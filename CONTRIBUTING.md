@@ -33,5 +33,5 @@ Small, focused, with tests. Describe the *why*. Do not include secrets, real hos
 
 ```bash
 python3 src/render.py --once --demo --color --cols 226 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · overview, 3-column layout (demo data)" > docs/img/overview.svg
-python3 src/render.py --once --demo --color --cols 120 --rows 33 | python3 tools/ansi2svg.py --title "nuc-console · 120×33 console, single column (demo data)" > docs/img/compact.svg
+python3 src/render.py --once --demo --color --cols 120 --rows 40 | python3 tools/ansi2svg.py --title "nuc-console · 120×40 console, single column (demo data)" > docs/img/compact.svg
 ```

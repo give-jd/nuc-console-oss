@@ -25,6 +25,8 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 |---|---|
 | 🌐 **Exposure by reach** | every listener classified as *local / LAN / Tailscale / Internet (Funnel)*, corrected by the real firewall |
 | 🧱 **Firewall truth** | ufw, iptables, `DOCKER-USER`, fail2ban — flags *Docker ports that bypass ufw* and *Tailscale accepted before ufw* |
+| 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
+| 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
@@ -92,6 +94,10 @@ rotate_seconds = 15
 #            ^ fixed on-screen order (this is the default, by priority); columns fill left to right, never back-filled
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
 rows = 0              # e.g. 65 if the bottom lines are cut by the monitor
+spacing = 1           # a blank line under each section title (0 = compact)
+
+[webapps]             # apps you EXPECT to be reachable: shown as active or DOWN; not a Docker-bypass problem
+ethibid = 8180, 8543
 
 [web]                 # optional read-only web view, see docs/WEB.md
 enabled = no
@@ -100,6 +106,19 @@ enabled = no
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
 Apply with `sudo systemctl restart nuc-console nuc-console-collector`. Environment overrides: `NUC_CONSOLE_CONFIG`, `NUC_CONSOLE_MODE`.
 Details in [config/config.ini](config/config.ini).
+
+## ATTENTION: inventory, analysis, accepting
+
+The ATTENTION list is generated from the current state, and every item has a stable id:
+
+```bash
+nuc-console-problems            # all current items with why it matters and how to fix it (add --json for scripts)
+sudo nuc-console-accept --problem docker-bypass --reason "ethibid web app, exposed on purpose"
+sudo nuc-console-accept --forget docker-bypass
+```
+
+Accepted items are dimmed ("N accepted" under ATTENTION) and no longer count in the header. The list lives in `/var/lib/nuc-console/accepted.json`; a missing or broken file accepts nothing.
+For web apps you expose on purpose, declare them under `[webapps]` instead: they appear in WEB APPS and stop counting as "Docker port bypassing ufw".
 
 ## How it works
 

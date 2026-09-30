@@ -242,6 +242,18 @@ def parse_ts_peers(text):
             "peers": sorted(peers, key=lambda x: (not x["online"], x["name"].lower()))}
 
 
+SIZE_UNITS = {"B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12}
+
+
+def parse_size(text):
+    """'1.68GB' -> bytes (docker prints decimal units); 0 if it cannot be read."""
+    m = re.fullmatch(r"\s*([\d.]+)\s*([kKMGT]?B)\s*", str(text))
+    return int(float(m.group(1)) * SIZE_UNITS[m.group(2)]) if m and m.group(2) in SIZE_UNITS else 0
+
+
+ANON_VOLUME = re.compile(r"^[0-9a-f]{64}$")
+
+
 def parse_docker_df(text):
     """docker system df --format '{{json .}}' -> [{'type','count','active','size','reclaimable'}] (strings as docker gives them)."""
     out = []
@@ -404,7 +416,11 @@ def collect_boot():
         need(rc == 0, err, "docker system df")
         rows = parse_docker_df(out)
         rc, dangling, _ = run("docker", "volume", "ls", "-q", "-f", "dangling=true", timeout=30)
-        return {"rows": rows, "volumes_unused": len(dangling.split()) if rc == 0 else None}
+        unused = dangling.split() if rc == 0 else None
+        rc, dimg, _ = run("docker", "image", "ls", "-f", "dangling=true", "--format", "{{.Size}}", timeout=30)
+        return {"rows": rows, "volumes_unused": len(unused) if unused is not None else None,
+                "volumes_unused_anonymous": sum(bool(ANON_VOLUME.match(v)) for v in unused) if unused is not None else None,
+                "dangling_images": {"count": len(dimg.split()), "bytes": sum(parse_size(x) for x in dimg.split())} if rc == 0 else None}
 
     with open("/proc/stat") as f:
         d["btime"] = next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
