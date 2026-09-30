@@ -80,7 +80,11 @@ tailscale = no
 thermal = no
 ```
 
-## 5. Port alarms
+## 5. Port alarms and problems
+
+`nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
+
+### Port baseline
 
 The first install stores the set of ports reachable from outside as the *expected* state. Afterwards a new, changed
 or vanished port shows a red banner. After an intended change: `sudo nuc-console-accept` (it refuses stale or partial data).

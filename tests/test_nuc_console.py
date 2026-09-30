@@ -13,6 +13,7 @@ import render  # noqa: E402
 import re
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 render.MODE = "rotate"  # page tests assume the 3-page rotation; overview tests pass mode= explicitly
+render.CFG["spacing"] = 0  # legacy layout tests count lines: spacing has its own tests
 
 CONT = {"ts": time.time(), "containers": [
     {"name": "web-1", "status": "Up 3 days", "state": "running", "project": "shop",
@@ -810,9 +811,9 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         boot = dict(BOOT, docker_df={"rows": [{"type": "Images", "count": "152", "active": "18", "size": "101.8GB", "reclaimable": "60GB (59%)"}],
                                      "volumes_unused": 151})
         dk = text(render.ov_docker(boot, 90, 0))
-        self.assertIn("reclaimable 60GB (59%)", dk)
-        self.assertIn("151 volumes not used by any container", dk)
-        self.assertIn("\x1b[33m60GB (59%)", "\n".join(render.ov_docker(boot, 90, 0)))     # >= 50% reclaimable: yellow
+        self.assertIn("unused 60GB (59%)", dk)
+        self.assertIn("151 unused volumes", dk)
+        self.assertIn("may hold data", dk)
         self.assertIn("unavailable", text(render.ov_docker(BOOT, 90, 0)))
         self.assertIn("1.0G/4.0G", text(render.ov_dischi(s, 78, 0)))
 
@@ -1145,11 +1146,187 @@ class SectionOrder(unittest.TestCase):
         finally:
             render.CFG["sections"] = saved
 
-    def test_per_core_bars_survive_one_level_down(self):
+    def test_per_core_bars_always_exploded_on_normal_levels(self):
         sm = {"cpu": {f"cpu{i}": 0.3 for i in range(14)}, "thermal": {}, "net": {}, "sessions": None, "fs": None}
-        lines = render.ov_sistema(sm, 76, -1)
-        self.assertTrue(any(" 13 " in render.ANSI.sub("", l) for l in lines))
-        self.assertFalse(any(" 13 " in render.ANSI.sub("", l) for l in render.ov_sistema(sm, 76, 0)))
+        for k in (-2, -1, 0, 1, 2):   # exploded at every normal level
+            self.assertTrue(any(" 13 " in render.ANSI.sub("", l) for l in render.ov_sistema(sm, 76, k)), k)
+        tiny = "\n".join(render.ANSI.sub("", l) for l in render.ov_sistema(sm, 76, 3))
+        self.assertNotIn(" 13 ", tiny)                                                # only the tiny-console levels compress
+        self.assertIn("core ", tiny)
+
+
+class WebAppsAndProblems(unittest.TestCase):
+    def setUp(self):
+        self.saved = dict(render.CFG["webapps"])
+        self.acc = render.ACCEPTED_PATH
+
+    def tearDown(self):
+        render.CFG["webapps"] = self.saved
+        render.ACCEPTED_PATH = self.acc
+
+    def test_declared_up_declared_down_and_discovered(self):
+        render.CFG["webapps"] = {"shop": [8080], "admin": [9443]}
+        rows = {r["name"]: r for r in render.webapp_rows(NET, CONT)}
+        self.assertEqual((rows["shop"]["state"], rows["shop"]["expected"]), ("up", True))
+        self.assertEqual((rows["admin"]["state"], rows["admin"]["reach"]), ("down", None))   # expected but nothing listens
+        self.assertIn("LAN", {r["reach"] for r in rows.values() if r["state"] == "up"})
+        self.assertFalse([r for r in rows.values() if r["ports"] and set(r["ports"]) & render.SENSITIVE])  # databases are not web apps
+        txt = "\n".join(render.ANSI.sub("", l) for l in render.ov_webapp(NET, CONT, 80, 0))
+        self.assertIn("DOWN (expected)", txt)
+        self.assertIn("1 down (expected)", txt)
+
+    def test_declared_webapp_is_not_a_docker_bypass_problem(self):
+        pb = lambda: [t for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass"]
+        render.CFG["webapps"] = {}
+        before = pb()
+        self.assertTrue(before, "fixture must have a docker bypass")
+        render.CFG["webapps"] = {"everything": [r["port"] for r in render.exposure_rows(NET, CONT)]}
+        left = pb()
+        self.assertEqual(len(left), 1)                       # only the database port 5432 still counts: a declaration cannot mask a DB
+        self.assertIn("1 Docker port", left[0])
+
+    def test_every_problem_id_is_in_the_catalog(self):
+        import re as _re
+        src = open(render.__file__).read()
+        ids = set(_re.findall(r'out\.append\(\(\d, .*?, "([a-z-]+)"\)\)', src))
+        self.assertTrue(ids)
+        self.assertFalse(ids - set(render.CATALOG), ids - set(render.CATALOG))
+        for pid, (title, why, fix) in render.CATALOG.items():
+            self.assertTrue(title and fix, pid)
+
+    def _boot(self, n):
+        return dict(BOOT, journal={"err": n, "warn": 1, "capped": False, "top": []})
+
+    def test_accept_hides_counts_and_shows_the_count(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            recs = lambda n: render.problem_records(NET, CONT, boot=self._boot(n))
+            self.assertEqual(render.accept_problem("journal-errors", "", records=recs(118)), 2)        # reason required
+            self.assertEqual(render.accept_problem("nope", "x", records=recs(118)), 2)                  # unknown id
+            self.assertEqual(render.accept_problem("db-open-lan", "x", records=[]), 2)                  # not a current problem
+            texts = lambda n: [t for _, t in render.problems(NET, CONT, boot=self._boot(n))]
+            self.assertTrue(any("118 errors" in t for t in texts(118)))
+            self.assertEqual(render.accept_problem("journal-errors", "docker veth noise\x1b[2J", records=recs(118)), 0)
+            self.assertFalse(any("errors in this boot" in t for t in texts(118)))
+            self.assertFalse(any("errors in this boot" in t for t in texts(120)))                      # noisy counter: digits ignored
+            pb = render.problems(NET, CONT, boot=self._boot(118))
+            self.assertEqual(pb.accepted, 1)
+            shown = "\n".join(render.ANSI.sub("", l) for l in render.page_overview(
+                {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": None, "fs": None}, CONT, NET, self._boot(118), 118, 40, pb=pb))
+            self.assertIn("1 accepted as known", shown)                                                # never silent
+            rec = [r for r in recs(118) if r["id"] == "journal-errors"][0]
+            self.assertTrue(rec["accepted"] and "\x1b" not in rec["reason"] and rec["fix"])
+            self.assertEqual(render.accept_problem("journal-errors", forget=True), 0)
+            self.assertTrue(any("errors in this boot" in t for t in texts(118)))
+            self.assertEqual(os.stat(render.ACCEPTED_PATH).st_mode & 0o777, 0o644)
+
+    def test_acceptance_does_not_hide_a_worse_situation(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            render.CFG["webapps"] = {}
+            recs = render.problem_records(NET, CONT)
+            self.assertEqual(render.accept_problem("docker-bypass", "intended", records=recs), 0)
+            self.assertFalse([1 for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass" and t in [x for _, x in render.problems(NET, CONT)]])
+            worse = dict(NET, listeners=NET["listeners"] + [{"proto": "tcp", "addr": "0.0.0.0", "port": 7778, "proc": "docker-proxy"}])
+            cont2 = dict(CONT, containers=CONT["containers"] + [{"name": "x-1", "status": "Up", "state": "running", "project": "",
+                                                              "ports": [{"p": 7778, "s": "*"}], "mem": 1}])
+            self.assertTrue(any("Docker port" in t for _, t in render.problems(worse, cont2)),
+                            "one more bypassing port must be a new, visible problem")
+            # thermal: accepting a warning must not hide a critical temperature
+            warn = render.problem_records(NET, CONT, thermal={"cpu": (88.0, 105.0), "throttle": None})
+            self.assertEqual(render.accept_problem("thermal", "hot room", records=warn), 0)
+            crit = render.problems(NET, CONT, thermal={"cpu": (100.0, 105.0), "throttle": None})
+            self.assertTrue(any(sev == 2 for sev, t in crit if "CPU at" in t))
+
+    def test_port_changes_cannot_be_accepted_as_problems(self):
+        self.assertEqual(render.accept_problem("port-new", "x", records=[{"id": "port-new", "fingerprint": "3|x"}]), 2)
+
+    def test_broken_or_hostile_accepted_files_hide_nothing_and_never_crash(self):
+        import tempfile
+        for payload in ("{not json", "[" * 100000, '[1,2]', '{"journal-errors": {"reason": 5, "fp": "1|x"}}',
+                        '{"journal-errors": {"reason": "ok"}}', '{"journal-errors": "x"}', '{"port-new": {"reason": "a", "fp": "3|x"}}'):
+            with tempfile.NamedTemporaryFile("w", delete=False) as f:
+                f.write(payload)
+            try:
+                self.assertEqual(render.load_accepted(f.name), {}, payload[:30])
+            finally:
+                os.unlink(f.name)
+
+    def test_problems_command_prints_advice_and_json(self):
+        import contextlib
+        import io
+        import json as _json
+        import tempfile
+        render.ACCEPTED_PATH = os.path.join(tempfile.mkdtemp(), "accepted.json")
+        orig = render.current_problem_records
+        render.current_problem_records = lambda: render.problem_records(NET, CONT, boot=self._boot(118))
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(render.print_problems([]), 0)
+            txt = out.getvalue()
+            self.assertIn("journal-errors", txt)
+            self.assertIn("fix:", txt)
+            self.assertIn("accept if known", txt)
+            self.assertIn("port changes are accepted with the baseline", render.ANSI.sub("", "port changes are accepted with the baseline")) 
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                render.print_problems(["--json"])
+            data = _json.loads(out.getvalue())
+            self.assertTrue(all({"id", "severity", "text", "accepted", "fix", "fingerprint"} <= set(r) for r in data))
+        finally:
+            render.current_problem_records = orig
+
+    def test_main_parses_accept_problem_and_forget(self):
+        calls = []
+        orig = render.accept_problem
+        render.accept_problem = lambda pid, reason="", forget=False, **kw: calls.append((pid, reason, forget)) or 0
+        try:
+            render.main(["render.py", "--accept", "--problem", "docker-bypass", "--reason", "because"])
+            render.main(["render.py", "--accept", "--forget", "docker-bypass"])
+            render.main(["render.py", "--accept", "--problem", "--reason", "x"])
+        finally:
+            render.accept_problem = orig
+        self.assertEqual(calls[0], ("docker-bypass", "because", False))
+        self.assertEqual(calls[1], ("docker-bypass", "", True))
+        self.assertEqual(calls[2][0], "--reason")        # malformed: the id is refused later as unknown
+
+    def test_declared_database_port_is_not_masked_and_exposure_panel_agrees(self):
+        render.CFG["webapps"] = {"db": [5432], "shop": [8080]}
+        rows = render.exposure_rows(NET, CONT)
+        bypass = [r for r in rows if r["bad_note"] and r["note"].startswith("docker") and r["lan"] == 1]
+        pb = [t for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass"]
+        self.assertTrue(pb, "the database port 5432 must still count")
+        panel = "\n".join(render.ANSI.sub("", l) for l in render.exposure_block(NET, CONT, 100))
+        self.assertIn("declared:", panel)                                                          # 8080 is labelled, not alarmed
+
+    def test_docker_df_parsers(self):
+        self.assertEqual(collector.parse_size("1.68GB"), 1_680_000_000)
+        self.assertEqual(collector.parse_size("0B"), 0)
+        self.assertEqual(collector.parse_size("garbage"), 0)
+        self.assertTrue(collector.ANON_VOLUME.match("a" * 64))
+        self.assertFalse(collector.ANON_VOLUME.match("my_named_volume"))
+
+    def test_spacing_adds_air_only_on_spaced_levels(self):
+        blocks = [lambda cw: ["TITLE", "a", "b"]]
+        saved = render.CFG["spacing"]
+        try:
+            render.CFG["spacing"] = 1
+            self.assertEqual([render.ANSI.sub("", x).strip() for x in render.pack(blocks, 1, 10, 10, 20, [""])], ["TITLE", "", "a", "b"])
+            self.assertEqual(render.pack(blocks, 1, 10, 10, 20, []), ["TITLE", "a", "b"])   # unspaced (tiny) levels stay compact
+            render.CFG["spacing"] = 0
+            self.assertEqual(render.pack(blocks, 1, 10, 10, 20, [""]), ["TITLE", "a", "b"])
+        finally:
+            render.CFG["spacing"] = saved
+
+    def test_sections_stay_even_when_empty(self):
+        sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
+        net = {"ts": time.time(), "errors": {}, "absent": [], "listeners": [], "ufw": None, "docker_user": [], "dbs": {"items": []}}
+        txt = render.ANSI.sub("", "\n".join("\n".join(x[3]) for x in render.slides(sm, {"ts": time.time(), "containers": []}, net, 226, 60, None, False, mode="overview")))
+        for title in ("WEB APPS", "SESSIONS", "NETWORK TRAFFIC", "DISKS", "DATABASE", "CONTAINER", "TAILSCALE", "DOCKER"):
+            self.assertIn(title, txt)
 
 
 class ChangedMessage(unittest.TestCase):
@@ -1176,11 +1353,14 @@ class NoClipping(unittest.TestCase):
         cont, net, boot, base = demo.snapshot()
         sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
         render.pack = spy
+        saved = dict(render.CFG["webapps"])
+        render.CFG["webapps"] = {"shop-web": [8080], "an-expected-app-with-a-long-name": [9443]}  # one up, one DOWN row
         try:
             for w, h in ((118, 33), (199, 50), (200, 40), (224, 50), (225, 50), (234, 60), (239, 67)):
                 render.slides(sm, cont, net, w, h - 2, boot, base, mode="overview")
         finally:
             render.pack = orig
+            render.CFG["webapps"] = saved
         self.assertEqual(wide, [])
 
     def test_fit_join_drops_trailing_items(self):

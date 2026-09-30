@@ -8,19 +8,19 @@ import os
 import sys
 
 DEFAULT_PATH = "/etc/nuc-console/config.ini"
-FEATURES = ("containers", "databases", "exposure", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
+FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal")
 MODES = ("overview", "rotate")
 # Fixed on-screen order of the overview sections (most important first: what needs action, then security posture,
 # then resources, workloads, history, then detail panels). Overridable with [dashboard] sections.
-SECTIONS = ("attention", "exposure", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
+SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
             "tailscale", "docker_disk", "disks")
 
 
 def load(path=None):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int}"""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
-    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "sections": list(SECTIONS),
+    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "spacing": 1, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 5, "allowed_hosts": []}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
@@ -44,7 +44,7 @@ def load(path=None):
             cfg["mode"] = mode
         else:
             print(f"nuc-console: {path}: [dashboard] mode must be one of {MODES}", file=sys.stderr)
-        for key, lo, hi in (("rotate_seconds", 3, 600), ("columns", 40, 500), ("rows", 10, 200)):
+        for key, lo, hi in (("rotate_seconds", 3, 600), ("columns", 40, 500), ("rows", 10, 200), ("spacing", 0, 1)):
             try:
                 v = cp.getint("dashboard", key, fallback=cfg[key])
                 cfg[key] = 0 if key != "rotate_seconds" and v == 0 else max(lo, min(hi, v))  # 0 = automatic
@@ -57,6 +57,17 @@ def load(path=None):
                 print(f"nuc-console: {path}: [dashboard] sections: unknown name '{x}' ignored (known: {', '.join(SECTIONS)})", file=sys.stderr)
         order = [x for i, x in enumerate(asked) if x in SECTIONS and x not in asked[:i]]
         cfg["sections"] = order + [x for x in SECTIONS if x not in order]  # sections you forget keep their default place at the end
+    if cp.has_section("webapps"):  # name = port[, port...]: web apps you expect to be reachable (and running)
+        for name in cp["webapps"]:
+            try:
+                ports = [int(x) for x in cp.get("webapps", name).replace(";", ",").split(",") if x.strip()]
+            except ValueError:
+                print(f"nuc-console: {path}: [webapps] {name}: ports must be integers", file=sys.stderr)
+                continue
+            if ports and all(0 < p < 65536 for p in ports):
+                cfg["webapps"][name] = ports
+            else:
+                print(f"nuc-console: {path}: [webapps] {name}: invalid port list", file=sys.stderr)
     if cp.has_section("web"):
         w = cfg["web"]
         try:

@@ -22,7 +22,7 @@ VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
     systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
-    rm -f "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
+    rm -f /usr/local/bin/nuc-console-problems "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept
     systemctl daemon-reload
@@ -43,6 +43,7 @@ install -d "$DEST"
 install -m 0644 src/render.py src/collector.py src/nuc_config.py src/demo.py src/web.py "$DEST"/
 install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept /usr/local/sbin/
+install -m 0755 bin/nuc-console-problems /usr/local/bin/
 install -d "$UNITD"
 {
     echo "[Service]"

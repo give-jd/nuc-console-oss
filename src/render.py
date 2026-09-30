@@ -928,87 +928,241 @@ def accept_baseline(if_missing=False, path=None, now=None):
     return 0
 
 
-def problems(net, cont, now=None, boot=False, thermal=None, baseline=False):
-    """Anomalies to show, by decreasing severity: [(2=error | 1=warning, text)]. Empty = all ok."""
+def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
+    """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
     if not on("containers"):
         pass
     elif cont is None:
-        out.append((2, "container collector not running"))
+        out.append((2, "container collector not running", "collector-containers"))
     else:
         if now - cont.get("ts", 0) > STALE_S:
-            out.append((1, f"container state stale ({int(now - cont.get('ts', 0))} s old)"))
+            out.append((1, f"container state stale ({int(now - cont.get('ts', 0))} s old)", "stale-containers"))
         down = [ct for ct in cont["containers"] if ct["state"] != "running"]
         sick = [ct for ct in cont["containers"] if "unhealthy" in ct["status"] or "Restarting" in ct["status"]]
         if sick:
-            out.append((2, plural(len(sick), "unhealthy container")))
+            out.append((2, plural(len(sick), "unhealthy container"), "unhealthy-container"))
         if down:
-            out.append((1, plural(len(down), "container") + " exited with an error"))
+            out.append((1, plural(len(down), "container") + " exited with an error", "container-exited"))
     if thermal and on("thermal"):
         for label, key in (("CPU", "cpu"), ("NVMe", "nvme")):
             if key in thermal:
                 t, mx = thermal[key]
                 if t >= THERMAL_ERR * mx:
-                    out.append((2, f"{label} at {t:.0f}°C: above the {THERMAL_ERR * mx:.0f}°C threshold"))
+                    out.append((2, f"{label} at {t:.0f}°C: above the {THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
                 elif t >= THERMAL_WARN * mx:
-                    out.append((1, f"{label} at {t:.0f}°C: above the {THERMAL_WARN * mx:.0f}°C threshold"))
+                    out.append((1, f"{label} at {t:.0f}°C: above the {THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
-            out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute"))
+            out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
     if not on("boot"):
         pass
     elif boot is None:
-        out.append((1, "boot collector not running"))
+        out.append((1, "boot collector not running", "collector-boot"))
     elif boot:
         if boot.get("failed"):
-            out.append((2, plural(len(boot["failed"]), "failed systemd unit") + ": " + ", ".join(safe(u) for u in boot["failed"][:3])))
+            out.append((2, plural(len(boot["failed"]), "failed systemd unit") + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
-            out.append((1, plural(boot["journal"]["err"], "error") + " in this boot's journal"))
+            out.append((1, plural(boot["journal"]["err"], "error") + " in this boot's journal", "journal-errors"))
     if net is None:
-        out.append((2, "network collector not running"))
+        out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
     if now - net.get("ts", 0) > NET_STALE_S:
-        out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)"))
+        out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)", "stale-net"))
     if net.get("errors"):
-        out.append((1, "network sections not collected: " + ", ".join(net["errors"])))
+        out.append((1, "network sections not collected: " + ", ".join(net["errors"]), "net-sections"))
     ufw = net.get("ufw")
     if ufw is None and is_disabled(net, "ufw"):
         pass  # firewall switched off in config.ini: the user's choice, not an alarm
     elif ufw is None and is_absent(net, "ufw"):
-        out.append((1, "ufw not installed: LAN filtering cannot be verified"))
+        out.append((1, "ufw not installed: LAN filtering cannot be verified", "ufw-missing"))
     elif ufw is None:
-        out.append((2, "ufw unreadable"))
+        out.append((2, "ufw unreadable", "ufw-unreadable"))
     elif not ufw["active"]:
-        out.append((2, "ufw off: no LAN filtering for non-Docker services"))
+        out.append((2, "ufw off: no LAN filtering for non-Docker services", "ufw-off"))
     if net.get("listeners") is not None and baseline == "corrotta":
-        out.append((2, "port baseline unreadable: regenerate it with sudo nuc-console-accept"))
+        out.append((2, "port baseline unreadable: regenerate it with sudo nuc-console-accept", "baseline-unreadable"))
     elif net.get("listeners") is not None and baseline is None:
-        out.append((1, "port baseline missing: create it with sudo nuc-console-accept"))
+        out.append((1, "port baseline missing: create it with sudo nuc-console-accept", "baseline-missing"))
     elif isinstance(baseline, dict) and net.get("listeners") is not None:
         if exposure_partial(net):  # partial data: a comparison would raise false alarms (or hide real ones)
-            out.append((1, "port comparison suspended: network sections unreadable"))
+            out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
         else:
             new, gone, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
             for k, v in list(new.items())[:3]:
                 port, _, group = k.partition(":")
-                out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})"))
+                out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})", "port-new"))
             if len(new) > 3:
-                out.append((3, f"… and {len(new) - 3} more new exposed ports"))
+                out.append((3, f"… and {len(new) - 3} more new exposed ports", "port-new"))
             for k, why in list(changed.items())[:3]:
-                out.append((3, f"CHANGED {k.partition(':')[0]}: {why}"))
+                out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
-                out.append((1, plural(len(gone), "port") + " no longer exposed: if intended, sudo nuc-console-accept"))
+                out.append((1, plural(len(gone), "port") + " no longer exposed: if intended, sudo nuc-console-accept", "port-gone"))
     if net.get("listeners") is not None:
         rows = exposure_rows(net, cont)
         pub = [r for r in rows if r["net"] == 1]
-        bypass = [r for r in rows if r["bad_note"] and r["note"].startswith("docker") and r["lan"] == 1]
+        expected = {p for ports in CFG["webapps"].values() for p in ports if p not in SENSITIVE}  # declared web apps: intended exposure
+        bypass = [r for r in rows if r["bad_note"] and r["note"].startswith("docker") and r["lan"] == 1
+                  and not (r["proto"] == "tcp" and r["port"] in expected)]
         dbs = [r for r in rows if r["warn"]]
         if dbs:
-            out.append((2, f"{len(dbs)} DB/broker open on LAN"))
+            out.append((2, f"{len(dbs)} DB/broker open on LAN", "db-open-lan"))
         if bypass:
-            out.append((1, plural(len(bypass), "Docker port") + " bypassing ufw (DOCKER-USER empty)"))
+            out.append((1, plural(len(bypass), "Docker port") + " bypassing ufw (DOCKER-USER empty)", "docker-bypass"))
         if pub:
-            out.append((1, plural(len(pub), "service") + f" public on the Internet (Funnel :{pub[0]['port']})"))
+            out.append((1, plural(len(pub), "service") + f" public on the Internet (Funnel :{pub[0]['port']})", "funnel-public"))
     return sorted(out, key=lambda x: -x[0])
+
+
+ACCEPTED_PATH = os.environ.get("NUC_CONSOLE_ACCEPTED", "/var/lib/nuc-console/accepted.json")
+
+# id -> (what it is, why it matters, how to handle it). Shown by `nuc-console-problems`.
+CATALOG = {
+    "collector-containers": ("Container collector not running", "no container data", "sudo systemctl status nuc-console-collector; journalctl -u nuc-console-collector"),
+    "collector-net": ("Network collector not running", "no exposure/firewall data", "sudo systemctl restart nuc-console-collector"),
+    "collector-boot": ("Boot collector not running", "no boot data", "sudo systemctl restart nuc-console-collector"),
+    "stale-containers": ("Container state is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
+    "stale-net": ("Network data is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
+    "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete", "journalctl -u nuc-console-collector; the section name is in the message"),
+    "unhealthy-container": ("Container unhealthy or restarting", "the service may be down or degraded", "docker ps; docker logs <name>; fix the healthcheck or the app. A wrong healthcheck path is the usual cause"),
+    "container-exited": ("Container exited with an error", "a service that should run is down", "docker ps -a; docker logs <name>; docker start <name> or remove it if obsolete"),
+    "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
+    "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
+    "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
+    "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
+    "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
+    "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),
+    "ufw-unreadable": ("ufw status unreadable", "firewall state unknown", "sudo ufw status verbose; journalctl -u nuc-console-collector"),
+    "docker-bypass": ("Docker ports bypass ufw", "a port published on 0.0.0.0 is reachable from the LAN whatever ufw says", "publish on 127.0.0.1 (compose: \"127.0.0.1:PORT:PORT\") or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule"),
+    "db-open-lan": ("Database/broker open on the LAN", "data services should not be reachable from the network", "publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused"),
+    "funnel-public": ("Service public on the Internet (Tailscale Funnel)", "anyone on the Internet can reach it", "tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off"),
+    "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
+    "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "sudo nuc-console-accept"),
+    "port-compare-suspended": ("Port comparison suspended", "network sections were unreadable", "see net-sections"),
+    "port-new": ("New exposed port", "something started listening where it did not before", "identify it (ss -ltnp); if intended: sudo nuc-console-accept; if not, stop it"),
+    "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port", "check what changed; if intended: sudo nuc-console-accept"),
+    "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: sudo nuc-console-accept"),
+}
+
+
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
+COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+
+
+def fingerprint(sev, text, pid):
+    """What was accepted: severity + text. For exposure/health items the exact text (one more is a new problem); for noisy
+    counters (journal errors, temperatures) the digits are ignored, so 118 -> 120 stays accepted but a worse severity does not."""
+    return f"{sev}|" + (text if pid in COUNT_MATTERS else re.sub(r"\d+", "#", text))
+
+
+class ProblemList(list):
+    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION)."""
+    accepted = 0
+
+
+def load_accepted(path=None):
+    """{problem id: {"reason", "fp", ...}} accepted as known. A missing or broken file means nothing is accepted: it never hides by accident."""
+    try:
+        with open(path or ACCEPTED_PATH) as f:
+            d = json.load(f)
+    except (OSError, ValueError, RecursionError):
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    return {k: v for k, v in d.items() if k in CATALOG and k not in NOT_ACCEPTABLE and isinstance(v, dict)
+            and isinstance(v.get("fp"), str) and isinstance(v.get("reason", ""), str)}
+
+
+def current_problem_records():
+    smp = Sampler()
+    time.sleep(0.5)
+    st, sm = snapshot(200), smp.sample()
+    return problem_records(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+
+
+def accept_problem(pid, reason="", forget=False, path=None, now=None, records=None):
+    """Mark what you see now as known (dimmed, counted under ATTENTION) or forget it. As root:
+    sudo nuc-console-accept --problem ID --reason ... The acceptance is tied to the current severity and text: a worse or
+    different situation shows up again."""
+    path = path or ACCEPTED_PATH
+    if pid not in CATALOG:
+        print("unknown problem id; known: " + ", ".join(sorted(CATALOG)), file=sys.stderr)
+        return 2
+    cur = load_accepted(path)
+    if forget:
+        cur.pop(pid, None)
+    else:
+        if pid in NOT_ACCEPTABLE:
+            print("port changes are accepted with the baseline: sudo nuc-console-accept (no --problem)", file=sys.stderr)
+            return 2
+        reason = CTRL.sub(" ", reason).strip()
+        if not reason:
+            print("--reason is required: write why this is acceptable (it is shown in `nuc-console-problems`)", file=sys.stderr)
+            return 2
+        recs = current_problem_records() if records is None else records
+        rec = next((r for r in recs if r["id"] == pid), None)
+        if rec is None:
+            print(f"{pid} is not a current problem: nothing to accept", file=sys.stderr)
+            return 2
+        cur[pid] = {"reason": reason[:200], "ts": now or time.time(), "fp": rec["fingerprint"]}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cur, f, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+    print(("forgot " if forget else "accepted ") + pid)
+    return 0
+
+
+def problems(*a, **kw):
+    """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
+    acc = load_accepted()
+    out = ProblemList()
+    for sev, text, pid in problems_raw(*a, **kw):
+        if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
+            out.accepted += 1
+        else:
+            out.append((sev, text))
+    return out
+
+
+def problem_records(*a, **kw):
+    """Every anomaly with its analysis, for `nuc-console-problems`: [{id, severity, text, accepted, reason, title, why, fix, fingerprint}]."""
+    acc = load_accepted()
+    out = []
+    for sev, text, pid in problems_raw(*a, **kw):
+        title, why, fix = CATALOG.get(pid, (pid, "", ""))
+        fp = fingerprint(sev, text, pid)
+        out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
+                    "accepted": pid in acc and acc[pid]["fp"] == fp, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
+                    "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
+    return out
+
+
+def print_problems(argv):
+    """`render.py --problems [--json]`: every current anomaly, with why it matters and how to fix it (read-only)."""
+    recs = current_problem_records()
+    if "--json" in argv:
+        print(json.dumps(recs, indent=1, ensure_ascii=False))
+        return 0
+    if not recs:
+        print("no problems")
+        return 0
+    print(f"{len(recs)} problems ({sum(r['accepted'] for r in recs)} accepted)\n")
+    for r in recs:
+        print(f"[{r['severity']}] {r['id']}" + ("   (ACCEPTED: " + safe(r["reason"]) + ")" if r["accepted"] else ""))
+        print(f"    {safe(r['text'])}")
+        if r["why"]:
+            print(f"    why: {r['why']}")
+        if r["fix"]:
+            print(f"    fix: {r['fix']}")
+        if r["acceptable"]:
+            print(f"    accept if known:  sudo nuc-console-accept --problem {r['id']} --reason \"...\"")
+        else:
+            print("    port changes are accepted with the baseline: sudo nuc-console-accept")
+    return 0
 
 
 def safe_problems(*a, **kw):
@@ -1064,12 +1218,14 @@ def exposure_block(net, cont, w, new=None):
         for r in by[g]:
             mark = c(31, "⚠") if r["warn"] else " "
             tag = new.get(f"{r['port']}/{r['proto'][0]}:{g}")
+            declared = r["proto"] == "tcp" and r["port"] in {p for ps in CFG["webapps"].values() for p in ps if p not in SENSITIVE}
             cells = [cell(r["loc"], loc=True), cell(r["lan"], r["warn"]), cell(r["ts"], r["warn"]), cell(r["net"], net=True)]
             head = (f"   {r['port']:>5}/{r['proto'][0]} {mark}{pad(r['name'][:nw - 1], nw)}"
                     + "".join(f"  {x}   " for x in cells) + " ")
             room = w - vlen(head) - (len(tag) + 1 if tag else 0)  # never clip mid-word: end with an ellipsis
-            text = r["note"] if vlen(r["note"]) <= room else r["note"][:max(room - 1, 0)] + "…"
-            note = c(31, text) if r["bad_note"] else c(90, text)
+            base = ("declared: " + r["note"].replace("docker: bypasses ufw", "docker")) if declared and r["bad_note"] else r["note"]
+            text = base if vlen(base) <= room else base[:max(room - 1, 0)] + "…"
+            note = c(31, text) if r["bad_note"] and not declared else c(90, text)
             if tag:
                 note = c("1;31", tag + " ") + note
             lines.append(head + note)
@@ -1239,12 +1395,14 @@ def ov_sistema(s, w, k, cont=None):
     cores = [v for _, v in sorted(s["cpu"].items(), key=lambda kv: int(kv[0][3:]))]
     if cores:
         mean = sum(cores) / len(cores)
-        spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
-        lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
-        if k <= -1:  # room: one compact bar per core, in columns
-            cells = [f" {i:>2} {bar(v, 6)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
-            per = max(1, min(6, (w - 1) // 17))
-            lines += ["".join(pad(x, 17) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
+        if k <= 2:  # one bar per core, in columns: the normal look; only the tiny-console levels (k>=3) compress to one character per core
+            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   {len(cores)} cores")
+            cells = [f" {i:>2} {bar(v, 9)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
+            per = max(1, min(6, (w - 1) // 20))
+            lines += ["".join(pad(x, 20) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
+        else:
+            spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
+            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
     if k <= -2 and cont:
         top = sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"])[:5]
         if top:
@@ -1475,6 +1633,68 @@ def ov_tailscale(net, w, k):
     return lines
 
 
+INFRA_PROCS = {"sshd", "tailscaled", "systemd-resolve", "systemd-resolved", "cupsd", "avahi-daemon", "chronyd", "rpcbind", "dnsmasq", "named"}
+REACH_ORDER = ("INTERNET", "LAN", "TAILNET", "LOCALE")
+REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
+
+
+def webapp_rows(net, cont):
+    """Web apps: the ones you declared under [webapps] (up or down) and the listeners found on their own.
+
+    -> [{name, ports, state: 'up'|'down', reach: INTERNET|LAN|TAILNET|LOCALE|None, expected: bool}] sorted for display."""
+    rows = exposure_rows(net, cont) if net and net.get("listeners") is not None else []
+    db_names = {it["name"] for it in ((net or {}).get("dbs") or {}).get("items", [])}
+    by_port = {}
+    for r in rows:
+        by_port.setdefault(r["port"], []).append(r)
+    widest = lambda rs: min((group_of(r) for r in rs), key=REACH_ORDER.index) if rs else None
+    out, used = [], set()
+    for name, ports in CFG["webapps"].items():
+        hit = [r for p in ports for r in by_port.get(p, [])]
+        out.append({"name": name, "ports": list(ports), "state": "up" if hit else "down", "reach": widest(hit), "expected": True})
+        used |= set(ports)
+    found = {}
+    for r in rows:
+        if r["port"] in used or r["port"] in SENSITIVE or r["port"] == 22 or r["proto"] != "tcp" or r["name"] in INFRA_PROCS or r["name"] in db_names:
+            continue
+        found.setdefault(r["name"], []).append(r)
+    for name, rs in found.items():
+        if name.startswith(("funnel ", "serve ")):
+            name = " ".join(name.split()[:2])  # 'funnel /webhook → 127.0.0.1:…' -> 'funnel /webhook'
+        out.append({"name": name, "ports": sorted({r["port"] for r in rs}), "state": "up", "reach": widest(rs), "expected": False})
+    rank = lambda x: (not x["expected"], x["state"] != "up", REACH_ORDER.index(x["reach"]) if x["reach"] else 9, x["name"])
+    return sorted(out, key=rank)
+
+
+def ov_webapp(net, cont, w, k):
+    lines = [section("WEB APPS", w)]
+    if net is None:
+        return lines + [msg("err", "network collector not running")]
+    rows = webapp_rows(net, cont)
+    if net.get("listeners") is None and not rows:
+        return lines + [unavail_msg(net, "listeners")]
+    if not rows:
+        return lines + [msg("info", "no web apps found (declare the ones you expect under [webapps] in config.ini)")]
+    up, down = sum(r["state"] == "up" for r in rows), sum(r["state"] == "down" for r in rows)
+    lines[0] = section("WEB APPS", w, f"{up} active" + (f" · {down} down (expected)" if down else ""))
+    declared = bool(CFG["webapps"])
+    nw = max(8, min(22, w - 47))
+    cap = 12 if k <= 0 else 6 if k <= 2 else 4
+    for r in rows[:cap]:
+        ports = ",".join(str(p) for p in r["ports"][:3]) + ("…" if len(r["ports"]) > 3 else "")
+        if r["state"] == "down":
+            mark, reach, flag = c(33, "○"), c(90, "not listening"), c(33, "DOWN (expected)")
+        else:
+            mark = c(32, "●") if r["expected"] or not declared else c(33, "●")
+            col = {"INTERNET": 31, "LAN": 33, "TAILNET": 0, "LOCALE": 90}.get(r["reach"], 0)
+            reach = c(col, REACH_LABEL.get(r["reach"], "?")) if col else REACH_LABEL.get(r["reach"], "?")
+            flag = c(90, "not declared") if declared and not r["expected"] else ""
+        lines.append(f" {mark} {pad(safe(r['name'])[:nw], nw + 1)}{pad(ports, 13)}{pad(reach, 14)}{flag}")
+    if len(rows) > cap:
+        lines.append(c(90, f" … +{len(rows) - cap} more"))
+    return lines
+
+
 def ov_docker(boot, w, k):
     lines = [section("DOCKER · DISK", w)]
     if boot and time.time() - boot.get("ts", time.time()) > BOOT_STALE_S:
@@ -1484,11 +1704,14 @@ def ov_docker(boot, w, k):
         return lines + [unavail_msg(boot, "docker_df")]
     for r in df["rows"]:
         recl = safe(r["reclaimable"])
-        pct = re.search(r"\((\d+)%\)", recl)
-        rec = recl if not pct or int(pct.group(1)) < 50 else c(33, recl)
-        lines.append(f" {pad(safe(r['type']), 14)}{safe(r['count']):>4} ({safe(r['active'])} in use)  {pad(safe(r['size']), 9)} reclaimable {rec}")
+        lines.append(f" {pad(safe(r['type']), 14)}{safe(r['count']):>4} ({safe(r['active'])} in use)  {pad(safe(r['size']), 9)} unused {recl}")
+    dang = df.get("dangling_images")
+    if dang is not None:
+        lines.append(c(90 if not dang["bytes"] else 33, f" dangling images: {dang['count']} ({human(dang['bytes']) if dang['bytes'] else '0B'}): safe to prune"))
     if df.get("volumes_unused"):
-        lines.append(c(90, f" {df['volumes_unused']} volumes not used by any container"))
+        anon = df.get("volumes_unused_anonymous") or 0
+        lines.append(c(33, f" {df['volumes_unused']} unused volumes ({anon} anonymous): may hold data, check before pruning"))
+    lines.append(c(90, " unused = no container uses it; tagged images can be re-pulled"))
     return lines
 
 
@@ -1511,6 +1734,8 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     ci = 0
     for fn in blocks:
         lines = fn(cw)
+        if gap and CFG["spacing"] and len(lines) > 1 and lines[1] != "":  # a little air under each section title
+            lines = [lines[0], ""] + lines[1:]
         while ci < ncol:
             col = cols[ci]
             need = len(lines) + (len(gap) if col else 0)
@@ -1537,7 +1762,9 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     def guardare(bw, k):
         rows = [msg("err" if sev >= 2 else "warn", t) for sev, t in pb[:max(3, 6 - k)]]
         extra = [c(90, f"   … +{len(pb) - len(rows)} more")] if len(pb) > len(rows) else []
-        return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")])
+        acc = getattr(pb, "accepted", 0)
+        known = [c(90, f"   · {acc} accepted as known (nuc-console-problems)")] if acc else []
+        return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
 
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
@@ -1555,7 +1782,8 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         if k < 4:
             cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
             cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
-        if k < 0:  # plenty of room: extra sections
+            cand["webapps"] = ("webapps", lambda c_: block(ov_webapp, "WEB APPS", c_, net, cont, c_, k))
+        if k <= 3 and w >= WIDE:  # wide consoles: the detail sections stay at every level (they shrink, they do not vanish)
             cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
                         sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
                         tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
@@ -1626,6 +1854,8 @@ def render_screen(smp, w, h, mode=None, n=0):
         import demo
         sm = demo.sampler_data(sm)
         socket.gethostname = lambda: "demo-host"
+        if not CFG["webapps"]:
+            CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}  # one up, one expected-but-down
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
                  safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])), len(sl)
@@ -1643,6 +1873,12 @@ def once(argv):
 
 
 def main(argv):
+    if "--problems" in argv:
+        return print_problems(argv)
+    if "--accept" in argv and ("--problem" in argv or "--forget" in argv):
+        flag = "--problem" if "--problem" in argv else "--forget"
+        opt = lambda k: argv[argv.index(k) + 1] if k in argv and argv.index(k) + 1 < len(argv) else ""
+        return accept_problem(opt(flag), opt("--reason"), forget=flag == "--forget")
     if "--accept" in argv:
         return accept_baseline(if_missing="--if-missing" in argv)
     if "--demo" in argv and "--once" not in argv:
