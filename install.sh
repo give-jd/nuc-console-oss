@@ -12,8 +12,9 @@ cd "$(dirname "$0")"
 DEST=/opt/nuc-console
 UNITD=/etc/systemd/system/nuc-console.service.d
 # values already installed (kept on re-install): from the drop-in, or from the old unit that had the time zone hardcoded
-OLD_TZ="$(sed -n 's/^Environment=TZ=//p' "$UNITD/local.conf" /etc/systemd/system/nuc-console.service 2>/dev/null | head -1)"
-OLD_VT="$(sed -n 's#^TTYPath=/dev/tty##p' "$UNITD/local.conf" 2>/dev/null | head -1)"
+# sed quits at the first match by itself: `sed ... | head -1` under pipefail dies with SIGPIPE (rc 141) when two files match
+OLD_TZ="$(sed -n 's/^Environment=TZ=//{p;q}' "$UNITD/local.conf" /etc/systemd/system/nuc-console.service 2>/dev/null || true)"
+OLD_VT="$(sed -n 's#^TTYPath=/dev/tty##{p;q}' "$UNITD/local.conf" 2>/dev/null || true)"
 TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 

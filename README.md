@@ -13,9 +13,9 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 
 [**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
 
-<img src="docs/img/overview.svg" alt="nuc-console overview screen rendered with synthetic demo data" width="900">
+<a href="docs/img/overview.svg"><img src="docs/img/overview.svg" alt="nuc-console on a wide console: three-column overview with synthetic demo data" width="100%"></a>
 
-<sub>The real screen, rendered from <code>--demo</code> synthetic data (no real host, address or container).</sub>
+<sub>The real screen on a 226-column console (3-column layout), rendered from <code>--demo</code> synthetic data. Click to zoom.</sub>
 
 </div>
 
@@ -33,9 +33,9 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
 <details>
-<summary><b>Wide consoles: automatic 3-column layout</b> (click)</summary>
+<summary><b>Smaller consoles: the layout adapts</b> (120×33, single column)</summary>
 <br>
-<img src="docs/img/wide.svg" alt="nuc-console on a wide console, three columns, demo data" width="100%">
+<img src="docs/img/compact.svg" alt="nuc-console on a 120x33 console, single column, demo data" width="100%">
 </details>
 
 ## Why
