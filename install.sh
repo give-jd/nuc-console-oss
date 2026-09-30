@@ -19,8 +19,8 @@ TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    systemctl disable --now nuc-console.service nuc-console-collector.service || true
-    rm -f /etc/systemd/system/nuc-console.service /etc/systemd/system/nuc-console-collector.service
+    systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
+    rm -f /etc/systemd/system/nuc-console.service /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept
     systemctl daemon-reload
@@ -38,7 +38,7 @@ fi
 
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
 install -d "$DEST"
-install -m 0644 src/render.py src/collector.py src/nuc_config.py src/demo.py "$DEST"/
+install -m 0644 src/render.py src/collector.py src/nuc_config.py src/demo.py src/web.py "$DEST"/
 install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept /usr/local/sbin/
 install -d "$UNITD"
@@ -63,5 +63,8 @@ systemctl mask --now "getty@tty$VT.service"
 # wait for a net.json written AFTER the collector restart: an older one would be stale
 for _ in $(seq 1 60); do [ "$(stat -c %Y /run/nuc-console/net.json 2>/dev/null || echo 0)" -ge "$t0" ] && break; sleep 1; done
 python3 "$DEST/render.py" --accept --if-missing || echo "warning: baseline not created (collector not ready yet): run sudo nuc-console-accept"
+# optional read-only web view: only if [web] enabled = yes in config.ini (never opens a port otherwise)
+if python3 "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
+else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
 systemctl restart nuc-console.service
 echo "ok: dashboard on tty$VT${TZ_VAL:+ (time zone $TZ_VAL)}. Logs: journalctl -u nuc-console -u nuc-console-collector"
