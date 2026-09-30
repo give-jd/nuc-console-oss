@@ -1112,5 +1112,35 @@ class Config(unittest.TestCase):
             render.CFG["features"].update(orig)
 
 
+
+class NoClipping(unittest.TestCase):
+    """No block may produce a line wider than its column: the 3-column layout used to cut words ("DB/broker ope")."""
+
+    def test_no_line_wider_than_its_column_with_demo_data(self):
+        import demo
+        orig, wide = render.pack, []
+
+        def spy(blocks, ncol, cw, w, body_h, gap):
+            wide.extend((render.ANSI.sub("", ln).strip(), cw) for fn in blocks for ln in fn(cw) if render.vlen(ln) > cw)
+            return orig(blocks, ncol, cw, w, body_h, gap)
+        cont, net, boot, base = demo.snapshot()
+        sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
+        render.pack = spy
+        try:
+            for w, h in ((118, 33), (199, 50), (200, 40), (224, 50), (225, 50), (234, 60), (239, 67)):
+                render.slides(sm, cont, net, w, h - 2, boot, base, mode="overview")
+        finally:
+            render.pack = orig
+        self.assertEqual(wide, [])
+
+    def test_fit_join_drops_trailing_items(self):
+        self.assertEqual(render.fit_join(["aaaa", "bbbb", "cccc"], "  ", 14, " x: "), " x: aaaa  bbbb")
+        self.assertEqual(render.fit_join(["a" * 50], "  ", 10), "a" * 50)   # one item is always kept (clipped by the column)
+
+    def test_short_ufw_default(self):
+        self.assertEqual(render.short_default("deny (incoming), allow (outgoing), deny (routed)"), "in deny  ·  out allow  ·  fwd deny")
+        self.assertEqual(render.short_default("weird"), "weird")
+
+
 if __name__ == "__main__":
     unittest.main()
