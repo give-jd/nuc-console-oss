@@ -131,4 +131,4 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 
 ## Contributing · License
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Released under the [MIT License](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Released under the [MIT License](LICENSE). Copyright © 2026 [Gi.Ve Group S.r.l.](https://givegroup.it)
