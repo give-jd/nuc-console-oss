@@ -1595,8 +1595,9 @@ def once(argv):
         sm = demo.sampler_data(sm)
         socket.gethostname = lambda: "demo-host"
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
-    print(ANSI.sub("", frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                             safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]))))
+    out = frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
+                safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]))
+    print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 
 def main(argv):

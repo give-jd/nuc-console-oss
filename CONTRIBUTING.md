@@ -28,3 +28,10 @@ shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
 ## Pull requests
 
 Small, focused, with tests. Describe the *why*. Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
+
+## Regenerating the README screenshots
+
+```bash
+python3 src/render.py --once --demo --color --cols 132 --rows 36 | python3 tools/ansi2svg.py --title "nuc-console · overview (demo data)" > docs/img/overview.svg
+python3 src/render.py --once --demo --color --cols 236 --rows 52 | python3 tools/ansi2svg.py --title "nuc-console · 3-column layout on a wide console (demo data)" > docs/img/wide.svg
+```

@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1141" height="714" viewBox="0 0 1141 714" role="img" aria-label="nuc-console · overview (demo data)">
+<rect width="1141" height="714" rx="10" fill="#0d1117" stroke="#30363d"/>
+<rect width="1141" height="34" rx="10" fill="#161b22"/><rect y="24" width="1141" height="10" fill="#161b22"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/><circle cx="40" cy="17" r="6" fill="#ffbd2e"/><circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="570" y="22" fill="#8b949e" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" text-anchor="middle">nuc-console · overview (demo data)</text>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'DejaVu Sans Mono',monospace" font-size="13.5" xml:space="preserve">
+<text x="16.0" y="64.4" fill="#c9d1d9" textLength="1100.4" lengthAdjust="spacingAndGlyphs" font-weight="700">  demo-host │ Overview │ 19:42:34                                                                                    ✖ 5 PROBLEMS  </text>
+<text x="16.0" y="82.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="82.4" fill="#39c5cf" textLength="92.4" lengthAdjust="spacingAndGlyphs" font-weight="700"> ATTENTION </text>
+<text x="125.2" y="82.4" fill="#39c5cf" textLength="974.4" lengthAdjust="spacingAndGlyphs">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="41.2" y="100.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs">✖</text>
+<text x="49.6" y="100.4" fill="#c9d1d9" textLength="201.6" lengthAdjust="spacingAndGlyphs"> 1 DB/broker open on LAN</text>
+<text x="41.2" y="118.4" fill="#d29922" textLength="8.4" lengthAdjust="spacingAndGlyphs">!</text>
+<text x="49.6" y="118.4" fill="#c9d1d9" textLength="277.2" lengthAdjust="spacingAndGlyphs"> 1 container exited with an error</text>
+<text x="41.2" y="136.4" fill="#d29922" textLength="8.4" lengthAdjust="spacingAndGlyphs">!</text>
+<text x="49.6" y="136.4" fill="#c9d1d9" textLength="268.8" lengthAdjust="spacingAndGlyphs"> 2 errors in this boot's journal</text>
+<text x="16.0" y="154.4" fill="#6e7681" textLength="100.8" lengthAdjust="spacingAndGlyphs">   … +2 more</text>
+<text x="16.0" y="172.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="172.4" fill="#39c5cf" textLength="84.0" lengthAdjust="spacingAndGlyphs" font-weight="700"> EXPOSURE </text>
+<text x="116.8" y="172.4" fill="#39c5cf" textLength="982.8" lengthAdjust="spacingAndGlyphs">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="16.0" y="190.4" fill="#c9d1d9" textLength="84.0" lengthAdjust="spacingAndGlyphs"> Internet </text>
+<text x="100.0" y="190.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-weight="700">1</text>
+<text x="108.4" y="190.4" fill="#c9d1d9" textLength="361.2" lengthAdjust="spacingAndGlyphs">   LAN 3   tailnet only 0   local only 4   </text>
+<text x="469.6" y="190.4" fill="#ff7b72" textLength="168.0" lengthAdjust="spacingAndGlyphs">⚠ 1 DB/broker on LAN</text>
+<text x="24.4" y="208.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs" font-weight="700">●</text>
+<text x="32.8" y="208.4" fill="#c9d1d9" textLength="420.0" lengthAdjust="spacingAndGlyphs"> 8444/t funnel /webhook → 127.0.0.1:5678/webhook  </text>
+<text x="452.8" y="208.4" fill="#ff7b72" textLength="184.8" lengthAdjust="spacingAndGlyphs">public on the Internet</text>
+<text x="24.4" y="226.4" fill="#ff7b72" textLength="126.0" lengthAdjust="spacingAndGlyphs">⚠5432 shop-db-1</text>
+<text x="150.4" y="226.4" fill="#c9d1d9" textLength="268.8" lengthAdjust="spacingAndGlyphs">  ·  8080 shop-web-1  ·  22 sshd</text>
+<text x="16.0" y="244.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="244.4" fill="#39c5cf" textLength="84.0" lengthAdjust="spacingAndGlyphs" font-weight="700"> FIREWALL </text>
+<text x="116.8" y="244.4" fill="#39c5cf" textLength="982.8" lengthAdjust="spacingAndGlyphs">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="41.2" y="262.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">✔</text>
+<text x="49.6" y="262.4" fill="#c9d1d9" textLength="92.4" lengthAdjust="spacingAndGlyphs"> ufw active</text>
+<text x="41.2" y="280.4" fill="#d29922" textLength="8.4" lengthAdjust="spacingAndGlyphs">!</text>
+<text x="49.6" y="280.4" fill="#c9d1d9" textLength="504.0" lengthAdjust="spacingAndGlyphs"> DOCKER-USER empty: ports published by containers bypass ufw</text>
+<text x="16.0" y="298.4" fill="#c9d1d9" textLength="260.4" lengthAdjust="spacingAndGlyphs">   INPUT DROP · FORWARD DROP   </text>
+<text x="276.4" y="298.4" fill="#3fb950" textLength="84.0" lengthAdjust="spacingAndGlyphs">ts-input ✔</text>
+<text x="360.4" y="298.4" fill="#c9d1d9" textLength="260.4" lengthAdjust="spacingAndGlyphs">   fail2ban sshd:2   drop 1h 41</text>
+<text x="16.0" y="316.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="316.4" fill="#39c5cf" textLength="67.2" lengthAdjust="spacingAndGlyphs" font-weight="700"> SYSTEM </text>
+<text x="100.0" y="316.4" fill="#39c5cf" textLength="722.4" lengthAdjust="spacingAndGlyphs">──────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="822.4" y="316.4" fill="#6e7681" textLength="277.2" lengthAdjust="spacingAndGlyphs">  up 1d 23h · load 0.84 1.01 1.05</text>
+<text x="16.0" y="334.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> RAM   </text>
+<text x="74.8" y="334.4" fill="#3fb950" textLength="134.4" lengthAdjust="spacingAndGlyphs">████████████████</text>
+<text x="209.2" y="334.4" fill="#6e7681" textLength="201.6" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="410.8" y="334.4" fill="#c9d1d9" textLength="218.4" lengthAdjust="spacingAndGlyphs"> 12.2G/30.2G   cache 12.2G</text>
+<text x="16.0" y="352.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> DISK  </text>
+<text x="74.8" y="352.4" fill="#3fb950" textLength="134.4" lengthAdjust="spacingAndGlyphs">████████████████</text>
+<text x="209.2" y="352.4" fill="#6e7681" textLength="201.6" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="410.8" y="352.4" fill="#c9d1d9" textLength="117.6" lengthAdjust="spacingAndGlyphs"> 358.5G/914.8G</text>
+<text x="16.0" y="370.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> TEMP  </text>
+<text x="74.8" y="370.4" fill="#3fb950" textLength="176.4" lengthAdjust="spacingAndGlyphs">█████████████████████</text>
+<text x="251.2" y="370.4" fill="#6e7681" textLength="159.6" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░</text>
+<text x="410.8" y="370.4" fill="#c9d1d9" textLength="403.2" lengthAdjust="spacingAndGlyphs"> 54°C/105°C   limits 84/94°C   clock 1.9/4.9 GHz</text>
+<text x="16.0" y="388.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> NVMe  </text>
+<text x="74.8" y="388.4" fill="#3fb950" textLength="126.0" lengthAdjust="spacingAndGlyphs">███████████████</text>
+<text x="200.8" y="388.4" fill="#6e7681" textLength="210.0" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="410.8" y="388.4" fill="#c9d1d9" textLength="226.8" lengthAdjust="spacingAndGlyphs"> 32°C/86°C   limits 69/77°C</text>
+<text x="24.4" y="406.4" fill="#6e7681" textLength="42.0" lengthAdjust="spacingAndGlyphs">throt</text>
+<text x="66.4" y="406.4" fill="#c9d1d9" textLength="235.2" lengthAdjust="spacingAndGlyphs"> 9.2 min total since boot   </text>
+<text x="301.6" y="406.4" fill="#6e7681" textLength="75.6" lengthAdjust="spacingAndGlyphs">measuring</text>
+<text x="16.0" y="424.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> CPU   </text>
+<text x="74.8" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">█</text>
+<text x="83.2" y="424.4" fill="#6e7681" textLength="327.6" lengthAdjust="spacingAndGlyphs">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</text>
+<text x="410.8" y="424.4" fill="#c9d1d9" textLength="92.4" lengthAdjust="spacingAndGlyphs"> 2%   core </text>
+<text x="503.2" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="511.6" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="520.0" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="528.4" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="536.8" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="545.2" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="553.6" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="562.0" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="570.4" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="578.8" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="587.2" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="595.6" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="604.0" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="612.4" y="424.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">▁</text>
+<text x="16.0" y="442.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="442.4" fill="#39c5cf" textLength="92.4" lengthAdjust="spacingAndGlyphs" font-weight="700"> CONTAINER </text>
+<text x="125.2" y="442.4" fill="#39c5cf" textLength="974.4" lengthAdjust="spacingAndGlyphs">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="16.0" y="460.4" fill="#c9d1d9" textLength="226.8" lengthAdjust="spacingAndGlyphs"> 7 containers   RAM 1.6G   </text>
+<text x="242.8" y="460.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="251.2" y="460.4" fill="#c9d1d9" textLength="67.2" lengthAdjust="spacingAndGlyphs"> 6 ok   </text>
+<text x="318.4" y="460.4" fill="#ff7b72" textLength="92.4" lengthAdjust="spacingAndGlyphs">✖ 1 stopped</text>
+<text x="16.0" y="478.4" fill="#c9d1d9" textLength="310.8" lengthAdjust="spacingAndGlyphs"> (standalone) 1  ·  blog 2  ·  shop 4</text>
+<text x="24.4" y="496.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs">✖</text>
+<text x="32.8" y="496.4" fill="#c9d1d9" textLength="319.2" lengthAdjust="spacingAndGlyphs"> worker-1                             </text>
+<text x="352.0" y="496.4" fill="#6e7681" textLength="201.6" lengthAdjust="spacingAndGlyphs">Exited (137) 2 hours ago</text>
+<text x="16.0" y="514.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="514.4" fill="#39c5cf" textLength="84.0" lengthAdjust="spacingAndGlyphs" font-weight="700"> DATABASE </text>
+<text x="116.8" y="514.4" fill="#39c5cf" textLength="789.6" lengthAdjust="spacingAndGlyphs">──────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="906.4" y="514.4" fill="#6e7681" textLength="193.2" lengthAdjust="spacingAndGlyphs">  3 running · 1 exposed</text>
+<text x="24.4" y="532.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="41.2" y="532.4" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs" font-weight="700">postgres </text>
+<text x="116.8" y="532.4" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">shop-db-1                      *5432    </text>
+<text x="452.8" y="532.4" fill="#ff7b72" textLength="58.8" lengthAdjust="spacingAndGlyphs">exposed</text>
+<text x="24.4" y="550.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="41.2" y="550.4" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs" font-weight="700">postgres </text>
+<text x="116.8" y="550.4" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">blog-db-1                      lo:5433  </text>
+<text x="452.8" y="550.4" fill="#6e7681" textLength="84.0" lengthAdjust="spacingAndGlyphs">local only</text>
+<text x="24.4" y="568.4" fill="#3fb950" textLength="8.4" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="41.2" y="568.4" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs" font-weight="700">redis    </text>
+<text x="116.8" y="568.4" fill="#c9d1d9" textLength="336.0" lengthAdjust="spacingAndGlyphs">cache-1                        lo:6379  </text>
+<text x="452.8" y="568.4" fill="#6e7681" textLength="84.0" lengthAdjust="spacingAndGlyphs">local only</text>
+<text x="16.0" y="586.4" fill="#39c5cf" textLength="16.8" lengthAdjust="spacingAndGlyphs">──</text>
+<text x="32.8" y="586.4" fill="#39c5cf" textLength="50.4" lengthAdjust="spacingAndGlyphs" font-weight="700"> BOOT </text>
+<text x="83.2" y="586.4" fill="#39c5cf" textLength="1016.4" lengthAdjust="spacingAndGlyphs">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="16.0" y="604.4" fill="#c9d1d9" textLength="109.2" lengthAdjust="spacingAndGlyphs"> finished in </text>
+<text x="125.2" y="604.4" fill="#c9d1d9" textLength="42.0" lengthAdjust="spacingAndGlyphs" font-weight="700">21.8s</text>
+<text x="192.4" y="604.4" fill="#3fb950" textLength="134.4" lengthAdjust="spacingAndGlyphs">✔ 0 failed units</text>
+<text x="326.8" y="604.4" fill="#c9d1d9" textLength="92.4" lengthAdjust="spacingAndGlyphs">   journal </text>
+<text x="419.2" y="604.4" fill="#ff7b72" textLength="8.4" lengthAdjust="spacingAndGlyphs">2</text>
+<text x="427.6" y="604.4" fill="#c9d1d9" textLength="58.8" lengthAdjust="spacingAndGlyphs"> err · </text>
+<text x="486.4" y="604.4" fill="#d29922" textLength="8.4" lengthAdjust="spacingAndGlyphs">9</text>
+<text x="494.8" y="604.4" fill="#c9d1d9" textLength="42.0" lengthAdjust="spacingAndGlyphs"> warn</text>
+<text x="16.0" y="694.4" fill="#6e7681" textLength="260.4" lengthAdjust="spacingAndGlyphs"> single screen   console 132x36</text>
+</g></svg>
