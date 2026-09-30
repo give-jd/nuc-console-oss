@@ -96,6 +96,15 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + c(90, f"  … +{hidden}")]
 
 
+def fit_join(items, sep, w, lead="", c90=False):
+    """lead + items joined by sep, dropping trailing items until it fits in w columns (at least one is kept)."""
+    items = list(items)
+    while len(items) > 1 and vlen(lead + sep.join(items)) > w:
+        items.pop()
+    text = sep.join(items)
+    return lead + (c(90, text) if c90 else text)
+
+
 def clip(s, w):
     """Cut to w visible columns, leaving ANSI sequences intact."""
     out, n, i = [], 0, 0
@@ -684,7 +693,7 @@ def exposure_rows(net, cont):
             note = "tailnet only"
         net_cell = 1 if port in funnel_ports and sc in ("ts", "wild") else 3 if serve_err and sc == "ts" else 0
         if net_cell == 1:
-            note, bad = "FUNNEL: public on the Internet", True
+            note, bad = "FUNNEL: public", True
         out.append({"port": port, "proto": proto, "name": safe(name), "loc": 0 if sc == "ts" else 1,
                     "lan": lan_cell, "ts": 1 if sc in ("wild", "ts") else 0, "net": net_cell,
                     "note": safe(note), "bad_note": bad, "warn": port in SENSITIVE and lan_cell in (1, 3)})
@@ -721,7 +730,7 @@ def boot_block_avvio(b, up, w):
     widths = {k: max(1, round(bw * v / total)) for k, v in parts.items()}
     lines.append(f"   boot finished in {c(1, fs(total))}   kernel {safe(b.get('kernel', '?'))}   up {fmt_dur(up)}")
     lines.append("   " + "".join(c(BOOT_COLORS.get(k, 37), "█" * n) for k, n in widths.items()))
-    lines.append("   " + "  ".join(c(BOOT_COLORS.get(k, 37), "■") + f" {k} {fs(v)}" for k, v in parts.items()))
+    lines += wrap_items([c(BOOT_COLORS.get(k, 37), "■") + f" {k} {fs(v)}" for k, v in parts.items()], w, indent=3, sep="  ")
     return lines
 
 
@@ -1024,12 +1033,13 @@ def exposure_block(net, cont, w, new=None):
     rows = exposure_rows(net, cont)
     by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
     warn = sum(r["warn"] for r in rows)
-    lines = [section("EXPOSURE", w), "",
-             f"   Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}    "
+    count = (f"   Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}    "
              f"LAN {c(33, len(by['LAN'])) if by['LAN'] else 0}    Tailscale {sum(r['ts'] == 1 for r in rows)}    "
-             f"Local {len(by['LOCALE'])}"
-             + (f"        {c(31, f'⚠ {warn} DB/broker open on LAN')}" if warn else ""),
-             c(90, "   ● open   ◐ filtered by source   ? unknown (treated as open)   · no"), ""]
+             f"Local {len(by['LOCALE'])}")
+    alert = c(31, f"⚠ {warn} DB/broker open on LAN") if warn else ""
+    summary = [count + "        " + alert] if not warn or vlen(count) + 8 + vlen(alert) <= w else [count, "   " + alert]
+    lines = [section("EXPOSURE", w), ""] + summary + [
+             clip(c(90, "   ● open   ◐ filtered by source   ? unknown (treated as open)   · no"), w), ""]
     nw = max(12, min(NAMEW, w - 57))  # narrow column (3 columns): the name gets shorter, notes and cells stay visible
     lines.append(c(1, "   " + pad("PORT", 9) + pad("SERVICE", nw + 1)
                    + "".join(x.center(6) for x in ("LOC", "LAN", "TS", "NET")) + "  NOTE"))
@@ -1042,13 +1052,16 @@ def exposure_block(net, cont, w, new=None):
             continue
         for r in by[g]:
             mark = c(31, "⚠") if r["warn"] else " "
-            note = c(31, r["note"]) if r["bad_note"] else c(90, r["note"])
             tag = new.get(f"{r['port']}/{r['proto'][0]}:{g}")
+            cells = [cell(r["loc"], loc=True), cell(r["lan"], r["warn"]), cell(r["ts"], r["warn"]), cell(r["net"], net=True)]
+            head = (f"   {r['port']:>5}/{r['proto'][0]} {mark}{pad(r['name'][:nw - 1], nw)}"
+                    + "".join(f"  {x}   " for x in cells) + " ")
+            room = w - vlen(head) - (len(tag) + 1 if tag else 0)  # never clip mid-word: end with an ellipsis
+            text = r["note"] if vlen(r["note"]) <= room else r["note"][:max(room - 1, 0)] + "…"
+            note = c(31, text) if r["bad_note"] else c(90, text)
             if tag:
                 note = c("1;31", tag + " ") + note
-            cells = [cell(r["loc"], loc=True), cell(r["lan"], r["warn"]), cell(r["ts"], r["warn"]), cell(r["net"], net=True)]
-            lines.append(f"   {r['port']:>5}/{r['proto'][0]} {mark}{pad(r['name'][:nw - 1], nw)}"
-                         + "".join(f"  {x}   " for x in cells) + f" {note}")
+            lines.append(head + note)
     return lines
 
 
@@ -1076,12 +1089,19 @@ def fw_status_lines(net):
     return lines
 
 
+def short_default(text):
+    """'deny (incoming), allow (outgoing), deny (routed)' -> 'in deny · out allow · fwd deny' (fits a 3-column layout)."""
+    names = {"incoming": "in", "outgoing": "out", "routed": "fwd"}
+    found = re.findall(r"(\w+) \((incoming|outgoing|routed)\)", str(text))
+    return safe("  ·  ".join(f"{names[d]} {a}" for a, d in found)) if found else safe(text)
+
+
 def firewall_block(net, w, max_rules=None):
     err = net.get("errors") or {}
     ufw, du, ipt = net.get("ufw"), net.get("docker_user"), net.get("iptables")
     lines = [section("FIREWALL", w), ""] + fw_status_lines(net) + [""]  # the status before any detail
     if ufw is not None:
-        lines.append(kv("ufw", f"{safe(ufw['default'])}   log: {safe(ufw['logging'])}" if ufw["active"]
+        lines.append(kv("ufw", f"{short_default(ufw['default'])}   log: {safe(ufw['logging'])}" if ufw["active"]
                         else c(31, "off (no rules in force)")))
     if ipt:
         pol, cnt = ipt["policy"], ipt["count"]
@@ -1369,10 +1389,10 @@ def ov_boot(b, w, k, now=None):
         bits.append(c(31, f"✖ {plural(len(failed), 'failed unit')}") if failed else c(32, "✔ 0 failed units"))
     if j:
         bits.append(f"journal {c(31, str(j['err'])) if j['err'] else 0} err · {c(33, str(j['warn'])) if j['warn'] else 0} warn")
-    lines.append(" " + "   ".join(bits))
+    lines.append(fit_join(bits, "   ", w, " "))
     if b.get("blame") and k < 3:
-        top = b["blame"][:max(1, 3 - k)]
-        lines.append(" slowest: " + c(90, "  ·  ".join(f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in top)))
+        top = [f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
+        lines.append(fit_join(top, "  ·  ", w, " slowest: ", c90=True))
     return lines
 
 

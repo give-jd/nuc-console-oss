@@ -4,11 +4,11 @@
 <circle cx="20" cy="17" r="6" fill="#ff5f56"/><circle cx="40" cy="17" r="6" fill="#ffbd2e"/><circle cx="60" cy="17" r="6" fill="#27c93f"/>
 <text x="522" y="22" fill="#8b949e" font-family="ui-sans-serif,system-ui,Helvetica,Arial,sans-serif" font-size="13" text-anchor="middle">nuc-console · 120×33 console, single column (demo data)</text>
 <g font-family="'DejaVu Sans Mono','Liberation Mono',Menlo,Consolas,ui-monospace,monospace" font-size="14" xml:space="preserve">
-<text x="43.2" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
-<rect x="130.8" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="144.0" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
-<rect x="223.2" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="236.4" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">19:56:52</text>
+<text x="26.4" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
+<rect x="114.0" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="127.2" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
+<rect x="206.4" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="219.6" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">20:04:21</text>
 <text x="900.0" y="65.5" fill="#c9d1d9" font-weight="700" text-anchor="start">✖</text>
 <text x="916.8" y="65.5" fill="#c9d1d9" font-weight="700" textLength="84.0" lengthAdjust="spacing">5 PROBLEMS</text>
 <text x="1017.6" y="65.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
@@ -461,7 +461,7 @@
 <rect x="715.2" y="314.0" width="8.8" height="1.2" fill="#39c5cf"/>
 <text x="740.4" y="317.5" fill="#6e7681" textLength="75.6" lengthAdjust="spacing">up 1d 23h</text>
 <text x="824.4" y="317.5" fill="#6e7681" text-anchor="start">·</text>
-<text x="841.2" y="317.5" fill="#6e7681" textLength="159.6" lengthAdjust="spacing">load 1.28 1.27 1.14</text>
+<text x="841.2" y="317.5" fill="#6e7681" textLength="159.6" lengthAdjust="spacing">load 0.70 1.00 1.07</text>
 <text x="1000.8" y="317.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
 <text x="26.4" y="335.5" fill="#c9d1d9" textLength="25.2" lengthAdjust="spacing">RAM</text>
 <rect x="76.8" y="325.0" width="8.8" height="13.0" fill="#3fb950"/>
@@ -504,7 +504,7 @@
 <rect x="387.6" y="325.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="396.0" y="325.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="404.4" y="325.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="421.2" y="335.5" fill="#c9d1d9" textLength="201.6" lengthAdjust="spacing">11.8G/30.2G   cache 8.2G</text>
+<text x="421.2" y="335.5" fill="#c9d1d9" textLength="201.6" lengthAdjust="spacing">11.8G/30.2G   cache 8.3G</text>
 <text x="622.8" y="335.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
 <text x="26.4" y="353.5" fill="#c9d1d9" textLength="33.6" lengthAdjust="spacing">DISK</text>
 <rect x="76.8" y="343.0" width="8.8" height="13.0" fill="#3fb950"/>
@@ -570,7 +570,7 @@
 <rect x="219.6" y="361.0" width="8.8" height="13.0" fill="#3fb950"/>
 <rect x="228.0" y="361.0" width="8.8" height="13.0" fill="#3fb950"/>
 <rect x="236.4" y="361.0" width="8.8" height="13.0" fill="#3fb950"/>
-<rect x="244.8" y="361.0" width="8.8" height="13.0" fill="#3fb950"/>
+<rect x="244.8" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="253.2" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="261.6" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="270.0" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
@@ -590,7 +590,7 @@
 <rect x="387.6" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="396.0" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="404.4" y="361.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="421.2" y="371.5" fill="#c9d1d9" textLength="16.8" lengthAdjust="spacing">56</text>
+<text x="421.2" y="371.5" fill="#c9d1d9" textLength="16.8" lengthAdjust="spacing">52</text>
 <text x="438.0" y="371.5" fill="#c9d1d9" text-anchor="start">°</text>
 <text x="446.4" y="371.5" fill="#c9d1d9" textLength="42.0" lengthAdjust="spacing">C/105</text>
 <text x="488.4" y="371.5" fill="#c9d1d9" text-anchor="start">°</text>
@@ -639,7 +639,7 @@
 <rect x="387.6" y="379.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="396.0" y="379.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="404.4" y="379.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="421.2" y="389.5" fill="#c9d1d9" textLength="16.8" lengthAdjust="spacing">33</text>
+<text x="421.2" y="389.5" fill="#c9d1d9" textLength="16.8" lengthAdjust="spacing">32</text>
 <text x="438.0" y="389.5" fill="#c9d1d9" text-anchor="start">°</text>
 <text x="446.4" y="389.5" fill="#c9d1d9" textLength="33.6" lengthAdjust="spacing">C/86</text>
 <text x="480.0" y="389.5" fill="#c9d1d9" text-anchor="start">°</text>
@@ -692,7 +692,7 @@
 <rect x="387.6" y="415.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="396.0" y="415.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="404.4" y="415.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="421.2" y="425.5" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacing">2%   core</text>
+<text x="421.2" y="425.5" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacing">1%   core</text>
 <rect x="505.8" y="426.2" width="7.2" height="1.8" fill="#3fb950"/>
 <rect x="514.2" y="426.2" width="7.2" height="1.8" fill="#3fb950"/>
 <rect x="522.6" y="426.2" width="7.2" height="1.8" fill="#3fb950"/>
