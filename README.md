@@ -1,28 +1,42 @@
-# nuc-console
+<div align="center">
 
-**A full-screen status dashboard for the physical monitor of a headless Linux box — no X11, no browser, no dependencies.**
+# 🖥️ nuc-console
 
-It replaces the login prompt on `tty1` with a live one-screen summary: what is listening and *who can reach it*
-(this machine / LAN / Tailscale / Internet), firewall state, containers, databases and who talks to them, boot
-health, temperatures and throttling, disks, network traffic. Plain Python 3 standard library, ANSI text, ~0.5 % of one core.
+**Turn the forgotten monitor of your headless Linux box into a live security & health board.**<br>
+No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 
-```
- demo-host │ Overview │ 19:06:32                                                       ✖ 5 PROBLEMS
-── ATTENTION ────────────────────────────────────────────────────────────────────────────────
-   ✖ 1 DB/broker open on LAN
-   ! 1 container exited with an error
-   ! 2 Docker ports bypassing ufw (DOCKER-USER empty)
-   ! 1 service public on the Internet (Funnel :8444)
-── EXPOSURE ─────────────────────────────────────────────────────────────────────────────────
- Internet 1   LAN 3   tailnet only 0   local only 4   ⚠ 1 DB/broker on LAN
- ● 8444/t funnel /webhook → 127.0.0.1:5678/webhook  public on the Internet
- ⚠5432 shop-db-1  ·  8080 shop-web-1  ·  22 sshd
-── FIREWALL ─────────────────────────────────────────────────────────────────────────────────
-   ✔ ufw active
-   ! DOCKER-USER empty: ports published by containers bypass ufw
-   INPUT DROP · FORWARD DROP   ts-input ✔   fail2ban sshd:2   drop 1h 41
-```
-<sub>Synthetic data from `--demo`.</sub>
+[![License: MIT](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/give-jd/nuc-console-oss?style=flat-square&color=58a6ff)](https://github.com/give-jd/nuc-console-oss/releases)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776ab?style=flat-square&logo=python&logoColor=white)](#requirements)
+[![Linux + systemd](https://img.shields.io/badge/linux-systemd-fcc624?style=flat-square&logo=linux&logoColor=black)](#requirements)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-8957e5?style=flat-square)](#security)
+
+[**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
+
+<img src="docs/img/overview.svg" alt="nuc-console overview screen rendered with synthetic demo data" width="900">
+
+<sub>The real screen, rendered from <code>--demo</code> synthetic data (no real host, address or container).</sub>
+
+</div>
+
+## ✨ At a glance
+
+| | |
+|---|---|
+| 🌐 **Exposure by reach** | every listener classified as *local / LAN / Tailscale / Internet (Funnel)*, corrected by the real firewall |
+| 🧱 **Firewall truth** | ufw, iptables, `DOCKER-USER`, fail2ban — flags *Docker ports that bypass ufw* and *Tailscale accepted before ufw* |
+| 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
+| 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
+| 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
+| 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
+| 🎛️ **Configurable** | switch every section on/off, single screen or rotating pages, pin the layout size |
+| 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
+
+<details>
+<summary><b>Wide consoles: automatic 3-column layout</b> (click)</summary>
+<br>
+<img src="docs/img/wide.svg" alt="nuc-console on a wide console, three columns, demo data" width="100%">
+</details>
 
 ## Why
 
