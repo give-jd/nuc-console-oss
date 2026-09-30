@@ -11,16 +11,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 DEST=/opt/nuc-console
 UNITD=/etc/systemd/system/nuc-console.service.d
+UNITF=/etc/systemd/system/nuc-console.service
 # values already installed (kept on re-install): from the drop-in, or from the old unit that had the time zone hardcoded
-# sed quits at the first match by itself: `sed ... | head -1` under pipefail dies with SIGPIPE (rc 141) when two files match
-OLD_TZ="$(sed -n 's/^Environment=TZ=//{p;q}' "$UNITD/local.conf" /etc/systemd/system/nuc-console.service 2>/dev/null || true)"
-OLD_VT="$(sed -n 's#^TTYPath=/dev/tty##{p;q}' "$UNITD/local.conf" 2>/dev/null || true)"
+# sed quits at the first match by itself: `sed ... | head -1` under pipefail dies with SIGPIPE (rc 141) when two files match.
+# (`s/x/y/{p;q}` is NOT valid sed: braces go around the whole command, `/x/{s///;p;q}`; tests/test_install.py runs these lines)
+OLD_TZ="$(sed -n '/^Environment=TZ=/{s///;p;q}' "$UNITD/local.conf" "$UNITF" 2>/dev/null || true)"
+OLD_VT="$(sed -n '/^TTYPath=\/dev\/tty/{s///;p;q}' "$UNITD/local.conf" 2>/dev/null || true)"
 TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
     systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
-    rm -f /etc/systemd/system/nuc-console.service /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
+    rm -f "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept
     systemctl daemon-reload

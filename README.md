@@ -29,7 +29,7 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
-| 🎛️ **Configurable** | switch every section on/off, single screen or rotating pages, pin the layout size |
+| 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
@@ -88,9 +88,13 @@ network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
 [dashboard]
 mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
 rotate_seconds = 15
-# sections = attention, exposure, firewall, system, containers, databases, boot, ...   (fixed on-screen order)
+# sections = attention, exposure, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
+#            ^ fixed on-screen order (this is the default, by priority); columns fill left to right, never back-filled
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
-rows = 0
+rows = 0              # e.g. 65 if the bottom lines are cut by the monitor
+
+[web]                 # optional read-only web view, see docs/WEB.md
+enabled = no
 ```
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
