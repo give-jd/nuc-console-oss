@@ -109,4 +109,4 @@ Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console
 | A section says "disabled in config.ini" | you turned it off in `[features]` |
 | Login prompt still visible | `systemctl is-enabled getty@tty1` must say `masked`; the VT in `local.conf` must match the one on the monitor |
 | Wrong layout | the real console size is logged: `journalctl -u nuc-console \| grep console` |
-| Time is in UTC | reinstall with `NUC_CONSOLE_TZ=Your/Zone` |
+| Time is in UTC | reinstall with `sudo NUC_CONSOLE_TZ=Your/Zone ./install.sh` (a re-install keeps the zone you chose; 1.1.0 had a bug that dropped it: upgrade to 1.1.1 first) |
