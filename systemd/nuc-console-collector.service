@@ -1,0 +1,20 @@
+[Unit]
+Description=nuc-console collector (privileged data gathering for the renderer)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/nuc-console/collector.py
+RuntimeDirectory=nuc-console
+RuntimeDirectoryPreserve=yes
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+# full, not strict: ufw/iptables must be able to take their own locks
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

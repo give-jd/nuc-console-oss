@@ -1,0 +1,31 @@
+[Unit]
+Description=nuc-console dashboard on the console
+After=systemd-user-sessions.service nuc-console-collector.service
+# No Conflicts=getty@tty1: it is symmetric, and logind (autovt) would start a login over the dashboard.
+# install.sh masks the getty on the chosen tty; login stays on tty2 (Ctrl+Alt+F2) and over SSH.
+# Retry forever: a crash loop must not leave the tty black in a "failed" state.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=nuc-console
+# time zone (NUC_CONSOLE_TZ) and virtual terminal (NUC_CONSOLE_VT) live in nuc-console.service.d/local.conf, written by install.sh
+# modalita' (overview/rotate) e sezioni: /etc/nuc-console/config.ini
+ExecStart=/usr/bin/python3 /opt/nuc-console/render.py
+StandardInput=tty
+StandardOutput=tty
+# the real console size is logged: journalctl -u nuc-console
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
