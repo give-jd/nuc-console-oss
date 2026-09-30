@@ -816,14 +816,14 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertIn("unavailable", text(render.ov_docker(BOOT, 90, 0)))
         self.assertIn("1.0G/4.0G", text(render.ov_dischi(s, 78, 0)))
 
-    def test_pack_first_fit(self):
+    def test_pack_keeps_the_requested_order(self):
         mk = lambda n, tag: (lambda cw: [f"{tag}{i}" for i in range(n)])
         out = render.pack([mk(3, "a"), mk(3, "b"), mk(2, "c")], 2, 10, 23, 6, [""])
         out = [render.ANSI.sub("", x) for x in out]                                  # columns() ends every line with a reset
         left = [l[:10].strip() for l in out]
-        self.assertEqual(left[:6], ["a0", "a1", "a2", "", "c0", "c1"])              # a stays on top; c (small) fills the gap below
+        self.assertEqual(left[:4], ["a0", "a1", "a2", ""])                           # a on top; the small c does NOT back-fill the gap below
         right = [l[13:].strip() for l in out]
-        self.assertEqual(right[:3], ["b0", "b1", "b2"])                              # b did not fit below a: it goes to the next column
+        self.assertEqual(right[:6], ["b0", "b1", "b2", "", "c0", "c1"])         # b did not fit below a: next column, then c after b
         self.assertIsNone(render.pack([mk(9, "x")], 3, 10, 36, 4, [""]))            # a block taller than the column: no room
         one = render.pack([mk(2, "a"), mk(2, "b")], 1, 10, 10, 10, [""])
         self.assertEqual(one, ["a0", "a1", "", "b0", "b1"])                         # one column: stacked with an empty line
@@ -1111,6 +1111,45 @@ class Config(unittest.TestCase):
             render.CFG["features"].clear()
             render.CFG["features"].update(orig)
 
+
+
+class SectionOrder(unittest.TestCase):
+    def _cfg(self, text):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
+            f.write(text)
+        try:
+            return nuc_config.load(f.name)
+        finally:
+            os.unlink(f.name)
+
+    def test_default_order_and_overrides(self):
+        self.assertEqual(nuc_config.load("/nonexistent")["sections"], list(nuc_config.SECTIONS))
+        cfg = self._cfg("[dashboard]\nsections = system, bogus, exposure, system\n")
+        self.assertEqual(cfg["sections"][:2], ["system", "exposure"])            # asked first, duplicates and unknown dropped
+        self.assertEqual(sorted(cfg["sections"]), sorted(nuc_config.SECTIONS))   # forgotten ones are appended, none lost
+
+    def test_overview_follows_the_configured_order(self):
+        import demo
+        cont, net, boot, base = demo.snapshot()
+        sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
+        saved = list(render.CFG["sections"])
+        try:
+            for order in (["attention", "exposure", "firewall", "system", "containers"],
+                          ["system", "containers", "firewall", "exposure", "attention"]):
+                render.CFG["sections"] = order + [x for x in nuc_config.SECTIONS if x not in order]
+                txt = render.ANSI.sub("", "\n".join("\n".join(x[3]) for x in render.slides(sm, cont, net, 118, 60, boot, base, mode="overview")))
+                pos = [txt.index(t) for t in ("ATTENTION", "EXPOSURE", "FIREWALL", "SYSTEM", "CONTAINER")]
+                names = ["attention", "exposure", "firewall", "system", "containers"]
+                self.assertEqual([names[i] for i in sorted(range(5), key=lambda i: pos[i])], order)
+        finally:
+            render.CFG["sections"] = saved
+
+    def test_per_core_bars_survive_one_level_down(self):
+        sm = {"cpu": {f"cpu{i}": 0.3 for i in range(14)}, "thermal": {}, "net": {}, "sessions": None, "fs": None}
+        lines = render.ov_sistema(sm, 76, -1)
+        self.assertTrue(any(" 13 " in render.ANSI.sub("", l) for l in lines))
+        self.assertFalse(any(" 13 " in render.ANSI.sub("", l) for l in render.ov_sistema(sm, 76, 0)))
 
 
 class ChangedMessage(unittest.TestCase):

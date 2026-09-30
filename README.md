@@ -88,6 +88,7 @@ network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
 [dashboard]
 mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
 rotate_seconds = 15
+# sections = attention, exposure, firewall, system, containers, databases, boot, ...   (fixed on-screen order)
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
 rows = 0
 ```

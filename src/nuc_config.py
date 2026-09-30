@@ -11,12 +11,16 @@ DEFAULT_PATH = "/etc/nuc-console/config.ini"
 FEATURES = ("containers", "databases", "exposure", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal")
 MODES = ("overview", "rotate")
+# Fixed on-screen order of the overview sections (most important first: what needs action, then security posture,
+# then resources, workloads, history, then detail panels). Overridable with [dashboard] sections.
+SECTIONS = ("attention", "exposure", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
+            "tailscale", "docker_disk", "disks")
 
 
 def load(path=None):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int}"""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
-    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0,
+    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "sections": list(SECTIONS),
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 5, "allowed_hosts": []}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
@@ -46,6 +50,13 @@ def load(path=None):
                 cfg[key] = 0 if key != "rotate_seconds" and v == 0 else max(lo, min(hi, v))  # 0 = automatic
             except ValueError:
                 print(f"nuc-console: {path}: [dashboard] {key} must be an integer", file=sys.stderr)
+    if cp.has_section("dashboard") and cp.has_option("dashboard", "sections"):
+        asked = [x.strip().lower() for x in cp.get("dashboard", "sections").split(",") if x.strip()]
+        for x in asked:
+            if x not in SECTIONS:
+                print(f"nuc-console: {path}: [dashboard] sections: unknown name '{x}' ignored (known: {', '.join(SECTIONS)})", file=sys.stderr)
+        order = [x for i, x in enumerate(asked) if x in SECTIONS and x not in asked[:i]]
+        cfg["sections"] = order + [x for x in SECTIONS if x not in order]  # sections you forget keep their default place at the end
     if cp.has_section("web"):
         w = cfg["web"]
         try:

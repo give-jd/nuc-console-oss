@@ -1241,10 +1241,10 @@ def ov_sistema(s, w, k, cont=None):
         mean = sum(cores) / len(cores)
         spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
         lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
-        if k <= -2:  # plenty of room: one bar per core, in columns
-            cells = [f" {i:>2} {bar(v, 10)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
-            per = max(1, min(4, (w - 1) // 24))
-            lines += ["".join(pad(x, 24) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
+        if k <= -1:  # room: one compact bar per core, in columns
+            cells = [f" {i:>2} {bar(v, 6)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
+            per = max(1, min(6, (w - 1) // 17))
+            lines += ["".join(pad(x, 17) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
     if k <= -2 and cont:
         top = sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"])[:5]
         if top:
@@ -1504,15 +1504,20 @@ def ov_dischi(s, w, k):
 
 
 def pack(blocks, ncol, cw, w, body_h, gap):
-    """Fills the columns in priority order: each block goes into the first column it fits in. None if one does not fit."""
+    """Fills the columns in the given order, left to right, top to bottom: a block goes in the current column, or in the
+    next one if it does not fit; earlier columns are never back-filled, so the order on screen is the order requested
+    (first-fit used to move sections around whenever a line more or less changed). None if one does not fit anywhere."""
     cols = [[] for _ in range(ncol)]
+    ci = 0
     for fn in blocks:
         lines = fn(cw)
-        for col in cols:
+        while ci < ncol:
+            col = cols[ci]
             need = len(lines) + (len(gap) if col else 0)
             if len(col) + need <= body_h:
                 col.extend((gap if col else []) + lines)
                 break
+            ci += 1
         else:
             return None
     return columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else cols[0]
@@ -1542,21 +1547,22 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     for i, (k, spaced) in enumerate(levels):
         gap = [""] if spaced else []
         # (feature, block): a section switched off in config.ini does not appear and takes no space
-        cand = [(True, lambda c_: guardare(c_, k)),
-                ("exposure", lambda c_: block(ov_esposizione, "EXPOSURE", c_, net, cont, c_, k, new)),
-                ("firewall", lambda c_: block(ov_firewall, "FIREWALL", c_, net, c_, k)),
-                (True, lambda c_: block(ov_sistema, "SYSTEM", c_, s, c_, k, cont)),
-                ("containers", lambda c_: block(ov_container, "CONTAINER", c_, cont, c_, k))]
+        cand = {"attention": (True, lambda c_: guardare(c_, k)),
+                "exposure": ("exposure", lambda c_: block(ov_esposizione, "EXPOSURE", c_, net, cont, c_, k, new)),
+                "firewall": ("firewall", lambda c_: block(ov_firewall, "FIREWALL", c_, net, c_, k)),
+                "system": (True, lambda c_: block(ov_sistema, "SYSTEM", c_, s, c_, k, cont)),
+                "containers": ("containers", lambda c_: block(ov_container, "CONTAINER", c_, cont, c_, k))}
         if k < 4:
-            cand += [("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k)),
-                     ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))]
+            cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
+            cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
         if k < 0:  # plenty of room: extra sections
-            cand += [("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
-                     ("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
-                     ("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
-                     ("docker_disk", lambda c_: block(ov_docker, "DOCKER · DISK", c_, boot, c_, k)),
-                     ("disks", lambda c_: block(ov_dischi, "DISKS", c_, s, c_, k))]
-        blocks = [fn for feat, fn in cand if feat is True or on(feat)]
+            cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
+                        sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
+                        tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
+                        docker_disk=("docker_disk", lambda c_: block(ov_docker, "DOCKER · DISK", c_, boot, c_, k)),
+                        disks=("disks", lambda c_: block(ov_dischi, "DISKS", c_, s, c_, k)))
+        # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
+        blocks = [cand[n][1] for n in CFG["sections"] if n in cand and (cand[n][0] is True or on(cand[n][0]))]
         last = i == len(levels) - 1
         lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, gap)  # at the last level: no limit (the page splits)
         if lines is not None:

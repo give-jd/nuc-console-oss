@@ -28,6 +28,10 @@ Choices made here **without a source**: 2 s refresh, redraw without `clear`, ~10
 - "Expected vs actual" column/marker in the matrix (needs a baseline: issue #5).
 - Alternating rows or dotted guides on wide tables.
 
+## Section order
+
+The overview keeps a fixed order, top-left to bottom-right, following the "most important first" rule of dashboard design: ATTENTION (what needs action), then the security posture (EXPOSURE, FIREWALL), resources (SYSTEM), workloads (CONTAINER, DATABASE), history (BOOT) and finally the detail panels. Columns are filled in that order and never back-filled, so a line more or less in one block does not move sections around. Change it with `[dashboard] sections` in `config.ini`.
+
 ## Exposure classification
 
 | Bind address | Exposure |
