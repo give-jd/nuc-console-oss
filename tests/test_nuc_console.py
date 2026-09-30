@@ -1113,6 +1113,17 @@ class Config(unittest.TestCase):
 
 
 
+class ChangedMessage(unittest.TestCase):
+    def test_name_change_shows_the_difference_not_the_common_prefix(self):
+        self.assertEqual(render.name_change("sshd", "evil"), "sshd → evil")
+        out = render.name_change("serve / → 127.0.0.1:8501", "serve / → 127.0.0.1:9000")
+        self.assertIn("8501", out)
+        self.assertIn("9000", out)
+        self.assertLessEqual(len(out), 2 * 21 + 3)
+        old, new = out.split(" → ")
+        self.assertNotEqual(old, new)
+
+
 class NoClipping(unittest.TestCase):
     """No block may produce a line wider than its column: the 3-column layout used to cut words ("DB/broker ope")."""
 

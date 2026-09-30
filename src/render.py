@@ -858,6 +858,17 @@ def load_baseline(path=None):
     return d if isinstance(d, dict) and isinstance(d.get("ports"), dict) else "corrotta"
 
 
+def name_change(old, new, width=20):
+    """'old → new' starting where the two names start to differ (a plain cut at 20 chars showed identical prefixes)."""
+    old, new = safe(old), safe(new)
+    p = 0
+    while p < min(len(old), len(new)) and old[p] == new[p]:
+        p += 1
+    start = max(0, p - 6)  # a little context before the first difference
+    lead = "…" if start else ""
+    return f"{lead}{old[start:start + width]} → {lead}{new[start:start + width]}"
+
+
 def baseline_diff(cur, base):
     """(new, gone, changed) against the accepted baseline; 'changed' = same port/group but another service,
     or a LAN filter that went from 'by source' to 'open to all'."""
@@ -870,7 +881,7 @@ def baseline_diff(cur, base):
         if k in old:
             o = val(old[k])
             if o["name"] != v["name"] and on("containers"):  # containers off: container names can't be resolved
-                changed[k] = f"service {safe(o['name'])[:20]} → {safe(v['name'])[:20]}"
+                changed[k] = "service " + name_change(o["name"], v["name"])
             elif o["lan"] == 2 and v["lan"] in (1, 3) and on("firewall"):  # firewall off: verdict unknown, not a rule change
                 changed[k] = "was filtered by source, now open to the whole LAN"
     return new, gone, changed
