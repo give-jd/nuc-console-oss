@@ -17,7 +17,7 @@ nuc-console has two parts with different privilege:
 
 Design rules you can audit in the code:
 
-- **No network exposure.** Neither process opens a socket or accepts input from the network.
+- **No network exposure by default.** The collector and the tty renderer open no socket. The optional read-only web view (`web.py`, off by default) is the only listener: GET only, no JavaScript, strict CSP, loopback unless a token is configured (it refuses to start otherwise), token compared in constant time and read from a 0600 file; see [docs/WEB.md](docs/WEB.md).
 - **No shell, no user-controlled command lines.** Commands are fixed argument lists run with `subprocess.run([...])` (no `shell=True`) and a fixed `PATH`; the only variable arguments are container IDs/PIDs obtained from Docker itself.
 - **Untrusted text is sanitised.** Container names, process names, journal lines etc. can contain terminal escape sequences; everything shown passes through `safe()` which strips control characters.
 - **Secrets are never stored or displayed.** To find which containers use a database, the collector checks whether container environment variable *names/values reference the DB's hostname*; it keeps only the match result, never the values (`env_uses`). Tests assert this.

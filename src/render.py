@@ -1582,6 +1582,18 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
+def render_screen(smp, w, h, mode=None, n=0):
+    """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py)."""
+    st, sm = snapshot(w), smp.sample()
+    if DEMO:
+        import demo
+        sm = demo.sampler_data(sm)
+        socket.gethostname = lambda: "demo-host"
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
+                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])), len(sl)
+
+
 def once(argv):
     global DEMO
     DEMO = "--demo" in argv
@@ -1589,14 +1601,7 @@ def once(argv):
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
     smp = Sampler()
     time.sleep(0.5)
-    st, sm = snapshot(w), smp.sample()
-    if DEMO:
-        import demo
-        sm = demo.sampler_data(sm)
-        socket.gethostname = lambda: "demo-host"
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
-    out = frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]))
+    out, _ = render_screen(smp, w, h, n=n)
     print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 

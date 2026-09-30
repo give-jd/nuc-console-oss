@@ -30,6 +30,7 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
 | 🎛️ **Configurable** | switch every section on/off, single screen or rotating pages, pin the layout size |
+| 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
 <details>
@@ -51,7 +52,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 - **Port alarms.** A baseline of the exposed ports is stored on install; a new, changed or vanished port raises a red banner until you accept it (`sudo nuc-console-accept`).
 - **Honest about missing data.** Unreadable or missing sections show `?` and are treated as open, never as "OK". A tool that isn't installed is reported as such, not as an error.
 - **Databases.** Finds postgres/redis/mysql/mongo/… containers, shows their *real* published ports and which containers/hosts actually connect (seen inside the container's network namespace, so Docker's DNAT can't hide external clients).
-- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener anywhere.
+- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view.
 - **Adaptive layout.** One screen from 79×24 up to 4K consoles: 1 column → 2 (≥200 cols) → 3 (≥225 cols), dropping detail before dropping sections.
 
 ## Requirements
@@ -110,6 +111,11 @@ Details in [config/config.ini](config/config.ini).
 ### Cost
 
 Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, 240×67) **≈0.5 % of one core, ~14 MB RSS**; the root collector runs its commands every 10–30 s (< 0.5 s CPU in total). Per-container memory is read from cgroup files, not `docker stats` (2 s per call).
+
+## Web view (optional)
+
+Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, no JavaScript, binds to loopback unless you give it a token.
+Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
 
 ## Security
 
