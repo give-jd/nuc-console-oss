@@ -52,7 +52,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <details>
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
-<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports (with the reach declared in config.ini) and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
 </details>
 
 <details>
