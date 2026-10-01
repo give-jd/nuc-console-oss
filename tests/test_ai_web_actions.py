@@ -16,6 +16,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -53,7 +54,7 @@ def runtime_script(kind="serve"):
     """The bytes of a fake llamafile for `/bin/sh runtime --server --host H --port N -m FILE -a ID ...`: serve = answers GET /v1/models on that port
     until it is stopped; die = writes a line and exits; stubborn = ignores SIGTERM. Windows starts `runtime.exe --server ...`: serve and stubborn
     are then the Python source itself, which Base.popen hands to this interpreter (a script cannot be an .exe)."""
-    serve = ("import http.server, json, sys\\n"
+    serve = ("import faulthandler, http.server, json, signal, sys\\nif hasattr(signal, \"SIGUSR1\"): faulthandler.register(signal.SIGUSR1)\\n"  # Unix: where it is (Base.where)
              "a = sys.argv[1:]\\nport = int(a[a.index(\"--port\") + 1])\\nmodel = a[a.index(\"-a\") + 1]\\n"
              "print(\"fake runtime up on\", port, flush=True)\\n"
              "class H(http.server.BaseHTTPRequestHandler):\\n"
@@ -61,7 +62,7 @@ def runtime_script(kind="serve"):
              "    def do_GET(self):\\n"
              "        b = json.dumps({\"data\": [{\"id\": model}]}).encode()\\n"
              "        self.send_response(200); self.send_header(\"Content-Length\", str(len(b))); self.end_headers(); self.wfile.write(b)\\n"
-             "http.server.ThreadingHTTPServer((\"127.0.0.1\", port), H).serve_forever()\\n")
+             "s = http.server.ThreadingHTTPServer((\"127.0.0.1\", port), H)\\nprint(\"listening\", flush=True)\\ns.serve_forever()\\n")
     stubborn = ("import signal, time\\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\\nprint(\"up\", flush=True)\\n"
                 "while True:\\n    time.sleep(0.05)\\n")
     if kind == "die":
@@ -145,8 +146,27 @@ class Base(unittest.TestCase):
         return aisetup.is_verified(self.d, aisetup.model_path(self.d, self.m(name)), self.m(name))
 
     def job(self):
-        self.assertTrue(self.eng.wait(30), "the job did not end")
+        if not self.eng.wait(30):
+            self.fail("the job did not end: %s" % self.where())
         return self.eng.snapshot()["job"]
+
+    def where(self):
+        """What a job that does not end is doing: its phase, the server's last lines (the fake runtime adds where it is, on SIGUSR1) and what
+        its endpoint answers."""
+        info = self.eng.child_info or {}
+        pid = info.get("pid")
+        if POSIX and pid and alive(pid):
+            try:
+                os.kill(pid, signal.SIGUSR1)
+            except OSError:
+                pass
+            threading.Event().wait(1)
+        snap = self.eng.snapshot()
+        job, srv = snap["job"] or {}, snap["server"]
+        probe = aisetup.probe(srv["endpoint"], 2) if srv["endpoint"] else None
+        return "phase %r, step %r, note %r; server running %s, pid %s, endpoint %r, alive %s; it wrote: %s; the endpoint: %r" % (
+            job.get("phase"), job.get("step"), job.get("note"), srv["running"], pid, srv["endpoint"], bool(pid and POSIX and alive(pid)),
+            " | ".join(info.get("tail") or []) or "nothing", probe)
 
     def notice(self):
         return self.eng.snapshot()["notice"]["text"]
