@@ -83,7 +83,7 @@ def catalog(change=None):
     models = [model("m-gpu", "gpu", "Alpha GPU", 1, 5000), model("m-part", "partial", "Beta Partial", 2, 12000, 11000, active_b=2.0),
               model("m-ram", "ram", "Gamma RAM", 3, 3000, 2600, installed=True), model("m-slow", "slow", "Delta Slow", 4, 9000, 8000),
               model("m-no", "no", "Epsilon Big", 5, 40000, 38000, pinned=False)]
-    cat = {"hw": demo.ai_catalog(None)["hw"], "dir": "/var/lib/nuc-console-ai", "runtime": {"installed": True, "version": "0.9.3"},
+    cat = {"hw": demo.ai_catalog(None)["hw"], "dir": "/var/lib/nuc-console-ai", "runtime": {"installed": True, "version": "0.10.6"},
            "recommended": "m-gpu", "active": "m-ram", "models": models}
     if change:
         change(cat)
@@ -644,7 +644,7 @@ class Once(AiCase):
         self.assertIn("endpoint  http://127.0.0.1:11434/v1", txt)
         self.assertIn("server    ✔ answering · 1 model: qwen3-4b", txt)
         self.assertIn("model     ● qwen3-4b  in the catalog", txt)
-        self.assertIn("runtime   ✔ installed (0.9.3)", txt)
+        self.assertIn("runtime   ✔ installed (0.10.6)", txt)
         self.assertIn("files     /var/lib/nuc-console-ai", txt)
         render.DEMO_OS = "windows"
         txt = "\n".join(self.screen([], 200, 50)[1])
