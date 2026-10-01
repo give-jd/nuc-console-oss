@@ -52,6 +52,23 @@ class Model(unittest.TestCase):
         self.assertIn(("warn", "public on the Internet (Tailscale Funnel)"), p["findings"])
         self.assertTrue(any(k == "tailscale funnel" and "5678" in v for k, v in p["facts"]))
 
+    def test_ports_say_the_reach_declared_for_them_and_flag_the_excess(self):
+        cont, net, boot, base = demo.snapshot(now=1_790_000_000)
+        expose = {"shop-db": "LOCALE", "shop-web": "LAN", "n8n": "TAILNET"}
+        plain = graph.build(cont, net, boot, WEBAPPS, now=1_790_000_000, baseline=base)
+        G = graph.build(cont, net, boot, WEBAPPS, now=1_790_000_000, baseline=base, expose=expose)
+        self.assertFalse([n for n in plain["nodes"].values() if any(k == "declared reach" for k, _ in n["facts"])])  # no [expose]: nothing said
+        db, web, hook = (G["nodes"][i] for i in ("port:5432/tcp@lan", "port:8080/tcp@lan", "port:8444/tcp@internet"))
+        self.assertIn(("declared reach", "local (config.ini [expose])"), db["facts"])
+        self.assertIn(("err", "declared local in config.ini, reachable from the LAN and the tailnet"), db["findings"])
+        self.assertIn(("declared reach", "LAN (config.ini [expose])"), web["facts"])
+        self.assertFalse([1 for lv, t in web["findings"] if "declared" in t])                                          # within its reach: a fact only
+        self.assertEqual(web["state"], plain["nodes"]["port:8080/tcp@lan"]["state"])
+        self.assertIn(("declared reach", "tailnet (config.ini [expose])"), hook["facts"])                             # n8n: the unit behind the Funnel
+        self.assertIn(("err", "declared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)"), hook["findings"])
+        self.assertEqual((plain["nodes"]["port:8444/tcp@internet"]["state"], hook["state"]), ("warn", "err"))
+        self.assertFalse([k for k, _ in G["nodes"]["port:22/tcp@lan"]["facts"] if k == "declared reach"])           # nothing declared for sshd
+
     def test_evidence_is_merged_per_pair_and_the_strongest_wins(self):
         G = demo_graph()
         e = edge(G, "ct:shop-api-1", "ct:shop-db-1")

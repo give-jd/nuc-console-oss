@@ -377,10 +377,10 @@ def row_owners(R, net, cont, rows):
     return out
 
 
-def _ports(G, R, net, cont, baseline, peers):
+def _ports(G, R, net, cont, baseline, peers, expose=None, webapps=None):
     if net is None or net.get("listeners") is None:
         return
-    rows = R.exposure_rows(net, cont)
+    rows = R.expose_apply(R.exposure_rows(net, cont), net, cont, expose or {}, webapps or {})  # [expose]: r["want"] where a key matches
     new = R.new_ports(net, cont, baseline) if isinstance(baseline, dict) else {}
     serve = _serve(net)
     for r, (owners, _) in zip(rows, row_owners(R, net, cont, rows)):
@@ -398,6 +398,11 @@ def _ports(G, R, net, cont, baseline, peers):
         _fact(n, "tailnet", CELL_TEXT.get(r["ts"], "?"))
         _fact(n, "Internet", {0: "no", 1: "PUBLIC (Funnel)", 3: "unknown"}.get(r["net"], "?"))
         _fact(n, "firewall", r["note"])
+        if r.get("want"):
+            _fact(n, "declared reach", f"{R.EXPOSE_LABEL[r['want']]} (config.ini [expose])")
+            if R.expose_over(r):
+                _find(n, "err", f"declared {R.EXPOSE_LABEL[r['want']]} in config.ini, reachable from {REACH_TEXT[group]}")
+                _worse(n, "err")
         if r["warn"]:
             _find(n, "err", "database/broker open on the LAN")
         if r["net"] == 1:
@@ -658,7 +663,7 @@ def _notes(G, R, net, links, cont):
         G["notes"].append("container collector not running")
 
 
-def build(cont, net, boot=None, webapps=None, now=None, baseline=None):
+def build(cont, net, boot=None, webapps=None, now=None, baseline=None, expose=None):
     """The graph of one snapshot. Never raises on missing or partial data: what is missing goes to G["notes"]."""
     R = _render()
     G = {"nodes": {}, "edges": [], "out": {}, "inc": {}, "notes": [], "roots": [], "_pair": {}, "_kids": {}, "_bad": {},
@@ -671,7 +676,7 @@ def build(cont, net, boot=None, webapps=None, now=None, baseline=None):
              for ip in p.get("ips") or []}
     _containers(G, cont, net, links)
     _hosts(G, R, net)
-    _ports(G, R, net, cont, baseline, peers)
+    _ports(G, R, net, cont, baseline, peers, expose, webapps)
     _conns(G, links, peers)
     _declared(G, links)
     _dbs(G, net, peers)

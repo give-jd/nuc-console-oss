@@ -2451,7 +2451,7 @@ def map_graph(smp=None):
     sm = smp.sample() if smp else {"thermal": {}}
     if DEMO:
         demo_defaults()
-    G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"])
+    G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
     return G, safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
@@ -2662,7 +2662,7 @@ def map_screen(G, pb, mv, w, h):
 
 def map_slide(cont, net, boot, baseline, w, body_h):
     """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
-    G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline)
+    G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline, expose=CFG["expose"])
     return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
 
 

@@ -481,7 +481,7 @@ class Once(MapCase):
             txt = "\n".join(pane)
             self.assertIn("entry port", txt, cols)
             self.assertIn(":5432/tcp", txt, cols)
-            if rows >= 33:
+            if rows >= 50:                                                             # (the demo's [expose] adds two lines to this pane)
                 self.assertIn("postgres:16", txt, cols)                                # what is behind it: the database's image
             self.assertIn(":5432/tcp", chosen(s)[0], cols)
             self.assertNotIn("DETAILS", "\n".join(self.screen(["--select", "shop-db-1"], cols, rows)[1]))
@@ -753,6 +753,17 @@ class MainLoop(MapCase):
         self.assertTrue(self.error_frame(frames[1]))
         self.assertIn("PROBLEMS", frames[0][0])                                        # the rotation, just before: ✖ 5 PROBLEMS
         self.assertNotIn("ALL OK", frames[1][0])                                       # nothing could be read: never a reassuring status
+
+    def test_the_demo_map_carries_the_declared_reach(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            render.once(["render.py", "--once", "--demo", "--view", "map", "--cols", "160", "--rows", "30"])
+        text = out.getvalue()
+        self.assertIn("declared local in config.ini, reachable from the LAN and the tailnet", text)
+        self.assertIn("declared tailnet in config.ini, reachable from the Internet", text)
+        cont, net, boot, base = demo.snapshot(now=NOW)
+        render.CFG["expose"] = {"shop-db": "LOCALE"}                                   # the rotation's map page builds with [expose] as well
+        self.assertIn("declared local in config.ini", "\n".join(render.ANSI.sub("", x) for x in render.map_slide(cont, net, boot, base, 160, 30)))
 
     def test_the_command_line_refuses_the_map_when_the_feature_is_off(self):
         render.CFG["features"]["map"] = False
