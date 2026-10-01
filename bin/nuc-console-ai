@@ -1,0 +1,9 @@
+#!/bin/sh
+# A small local AI model for the HEALTH advisor: installed once, served on 127.0.0.1 only (see docs/HEALTH.md).
+#   nuc-console-ai setup [--model ID] [--yes]    download the runtime and a model (pinned, SHA-256 verified), once; offers to write [ai] in config.ini
+#   nuc-console-ai serve [--port 8080]            run the server in the foreground (sudo ... --install-service: as a service; --remove-service)
+#   nuc-console-ai status                         what is installed, whether the configured endpoint answers
+#   nuc-console-ai remove [--model ID]            delete the downloaded files
+# Run setup and --install-service with sudo for a system-wide install (/var/lib/nuc-console/ai); without it the files go to your home.
+# env -u: NUC_CONSOLE_* variables must not be able to redirect a write done by root (e.g. with sudo -E): use --dir and --config
+exec env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG /usr/bin/python3 /opt/nuc-console/aisetup.py "$@"
