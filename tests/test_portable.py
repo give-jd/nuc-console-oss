@@ -1566,12 +1566,21 @@ class PortableAdvice(unittest.TestCase):
                    if re.search(r"systemctl (restart|status) nuc-console|journalctl -u nuc-console|system/com\.nuc-console|\\nuc-console\\", a)}
             self.assertEqual(bad, {})
 
-    @unittest.skipIf(WINDOWS, "the Linux words")
     def test_installed_is_as_before(self):
         accept, restart, logs, catalog, problems = self.advice("")
-        self.assertEqual((accept, problems), ("sudo nuc-console-accept", "nuc-console-problems"))
-        self.assertEqual(catalog["stale-net"], "sudo systemctl restart nuc-console-collector")
-        self.assertEqual(catalog["collector-containers"], "sudo systemctl status nuc-console-collector; journalctl -u nuc-console-collector")
+        # the installed collector is a service, named in the words of each OS: a scheduled task, a LaunchDaemon, a systemd unit
+        if WINDOWS:
+            words = ("nuc-console-accept", "Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName collector (administrator PowerShell)",
+                     "Get-ScheduledTask -TaskPath \\nuc-console\\ ; log: %ProgramData%\\nuc-console\\logs\\collector.log")
+        elif sys.platform == "darwin":
+            words = ("sudo nuc-console-accept", "sudo launchctl kickstart -k system/com.nuc-console.collector",
+                     "sudo launchctl print system/com.nuc-console.collector; log: /var/log/nuc-console/collector.log")
+        else:
+            words = ("sudo nuc-console-accept", "sudo systemctl restart nuc-console-collector",
+                     "sudo systemctl status nuc-console-collector; journalctl -u nuc-console-collector")
+        self.assertEqual((accept, problems), (words[0], "nuc-console-problems"))
+        self.assertEqual((restart, catalog["stale-net"]), (words[1], words[1]))
+        self.assertEqual(catalog["collector-containers"], words[2])
         self.assertTrue([a for a in catalog.values() if "nuc-console-accept" in a])
 
     def test_the_screen_and_the_message_name_the_portable_command(self):
@@ -1595,7 +1604,9 @@ class CollectorPortable(unittest.TestCase):
             r = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "src", "collector.py"), "--once"], capture_output=True, text=True,
                                env=env, timeout=170)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(sorted(json.loads(r.stdout)), ["boot", "containers", "net"])
+            # and "sensors" on macOS and Windows: the CPU temperature only the collector can read there (Linux: render.py reads sysfs)
+            sensors = ["sensors"] if sys.platform in ("darwin", "win32") else []
+            self.assertEqual(sorted(json.loads(r.stdout)), ["boot", "containers", "net"] + sensors)
 
     def test_portable_paths(self):
         code = ("import nuc_config as n, os; print(n.PORTABLE, n.ETC_DIR, n.RUN_DIR, n.LIB_DIR, n.DEFAULT_PATH, sep='|')")
