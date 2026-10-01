@@ -38,7 +38,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels (thermal: Linux only) | — (reads `/proc`, `/sys`; macOS/Windows: system calls) |
 | `cpu` | the **CPU** screen: per-core load and frequency, temperatures, top processes, like htop (console key `c`, web `cpu` link) | `/proc`, `/sys` (Linux); system calls and `ps` (macOS); Windows API. Temperatures on macOS/Windows: the collector (`powermetrics`; WMI, LibreHardwareMonitor/OpenHardwareMonitor if installed) |
 | `health` | the **HEALTH** screen: which apps, services and containers cause trouble over time (CPU, memory, crashes, restarts, OOM), disks filling up, hot hours (console key `h`, web `health` link) | the collector keeps `history.db` (SQLite): per-app CPU/memory per hour, events and log *templates* from `journalctl` (Linux), the Event Log (Windows), crash reports (macOS) |
-| `ai` | the **AI** screen: this machine's RAM and GPU, and for each model of its list whether it fits (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big) and how fast it would be (console key `a`, web `ai` link; it is not a rotating page). It only reads the hardware and downloads or starts nothing, and shows with `[ai] enabled = no` too; `no`: no screen, no key, no link, the hardware is never probed. The advisor itself is `[ai]` below | — (unprivileged: `/proc`, `/sys`, the registry, Windows API; `nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler` with fixed arguments and a time limit of 5 s at most) |
+| `ai` | the **AI** screen: this machine's RAM and GPU, and for each model of its list whether it fits (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big) and how fast it would be (console key `a`, web `ai` link; it is not a rotating page). It reads the hardware, and it is where you set a model up (choose one: it is downloaded, started and turned on; AI on/off; delete) unless `[ai] web_actions = no`; it shows with `[ai] enabled = no` too; `no`: no screen, no key, no link, the hardware is never probed. The advisor itself is `[ai]` below | — (unprivileged: `/proc`, `/sys`, the registry, Windows API; `nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler` with fixed arguments and a time limit of 5 s at most) |
 | `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console keys `m`/`Tab`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
@@ -61,7 +61,7 @@ Sections fill the columns in the given order and never back-fill, so a line more
 
 ## `[display]` — the dashboard on macOS and Windows
 
-macOS and Windows have no text console to take over. The installers start the read-only web view on **127.0.0.1 only**
+macOS and Windows have no text console to take over. The installers start the web view (read-only; only the AI page has buttons) on **127.0.0.1 only**
 (not reachable from the network) and show it the way you choose. Linux ignores this section (it uses the console).
 
 | Key | Default | Meaning |
@@ -85,11 +85,11 @@ admin-console = 9443
 
 `name = port[, port…]`. Listed apps appear in **WEB APPS** as active (with how far they are reachable: local, tailnet, LAN, Internet) or as **DOWN (expected)** when nothing listens. The ports are an *intended exposure*: they stop counting as "Docker port bypassing ufw" (database ports are never masked). Other web listeners found on the machine are listed as "not declared".
 
-## `[web]` — read-only web view (off by default)
+## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | The only network listener of the dashboard (the optional AI model server listens on 127.0.0.1 only, [AI.md](AI.md)) (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`; a portable run always runs it on 127.0.0.1 and ignores this section's `enabled`, `bind`, `port` and `token_file`). Details and threat model: [WEB.md](WEB.md) |
+| `enabled` | `no` | The only network listener of the dashboard (the optional AI model server listens on 127.0.0.1 only, [AI.md](AI.md)); every page is read-only except the buttons of the AI page, which `[ai] web_actions = no` locks (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`; a portable run always runs it on 127.0.0.1 and ignores this section's `enabled`, `bind`, `port` and `token_file`). Details and threat model: [WEB.md](WEB.md) |
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
@@ -103,12 +103,13 @@ What it is, how to choose a model for your hardware, the commands and the securi
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | Use a local model to turn the HEALTH findings into advice and to answer questions. It only reads and suggests: it never runs anything. The AI screen (`[features] ai`) shows with `no` as well: it is where you choose. `nuc-console-ai setup` never switches it on for you |
+| `enabled` | `no` | Use a local model to turn the HEALTH findings into advice and to answer questions. It only reads and suggests: it never runs anything. The AI screen (`[features] ai`) shows with `no` as well: it is where you choose. `nuc-console-ai setup` never switches it on for you. **`yes` always wins**: the AI page and screen cannot switch it off (they say "on by config.ini"); with `no` they can turn it on, and what they chose is kept in `web.json` in the AI folder ([AI.md](AI.md#from-the-browser-and-the-console)) |
 | `endpoint` | `http://127.0.0.1:11434/v1` | Any OpenAI-compatible server: Ollama (this default), llama.cpp server, LM Studio, llamafile (`nuc-console-ai setup` installs one, and offers to write `http://127.0.0.1:8080/v1`, or the `--port` you gave) |
 | `model` | empty | The model name the server knows. What `nuc-console-ai setup` (the first model named) or `use` writes is a catalog id, e.g. `qwen3-8b`, which is the name its server answers to; for Ollama e.g. `qwen3:8b`. Also the model `serve` starts when none is named. Empty: the server's first model is used |
 | `gpu` | `auto` | `auto`: `nuc-console-ai serve` puts the model on the GPU (all of it, or some layers) when the hardware advice says it fits there; `no`: the server it starts never uses the GPU (and the hardware is not even read for it). Only for the server that `nuc-console-ai` starts: Ollama and the others decide for themselves. An installed service keeps what it was installed with: after changing `gpu` (or `model`, with `use`) run `sudo nuc-console-ai serve --install-service` again |
 | `allow_remote` | `no` | An endpoint that is not on this machine is refused unless `yes`: it would receive this machine's history |
 | `timeout_s` | `120` | Seconds a generation may take (10–600) |
+| `web_actions` | `yes` | `yes`: the AI page of the web view and the AI screen of the console may act: set a model up (download it, start its server), turn the advisor on and off, delete the downloaded files, ask questions, as the unprivileged account that runs them. The same access as viewing the page: loopback, or the token; everyone who can open the page can press the buttons. What they choose goes in `web.json` in the AI folder, never in `config.ini`. `no`: the lock for an admin who wants the web view strictly read-only: the page and the screen only show ("locked by config.ini"), every post is refused with 403 and `web.json` counts for nothing. [WEB.md](WEB.md#the-ai-pages-buttons) |
 | `daily` | `no` | `yes`: the collector asks for one digest of the last 7 days a day, at low priority, shown on the HEALTH screen ([AI.md](AI.md#the-daily-digest)) |
 
 ## Commands

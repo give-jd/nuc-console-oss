@@ -11,6 +11,7 @@ python3 src/render.py --once --demo --cols 200 --rows 50
 python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
 python3 src/render.py --once --demo --view ai --cols 200 --rows 50           # the AI screen: three invented machines (--demo-os windows|darwin for the others)
 python3 src/render.py --once --demo --view ai --select qwen3-8b --details    # the details of one model: why, licence, the commands
+python3 src/web.py --demo --port 8796                                        # the web view with the AI page's buttons, simulated: nothing is downloaded or started
 shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
 ```
 
@@ -28,6 +29,11 @@ shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{acce
   (`/proc`, `/sys`) go through two injectable functions, so each OS has fixtures in the tests; fixed argument lists, a short time limit, never a
   shell, and whatever cannot be read goes to the notes instead of being guessed. The thresholds of the five verdicts and the memory
   bandwidths behind the speed estimates are named constants at the top of that file; change one together with the tables in `docs/AI.md`.
+- What the AI page and the AI screen do (choose a model, AI on / off, delete, chat) is one engine, `src/aiweb.py`, used by both: the jobs (download, start, delete)
+  and the chat answer run in daemon threads and the screens only read `snapshot()`; nothing there may block a page or a key. Put new behaviour in the engine and its tests
+  (`tests/test_ai_web_actions.py`: a fake download server, fake runtimes that are shell scripts, a fake OpenAI server; no sleeps, no network, nothing real is downloaded),
+  never in `web.py` or `render.py`, which only turn a request or a key into a call and the snapshot into markup or text. The POST rules (CSRF token,
+  Origin/Referer, 4 KB, ids from the catalog, no JavaScript, the CSP) are in `docs/WEB.md`; a new button follows them and gets a test in `WebSecurity`. `--demo` simulates every action.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view has none except `src/graphjs.py` (the MAP's graph view). Keep it that way; `tests/test_graphjs.py` lists
@@ -104,7 +110,8 @@ python3 src/render.py --once --demo --color --cols 120 --rows 40 | python3 tools
 python3 src/render.py --once --demo --color --view map --expand fit --select shop-api --details --cols 200 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · MAP: who reaches what, and what is behind it (demo data)" > docs/img/map.svg
 # the CPU screen (docs/img/cpu.png) the same way: http://127.0.0.1:8799/?view=cpu&sel=<a pid>&pause=1, window 1760x940
 # the HEALTH page (docs/img/health.png): http://127.0.0.1:8799/?view=health&sel=mem-leak%3Anode&pause=1, window 1760x840
-# the AI page: http://127.0.0.1:8799/?view=ai&sel=qwen3-8b&pause=1 (the demo web view shows the invented machines)
+# the AI page (docs/img/ai.png): the demo web view shows the invented machines and simulates the buttons:
+#   python3 src/web.py --demo --port 8796 & PID=$!   # then window 1760x900: http://127.0.0.1:8796/?view=ai&pause=1 ; kill $PID
 # the graph view is a browser page: run the demo web view and take a screenshot with any Chromium-based browser
 python3 src/web.py --demo --port 8799 &   # then:
 chromium --headless --hide-scrollbars --window-size=1600,1000 --screenshot=docs/img/graph.png "http://127.0.0.1:8799/?view=map&as=graph&sel=<key of shop-api-1>"
