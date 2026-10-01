@@ -73,6 +73,59 @@ VM: their own connections are out of reach, the map says that too and shows the 
 State propagates along `seen` and `declared` edges: a database that is down turns what depends on it yellow, all the way
 up to the entry the LAN uses to reach it.
 
+### Tree or graph
+
+On the console the MAP is only a tree, for the reason above. In a browser the same graph can also be drawn as circles and
+lines (the **tree | graph** switch): it shows at a glance the hubs and the islands that a tree spreads over many rows, and
+the *local graph* of one node (what is one or two links away) answers "what touches this?" without scrolling. The tree
+stays the default because it is the one that reads the same everywhere and states every path in words.
+
+- The positions are computed by the server (`src/graphlayout.py`, a force-directed layout): deterministic, each node starting
+  from a hash of its id, so the same graph is always drawn the same way and a refresh does not move what did not change.
+- The page is complete without a script: every circle is a link to its details, zoom is a link. One small inline script
+  (`src/graphjs.py`) adds dragging, panning, wheel zoom and a light physics; it is pinned by its SHA-256 in that page's CSP,
+  cannot open connections, and is the only script of the web view (docs/WEB.md).
+- Edges keep the tree's evidence styles: seen solid, declared dashed, same network dotted; zone → port and port → owner
+  links are thin and grey (structure, not traffic).
+
+## CPU
+
+The overview keeps one line of bars per core; the **CPU** screen (key `c`, web `cpu`) is the htop-like view for when
+something is busy: what the processor is, what each core does, how hot it is, and which processes cost what.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Model, cores, threads, caches | `/proc/cpuinfo`, sysfs topology and caches | `sysctl` (no subprocess) | registry, `GetLogicalProcessorInformationEx` |
+| P/E cores | `/sys/devices/cpu_core` and `cpu_atom` (Intel), capacity classes (ARM) | `hw.perflevel0/1` (counts) | `EfficiencyClass` |
+| Per-core load | `/proc/stat` (user, system, iowait, irq, steal) | `host_processor_info` | `NtQuerySystemInformation` |
+| Frequency | cpufreq per core, governor, driver | Intel: one value; Apple Silicon: per cluster from `powermetrics` (collector) | per core (`CallNtPowerInformation` / PDH) |
+| Temperature | hwmon: coretemp per core, k10temp, zenpower, ARM SoC, thermal zones | collector: `powermetrics`, `smctemp`, `osx-cpu-temp` | collector: LibreHardwareMonitor, OpenHardwareMonitor, ACPI |
+| Processes | `/proc/<pid>` | `ps` (fixed argv) | Toolhelp, `GetProcessTimes`, working set |
+
+The rules are the dashboard's: what cannot be read is `?`, never a guess or a zero; one source failing leaves the others
+on screen with a note; processes are sampled only while the screen is shown (it costs a little CPU), and only their names
+are read. Temperatures on macOS and Windows need root/SYSTEM, so the collector writes them to `sensors.json` every 10 s
+(30 s on Windows, where each reading starts PowerShell) and the screen merges them.
+
+## Health
+
+The HEALTH screen answers questions about time ("what keeps crashing?", "when will this disk be full?"), which a snapshot
+cannot. Decisions:
+
+- **A history, in SQLite**: the data is numbers and events, and the questions are aggregations (top apps of the week, a
+  trend), which is what SQL is for; `sqlite3` is in the standard library on every OS, the embeddable Windows Python
+  included. One writer (the collector, WAL mode), readers open it read-only. No vector database: there is no free text to
+  search, log lines become templates and are counted.
+- **Rules before any model**: every finding is a small function with named thresholds (`src/health.py`) and the numbers it
+  used, so it can be checked and tested; a rule that needs days says "collecting" until it has them. An optional local
+  model can only rephrase these findings (docs/HEALTH.md), never replace them.
+- **Cheap and bounded**: the collector samples once a minute, writes every five, reads only what is new since its last
+  look (journal cursor, event-log record id, crash-report mtime), keeps the top 200 apps an hour, prunes daily.
+- **Nothing that can hold a secret**: process names, not command lines; templates, not log lines; counts, not the IP
+  addresses or user names of failed logins.
+
+Full description, what is collected per OS and every rule: [docs/HEALTH.md](HEALTH.md).
+
 ## macOS and Windows
 
 There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every

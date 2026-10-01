@@ -113,7 +113,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT 
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want.
+Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` user; remove them by hand if you want.
 
 ## Troubleshooting (Linux)
 
@@ -183,7 +183,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place.
+`/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console` and the `_nuc-console` user are left in place.
 
 ## What is different from Linux
 
@@ -192,7 +192,8 @@ sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launch
 | Firewall | the **Application Firewall** works per program: a port is *open* when its program is allowed (Apple's own programs are, by default), *blocked* when it is blocked, `?` when macOS would ask or decide on the signature. With the firewall off every listener is open to the LAN. `pf` rules of your own are not interpreted (`?`) |
 | Docker | Docker Desktop / OrbStack: published ports belong to the Docker backend program, judged like any other; "who connects" inside the containers is not visible (they live in a VM) |
 | Boot | failed launch daemons and the third-party ones; no boot time, slowest units or system log |
-| Not available | thermal sensors and throttling, fail2ban, ufw/iptables |
+| CPU temperature | read by the collector (root) with Apple's `powermetrics`: the CPU die temperature on Intel Macs, the thermal pressure level (Nominal…) and the per-cluster frequencies on Apple Silicon. Apple Silicon has no temperature without a helper: install [smctemp](https://github.com/narugit/smctemp) or osx-cpu-temp and the collector uses it (run as the user who owns it, never as root) |
+| Not available | throttling counters, load-based CPU frequency on Apple Silicon, fail2ban, ufw/iptables |
 
 ## Troubleshooting (macOS)
 
@@ -254,7 +255,7 @@ Python is downloaded only the first time: a re-install reuses it.
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place.
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state and the HEALTH history `lib\history.db`) is left in place.
 
 ## What is different from Linux
 
@@ -264,7 +265,8 @@ the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-c
 | Docker | Docker Desktop: published ports belong to `com.docker.backend`, judged like any other program; "who connects" inside the containers is not visible (they live in a VM) |
 | Boot | boot time (Diagnostics-Performance log), automatic services stopped with an error, System event log since boot |
 | Sessions | console and Remote Desktop users; ssh and RDP clients |
-| Not available | load average, thermal sensors and throttling, slowest units, fail2ban, ufw/iptables |
+| CPU temperature | Windows has no standard sensor API: the collector (SYSTEM) reads [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) or OpenHardwareMonitor when one of them is running (per-core temperatures), else the ACPI thermal zones (one value, often missing). Without them the CPU screen shows `?` |
+| Not available | load average, throttling counters, slowest units, fail2ban, ufw/iptables |
 
 ## Troubleshooting (Windows)
 

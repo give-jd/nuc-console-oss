@@ -13,9 +13,13 @@ The macOS Application Firewall works per program, not per port:
 pf (the packet filter) is off by default; when it is on with rules of its own those rules are not interpreted, so a verdict
 that would say "reachable" becomes 'unknown'.
 """
+import glob
+import json
 import os
 import plistlib
 import re
+import stat
+import time
 
 APPLE_DIRS = ("/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/")
 ESSENTIAL = {"mDNSResponder", "configd", "racoon", "launchd"}  # allowed even with "block all incoming"
@@ -147,6 +151,7 @@ def fw_summary(alf, pf):
 
 # ---- sections (run = collector.run) ------------------------------------------------------------------------------------
 
+
 def _ok(rc, err, what, allowed=(0,)):
     if rc not in allowed:
         raise RuntimeError(err or f"{what} failed")
@@ -245,3 +250,189 @@ def daemons(run, plist_dir="/Library/LaunchDaemons"):
         enabled.append({"unit": label, "state": state})
     failed = sorted(lbl for lbl, (pid, st) in jobs.items() if not pid and failed_status(st) and not lbl.startswith("com.apple."))
     return enabled, failed
+
+
+# ---- history: crash, hang and memory-pressure reports since the last look -----------------------------------------------------
+# macOS writes one report file per crash (.ips since Monterey, .crash before), hang (.hang) and Jetsam kill (JetsamEvent-*.ips)
+# into DiagnosticReports. Only the head of each file is read (the JSON header line of an .ips, the "Process:" line of the old
+# format): a name and a number, never the body (stacks, paths, user data). The directories of the users belong to the users: a
+# file that is not a plain file (a link) is never opened.
+
+DIAG_DIRS = ("/Library/Logs/DiagnosticReports", "/Users/*/Library/Logs/DiagnosticReports")
+DIAG_SUFFIXES = (".ips", ".crash", ".hang")
+DIAG_HEAD = 4096        # bytes read from a report
+DIAG_CAP = 200          # files per pass; the rest comes next pass
+DIAG_FIRST_S = 30 * 86400
+CRASH_TYPES, HANG_TYPES = {"309"}, {"298", "211"}
+PROCESS_LINE = re.compile(r"^Process:\s+(.+?)\s+\[\d+\]\s*$")
+
+
+def parse_report_head(head, filename):
+    """The first bytes of a report + its file name -> (kind, subject, detail), or None for what is not a crash, hang or
+    memory-pressure report. JetsamEvent -> oom ('memory pressure'); .hang, bug_type 298/211 -> hang; .crash, bug_type 309 ->
+    crash. Anything else (stackshots, panics...) is not an app trouble report."""
+    import history
+    text = head.decode("utf-8", "replace") if isinstance(head, (bytes, bytearray)) else str(head)
+    lines = text.splitlines()
+    base = os.path.basename(filename)
+    name, bug, jetsam = "", "", base.startswith("JetsamEvent")
+    first = lines[0].strip() if lines else ""
+    if first.startswith("{"):
+        try:
+            h = json.loads(first)
+        except ValueError:
+            h = None
+        if isinstance(h, dict):
+            name = history.clean(h.get("app_name") or h.get("name"))
+            bug = str(h.get("bug_type") or "")
+            jetsam = jetsam or "JetsamEvent" in (str(h.get("name")), str(h.get("app_name")))
+    if jetsam:
+        return "oom", "memory pressure", "Jetsam report"
+    if not name:  # the old format: a "Process:  name [pid]" line near the top
+        name = next((history.clean(m.group(1)) for m in (PROCESS_LINE.match(ln) for ln in lines[:40]) if m), "")
+    if not name:
+        return None
+    if base.endswith(".hang") or bug in HANG_TYPES:
+        return "hang", name, "hang report"
+    if base.endswith(".crash") or bug in CRASH_TYPES:
+        return "crash", name, "crash report" + (" (bug_type %s)" % history.clean(bug, 8) if bug else "")
+    return None
+
+
+def diag_events(since, cap=DIAG_CAP, dirs=DIAG_DIRS, now=None):
+    """Reports newer than `since` (an mtime) -> (events, newest mtime read). Oldest first, at most `cap` files: the returned
+    cursor is the mtime of the last file read, so a larger backlog is read over the next passes. events are
+    history.merge_events() rows (source 'diag')."""
+    import history
+    now = int(now if now is not None else time.time())
+    found = []
+    for pattern in dirs:
+        for d in glob.glob(pattern):
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            for fn in names:
+                if not fn.endswith(DIAG_SUFFIXES):
+                    continue
+                path = os.path.join(d, fn)
+                try:
+                    st = os.lstat(path)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode) and st.st_mtime > since:
+                    found.append((st.st_mtime, path, fn))
+    found.sort()
+    events, newest = [], since
+    for mtime, path, fn in found[:cap]:
+        newest = max(newest, mtime)
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            fd = os.open(path, flags)
+            try:
+                head = os.read(fd, DIAG_HEAD)
+            finally:
+                os.close(fd)
+        except OSError:
+            continue
+        got = parse_report_head(head, fn)
+        if got:
+            events.append({"ts": int(mtime), "kind": got[0], "subject": got[1], "detail": got[2], "source": "diag", "n": 1})
+    return history.merge_events(events), newest
+
+
+def new_failed_daemons(prev, failed, now):
+    """Third-party launch daemons that exited with an error since the last look (prev: the previous list, None the first
+    time: only a baseline) -> service_failed events."""
+    if prev is None:
+        return []
+    import history
+    return [{"ts": int(now), "kind": "service_failed", "subject": history.clean(lbl), "detail": "launchd job exited with an error",
+             "source": "launchd", "n": 1} for lbl in sorted(set(failed) - set(prev))]
+
+# ---- CPU sensors (sensors.json) ----------------------------------------------------------------------------------------
+
+PM_DIE = re.compile(r"^CPU die temperature:\s*(-?\d+(?:\.\d+)?)\s*C\b")
+PM_PRESSURE = re.compile(r"^Current pressure level:\s*([A-Za-z]+)")
+PM_CLUSTER = re.compile(r"^([A-Za-z0-9]+-Cluster) HW active (frequency|residency):\s*(\d+(?:\.\d+)?)\s*(?:MHz|%)")
+PM_CPU = re.compile(r"^CPU (\d+) frequency:\s*(\d+(?:\.\d+)?)\s*MHz")
+PRESSURES = ("Nominal", "Moderate", "Heavy", "Trapping", "Sleeping")
+# Optional third-party tools for the CPU temperature where powermetrics has none (Apple Silicon). collector.run runs them
+# as the user who owns them, never as root, like docker and tailscale: they read the SMC without privileges.
+TEMP_TOOLS = {"smctemp": ("-c",), "osx-cpu-temp": ()}
+TOOL_TEMP = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:[^\w\s]?\s*C)?\s*$")  # 52.3 | 52.3°C (° maybe mis-decoded)
+
+
+def pm_samplers(machine):
+    """The powermetrics sampler lists to try, best first (an unknown sampler makes it fail; smc exists on Intel only).
+
+    Intel: smc (CPU die temperature) + thermal (pressure). Apple Silicon: thermal + cpu_power (cluster frequency and
+    residency). 'x86_64' may also be an Intel Python under Rosetta on Apple Silicon: the Apple Silicon list comes next."""
+    if machine.lower().startswith(("arm", "aarch")):
+        return (("thermal", "cpu_power"), ("cpu_power",), ("thermal",))
+    return (("smc", "thermal"), ("thermal", "cpu_power"), ("thermal",))
+
+
+def parse_powermetrics(text):
+    """powermetrics text -> {'die': C | None, 'pressure': str | None, 'clusters': [{'name', 'mhz', 'active', 'cpus'}]}.
+
+    Intel (smc): 'CPU die temperature: 45.69 C'. Every Mac (thermal): 'Current pressure level: Nominal'. Apple Silicon
+    (cpu_power): 'E-Cluster HW active frequency: 1020 MHz' and '... HW active residency:  12.34% (...)' per cluster (P0-,
+    P1-Cluster on Max/Ultra), each followed by 'CPU 4 frequency: 2064 MHz' for its CPUs ('cpus': {cpu id: MHz}).
+    Apple's text, English on every system; what does not match stays None or missing, never a guess."""
+    die = pressure = cur = None
+    clusters = []
+    for ln in (text or "").splitlines():
+        ln = ln.strip()
+        m = PM_DIE.match(ln)
+        if m:
+            die = float(m.group(1)) if die is None else die
+            continue
+        m = PM_PRESSURE.match(ln)
+        if m:
+            word = m.group(1).capitalize()
+            pressure = pressure or (word if word in PRESSURES else m.group(1)[:20])
+            continue
+        m = PM_CLUSTER.match(ln)
+        if m:
+            cur = next((c for c in clusters if c["name"] == m.group(1)), None)
+            if cur is None:
+                cur = {"name": m.group(1), "mhz": None, "active": None, "cpus": {}}
+                clusters.append(cur)
+            cur["mhz" if m.group(2) == "frequency" else "active"] = float(m.group(3))
+            continue
+        m = PM_CPU.match(ln)
+        if m and cur is not None:
+            cur["cpus"][int(m.group(1))] = float(m.group(2))
+    return {"die": die, "pressure": pressure, "clusters": clusters}
+
+
+def powermetrics(run, machine):
+    """One ~1 s sample of Apple's /usr/bin/powermetrics (root) -> parse_powermetrics(). When a sampler list is refused
+    (unknown sampler on this Mac) the next, smaller one is tried; a timeout or 'not root' ends the attempts."""
+    err = ""
+    for samplers in pm_samplers(machine):
+        rc, out, err = run("powermetrics", "-n", "1", "-i", "1000", "--samplers", ",".join(samplers), timeout=10)
+        if rc == 0:
+            return parse_powermetrics(out)
+        if rc is None or "superuser" in err.lower():
+            break
+    raise RuntimeError(err or "powermetrics failed")
+
+
+def parse_tool_temp(text):
+    """`smctemp -c` ('52.3') or `osx-cpu-temp` ('52.3°C') -> 52.3; None if that is not what it printed (°F, text)."""
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    m = TOOL_TEMP.match(lines[0]) if len(lines) == 1 else None
+    return float(m.group(1)) if m else None
+
+
+def temp_tool(run, name):
+    """The CPU temperature one optional tool prints (TEMP_TOOLS); collector.run raises Absent if it is not installed."""
+    rc, out, err = run(name, *TEMP_TOOLS[name], timeout=10)
+    if rc != 0:
+        raise RuntimeError(err or f"{name} failed (rc={rc})")
+    c = parse_tool_temp(out)
+    if c is None:
+        raise ValueError("unreadable output: " + repr(out.strip()[:40]))
+    return c

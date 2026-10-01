@@ -65,6 +65,22 @@ foreach ($s in $svc) { if ($s.s -eq 'Stopped' -and $s.e -ne 0 -and $s.e -ne 1077
 @{ boot = ([DateTimeOffset]$boot).ToUnixTimeSeconds(); services = $svc; events = $ev; perf = $perf; deps = $dep } | ConvertTo-Json -Depth 4 -Compress
 """
 
+# CPU temperatures (sensors.json). Windows has no API for them: LibreHardwareMonitor / OpenHardwareMonitor publish their
+# sensors in WMI while they run; else the ACPI thermal zones. A namespace that does not exist = not installed ('absent');
+# errors carry their WMI code (not localised) next to the message. Every source is read; sensor_sources() picks.
+PS_SENSORS = PS_PRELUDE + r"""
+$ns = @(Get-CimInstance -Namespace root -ClassName __NAMESPACE -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Name })
+$out = @{}
+foreach ($src in 'LibreHardwareMonitor', 'OpenHardwareMonitor') {
+  if ($ns -notcontains $src) { $out[$src] = @{ absent = $true }; continue }
+  try { $out[$src] = @{ sensors = @(Get-CimInstance -Namespace "root/$src" -ClassName Sensor -Filter "SensorType='Temperature'" | ForEach-Object { @{ n = [string]$_.Name; id = [string]$_.Identifier; p = [string]$_.Parent; v = $_.Value } }) } }
+  catch { $out[$src] = @{ error = [string]$_.Exception.Message; code = [string]$_.Exception.NativeErrorCode; id = [string]$_.FullyQualifiedErrorId } }
+}
+try { $out['ACPI'] = @{ zones = @(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object { @{ n = [string]$_.InstanceName; t = $_.CurrentTemperature } }) } }
+catch { $out['ACPI'] = @{ error = [string]$_.Exception.Message; code = [string]$_.Exception.NativeErrorCode; id = [string]$_.FullyQualifiedErrorId } }
+$out | ConvertTo-Json -Depth 5 -Compress
+"""
+
 
 def powershell(run, script, timeout=60):
     """Runs a fixed script (never user input) and returns its JSON. -EncodedCommand: no quoting, no execution policy."""
@@ -77,6 +93,7 @@ def powershell(run, script, timeout=60):
 
 
 # ---- Windows Firewall evaluation (pure, tested with fixtures) -----------------------------------------------------------
+
 
 def expand(path, env):
     """'%SystemRoot%\\system32\\svchost.exe' -> 'c:\\windows\\system32\\svchost.exe' (lower case, backslashes)."""
@@ -226,6 +243,7 @@ def fw_summary(fw):
 
 # ---- sections ----------------------------------------------------------------------------------------------------------
 
+
 def proc_name(path, pid, svc_by_pid):
     """'C:\\...\\svchost.exe' + the service it hosts -> 'svchost/Dnscache'; 'C:\\...\\sshd.exe' -> 'sshd'."""
     if pid == 4:
@@ -318,3 +336,216 @@ def boot_sections(data):
     deps = {n: ([v] if isinstance(v, str) else [str(x) for x in v or []])[:20] for n, v in raw.items() if n in failed}
     return {"btime": int(data.get("boot") or time.time()), "analyze": analyze, "failed": failed, "deps": deps, "enabled": enabled,
             "journal": journal_from_events(data.get("events"))}
+
+
+# ---- history: warnings and errors of the System and Application logs since the last look -------------------------------------
+# The script is fixed text; the only variable parts are two integers (the last RecordId seen in each log), formatted with %d.
+# Per event it reads Id, ProviderName, LogName, RecordId, TimeCreated, Level and, for the few ids whose first insertion string
+# is a name (application, service), that one string. The message text (localised, may hold user names and paths) is never
+# read. The first look (no cursor) takes the last hour; a cursor above the newest record (the log was cleared) starts again.
+
+HISTORY_FIRST_S = 3600
+HISTORY_MAX_EVENTS = 2000
+PS_EVENTS_BODY = r"""
+$known = 1000, 1002, 7000, 7001, 7009, 7023, 7024, 7031, 7034
+$res = @{}
+$errs = @{}
+foreach ($log in 'System', 'Application') {
+  $last = [int64]$cur[$log]
+  $max = [int64]0
+  $rows = @()
+  try {
+    try { $max = [int64](Get-WinEvent -LogName $log -MaxEvents 1 -ErrorAction Stop).RecordId } catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }
+    if ($last -gt $max) { $last = [int64]0 }
+    if ($last -gt 0) { $xp = "*[System[(Level=1 or Level=2 or Level=3) and EventRecordID > $last and EventRecordID <= $max]]" }
+    else { $xp = "*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= $($first * 1000)]]]" }
+    if ($max -gt $last) {
+      $ev = @()
+      try { $ev = @(Get-WinEvent -LogName $log -FilterXPath $xp -MaxEvents %(max)d -ErrorAction Stop) } catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }
+      foreach ($e in $ev) {
+        $a0 = $null
+        if ($known -contains [int]$e.Id) { $p = $e.Properties; if ($p -and $p.Count -gt 0) { $a0 = [string]$p[0].Value } }
+        $t = [int64]0
+        if ($e.TimeCreated) { $t = ([DateTimeOffset]$e.TimeCreated).ToUnixTimeSeconds() }
+        $rows += @{ Id = [int]$e.Id; ProviderName = [string]$e.ProviderName; LogName = [string]$e.LogName; RecordId = [int64]$e.RecordId; TimeCreated = $t; Level = [int]$e.Level; Arg0 = $a0 }
+      }
+    }
+  } catch { $errs[$log] = [string]$_.FullyQualifiedErrorId }
+  $res[$log] = @{ max = $max; events = @($rows) }
+}
+@{ logs = $res; errors = $errs } | ConvertTo-Json -Depth 6 -Compress
+""" % {"max": HISTORY_MAX_EVENTS}
+
+
+def events_script(cursors=None, first_s=HISTORY_FIRST_S):
+    """The PowerShell script for powershell(): cursors = {'System': last RecordId, 'Application': last RecordId} (0 or missing:
+    the first look). Only integers are put into the text."""
+    cur = cursors or {}
+    return PS_PRELUDE + "$cur = @{ System = %d; Application = %d }\n$first = %d\n" % (
+        max(0, int(cur.get("System") or 0)), max(0, int(cur.get("Application") or 0)), int(first_s)) + PS_EVENTS_BODY
+
+
+# What each event means. ProviderName is the registered source name: it is not translated, unlike the message.
+SERVICE_CRASH = {7031, 7034}                         # Service Control Manager: a service terminated unexpectedly
+SERVICE_FAILED = {7000, 7001, 7009, 7023, 7024}      # ... failed to start / a dependency failed / timeout / error
+LEVEL_ERR = (1, 2)                                   # Critical, Error: also kept as a log template
+
+
+def _name(v, fallback="(unknown)"):
+    import history
+    return history.clean(v) or fallback
+
+
+def classify_event(e):
+    """One event dict (as the script returns it) -> (kind, subject, detail) or None. Details are fixed words or
+    '<provider> <id>': never message text."""
+    import history
+    try:
+        eid, prov = int(e.get("Id")), history.clean(e.get("ProviderName"))
+    except (TypeError, ValueError):
+        return None
+    arg = e.get("Arg0")
+    if eid == 1000 and prov == "Application Error":
+        return "crash", _name(arg), "Application Error 1000"
+    if eid == 1002 and prov == "Application Hang":
+        return "hang", _name(arg), "Application Hang 1002"
+    if prov == "Service Control Manager":
+        if eid in SERVICE_CRASH:
+            return "crash", _name(arg), "Service Control Manager %d" % eid
+        if eid in SERVICE_FAILED:
+            return "service_failed", _name(arg), "Service Control Manager %d" % eid
+    if eid == 41 and prov.endswith("Kernel-Power"):
+        return "unexpected_shutdown", "system", "Kernel-Power 41"
+    if "WHEA-Logger" in prov:
+        return "hw_error", "WHEA", "%s %d" % (prov[:48], eid)
+    if eid == 2004 and prov.endswith("Resource-Exhaustion-Detector"):
+        return "oom", "low virtual memory", "Resource-Exhaustion-Detector 2004"
+    return None
+
+
+def parse_events(data, now=None):
+    """The script's JSON -> {'events': [...], 'logs': [...], 'cursors': {log: newest RecordId}, 'errors': {log: id}}.
+    events are history.merge_events() rows (source 'eventlog'); logs are the Level 1-2 events as '<provider> <id>' templates.
+    A log that failed has no cursor: it is read again next time."""
+    import history
+    now = int(now if now is not None else time.time())
+    events, logs, cursors, errors = [], [], {}, {}
+    data = data if isinstance(data, dict) else {}
+    errs = data.get("errors") if isinstance(data.get("errors"), dict) else {}
+    for log, entry in (data.get("logs") if isinstance(data.get("logs"), dict) else {}).items():
+        if log in errs or not isinstance(entry, dict):
+            errors[str(log)[:32]] = history.clean(errs.get(log) or "unreadable", 80)
+            continue
+        try:
+            cursors[log] = int(entry.get("max") or 0)
+        except (TypeError, ValueError):
+            continue
+        rows = entry.get("events")
+        for e in [rows] if isinstance(rows, dict) else rows or []:
+            if not isinstance(e, dict):
+                continue
+            try:
+                ts = int(e.get("TimeCreated") or now)
+                eid, level = int(e.get("Id")), int(e.get("Level") or 0)
+            except (TypeError, ValueError):
+                continue
+            c = classify_event(e)
+            if c:
+                events.append({"ts": ts, "kind": c[0], "subject": c[1], "detail": c[2], "source": "eventlog", "n": 1})
+            prov = history.clean(e.get("ProviderName"))
+            if level in LEVEL_ERR and prov:
+                logs.append({"ts": ts, "source": "eventlog", "unit": prov, "template": "%s %d" % (prov, eid)})
+    for log, why in errs.items():
+        errors.setdefault(str(log)[:32], history.clean(why, 80))
+    return {"events": history.merge_events(events), "logs": logs, "cursors": cursors, "errors": errors}
+
+# ---- CPU sensors (sensors.json; pure, tested with fixtures) -------------------------------------------------------------
+
+HWMON = ("LibreHardwareMonitor", "OpenHardwareMonitor")  # best first; then ACPI
+# WMI answers that mean "this machine / this tool does not provide it": NativeErrorCode names and their HRESULTs
+# (invalid namespace, invalid class, not supported, not found)
+WMI_ABSENT = ("invalidnamespace", "invalidclass", "notsupported", "notfound", "0x8004100e", "0x80041010", "0x8004100c", "0x80041002")
+CORE_SENSOR = re.compile(r"^(?:CPU )?Core #(\d+)$", re.I)
+
+
+def wmi_status(entry, key):
+    """One source of PS_SENSORS -> (None | 'absent' | short error, its rows)."""
+    if not isinstance(entry, dict):
+        return "unreadable answer", []
+    if entry.get("absent"):
+        return "absent", []
+    if any(k in entry for k in ("error", "code", "id")):
+        code = "{} {}".format(entry.get("code") or "", entry.get("id") or "").strip()
+        if any(k in code.lower() for k in WMI_ABSENT):
+            return "absent", []
+        return (str(entry.get("error") or "").strip() or code or "WMI error")[:120], []
+    rows = entry.get(key)
+    rows = [rows] if isinstance(rows, dict) else rows  # one object instead of a list of one: be lenient
+    if not isinstance(rows, list):
+        return "unreadable answer", []
+    return None, [r for r in rows if isinstance(r, dict)]
+
+
+def hwmon_readings(rows):
+    """LibreHardwareMonitor / OpenHardwareMonitor temperature sensors -> the CPU's [{'label', 'c', 'role', 'core'}].
+
+    The CPU's own sensors hang under '/intelcpu/N' or '/amdcpu/N': 'CPU Core #3' -> core 3 (numbered from 1, as named),
+    'CPU Package' (Intel), else 'Core (Tctl/Tdie)' (AMD) -> package; 'Core Max', 'Core Average', 'CCD1 (Tdie)' are listed
+    only. A motherboard sensor named 'CPU' ('/lpc/...') is listed as 'CPU (board)', never the package. 'Distance to TjMax' is a margin, not
+    a temperature: skipped. With several CPUs the cores and the package are the first one's; the others' are listed."""
+    found = []
+    for r in rows:
+        name, ident = str(r.get("n") or "").strip(), str(r.get("id") or "")
+        parent = str(r.get("p") or "") or ident.rsplit("/", 2)[0]
+        if not name or "distance" in name.lower():
+            continue
+        on_cpu = "cpu" in (parent + " " + ident).lower()
+        if on_cpu or re.search(r"\bcpu\b", name, re.I):
+            found.append((parent if on_cpu else None, name, r.get("v")))
+    cpus = sorted({p for p, _, _ in found if p})
+    out, package = [], None
+    for parent, name, value in sorted(found, key=lambda x: (x[0] is None, cpus.index(x[0]) if x[0] else 0, x[1].lower())):
+        label = f"{name} (board)" if parent is None else name if len(cpus) < 2 or parent == cpus[0] else f"{name} (CPU {cpus.index(parent) + 1})"
+        x = {"label": label, "c": value, "role": None}
+        if parent and parent == cpus[0]:
+            m = CORE_SENSOR.match(name)
+            if m:
+                x.update(role="core", core=int(m.group(1)))
+            rank = 0 if "package" in name.lower() else 1 if "tctl" in name.lower() else None
+            if rank is not None and (package is None or rank < package[0]):
+                package = (rank, x)
+        out.append(x)
+    if package:
+        package[1]["role"] = "package"
+    return sorted(out, key=lambda x: ({"package": 0, "core": 1}.get(x["role"], 2), x.get("core") or 0))
+
+
+def acpi_readings(zones):
+    """MSAcpi_ThermalZoneTemperature (tenths of kelvin) -> [{'label': 'ACPI <zone>', 'c', 'role'}]. A thermal zone is a
+    place on the board, not a core: it is the package only when it is the only zone (with several, which one is the CPU
+    is not known)."""
+    out = []
+    for z in zones:
+        t = z.get("t")
+        c = t / 10.0 - 273.15 if isinstance(t, (int, float)) and not isinstance(t, bool) else None
+        out.append({"label": "ACPI " + (str(z.get("n") or "").split("\\")[-1] or "zone"), "c": c, "role": None})
+    if len(out) == 1:
+        out[0]["role"] = "package"
+    return out
+
+
+def sensor_sources(data):
+    """PS_SENSORS JSON -> [(source, status, readings)], best first: LibreHardwareMonitor, OpenHardwareMonitor, ACPI.
+
+    status None = read (readings to validate), 'absent' = not installed or not provided by this machine, else a short
+    error. A hardware monitor that is installed but shows no CPU temperature is an error (said, not hidden)."""
+    if not isinstance(data, dict):
+        raise ValueError("unreadable answer from PowerShell")
+    out = []
+    for src in HWMON:
+        status, rows = wmi_status(data.get(src), "sensors")
+        readings = hwmon_readings(rows) if status is None else []
+        out.append((src, "no CPU temperature sensor" if status is None and not readings else status, readings))
+    status, zones = wmi_status(data.get("ACPI"), "zones")
+    out.append(("ACPI", "absent" if status is None and not zones else status, acpi_readings(zones)))
+    return out

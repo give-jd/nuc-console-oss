@@ -30,9 +30,11 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
-| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link) |
+| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
-| 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
+| 🧮 **CPU, like htop** | a screen of its own (console `c`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
+| 🌡️ **Health now** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
+| 🩺 **HEALTH over time** | a small local history (SQLite) and a screen of its own (console `h`, web **health** link): over the last day, week or month, which apps use the CPU and memory, which crash, hang or get killed, which services and containers keep restarting, hot hours, disks filling up ("full in 12 days"), noisy or new log messages, each with how to fix it. Rules over numbers, no AI; names and counts only, never command lines or log lines as they are ([docs/HEALTH.md](docs/HEALTH.md)) |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
@@ -50,6 +52,24 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
 <img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+</details>
+
+<details>
+<summary><b>The CPU screen, like htop</b> (per-core load, frequency and temperature; processes; details of one)</summary>
+<br>
+<img src="docs/img/cpu.png" alt="nuc-console CPU screen in a browser: model and caches, per-core bars with frequency and temperature and P/E tags, package temperature and throttling, the process list sorted by CPU with the details of one process, demo data" width="100%">
+</details>
+
+<details>
+<summary><b>HEALTH over time</b> (what keeps going wrong in the last day, week or month, with a fix for each)</summary>
+<br>
+<img src="docs/img/health.png" alt="nuc-console HEALTH page in a browser: findings with level pills (out of memory, restart loop, disk filling up, memory growing, CPU hog, running hot, failed logins, noisy and new log messages, slower boot), the details and fix of one finding, top CPU and memory apps per day, events by kind, noisy log templates, disks with days to full, hot hours and boot times, demo data" width="100%">
+</details>
+
+<details>
+<summary><b>The MAP as a graph</b> (browser: circles and lines, drag and zoom)</summary>
+<br>
+<img src="docs/img/graph.png" alt="nuc-console MAP graph view in a browser: zones, ports, containers and databases as coloured circles linked by solid, dashed and dotted lines, one container selected with its details, demo data" width="100%">
 </details>
 
 ## Why
@@ -106,6 +126,7 @@ Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **
 containers = yes      databases = yes     exposure = yes      firewall = yes
 fail2ban   = yes      tailscale = yes     boot     = yes      docker_disk = yes
 network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
+cpu      = yes      health   = yes
 webapps  = yes      map      = yes
 
 [dashboard]
@@ -120,6 +141,8 @@ spacing = 1           # a blank line under each section title (0 = compact)
 details = yes         # pages with everything the overview cuts ("… +N more"), rotating on the monitor
 overview_seconds = 45
 map_in_rotation = no  # yes: the MAP joins the rotating pages too (a monitor with no keyboard)
+cpu_in_rotation = no  # yes: the CPU screen joins them too
+health_in_rotation = no  # and the HEALTH screen
 
 [webapps]             # apps you EXPECT to be reachable: shown as active or DOWN; not a Docker-bypass problem
 ethibid = 8180, 8543
@@ -167,7 +190,7 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 ## Web view (optional)
 
-Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, no JavaScript, binds to loopback unless you give it a token.
+Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, binds to loopback unless you give it a token; no JavaScript except the small, hash-pinned script that lets you drag and zoom the MAP's graph view.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
 
 ## Security
@@ -178,9 +201,10 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 ## Limitations
 
 - Linux: the exposure logic knows `ufw`, `iptables`/`ts-input` and Docker; **nftables-native** or firewalld rulesets are not interpreted (shown as unknown `?`).
-- macOS/Windows: no thermal sensors, fail2ban or "who connects" inside containers (Docker Desktop runs them in a VM); Windows Firewall rules from Group Policy, port keywords (RPC…) and macOS `pf` rules show as unknown `?`. Details: [docs/INSTALL.md](docs/INSTALL.md#macos).
+- macOS/Windows: the CPU temperature is best effort (macOS: `powermetrics` on Intel Macs; on Apple Silicon only with `smctemp` or `osx-cpu-temp` installed. Windows: LibreHardwareMonitor or OpenHardwareMonitor if running, else the ACPI thermal zones, often absent) and `?` when there is none; no throttling counters, fail2ban or "who connects" inside containers (Docker Desktop runs them in a VM); Windows Firewall rules from Group Policy, port keywords (RPC…) and macOS `pf` rules show as unknown `?`. Details: [docs/INSTALL.md](docs/INSTALL.md#macos).
 - Non-systemd Linux (OpenRC, runit…) and the BSDs are not supported.
 - Docker-published ports are assumed TCP; `tailscaled` ephemeral ports (≥32768 except 41641) are ignored; one NVMe sensor is read.
+- HEALTH needs a day of history before it draws trends (memory growth, disk forecast); crashes and OOM kills show from the first one. On macOS it reads crash reports, not the unified log.
 - Connections shorter than the 30 s sampling window are not seen by the database "who connects" view nor by the MAP (which remembers what it saw for 24 h).
 - MAP on macOS/Windows: the containers' own connections are inside Docker Desktop's VM, so container-to-container links are *declared* or *same network* only.
 

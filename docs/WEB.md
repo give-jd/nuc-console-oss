@@ -1,7 +1,7 @@
 # Read-only web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no JavaScript,
-no forms, no API, GET only.** Configuration is *not* editable from the web on purpose (see below).
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no forms, no API,
+GET only, no JavaScript** — except one small script on the graph view of the MAP, pinned by its hash (see below). Configuration is *not* editable from the web on purpose (see below).
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -64,11 +64,28 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out; every section and item is shown and the page scrolls. With `rows=` it fills the height instead (one screen, like the console) |
 | `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
 | `/?view=map` | the **MAP** (the **map** link in the bottom bar): every row is a link. ▸/▾ opens or closes a branch, a name shows its details pane. The whole state is in the URL, so a view can be bookmarked: `open=`/`shut=` the branches opened/closed by hand (row keys), `all=1` everything open, `sel=` the row whose details are shown, `only=1` problems only, `pause=1` no reload while you read. Off with `[features] map = no` |
+| `/?view=map&as=graph` | the MAP as a **graph**: circles and lines, like Obsidian's graph view (the **tree \| graph** switch on the MAP page). Zones, ports, processes, containers and remote addresses are circles coloured by state and sized by how connected they are; seen links are solid, declared dashed, same-network dotted. A click on a circle selects it (details pane, its neighbours highlighted); `local=1` / `local=2` show only it and what is 1 or 2 links away, `only=1` the paths to a problem, `ext=0` hides remote addresses, `stacks=1` adds the compose projects, `z=50`…`300` zooms without a script. With the script: drag a circle (it stays where you put it, double-click to release it), drag the background to pan, mouse wheel or pinch to zoom, `+` `-` `0` and arrows on the keyboard; the view survives the page's refresh. At most 400 circles are drawn ("+N more" says what is left out) |
+| `/?view=cpu` | the **CPU** screen (the **cpu** link in the bottom bar): processor, per-core load, frequency and temperature, processes. `sort=mem` / `time` / `pid` / `user` (CPU% by default), `sel=<pid>` the details of one process (each row is a link). Process names only, never command lines. Off with `[features] cpu = no` |
+| `/?view=health` | the **HEALTH** page (the **health** link in the bottom bar): the findings over the history kept by the collector, top CPU and memory apps per day, events, noisy and new log templates, disks, hot hours, boots. `period=1` / `7` / `30` (days, 7 by default), `sel=<finding id>` the details and fix of one finding (each finding is a link), `pause=1` no reload. Names and counts only ([HEALTH.md](HEALTH.md)). Off with `[features] health = no` |
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 
 Everything else is 404; any method but GET is 405. Security headers: strict CSP (`default-src 'none'`), `no-store`, `nosniff`,
 `frame-ancestors 'none'`, `no-referrer`. No access log (URLs may carry a token).
+
+## The one script (graph view)
+
+Every page is plain HTML except the MAP's graph view, which carries one small inline script (`src/graphjs.py`, ~16 KB, no
+library) for dragging, zooming and panning. It is the only exception, and it is boxed in:
+
+- its SHA-256 is in that page's CSP (`script-src 'sha256-…'`): no other script, inline or loaded, can run, and every other
+  page keeps a CSP without `script-src`;
+- it only moves what the server drew: it never builds HTML from data, and `default-src 'none'` (no `connect-src`) means it
+  cannot open any connection or load anything; it keeps the view (zoom, pan, circles placed by hand) in `sessionStorage`;
+- the page works without it: every circle is a link, zoom has links, and the page then refreshes by `<meta refresh>`
+  (inside `<noscript>`; with the script, the script reloads the page itself, never while you are dragging);
+- `tests/test_graphjs.py` rejects any change that adds markup building, `eval`, timers with strings, network or storage
+  APIs, globals, or anything outside the page's own elements.
 
 ## Why there is no configuration editor
 
@@ -79,6 +96,7 @@ or a privileged helper — a large jump in risk for a file you change a few time
 
 The page shows your topology (ports, container names, client IPs seen on databases, and on the map which service talks to which), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
 With a token, anyone holding the token can. It cannot change anything on the machine. Rendering is cached for half the refresh interval per layout size.
+The graph view's script runs in your browser and cannot send anything anywhere (the CSP forbids connections).
 
 ## macOS and Windows
 
