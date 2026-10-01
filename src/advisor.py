@@ -10,9 +10,12 @@ Design rules (SECURITY.md has the threat model):
   instructions; the model's text is stripped of escapes/control characters and capped before anyone sees it;
 - the model never sees SQL and never produces any: it picks one of six tools by name, the arguments are validated against
   whitelists and ranges, and the queries are constants with bound parameters on a read-only connection;
-- one generation at a time, at most one waiting, a minimum gap between two (the web view is network-facing).
+- one generation at a time, at most one waiting, a minimum gap between two (the web view is network-facing);
+- the screens never contact the model: they show the answer cached for exactly their report (per user) or, failing that, the
+  latest "shared advice": one small file in the collector's state directory that root/Administrator writes (the daily digest of
+  [ai] daily = yes, or `advise` run as root) and everyone reads; it is checked like any text from outside (see "the shared advice").
 
-Command line (python advisor.py ...; bin/nuc-console-ask):  advise [--days N] | ask QUESTION... | status.
+Command line (python advisor.py ...; bin/nuc-console-ask):  advise [--days N] [--store] | ask QUESTION... | status.
 Exit codes: 0 ok, 1 the model/server failed, 2 usage, 3 off or refused by config, 4 no history yet, 5 busy / rate limited.
 """
 import contextlib
@@ -22,10 +25,13 @@ import http.client
 import ipaddress
 import json
 import math
+import ntpath
 import os
+import posixpath
 import re
 import socket
 import sqlite3
+import stat
 import sys
 import tempfile
 import textwrap
@@ -406,6 +412,8 @@ def _dump(p):
 def compact_report(report):
     """-> (compact JSON string within the token budget, set of the finding ids of the whole report)."""
     r = report if isinstance(report, dict) else {}
+    if not isinstance(r.get("findings") or [], list):  # the screens call this with whatever the history gave them
+        r = dict(r, findings=[])
     ids = {clean_line(f.get("id"), 120) for f in (r.get("findings") or []) if isinstance(f, dict) and f.get("id")}
     budget, lim, cut = TOKEN_BUDGET * CHARS_PER_TOKEN, dict(_LIMITS), False
     text = _dump(_payload(r, lim))
@@ -534,11 +542,241 @@ def _cache_put(key, result):
             pass  # no writable cache dir (the unprivileged service user may have no home): memory only
 
 
+# ------------------------------------------------------------------------------------------------------ the shared advice
+# The screens run unprivileged and cannot read root's cache, and the report they compute a minute later never matches a cache
+# key: so the advice they show comes from ONE small file in the collector's state directory (next to history.db), readable by
+# everybody and written only by root/Administrator: by the collector's daily digest or by `advise` run as root. It holds the
+# latest advice per period of the HEALTH screen (1, 7, 30 days). The reader trusts nothing in it (size, owner, types, text).
+
+STORE_FILE = "advice.json"
+STORE_PERIODS = (1, 7, 30)         # the periods of the HEALTH screen: one entry each
+STORE_MAX_BYTES = 256 * 1024       # a bigger file is not ours: three entries are about 50 KB at their largest
+SHARED_MAX_AGE = 36 * 3600         # older advice describes a machine that has moved on: not shown (the digest runs every 24 h)
+SKEW = 300                         # an entry from the future by more than this is not ours either
+MAX_IDS, MAX_CITES = 200, 30       # finding ids kept per entry (every cited one is among them)
+_STORE_LOCK = threading.Lock()
+
+
+def store_path(plat=None, env=None):
+    """The shared advice file: next to history.db (Linux/macOS /var/lib/nuc-console, Windows %ProgramData%\\nuc-console\\lib), or in
+    $NUC_CONSOLE_HOME when that is set (portable use, tests). plat/env: another OS or environment, for the tests; the paths
+    below mirror nuc_config's."""
+    env = os.environ if env is None else env
+    win = nuc_config.WINDOWS if plat is None else plat == "win32"
+    p = ntpath if win else posixpath
+    if env.get("NUC_CONSOLE_HOME"):
+        return p.join(env["NUC_CONSOLE_HOME"], STORE_FILE)
+    if plat is None:
+        return os.path.join(nuc_config.LIB_DIR, STORE_FILE)
+    if win:
+        return ntpath.join(env.get("ProgramData") or r"C:\ProgramData", "nuc-console", "lib", STORE_FILE)
+    return posixpath.join("/var/lib/nuc-console", STORE_FILE)
+
+
+def _is_int(v, lo=None):
+    return isinstance(v, int) and not isinstance(v, bool) and (lo is None or v >= lo)
+
+
+def _no(_s):
+    raise ValueError("a number of that kind is not part of the advice file")
+
+
+def _small_int(s):
+    if len(s) > 18:  # Python 3.8 has no limit: 250 000 digits would cost seconds
+        _no(s)
+    return int(s)
+
+
+def _owner_ok(st, euid=None):
+    """POSIX: the file belongs to root or to the user who reads it, and nobody else may write it. Windows: the ACL of the
+    folder (SYSTEM and Administrators only) is what keeps others out, there is no owner to check here."""
+    if not hasattr(os, "geteuid"):
+        return True
+    euid = os.geteuid() if euid is None else euid
+    return st.st_uid in (0, euid) and not st.st_mode & 0o022
+
+
+def _read_json(path, cap):
+    """The JSON object of a regular file of at most `cap` bytes with a trusted owner, else None. Floats, NaN and huge integers
+    are refused while parsing; a deeply nested file is an error, not a crash."""
+    try:
+        st = os.stat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap or not _owner_ok(st):  # not a FIFO: opening it would block
+            return None
+        with open(path, "rb") as f:
+            raw = f.read(cap + 1)
+        if len(raw) > cap:
+            return None
+        return json.loads(raw.decode("utf-8"), parse_int=_small_int, parse_float=_no, parse_constant=_no)
+    except (OSError, ValueError, RecursionError):  # UnicodeDecodeError is a ValueError
+        return None
+
+
+def _ids(v, cap):
+    """A list of finding ids -> clean ids (at most `cap`, no duplicates); None when it is not a list of strings."""
+    if not isinstance(v, list):
+        return None
+    out = []
+    for x in v[:cap]:
+        if not isinstance(x, str):
+            return None
+        c = clean_line(x, 120)
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def _valid_shared(e, period):
+    """One entry of the file -> the clean entry, or None. Everything is checked and cleaned again here: the file is written by
+    root, but the text in it came from a model and the reader is a terminal and a browser."""
+    if not (isinstance(e, dict) and isinstance(e.get("text"), str) and isinstance(e.get("model"), str)
+            and _is_int(e.get("at"), 1) and _is_int(e.get("report_at"), 0) and _is_int(e.get("period")) and e["period"] == period):
+        return None
+    ids, cites, text = _ids(e.get("findings_ids"), MAX_IDS + MAX_CITES), _ids(e.get("cites"), MAX_CITES), clean_text(e["text"])
+    if ids is None or cites is None or not text:
+        return None
+    return {"text": text, "model": clean_line(e["model"], 80), "at": e["at"], "cites": [c for c in cites if c in ids], "period": period,
+            "report_at": e["report_at"], "findings_ids": ids}
+
+
+def read_store(path=None):
+    """The shared advice file -> {"periods": {7: entry, ...}, "daily": {"at", "ok"} or None}. Empty when the file is missing or is
+    not what this module writes; an invalid entry is dropped alone. Never raises."""
+    out = {"periods": {}, "daily": None}
+    data = _read_json(path or store_path(), STORE_MAX_BYTES)
+    if not isinstance(data, dict) or not _is_int(data.get("v")) or data["v"] != 1:
+        return out
+    periods = data.get("periods")
+    for key, e in (periods.items() if isinstance(periods, dict) else ()):
+        if key in ("1", "7", "30"):
+            good = _valid_shared(e, int(key))
+            if good:
+                out["periods"][int(key)] = good
+    d = data.get("daily")  # the collector's own memory of its last digest: a restart must not run another one
+    if isinstance(d, dict) and _is_int(d.get("at"), 1) and (d.get("ok") is None or isinstance(d.get("ok"), bool)):
+        out["daily"] = {"at": d["at"], "ok": d.get("ok")}
+    return out
+
+
+def _store_write(data, path):
+    """tmp file + os.replace: a reader sees the old file or the new one, never half of one. Mode 0644: the readers are other users."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, mode=0o755, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".advice-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        os.chmod(tmp, 0o644)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:  # Windows: a reader has the file open this very moment; it closes it in milliseconds
+                if not nuc_config.WINDOWS or attempt == 19:
+                    raise
+                time.sleep(0.05)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _store_update(change, path=None):
+    """Read, change(contents), write: the other entries and the daily mark stay. Raises OSError when the file cannot be written."""
+    path = path or store_path()
+    with _STORE_LOCK:
+        cur = read_store(path)
+        if change(cur) is False:
+            return False
+        out = {"v": 1, "periods": {str(k): v for k, v in sorted(cur["periods"].items())}}
+        if cur["daily"]:
+            out["daily"] = cur["daily"]
+        _store_write(out, path)
+        return True
+
+
+def _finding_ids(report):
+    """The ids of the findings of a report, in its order (most important first), clean, without duplicates."""
+    fl = report.get("findings") if isinstance(report, dict) else None
+    out = []
+    for f in fl if isinstance(fl, list) else ():
+        i = clean_line(f.get("id"), 120) if isinstance(f, dict) and f.get("id") else ""
+        if i and i not in out:
+            out.append(i)
+    return out
+
+
+def is_admin():
+    """root (Windows: an administrator, SYSTEM): the ones who may write the collector's state directory."""
+    if nuc_config.WINDOWS:
+        try:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except (AttributeError, OSError, ImportError):
+            return False
+    return os.geteuid() == 0
+
+
+def store_writable():
+    """May this process write the shared advice? root/Administrator in the state directory, or anyone under $NUC_CONSOLE_HOME."""
+    return bool(os.environ.get("NUC_CONSOLE_HOME")) or is_admin()
+
+
+def save_shared(result, report, days, path=None):
+    """Keeps advise()'s `result` on `report` (the last `days` days: 1, 7 or 30) as the latest advice of that period. True when
+    stored, False when the file already holds a newer one (a cached answer must not replace a fresh one). Raises OSError."""
+    if days not in STORE_PERIODS:
+        raise ValueError("the shared advice keeps the periods %s" % (STORE_PERIODS,))
+    cites = [c for c in result.get("cites") or [] if isinstance(c, str)][:MAX_CITES]
+    ids = _finding_ids(report)[:MAX_IDS]
+    to = (report.get("period") or {}).get("to") if isinstance(report, dict) and isinstance(report.get("period"), dict) else None
+    at = int(result["at"])
+    entry = _valid_shared({"text": result["text"], "model": result["model"], "at": at, "cites": cites, "period": days,
+                           "report_at": max(0, int(to)) if isinstance(to, (int, float)) and math.isfinite(to) else at,
+                           "findings_ids": ids + [c for c in cites if c not in ids]}, days)
+    if entry is None:
+        return False
+
+    def put(cur):
+        old = cur["periods"].get(days)
+        if old and old["at"] > entry["at"]:
+            return False
+        cur["periods"][days] = entry
+    return _store_update(put, path)
+
+
+def mark_daily(at, ok, path=None):
+    """The collector's note of its last digest (when it began, how it ended: None while running). Raises OSError."""
+    def put(cur):
+        cur["daily"] = {"at": int(at), "ok": ok}
+    return _store_update(put, path)
+
+
+def shared_advice(report, now=None, path=None):
+    """The latest shared advice for the period of `report`, as advise() would answer, plus "shared": True, "period" and
+    "stale_s" (seconds since it was generated); None when there is none, it is older than SHARED_MAX_AGE or from the future.
+    Its cites are only the findings that still exist in `report`. Reads a file, never contacts the model, never raises."""
+    period = report.get("period") if isinstance(report, dict) else None
+    days = period.get("days") if isinstance(period, dict) else None
+    if not _is_int(days) or days not in STORE_PERIODS:
+        return None
+    e = read_store(path)["periods"].get(days)
+    if e is None:
+        return None
+    age = (time.time() if now is None else now) - e["at"]
+    if age > SHARED_MAX_AGE or age < -SKEW:
+        return None
+    ids = set(_finding_ids(report))  # a finding that is gone is not linked: the advice may mention it, nothing leads to it
+    return {"text": e["text"], "model": e["model"], "at": e["at"], "cites": [c for c in e["cites"] if c in ids], "shared": True,
+            "period": days, "stale_s": max(0, int(age))}
+
+
 # --------------------------------------------------------------------------------------------------------------- advise
 
-def advise(report, cfg, cached_only=False):
+def advise(report, cfg, cached_only=False, fresh=False):
     """-> {"text", "model", "at", "cites"}: advice on a health.report() dict. Raises AdvisorError (Busy, Disabled, ...).
-    The same report and model give the cached answer at once. cached_only=True never contacts the model: None when not cached."""
+    The same report and model give the cached answer at once (fresh=True: always a new one, for the daily digest).
+    cached_only=True never contacts the model: None when not cached."""
     ok, why = available(cfg)
     if not ok:
         if cached_only:
@@ -547,11 +785,11 @@ def advise(report, cfg, cached_only=False):
     ai = cfg["ai"]
     compact, ids = compact_report(report)
     key = _cache_key(compact, ai.get("model"))
-    hit = _cache_get(key, ids)
+    hit = None if fresh else _cache_get(key, ids)
     if hit or cached_only:
         return hit
     with _generation():
-        hit = _cache_get(key, ids)  # filled by another thread while we waited
+        hit = None if fresh else _cache_get(key, ids)  # filled by another thread while we waited
         if hit:
             return hit
         timeout = _timeout(cfg)
@@ -568,9 +806,15 @@ def advise(report, cfg, cached_only=False):
 
 
 def try_advise(report, cfg, cached_only=False):
-    """advise() for screens: never raises. -> the result, None (cached_only and nothing cached), or {"error", "busy"}."""
+    """advise() for screens: never raises. -> the result, None (cached_only and nothing to show), or {"error", "busy"}.
+    cached_only (what a screen asks, every redraw): the answer cached for exactly this report, else the latest shared advice for
+    its period (shared_advice(): "shared", "period", "stale_s"; at most 36 h old; only the cites that still exist). Both are
+    read from files: the model is never contacted."""
     try:
-        return advise(report, cfg, cached_only)
+        res = advise(report, cfg, cached_only)
+        if res is None and cached_only and ((cfg or {}).get("ai") or {}).get("enabled"):
+            res = shared_advice(report)
+        return res
     except AdvisorError as e:
         return {"error": str(e), "busy": isinstance(e, Busy)}
 
@@ -958,9 +1202,23 @@ def _ask_loop(q, conn, info, model, timeout, now):
 NO_QUERY = "no query on the history was made: this answer is not based on the data of this machine"
 
 
+def ago(seconds):
+    """'just now', '12 min ago', '5 h ago', '3 days ago'."""
+    s = max(0, int(seconds))
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        return "%d min ago" % (s // 60)
+    if s < 48 * 3600:
+        return "%d h ago" % (s // 3600)
+    return "%d days ago" % (s // 86400)
+
+
 def _head(result):
     kind = "ANSWER" if "tools_used" in result else "ADVICE"
-    return "%s (AI, %s) — check before acting" % (kind, clean_line(result.get("model") or "?", 60))
+    age = result.get("stale_s")  # shared advice (try_advise): written earlier, by the collector's digest or by an admin
+    when = ", generated " + ago(age) if _is_int(age, 0) else ""
+    return "%s (AI, %s%s) — check before acting" % (kind, clean_line(result.get("model") or "?", 60), when)
 
 
 def lines(result, w=80):
@@ -1006,15 +1264,20 @@ def html(result):
         foot += '<p class="advice-tools">queries: %s</p>' % esc(", ".join(clean_line(t, 30) for t in result["tools_used"]))
     if "tools_used" in result and not result["tools_used"]:
         foot += '<p class="advice-tools">%s</p>' % esc(NO_QUERY)
-    return '<div class="advice"><p class="advice-head">%s</p>%s%s</div>' % (esc(_head(result)), body, foot)
+    return '<div class="advice%s"><p class="advice-head">%s</p>%s%s</div>' % (
+        " advice-shared" if _is_int(result.get("stale_s"), 0) else "", esc(_head(result)), body, foot)
 
 
 # ------------------------------------------------------------------------------------------------------------------ CLI
 
 USAGE = """usage: advisor.py advise [--days N]     advice on the last N days (default 7) of this machine's health
+       advisor.py advise --store [--period N]
+                                         the same, always a new one, kept for the screens to show (N: 1, 7 or 30; root or
+                                         Administrator: this is what the daily digest of [ai] daily = yes runs, at low priority)
        advisor.py ask QUESTION...        answer a question from the history (read-only queries)
        advisor.py status                 is the model server reachable? which models? which one is configured?
-A local model suggests; it never runs anything. Needs [ai] enabled = yes in config.ini.
+A local model suggests; it never runs anything. Needs [ai] enabled = yes in config.ini. `advise` run as root also keeps its
+answer (for 1, 7 or 30 days) where the screens, which cannot read root's cache, find it.
 exit codes: 0 ok, 1 server/model failure, 2 usage, 3 [ai] off or endpoint refused, 4 no history yet, 5 busy / rate limited"""
 
 
@@ -1055,6 +1318,44 @@ def _width():
         return 99
 
 
+def _advise_args(rest):
+    """`--days N`, `--period N` (the same) and `--store`, in any order, each once -> (days, store); None when it is not that."""
+    days, store, seen, i = 7, False, set(), 0
+    while i < len(rest):
+        a = rest[i]
+        if a == "--store" and a not in seen:
+            store = True
+        elif (a in ("--days", "--period") and "days" not in seen and i + 1 < len(rest) and re.fullmatch(r"[0-9]{1,2}", rest[i + 1])
+              and 1 <= int(rest[i + 1]) <= 30):
+            days, i, a = int(rest[i + 1]), i + 1, "days"
+        else:
+            return None
+        seen.add(a)
+        i += 1
+    return (days, store) if not store or days in STORE_PERIODS else None
+
+
+def _low_priority():
+    """The daily digest runs behind everything else (the model server does the heavy work; this is its client). POSIX: nice 10 for
+    this process, which is single-threaded; Windows: the collector starts it with BELOW_NORMAL_PRIORITY_CLASS."""
+    if hasattr(os, "nice"):
+        with contextlib.suppress(OSError):
+            os.nice(10)
+
+
+def _publish(res, report, days, strict):
+    """Root's advise also feeds the screens: kept as the latest advice of its period. strict (--store): a failure is the answer."""
+    if days not in STORE_PERIODS or not store_writable():
+        return
+    try:
+        save_shared(res, report, days)
+    except OSError as e:
+        msg = "cannot write the shared advice %s: %s" % (store_path(), clean_line(e, 100))
+        if strict:
+            raise AdvisorError(msg)
+        sys.stderr.write("nuc-console-ask: %s\n" % msg)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     for stream in (sys.stdout, sys.stderr):
@@ -1078,21 +1379,26 @@ def main(argv=None):
         if cmd == "status":
             return _cmd_status(cfg)
         if cmd == "advise":
-            days = 7
-            if rest:
-                if len(rest) != 2 or rest[0] != "--days" or not rest[1].isdigit() or not 1 <= int(rest[1]) <= 30:
-                    _out(USAGE)
-                    return 2
-                days = int(rest[1])
+            opts = _advise_args(rest)
+            if opts is None:
+                _out(USAGE)
+                return 2
+            days, store = opts
+            if store:
+                _low_priority()
+                if not store_writable():
+                    raise AdvisorError("--store writes %s: run it as root (Windows: as an administrator)" % store_path())
             ok, why = available(cfg)
             if not ok:
                 raise Disabled(why)
             import health
             conn = _open_history()
             try:
-                res = advise(health.report(conn, days=days), cfg)
+                report = health.report(conn, days=days)
             finally:
-                conn.close()
+                conn.close()  # not held open while the model thinks
+            res = advise(report, cfg, fresh=store)
+            _publish(res, report, days, store)
         else:
             question = " ".join(argv).strip()
             if not question:
