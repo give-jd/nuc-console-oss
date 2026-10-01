@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. The project is small on purpose: **Python standard library only, one file per process, no build step.**
+Thanks for helping. The project is small on purpose: **Python standard library only, one entry script per process, no build step.** The modules an entry script imports are flat files in `src/` (the installers copy `src/*.py`): add one as a new file next to the others, never a package or a folder. [docs/DESIGN.md](docs/DESIGN.md#code-layout) says which module holds what.
 
 ## Development
 
@@ -17,6 +17,8 @@ shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{acce
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
 - Never add a dependency. If you need one, the answer is almost certainly a stdlib function or fewer features.
 - Keep Python 3.8 compatibility (no `match`, no `X | Y` types, no `str.removeprefix`).
+- Colours: a colour that means a state (fine, attention, problem, unknown, a note) is a token of `src/ui.py`, drawn with `ui.sgr(token)` (`ansi.py` does it for the primitives); a raw SGR code is for what means nothing but itself. Every state also has a symbol: colour is never the only signal.
+- Configuration: read it through `nuc_config.current()`, the one dict of the process (`render.CFG` is that object); only code that needs the file read again calls `nuc_config.load()`.
 - Platform code lives in `collect_darwin.py` / `collect_windows.py` (collector), `hostinfo.py` / `winapi.py` (renderer metrics):
   parsers are pure functions with fixtures, so they are tested on every OS; the classes `OnWindows` / `OnMacOS` in
   `tests/test_platforms.py` exercise the real system calls on their own OS. Text output of system tools is localised on Windows:
@@ -36,7 +38,7 @@ shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{acce
 
 ## Most wanted
 
-1. **Translations.** All on-screen strings are English and live in `src/render.py`. A small translation layer (a dict of message keys, `NUC_CONSOLE_LANG` / `[dashboard] language`) would let other languages be added without touching the layout code. Keep strings within the widths the tables allot them, and discuss the approach in an issue first.
+1. **Translations.** All on-screen strings are English and live in `src/render.py`, with the console primitives in `src/ansi.py`, the text helpers and the colour tokens in `src/ui.py` and the notes of the exposure rows in `src/exposure.py`. A small translation layer (a dict of message keys, `NUC_CONSOLE_LANG` / `[dashboard] language`) would let other languages be added without touching the layout code. Keep strings within the widths the tables allot them, and discuss the approach in an issue first.
 2. nftables-native and firewalld support in the exposure logic; macOS `pf` rules; verifying macOS code signatures for the Application Firewall.
 3. Other container runtimes (podman).
 4. More sensors (AMD/ARM thermal, macOS, Windows), multiple NVMe.

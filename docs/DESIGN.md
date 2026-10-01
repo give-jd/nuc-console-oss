@@ -44,7 +44,7 @@ tailscaled installs a ts-input rule accepting tailscale0 traffic before ufw, so 
 
 ## Expected vs actual
 
-The baseline says what *changed*; `[expose]` in `config.ini` says what you *meant*: the widest reach a service may have (`local`, `tailnet`, `lan`, `internet`, the same four groups as above). `render.py` compares it with the reach it computed: `expose_apply` gives each exposure row the declaration that names it, `expose_over` is true when the row's group is wider (INTERNET > LAN > TAILNET > LOCALE). A key names what is behind the row (container, compose service or project, process, unit, database name or kind, `[webapps]` name) or a port; behind a Funnel it is whatever listens on the backend, found by `graph.row_owners`, the same lookup the map draws. The most restrictive matching key wins and an unknown firewall verdict counts as open, as everywhere else.
+The baseline says what *changed*; `[expose]` in `config.ini` says what you *meant*: the widest reach a service may have (`local`, `tailnet`, `lan`, `internet`, the same four groups as above). `exposure.py` compares it with the reach it computed: `expose_apply` gives each exposure row the declaration that names it, `expose_over` is true when the row's group is wider (INTERNET > LAN > TAILNET > LOCALE). A key names what is behind the row (container, compose service or project, process, unit, database name or kind, `[webapps]` name) or a port; behind a Funnel it is whatever listens on the backend, found by `exposure.row_owners`, the same lookup the map draws. The most restrictive matching key wins and an unknown firewall verdict counts as open, as everywhere else.
 
 It shows in three places: ATTENTION (`over-exposed`, an error listing each service; `expose-unmatched`, a warning for a name that matches nothing), the matrix and the compact overview (a red "beyond config.ini: local" instead of the note, or a grey "expected: LAN" before it), and the MAP (a "declared reach" fact on the port node, an error finding when it is exceeded). It only adds alarms: `db-open-lan` and `docker-bypass` stay as they were, declared or not.
 
@@ -130,6 +130,39 @@ cannot. Decisions:
   addresses or user names of failed logins.
 
 Full description, what is collected per OS and every rule: [docs/HEALTH.md](HEALTH.md).
+
+## Code layout
+
+Standard library only, and flat: every module is one file in `src/` (the installers copy `src/*.py`, `tools/build_release.py` ships
+`src/`), no packages. Each process has **one entry script**; the modules it imports sit next to it. The dependencies run one way: `ui` is
+read by `ansi` and `exposure`, `exposure` by `graph`, `graph` by `render`, `render` by `web` and `notify`.
+
+| Entry script | Process |
+|---|---|
+| `collector.py` (with `collect_darwin.py`, `collect_windows.py`) | the privileged collector: writes the container, network and boot state as JSON (and `history.db`) |
+| `render.py` | the unprivileged console: the overview, the MAP, CPU, HEALTH and AI screens on the tty (macOS/Windows: `--kiosk`, `--open`); `--once` for one frame |
+| `web.py` | the read-only web view of the same screens |
+| `notify.py` | the optional Telegram notifier |
+| `aisetup.py`, `advisor.py` | `nuc-console-ai` and `nuc-console-ask` |
+| `update.py` | the logic of `nuc-console-update` |
+
+| Module | Holds |
+|---|---|
+| `render.py` | the inputs (`snapshot`, `Sampler`, `CpuFeed`, the HEALTH and AI data), the problem list, the drawing of every screen, the TTY layout engine (`pack`, the levels, `slides`, `frame`) and the main loop. It still holds `FULL`/`TRUNC`/`EXPAND` and what reads them (`lim`, `wrap_items`), and re-exports the names that moved out of it (marked "moved; kept for tests and tools") |
+| `ui.py` | what a colour **means**: the semantic tokens (`ok`, `warn`, `err`, `unknown`, `info`, `muted`, `accent`, `strong`, the header banners, `sel`), the ANSI themes (`default` is the SGR codes the console has always written; `light`, `hc`, `mono`) and the CSS palettes (`dark`, `light`, `hc`) as plain data, `sgr(token)`; and the text helpers that have no colour and no clock: `safe`, `plural`, the human sizes, durations, rates and ages |
+| `ansi.py` | the console primitives every screen is drawn from: `c`, `section`, `msg`, `msg_wrap`, `kv`, `bar`, `sparkline`, `pad`, `clip`, `columns`, `fit_join`, `cell` (the exposure matrix glyph). A colour that is a state is asked of `ui.sgr(token)` |
+| `exposure.py` | the exposure model: the rows of ports and their verdict per way in, the firewall rules read, the `[expose]` check, the web apps, the baseline comparison, and who is behind a row. No drawing, no files |
+| `graph.py`, `graphlayout.py`, `graphjs.py` | the MAP model (nodes, edges, the tree's rows), the positions of the graph view, the one script of the web view |
+| `htmlview.py` | ANSI to HTML (`to_html`) and the CSS of the web pages |
+| `nuc_config.py` | `config.ini`, the paths of each OS and of the portable run. `load()` reads the file; `current()` is the process's one configuration dict, loaded once (`render.CFG` is that object) |
+| `cpuinfo.py`, `procs.py`, `hostinfo.py`, `winapi.py` | the CPU and process producers, the host metrics on macOS and Windows, the Windows API calls |
+| `health.py`, `history.py` | the HEALTH findings and the history database they read |
+| `aihw.py`, `aisetup.py`, `advisor.py` | the hardware the AI screen rates, the installer and server of the local model, the advisor |
+| `demo.py` | the synthetic data of `--demo` |
+
+Where a change goes: a colour that means a state is a token in `ui.py`, not a literal code in new drawing code; a rule about what is
+reachable is `exposure.py` (or `graph.py` for the MAP), not a line of a screen; the screen itself, its layout and its words are
+`render.py`. On-screen strings are English. A test that replaces a name must replace it where it is used (`exposure.X`, not `render.X`).
 
 ## macOS and Windows
 
