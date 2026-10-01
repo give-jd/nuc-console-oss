@@ -114,14 +114,16 @@ def drawn(G, stacks=False, ext=True):
 class GraphPage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # the demo (render.demo_defaults) declares [webapps] and renames the host for the whole process: put back after
+        # the demo (render.demo_defaults) declares [webapps] and [expose] and renames the host for the whole process: put back after
         cls.saved = (render.CFG["webapps"], socket.gethostname)
+        cls.saved_expose = render.CFG["expose"]
         cls.srv = serve()
 
     @classmethod
     def tearDownClass(cls):
         render.DEMO = False
         render.CFG["webapps"], socket.gethostname = cls.saved
+        render.CFG["expose"] = cls.saved_expose
         cls.srv.shutdown()
         cls.srv.server_close()
 

@@ -106,6 +106,19 @@ def msg(level, text):
     return f"   {c(col, sym)} {text}"
 
 
+def msg_wrap(level, text, w):
+    """msg(), continued on the lines below (under the text) at the commas when it is wider than w: a long list is not cut."""
+    lines, cur = [], ""
+    for part in text.split(", "):
+        if cur and len(cur) + 2 + len(part) > w - 6:  # -6: the comma that ends the line when it wraps
+            lines.append(cur + ",")
+            cur = part
+        else:
+            cur = cur + ", " + part if cur else part
+    lines.append(cur)
+    return [msg(level, lines[0])] + ["     " + x for x in lines[1:]]
+
+
 def kv(label, value, lw=13):
     return f"   {c(90, pad(label, lw))}{value}"
 
@@ -1086,6 +1099,8 @@ def accept_baseline(if_missing=False, path=None, now=None):
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
+    if CFG.get("config_error"):  # config.ini exists but could not be read: nothing in it ([expose], [webapps]) is applied
+        out.append((2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)", "config-unreadable"))
     if not on("containers"):
         pass
     elif cont is None:
@@ -1178,6 +1193,15 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((1, plural(len(bypass), "Docker port") + " bypassing ufw (DOCKER-USER empty)", "docker-bypass"))
         if pub:
             out.append((1, plural(len(pub), "service") + f" public on the Internet (Funnel :{pub[0]['port']})", "funnel-public"))
+        if CFG["expose"]:  # [expose] only adds alarms: the ones above stay as they are, declared or not
+            over = expose_over_items(expose_apply(rows, net, cont))
+            if over:
+                out.append((2, plural(len(over), "service") + (" reaches" if len(over) == 1 else " reach") + " beyond config.ini: " + ", ".join(over), "over-exposed"))
+            ok = (isinstance(cont, dict) and not any(cont.get(k) for k in ("error", "absent", "disabled")) and isinstance(boot, dict)
+                  and not {"links", "dbs"} & set(net.get("errors") or ()))  # with a source of names missing every name looks wrong
+            lost = expose_unmatched(net, cont, boot) if ok else []
+            if lost:
+                out.append((1, "[expose] " + ", ".join(f"'{safe(k)}'" for k in lost) + (" matches" if len(lost) == 1 else " match") + " no service", "expose-unmatched"))
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -1203,6 +1227,12 @@ CATALOG = {
     "docker-bypass": ("Docker ports bypass ufw", "a port published on 0.0.0.0 is reachable from the LAN whatever ufw says", "publish on 127.0.0.1 (compose: \"127.0.0.1:PORT:PORT\") or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule"),
     "db-open-lan": ("Database/broker open on the LAN", "data services should not be reachable from the network", "publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused"),
     "funnel-public": ("Service public on the Internet (Tailscale Funnel)", "anyone on the Internet can reach it", "tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off"),
+    "over-exposed": ("Service reaches further than config.ini says", "you declared under [expose] how far it should be reachable, and it is reachable from more places",
+                     "bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini"),
+    "expose-unmatched": ("[expose] name matches no service", "a name that matches nothing (a typo, or a service that was removed) guards nothing",
+                         "fix the name under [expose] in config.ini (container, compose service or project, process, unit, database, [webapps] name) or remove the line; ports are never checked"),
+    "config-unreadable": ("config.ini unreadable", "the file exists but could not be read, so the defaults are in use: [expose] and [webapps] are not applied and nothing is checked against them",
+                          "check config.ini for a key starting with ':' (write ports as 8080) or a section without a header; the exact error is in the service logs / stderr; restart the services after fixing it"),
     "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
     "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "sudo nuc-console-accept"),
     "port-compare-suspended": ("Port comparison suspended", "network sections were unreadable", "see net-sections"),
@@ -1277,6 +1307,8 @@ if nuc_config.PORTABLE:
 
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
+COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 
 
 def fingerprint(sev, text, pid):
@@ -1426,7 +1458,7 @@ def group_of(r):
 
 def exposure_block(net, cont, w, new=None):
     new = new or {}
-    rows = exposure_rows(net, cont)
+    rows = expose_apply(exposure_rows(net, cont), net, cont)
     by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
     warn = sum(r["warn"] for r in rows)
     count = (f"   Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}    "
@@ -1455,8 +1487,11 @@ def exposure_block(net, cont, w, new=None):
                     + "".join(f"  {x}   " for x in cells) + " ")
             room = w - vlen(head) - (len(tag) + 1 if tag else 0)  # never clip mid-word: end with an ellipsis
             base = ("declared: " + r["note"].replace("docker: bypasses ufw", "docker")) if declared and r["bad_note"] else r["note"]
+            xn = expose_note(r)  # [expose]: beyond what config.ini says (red, instead of the note) or within it (grey, before the note)
+            if xn:
+                base = xn[0] if xn[1] else xn[0] + (" · " + base if base else "")
             text = base if vlen(base) <= room else base[:max(room - 1, 0)] + "…"
-            note = c(31, text) if r["bad_note"] and not declared else c(90, text)
+            note = c(31, text) if (xn and xn[1]) or (r["bad_note"] and not declared) else c(90, text)
             if tag:
                 note = c("1;31", tag + " ") + note
             lines.append(head + note)
@@ -1620,10 +1655,10 @@ def page_rete(net, cont, w, now=None, baseline=False):
     pb = safe_problems(net, cont, now, baseline=baseline)
     new = new_ports(net, cont, baseline)
     if not on("exposure"):  # section switched off in config.ini: draw only the other one
-        return [section("ATTENTION", w), ""] + [msg("err" if sev >= 2 else "warn", t) for sev, t in pb[:6]] + [""] + firewall_block(net, w)
+        return [section("ATTENTION", w), ""] + [x for sev, t in pb[:6] for x in msg_wrap("err" if sev >= 2 else "warn", t, w)] + [""] + firewall_block(net, w)
     if not on("firewall"):
-        return [section("ATTENTION", w), ""] + [msg("err" if sev >= 2 else "warn", t) for sev, t in pb[:6]] + [""] + exposure_block(net, cont, w, new)
-    head = [section("ATTENTION", w), ""] + ([msg("err" if sev >= 2 else "warn", t) for sev, t in pb[:6]] if pb
+        return [section("ATTENTION", w), ""] + [x for sev, t in pb[:6] for x in msg_wrap("err" if sev >= 2 else "warn", t, w)] + [""] + exposure_block(net, cont, w, new)
+    head = [section("ATTENTION", w), ""] + ([x for sev, t in pb[:6] for x in msg_wrap("err" if sev >= 2 else "warn", t, w)] if pb
                                               else [msg("ok", "no problems detected")]) + [""]
 
     if net.get("listeners") is None:  # without the port list "LAN 0" would look like "nothing exposed"
@@ -1789,7 +1824,7 @@ def ov_esposizione(net, cont, w, k, new=None):
     lines = [section("EXPOSURE", w)]
     if net is None or net.get("listeners") is None:
         return lines + [msg("err", "unavailable")]
-    rows = exposure_rows(net, cont)
+    rows = expose_apply(exposure_rows(net, cont), net, cont)
     by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
     warn = sum(r["warn"] for r in rows)
     lines.append(f" Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}   LAN {len(by['LAN'])}   "
@@ -1797,13 +1832,19 @@ def ov_esposizione(net, cont, w, k, new=None):
                  + (f"   {c(31, f'⚠ {warn} DB/broker on LAN')}" if warn else ""))
     for r in lim(by["INTERNET"], 2, "exposure"):
         tag = new.get(f"{r['port']}/{r['proto'][0]}:INTERNET")
+        xn = expose_note(r)
         lines.append(f" {c('1;31', '●')} {c('1;31', tag + ' ') if tag else ''}{r['port']}/{r['proto'][0]} "
                      f"{r['name'][:40]}  {c(31, 'public on the Internet')}")
+        if xn:  # [expose]: after the line when it fits, else below it
+            mark = c(31 if xn[1] else 90, xn[0])
+            lines[-1:] = [lines[-1] + "  " + mark] if vlen(lines[-1]) + 2 + vlen(mark) <= w else [lines[-1], "   " + mark]
     items = []
     for r in by["LAN"]:
         tag = new.get(f"{r['port']}/{r['proto'][0]}:LAN")
         label = f"{r['port']} {r['name'][:22]}"
-        items.append((0 if tag else 1, (c("1;31", tag + " ") if tag else "") + (c(31, "⚠" + label) if r["warn"] else label)))
+        xn = expose_note(r)
+        items.append((0 if tag or (xn and xn[1]) else 1, (c("1;31", tag + " ") if tag else "") + (c(31, "⚠" + label) if r["warn"] else label)
+                      + (" " + c(31 if xn[1] else 90, xn[0]) if xn else "")))
     # new/changed items first: they must not end up behind the '… +N'
     lines += wrap_items([t for _, t in sorted(items, key=lambda x: x[0])], w, indent=1, max_lines=max(1, 3 - min(k, 2)), section="exposure")
     return lines
@@ -1946,6 +1987,132 @@ REACH_ORDER = ("INTERNET", "LAN", "TAILNET", "LOCALE")
 REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
 
 
+# ---- [expose]: the widest reach you intend for a service, against the reach it has --------------------------------------------
+EXPOSE_LABEL = {"INTERNET": "Internet", "LAN": "LAN", "TAILNET": "tailnet", "LOCALE": "local"}  # a reach in the words of [expose]
+
+
+def expose_policy(policy=None):
+    """[(key, (port, proto) or None, group)] of [expose]: keys lowercased; a reach that does not exist or a port that cannot exist is left out."""
+    out = []
+    for k, v in (CFG["expose"] if policy is None else policy).items():
+        k = str(k).lower()
+        try:
+            if v in REACH_ORDER:
+                out.append((k, nuc_config.expose_port(k), v))
+        except ValueError:
+            pass  # nuc_config said so when it read the file
+    return out
+
+
+def _ct_names(name, project="", service=""):
+    """The names a container answers to in [expose]: its own, without a replica number (shop-db-1 -> shop-db), its compose project and service."""
+    out = {name, re.sub(r"[-_]\d+$", "", name), project, service}
+    if project and service:
+        out |= {f"{project}-{service}", f"{project}_{service}"}
+    return {x.lower() for x in out if x}
+
+
+def _unit_names(unit):
+    u = str(unit).lower()
+    return {u, u[:-len(".service")]} if u.endswith(".service") else {u}
+
+
+def expose_cts(net, cont):
+    """{container name: the names it answers to}: every container listed (stopped ones too) and every database (its kind too)."""
+    cts = {}
+
+    def add(name, project="", service="", *more):
+        cts[name] = cts.get(name, set()) | _ct_names(name, project, service) | set(more)
+
+    for ct in (cont or {}).get("containers") or []:
+        if isinstance(ct, dict) and ct.get("name"):
+            add(ct["name"], ct.get("project") or "")
+    for ln in ((net or {}).get("links") or {}).get("containers") or []:
+        if isinstance(ln, dict) and ln.get("name"):
+            add(ln["name"], ln.get("project") or "", ln.get("service") or "")
+    for it in ((net or {}).get("dbs") or {}).get("items") or []:
+        if isinstance(it, dict) and it.get("name"):
+            add(it["name"], it.get("project") or "", "", *([str(it["kind"]).lower()] if it.get("kind") else []))
+    return cts
+
+
+def expose_apply(rows, net, cont, policy=None, webapps=None):
+    """Puts the [expose] verdict on each exposure row (in place): r["want"] = the widest reach intended for it (a group name),
+    r["key"] = the config key that says so. Rows no key matches get nothing (and with no [expose] at all nothing is touched).
+
+    A key is a port (8080, 8080/udp) or a name: the row's service, the container behind it (its name without the replica number,
+    compose project and service, database name and kind), the process and unit that listen, a [webapps] name. Behind a
+    Funnel/Serve row it is what listens on the backend (graph.row_owners: the map and this check agree on who is behind a row).
+    Several keys on one row: the most restrictive reach wins."""
+    pol = expose_policy(policy)
+    if not pol or not rows or (net or {}).get("listeners") is None:
+        return rows
+    webapps = CFG["webapps"] if webapps is None else webapps
+    cts = expose_cts(net, cont)
+    for r, (owners, ports) in zip(rows, graph.row_owners(sys.modules[__name__], net, cont, rows)):
+        names = set() if r["name"] in ("?", "container?") or r["name"].startswith(("funnel ", "serve ")) else {r["name"].lower()}
+        for o in owners:
+            kind, _, who = o.partition(":")
+            if kind == "ct":
+                names |= cts.get(who) or _ct_names(who)
+            elif kind == "proc":  # its unit is the one that listens on one of this row's ports (another service may run the same program)
+                names.add(who.lower())
+                for ln in net["listeners"]:
+                    if ln.get("proc") == who and ln.get("port") in ports and ln.get("unit"):
+                        names |= _unit_names(ln["unit"])
+        if r["proto"] == "tcp":
+            names |= {n.lower() for n, ps in webapps.items() if ports & set(ps)}
+        hit = [(REACH_ORDER.index(g), -i, k) for i, (k, pk, g) in enumerate(pol) if (((pk[1] == r["proto"] == "tcp" and pk[0] in ports) or pk == (r["port"], r["proto"])) if pk else k in names)]
+        r["want"], r["key"] = (REACH_ORDER[max(hit)[0]], max(hit)[2]) if hit else (None, None)  # the highest index is the narrowest reach
+    return rows
+
+
+def _expose_reach(r):
+    return "INTERNET" if r["net"] == 3 else group_of(r)  # Funnel status unreadable (net 3): unknown is treated as open
+
+
+def expose_over(r):
+    """True when an exposure row (after expose_apply) reaches further than [expose] says. A row no key matches never does."""
+    return bool(r.get("want")) and REACH_ORDER.index(_expose_reach(r)) < REACH_ORDER.index(r["want"])
+
+
+def expose_note(r):
+    """The [expose] marker of an exposure row: ('beyond config.ini: local', True), ('expected: LAN', False), None if no key matches."""
+    if not r.get("want"):
+        return None
+    return (f"beyond config.ini: {EXPOSE_LABEL[r['want']]}", True) if expose_over(r) else (f"expected: {EXPOSE_LABEL[r['want']]}", False)
+
+
+def expose_over_items(rows):
+    """['shop-db :5432 LAN > local', ...]: what reaches further than [expose] says, widest first, once per service and port."""
+    items = {}
+    for r in rows:
+        if expose_over(r):
+            pk = nuc_config.expose_port(r["key"])
+            udp = "/udp" if r["proto"] == "udp" else ""
+            who = f"port {pk[0]}" + ("/udp" if pk[1] == "udp" else "") if pk else r["key"]  # a port key is named by itself: the process behind it can change
+            at = "" if pk == (r["port"], r["proto"]) else f" :{r['port']}{udp}"  # (a port key that follows a Funnel to its backend: the row's own port too)
+            items.setdefault((REACH_ORDER.index(_expose_reach(r)), who, r["port"], r["proto"]),
+                             f"{safe(who)}{at} {EXPOSE_LABEL[_expose_reach(r)]} > {EXPOSE_LABEL[r['want']]}")
+    return [items[k] for k in sorted(items)]
+
+
+def expose_unmatched(net, cont, boot=None, policy=None, webapps=None):
+    """The [expose] names that match nothing this machine knows (a typo guards nothing). Port keys are never listed: a port nobody
+    listens on is fine. Known: containers (stopped ones too), compose projects and services, the processes and units that listen,
+    databases (name, kind), [webapps], the units enabled at boot."""
+    webapps = CFG["webapps"] if webapps is None else webapps
+    known = {n.lower() for n in webapps}
+    for names in expose_cts(net, cont).values():
+        known |= names
+    for ln in (net or {}).get("listeners") or []:
+        known |= {str(ln.get("proc") or "").lower()} | _unit_names(ln.get("unit") or "")
+    boot = boot if isinstance(boot, dict) else {}
+    known |= {n for u in boot.get("enabled") or [] if isinstance(u, dict) for n in _unit_names(u.get("unit") or "")}
+    known |= {n for u in boot.get("failed") or [] for n in _unit_names(u)}
+    return [k for k, pk, _ in expose_policy(policy) if pk is None and k not in known]
+
+
 def webapp_rows(net, cont):
     """Web apps: the ones you declared under [webapps] (up or down) and the listeners found on their own.
 
@@ -2084,8 +2251,8 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
 
     def guardare(bw, k):
         shown = lim(pb, max(3, 6 - k), "attention")
-        rows = [msg("err" if sev >= 2 else "warn", t) for sev, t in shown]
-        extra = [c(90, f"   … +{len(pb) - len(rows)} more")] if len(pb) > len(rows) else []
+        rows = [x for sev, t in shown for x in msg_wrap("err" if sev >= 2 else "warn", t, bw)]
+        extra = [c(90, f"   … +{len(pb) - len(shown)} more")] if len(pb) > len(shown) else []
         acc = getattr(pb, "accepted", 0)
         known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
         return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
@@ -2317,6 +2484,8 @@ def demo_defaults():
     socket.gethostname = lambda: "demo-host"
     if not CFG["webapps"]:
         CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
+    if not CFG["expose"]:  # one service within its reach, two beyond it (the Funnel's backend is the process 'node': a unit on Linux only)
+        CFG["expose"] = {"shop-web": "LAN", "shop-db": "LOCALE", ("n8n" if DEMO_OS in (None, "linux") else "node"): "TAILNET"}
 
 
 def map_graph(smp=None):
@@ -2325,7 +2494,7 @@ def map_graph(smp=None):
     sm = smp.sample() if smp else {"thermal": {}}
     if DEMO:
         demo_defaults()
-    G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"])
+    G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
     return G, safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
@@ -2536,7 +2705,7 @@ def map_screen(G, pb, mv, w, h):
 
 def map_slide(cont, net, boot, baseline, w, body_h):
     """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
-    G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline)
+    G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline, expose=CFG["expose"])
     return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
 
 

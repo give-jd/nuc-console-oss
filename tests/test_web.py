@@ -53,10 +53,12 @@ class Web(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.open, cls.locked = serve(), serve(TOKEN)
+        cls.expose = render.CFG["expose"]  # the demo declares [expose]: put back after
 
     @classmethod
     def tearDownClass(cls):
         render.DEMO = False
+        render.CFG["expose"] = cls.expose
         for s in (cls.open, cls.locked):
             s.shutdown()
             s.server_close()
