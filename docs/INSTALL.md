@@ -142,6 +142,7 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 **Text size**: the **A− / A+** links at the bottom of the page; the default is `[display] zoom`. Bigger text = fewer columns, never less
 content: in a browser window every section stays and the page scrolls; full screen rotates what does not fit onto Details pages.
+**Refresh**: the **− / +** links next to "refresh every" in the same bar, 1 to 10 seconds; the default is `[dashboard] refresh_seconds` (2).
 
 ## Install
 
@@ -218,6 +219,7 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 **Text size**: the **A− / A+** links at the bottom of the page; the default is `[display] zoom`. Bigger text = fewer columns, never less
 content: in a browser window every section stays and the page scrolls; full screen rotates what does not fit onto Details pages.
+**Refresh**: the **− / +** links next to "refresh every" in the same bar, 1 to 10 seconds; the default is `[dashboard] refresh_seconds` (2).
 
 ## Install
 

@@ -20,6 +20,7 @@ DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal")
 MODES = ("overview", "rotate")
+REFRESH_MIN, REFRESH_MAX = 1, 10  # seconds between two redraws ([dashboard] refresh_seconds): every screen and page
 # macOS/Windows: how the dashboard is shown ([display] mode). 'kiosk' is accepted for the full-screen window.
 DISPLAY_MODES = {"browser": "browser", "fullscreen": "fullscreen", "kiosk": "fullscreen", "none": "none", "no": "none", "off": "none"}
 # Fixed on-screen order of the overview sections (most important first: what needs action, then security posture,
@@ -31,9 +32,9 @@ SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "container
 def load(path=None):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int}"""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
-    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "sections": list(SECTIONS), "webapps": {},
+    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
-                   "refresh_seconds": 5, "allowed_hosts": []},
+                   "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
     try:
@@ -62,6 +63,13 @@ def load(path=None):
                 cfg[key] = 0 if key != "rotate_seconds" and v == 0 else max(lo, min(hi, v))  # 0 = automatic
             except ValueError:
                 print(f"nuc-console: {path}: [dashboard] {key} must be an integer", file=sys.stderr)
+    refresh = lambda sec: max(REFRESH_MIN, min(REFRESH_MAX, cp.getint(sec, "refresh_seconds")))  # noqa: E731
+    dash_refresh, web_refresh = False, None
+    if cp.has_section("dashboard") and cp.has_option("dashboard", "refresh_seconds"):
+        try:
+            cfg["refresh_seconds"], dash_refresh = refresh("dashboard"), True
+        except ValueError:
+            print(f"nuc-console: {path}: [dashboard] refresh_seconds must be an integer (1-10)", file=sys.stderr)
     if cp.has_section("dashboard") and cp.has_option("dashboard", "details"):
         try:
             cfg["details"] = cp.getboolean("dashboard", "details")
@@ -94,11 +102,18 @@ def load(path=None):
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
-        for key, lo, hi in (("port", 1, 65535), ("columns", 60, 300), ("rows", 20, 120), ("refresh_seconds", 2, 300)):
+        for key, lo, hi in (("port", 1, 65535), ("columns", 60, 300), ("rows", 20, 120)):
             try:
                 w[key] = max(lo, min(hi, cp.getint("web", key, fallback=w[key])))
             except ValueError:
                 print(f"nuc-console: {path}: [web] {key} must be an integer", file=sys.stderr)
+        if cp.has_option("web", "refresh_seconds"):  # the old place of the setting: used while [dashboard] has none
+            try:
+                web_refresh = refresh("web")
+            except ValueError:
+                print(f"nuc-console: {path}: [web] refresh_seconds must be an integer (1-10)", file=sys.stderr)
+    # one refresh for every screen and page; [web] refresh_seconds (older config files) only for the web pages, as before
+    cfg["web"]["refresh_seconds"] = cfg["refresh_seconds"] if dash_refresh or web_refresh is None else web_refresh
     if cp.has_section("display"):  # Windows/macOS: the dashboard in a browser tab or a full-screen window
         b = cp.get("display", "browser", fallback="auto").strip()
         cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")

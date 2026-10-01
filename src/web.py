@@ -130,26 +130,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "token" in q:  # move the token out of the URL (history, logs, referrers) into a cookie
                 return self._send(302, extra=(("Location", "/"), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
-        self._send(200, srv.page(**view_params(q, srv.zoom)).encode(), "text/html; charset=utf-8")
+        self._send(200, srv.page(**view_params(q)).encode(), "text/html; charset=utf-8")
 
     def _no(self):
         self._send(405, b"read-only\n", extra=(("Allow", "GET"),))
     do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_HEAD = _no
 
 
-def view_params(q, default_zoom=100):
+def view_params(q):
     """Query string -> page() arguments, clamped and rounded to a few distinct values (bounded cache and CPU).
 
-    cols/rows: the layout grid (rows 0 = config); zoom: text size in %; fit=1: the text fills the window width (and the
+    cols/rows: the layout grid (rows 0 = config); zoom: text size in % (0 = [display] zoom); fit=1: the text fills the window width (and the
     height, when rows is given), so a bigger zoom means fewer columns, re-laid out; full=1: every Details page;
-    rotate=1: overview and Details pages take turns like on the console; kiosk=1: the footer says how to close the window."""
+    rotate=1: overview and Details pages take turns like on the console; kiosk=1: the footer says how to close the window;
+    refresh: seconds between two reloads (1-10; default [dashboard] refresh_seconds)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if one(k).isdigit() else 0  # noqa: E731
-    cols, rows, zoom = num("cols"), num("rows"), num("zoom") or default_zoom
+    cols, rows, zoom = num("cols"), num("rows"), num("zoom")
     return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
             "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
-            "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)), "fit": one("fit") == "1", "full": one("full") == "1",
-            "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1"}
+            "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
+            "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
+            "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0}  # 0 = config
 
 
 class Server(http.server.ThreadingHTTPServer):
@@ -181,11 +183,15 @@ class Server(http.server.ThreadingHTTPServer):
         finally:
             self.slots.release()
 
-    def page(self, cols=0, full=False, zoom=100, rows=0, fit=False, rotate=False, kiosk=False):
-        key = (cols, rows, zoom, fit, full, rotate, kiosk)
+    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0):
+        """zoom/refresh 0 = the configured ones: only what the viewer changed is written in the links."""
+        r = refresh or self.cfg["refresh_seconds"]
+        here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh}
+        zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
+        key = (cols, rows, zoom, fit, full, rotate, kiosk, r)
         with self.lock:
             hit = self.cache.get(key)
-            if hit and time.time() - hit[0] < self.cfg["refresh_seconds"] / 2:
+            if hit and time.time() - hit[0] < r / 2:
                 return hit[1]
             base_cols, base_rows = cols or self.cfg["columns"], rows or self.cfg["rows"]
             if fit:  # the text fills the window: a bigger zoom = fewer columns and rows, re-laid out like a smaller console
@@ -206,17 +212,17 @@ class Server(http.server.ThreadingHTTPServer):
             except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
                 print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
                 body = "render error (see the service log)"
-            r = self.cfg["refresh_seconds"]
-            here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk}
             link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
             i = ZOOMS.index(zoom)
             size = (link("A−", zoom=ZOOMS[i - 1]) if i else "A−") + f" {zoom}% " + (link("A+", zoom=ZOOMS[i + 1]) if i + 1 < len(ZOOMS) else "A+")
+            lo, hi = nuc_config.REFRESH_MIN, nuc_config.REFRESH_MAX  # − = more often, + = less often
+            every = (link("−", refresh=r - 1) if r > lo else "−") + f" {r}s " + (link("+", refresh=r + 1) if r < hi else "+")
             views = " · ".join((link("compact", cols=100), link("wide", cols=200),
                                 link("overview", full=False) if full else link("full details", full=True)))
             page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     f'<meta http-equiv="refresh" content="{r}"><title>{html.escape(socket.gethostname())} · nuc-console</title>'
-                    f'<style>{CSS}{style}</style><pre>{body}</pre><footer>text {size} · {views} · read-only · {time.strftime("%H:%M:%S")} · '
-                    f'refreshes every {r}s' + (f" · {html.escape(render.KIOSK_HINT)}" if kiosk else "") + '</footer></html>')
+                    f'<style>{CSS}{style}</style><pre>{body}</pre><footer>text {size} · refresh every {every} · {views} · read-only · '
+                    f'{time.strftime("%H:%M:%S")}' + (f" · {html.escape(render.KIOSK_HINT)}" if kiosk else "") + '</footer></html>')
             self.cache[key] = (time.time(), page)
             return page
 

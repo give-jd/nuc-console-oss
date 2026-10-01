@@ -683,6 +683,27 @@ class Kiosk(unittest.TestCase):
             self.assertEqual(cfg["webapps"], {"caffè": [8080]})
             self.assertFalse(cfg["features"]["thermal"])
 
+    def test_refresh_seconds_one_setting_for_every_screen(self):
+        def load(text):
+            with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
+                f.write(text)
+            try:
+                c = nuc_config.load(f.name)
+            finally:
+                os.unlink(f.name)
+            return c["refresh_seconds"], c["web"]["refresh_seconds"]
+        self.assertEqual(load(""), (2, 2))
+        self.assertEqual(load("[dashboard]\nrefresh_seconds = 0\n"), (1, 1))                       # never under 1 s
+        self.assertEqual(load("[dashboard]\nrefresh_seconds = 60\n"), (10, 10))                    # never over 10 s
+        self.assertEqual(load("[dashboard]\nrefresh_seconds = x\n"), (2, 2))
+        self.assertEqual(load("[web]\nrefresh_seconds = 5\n"), (2, 5))                             # an older config file: web only
+        self.assertEqual(load("[web]\nrefresh_seconds = 30\n"), (2, 10))
+        self.assertEqual(load("[dashboard]\nrefresh_seconds = 3\n[web]\nrefresh_seconds = 5\n"), (3, 3))  # the new key wins
+        with open(os.path.join(ROOT, "config", "config.ini"), encoding="utf-8") as f:
+            shipped = f.read()
+        self.assertEqual(load(shipped), (2, 2))
+        self.assertNotRegex(shipped.split("[web]")[1].split("[display]")[0], r"(?m)^refresh_seconds")  # one place only
+
     def test_set_key_changes_one_line_and_keeps_the_rest(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "config.ini")

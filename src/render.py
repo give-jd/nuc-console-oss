@@ -53,7 +53,7 @@ def on(feature):
     """Section enabled in config.ini (default: yes)."""
     return CFG["features"].get(feature, True)
 
-ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], 2, 60, 60
+ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
