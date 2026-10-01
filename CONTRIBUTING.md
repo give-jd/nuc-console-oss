@@ -21,7 +21,7 @@ shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
   use the API or PowerShell objects (`ConvertTo-Json`), never `netstat`/`netsh` text.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
-- Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`.
+- Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`. The MAP screen: `--view map` (with `--expand all|fit|N`, `--select TEXT`, `--details`, `--only`).
 
 ## Most wanted
 
@@ -39,4 +39,5 @@ Small, focused, with tests. Describe the *why*. Do not include secrets, real hos
 ```bash
 python3 src/render.py --once --demo --color --cols 226 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · overview, 3-column layout (demo data)" > docs/img/overview.svg
 python3 src/render.py --once --demo --color --cols 120 --rows 40 | python3 tools/ansi2svg.py --title "nuc-console · 120×40 console, single column (demo data)" > docs/img/compact.svg
+python3 src/render.py --once --demo --color --view map --expand fit --select shop-api --details --cols 200 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · MAP: who reaches what, and what is behind it (demo data)" > docs/img/map.svg
 ```

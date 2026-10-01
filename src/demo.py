@@ -32,6 +32,38 @@ def _db(name, kind, project, port, scope, active=(), ext=()):
             "external": [{"ip": ip, "last": time.time() - 60} for ip in ext], "ext_source": "netns"}
 
 
+def _link(name, project, service, image, nets, listen, ports=(), depends=(), env=(), db=None, state="running", health="",
+          exit_code=None, restarts=0):
+    return {"name": name, "image": image, "project": project, "service": service, "state": state, "health": health,
+            "exit": exit_code, "restarts": restarts, "restart": "unless-stopped", "host_net": False, "nets": dict(nets),
+            "ports": list(ports), "listen": list(listen), "listen_src": "netns" if state == "running" else "image",
+            "depends_on": list(depends), "env_refs": list(env), "db": db}
+
+
+def _links(now):
+    """net["links"] (the MAP): what each container is, and who was seen talking to whom (see collector.link_items)."""
+    sh, bl = "shop_default", "blog_default"
+    edge = lambda a, b, port, n=1, ago=0: {"from": a, "to": b, "port": port, "n": n, "last": now - ago}  # noqa: E731
+    return {"since": now - 3600, "conn_source": "netns", "errors": [], "containers": [
+        _link("shop-web-1", "shop", "web", "example/shop-web:1.4", {sh: "172.18.0.2"}, [80], [{"p": 8080, "c": "80/tcp", "s": "*"}],
+              depends=["shop-api-1"], env=["shop-api-1"], health="healthy"),
+        _link("shop-api-1", "shop", "api", "example/shop-api:1.4", {sh: "172.18.0.3"}, [3000],
+              depends=["shop-db-1"], env=["shop-db-1", "cache-1"], health="healthy"),
+        _link("shop-db-1", "shop", "db", "postgres:16", {sh: "172.18.0.4"}, [5432], [{"p": 5432, "c": "5432/tcp", "s": "*"}], db="postgres"),
+        _link("worker-1", "shop", "worker", "example/shop-worker:1.4", {sh: ""}, [], depends=["shop-db-1"], env=["shop-db-1"],
+              state="exited", exit_code=137, restarts=3),
+        _link("blog-app-1", "blog", "app", "example/blog:2.0", {bl: "172.19.0.2"}, [8080], [{"p": 8081, "c": "8080/tcp", "s": "lo"}],
+              depends=["blog-db-1"], env=["blog-db-1"]),
+        _link("blog-db-1", "blog", "db", "postgres:16", {bl: "172.19.0.3"}, [5432], [{"p": 5433, "c": "5432/tcp", "s": "lo"}], db="postgres"),
+        _link("cache-1", "", "", "redis:7", {sh: "172.18.0.9"}, [6379], [{"p": 6379, "c": "6379/tcp", "s": "lo"}], db="redis")],
+        "conns": [
+        edge("ct:shop-web-1", "ct:shop-api-1", 3000, 4), edge("ct:shop-api-1", "ct:shop-db-1", 5432, 6),
+        edge("ct:blog-app-1", "ct:blog-db-1", 5432, 2), edge("ext:" + LAN + ".50", "ct:shop-db-1", 5432),
+        edge("ext:" + TS + ".2", "ct:shop-web-1", 8080), edge("ext:" + LAN + ".20", "proc:sshd", 22),
+        edge("proc:tailscaled", "proc:node", 5678), edge("ct:shop-api-1", "ext:" + EXT + ".25", 443, 2),
+        edge("proc:node", "ext:" + EXT + ".80", 443, 0, 1500)]}
+
+
 def _ufw():
     import collector
     d = collector.parse_ufw(UFW_TEXT)
@@ -51,7 +83,9 @@ def snapshot(now=None, os_name=None):
         _ct("cache-1", "", ports=[{"p": 6379, "s": "lo"}], mem=30 * 2 ** 20),
         _ct("worker-1", "shop", state="exited", status="Exited (137) 2 hours ago", mem=None),
     ]}
-    lst = lambda addr, port, proc: {"proto": "tcp", "addr": addr, "port": port, "proc": proc}
+    units = {"sshd": "ssh.service", "node": "n8n.service", "tailscaled": "tailscaled.service"}
+    lst = lambda addr, port, proc: dict({"proto": "tcp", "addr": addr, "port": port, "proc": proc},  # noqa: E731
+                                        **({"unit": units[proc]} if proc in units else {}))
     net = {"ts": now, "errors": {}, "absent": [], "ufw": _ufw(), "docker_user": [],
            "iptables": {"policy": {"INPUT": "DROP", "FORWARD": "DROP"}, "count": {"INPUT": 5}, "ts_input": True},
            "f2b": {"jails": [{"name": "sshd", "banned": 2, "ips": [EXT + ".7", EXT + ".9"]}]},
@@ -65,13 +99,16 @@ def snapshot(now=None, os_name=None):
                _db("shop-db-1", "postgres", "shop", 5432, "*", active=["shop-api-1"], ext=[LAN + ".50"]),
                _db("blog-db-1", "postgres", "blog", 5433, "lo", active=["blog-app-1"]),
                _db("cache-1", "redis", "", 6379, "lo")]},
-           "ts_peers": {"self": {"name": "demo-host", "online": True, "exit_option": False}, "peers": [
-               {"name": "laptop", "os": "linux", "online": True, "last_seen": None, "direct": True, "relay": "", "exit": False, "exit_option": False},
-               {"name": "phone", "os": "android", "online": False, "last_seen": now - 7200, "direct": False, "relay": "fra", "exit": False, "exit_option": False}]}}
+           "ts_peers": {"self": {"name": "demo-host", "online": True, "exit_option": False, "ips": [TS + ".1"]}, "peers": [
+               {"name": "laptop", "os": "linux", "online": True, "last_seen": None, "direct": True, "relay": "", "exit": False, "exit_option": False,
+                "ips": [TS + ".2"]},
+               {"name": "phone", "os": "android", "online": False, "last_seen": now - 7200, "direct": False, "relay": "fra", "exit": False, "exit_option": False,
+                "ips": [TS + ".3"]}]},
+           "links": _links(now)}
     boot = {"ts": now, "errors": {}, "absent": [], "kernel": "6.8.0-demo", "btime": int(now) - 5 * 86400,
             "analyze": {"parts": {"firmware": 5.1, "loader": 2.0, "kernel": 1.2, "initrd": 1.1, "userspace": 12.4}, "total": 21.8},
             "blame": [{"unit": u, "s": s} for u, s in (("docker.service", 6.2), ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
-            "failed": [], "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
+            "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
             "containers": [{"name": "shop-web-1", "started": int(now) - 5 * 86400 + 40, "restart": "unless-stopped"},
                            {"name": "cache-1", "started": int(now) - 3600, "restart": "no"}],
@@ -127,9 +164,15 @@ def _native(net, boot, os_name, now):
     gone = ("ufw", "docker_user", "iptables", "f2b", "drops")
     net = {k: v for k, v in net.items() if k not in gone}
     net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
+    if not win:
+        boot.pop("deps", None)  # macOS: launchd has no dependency graph to read
     for it in net["dbs"]["items"]:
         it["ext_source"] = "n/d"  # Docker Desktop: the containers' namespaces are inside a VM
-        it["external"] = []
+        it["external"], it["active"] = [], []  # nor who connects from the other containers (collector.db_items without conn_fn)
+    links = dict(net["links"], conn_source="host")  # only the host's sockets: container-to-container traffic is in the VM
+    links["containers"] = [dict(x, listen_src="image") for x in links["containers"]]
+    links["conns"] = [e for e in links["conns"] if not e["from"].startswith("ct:")]  # what containers open is NATed by the VM
+    net["links"] = links
     return net, dict(boot, os=os_name, ts=now)
 
 

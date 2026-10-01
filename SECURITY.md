@@ -12,7 +12,7 @@ nuc-console has two parts with different privilege:
 
 | Part | Runs as | Reads | Writes |
 |---|---|---|---|
-| `collector.py` | **root** (systemd, `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome`, `PrivateTmp`) | output of `docker`, `ss`, `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter` | `/run/nuc-console/*.json` (0644, atomic rename) |
+| `collector.py` | **root** (systemd, `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome`, `PrivateTmp`) | output of `docker`, `ss`, `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `systemctl`, `journalctl`, `nsenter` (`ss` inside each running container's network namespace, for the MAP; `[features] map = no` stops it), `/proc/<pid>/cgroup` of listening processes | `/run/nuc-console/*.json` (0644, atomic rename) |
 | `render.py` | unprivileged user `nuc-console` (`NoNewPrivileges`, `ProtectSystem=strict`) | `/proc`, `/sys`, the JSON files, `/var/lib/nuc-console/baseline.json` | the tty only |
 
 On **macOS** and **Windows** the split is the same:
@@ -37,7 +37,7 @@ Design rules you can audit in the code:
 
 Things to be aware of (by design):
 
-- The JSON state files are **world-readable** so the unprivileged renderer can read them. They contain your topology (ports, container names, IPs of clients seen on databases) but no secrets. Do not run this on a multi-user machine where local users must not see that.
+- The JSON state files are **world-readable** so the unprivileged renderer can read them. They contain your topology (ports, container names, which container or process talks to which, the IPs of clients seen connected and of the hosts your services connect to) but no secrets. Do not run this on a multi-user machine where local users must not see that.
 - **The monitor itself shows your topology** to anyone who can see the screen.
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
