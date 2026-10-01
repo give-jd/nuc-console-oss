@@ -1096,6 +1096,39 @@ def accept_baseline(if_missing=False, path=None, now=None):
     return 0
 
 
+TELEGRAM_DOWN_S, TELEGRAM_FAILING_S = 300, 600  # notify.py rewrites status.json every 30 s: older than 5 min = not running; 10 min of failed sends = say so
+TELEGRAM_TOKEN = re.compile(r"\d{6,}:[A-Za-z0-9_-]{20,}")  # a bot token must never reach the screen, whoever put it in a message
+
+
+def telegram_status(path=None):
+    """notify.py's status.json (counters and the last error, never a secret): a dict; None if missing or broken; False if this user may
+    not read it (on Windows only administrators and the service accounts can open the notifier's folder, where the token is)."""
+    try:
+        with open(path or os.path.join(nuc_config.NOTIFY_DIR, "status.json"), encoding="utf-8") as f:
+            d = json.load(f)
+    except PermissionError:
+        return False
+    except (OSError, ValueError, RecursionError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def telegram_state(now, path=None):
+    """The notifier as status.json shows it: ("ok" | "unreadable" | "unpaired" | "down" | "failing", how long and why, for "failing")."""
+    tg = telegram_status(path)
+    if tg is False:
+        return "unreadable", ""  # cannot look: neither a problem nor a proof that all is well
+    if tg and tg.get("paired") is False:
+        return "unpaired", ""  # its last word, even if it has stopped since (it exits at once when there is no chat)
+    ts, since = (tg or {}).get("ts"), (tg or {}).get("failing_since")
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or now - ts > TELEGRAM_DOWN_S:
+        return "down", ""
+    if not isinstance(since, bool) and isinstance(since, (int, float)) and now - since > TELEGRAM_FAILING_S:
+        err = TELEGRAM_TOKEN.sub("<token>", safe(tg.get("last_error") or ""))[:60].strip()
+        return "failing", fmt_ago(now - since) + (": " + err if err else "")
+    return "ok", ""
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -1202,6 +1235,14 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             lost = expose_unmatched(net, cont, boot) if ok else []
             if lost:
                 out.append((1, "[expose] " + ", ".join(f"'{safe(k)}'" for k in lost) + (" matches" if len(lost) == 1 else " match") + " no service", "expose-unmatched"))
+    if CFG["telegram"]["enabled"]:  # notify.py (docs/TELEGRAM.md): only then its status.json is read; switched off = nothing to say
+        state, why = telegram_state(now)
+        if state == "unpaired":
+            out.append((1, "Telegram notifications on, but not paired", "telegram-unpaired"))
+        elif state == "down":
+            out.append((1, "Telegram notifier not running", "telegram-failing"))
+        elif state == "failing":
+            out.append((1, f"Telegram notifications failing for {why}", "telegram-failing"))
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -1292,6 +1333,28 @@ OS_CATALOG = {
                      "identify it (sudo lsof -nP -iTCP -sTCP:LISTEN); if intended: sudo nuc-console-accept; if not, stop it"),
     },
 }
+CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when [telegram] enabled = yes
+    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
+                          "sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), then tap the link it prints and press Start"),
+    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
+                         "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; journalctl -u nuc-console-notify; "
+                         "sudo systemctl restart nuc-console-notify"),
+})
+OS_CATALOG["windows"].update({
+    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
+                          "nuc-console-telegram.cmd --setup (administrator prompt: the bot token from @BotFather, your @username), "
+                          "then tap the link it prints and press Start"),
+    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
+                         "nuc-console-telegram.cmd --status; nuc-console-telegram.cmd --test; log: %ProgramData%\\nuc-console\\logs\\notify.log; "
+                         "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
+})
+OS_CATALOG["darwin"].update({
+    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
+                          "sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), then tap the link it prints and press Start"),
+    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
+                         "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; log: /var/log/nuc-console/notify.log; "
+                         "restart: sudo launchctl kickstart -k system/com.nuc-console.notify"),
+})
 CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 if nuc_config.PORTABLE:
     CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}
@@ -1302,6 +1365,9 @@ if nuc_config.PORTABLE:
         "stale-containers": _again, "stale-net": _again,
         "net-sections": CMD["logs"] + "; the section name is in the message",
         "ufw-unreadable": "sudo ufw status verbose; log: " + CMD["logs"],
+        # the Telegram notifier is a service of an installed nuc-console: a portable run does not start it
+        "telegram-unpaired": "a portable run sends no Telegram message: install nuc-console (docs/TELEGRAM.md), or [telegram] enabled = no",
+        "telegram-failing": "a portable run sends no Telegram message: install nuc-console (docs/TELEGRAM.md), or [telegram] enabled = no",
     }.items()})
 
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- nuc-console Telegram notifier, as the unprivileged user _nuc-console. Always loaded by install-macos.sh; it exits 0 at once
+     (and stays idle) unless [telegram] enabled = yes in config.ini and the chat is paired. Outbound HTTPS to api.telegram.org
+     only: it never listens and never reads incoming messages. Its token and paired chat live in /var/lib/nuc-console-notify. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.nuc-console.notify</string>
+    <key>ProgramArguments</key>
+    <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/notify.py</string></array>
+    <key>UserName</key><string>_nuc-console</string>
+    <key>GroupName</key><string>_nuc-console</string>
+    <!-- 0077: whatever it creates is its own only (the token, the chat); status.json is opened up on purpose -->
+    <key>Umask</key><integer>63</integer>
+    <key>RunAtLoad</key><true/>
+    <!-- exit 0 = disabled or not paired: no restart loop (nuc-console-telegram setup or on starts it again) -->
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+    <key>ThrottleInterval</key><integer>30</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>StandardOutPath</key><string>/var/log/nuc-console/notify.log</string>
+    <key>StandardErrorPath</key><string>/var/log/nuc-console/notify.log</string>
+</dict>
+</plist>

@@ -824,7 +824,7 @@ class Installers(unittest.TestCase):
 
     def test_launchd_plists(self):
         pls = {}
-        for name in ("collector", "web", "display"):
+        for name in ("collector", "web", "display", "notify"):
             with open(os.path.join(ROOT, "launchd", f"com.nuc-console.{name}.plist"), "rb") as f:
                 pls[name] = plistlib.load(f)
             self.assertEqual(pls[name]["Label"], f"com.nuc-console.{name}")
@@ -832,6 +832,10 @@ class Installers(unittest.TestCase):
         self.assertEqual(pls["web"]["UserName"], "_nuc-console")                                    # never root
         self.assertEqual(pls["web"]["ProgramArguments"][-1], "--local")                             # 127.0.0.1 unless [web] says otherwise
         self.assertTrue(pls["display"]["AbandonProcessGroup"])                                      # the browser outlives its launcher
+        self.assertEqual(pls["notify"]["UserName"], "_nuc-console")                                 # the Telegram notifier is never root
+        self.assertEqual(pls["notify"]["ProgramArguments"][2], "@DEST@/notify.py")
+        self.assertEqual(pls["notify"]["KeepAlive"], {"SuccessfulExit": False})                     # exit 0 = idle (off or not paired): no loop
+        self.assertFalse({"Sockets", "inetdCompatibility", "WatchPaths", "QueueDirectories"} & set(pls["notify"]))  # outbound only
 
     def test_display_choice_in_both_installers(self):
         ps, mac = self.read("install-windows.ps1"), self.read("install-macos.sh")
@@ -853,6 +857,70 @@ class Installers(unittest.TestCase):
                "if ($e) { $e | ForEach-Object { $_.Message }; exit 1 }" % path)
         r = subprocess.run([ps, "-NoProfile", "-Command", cmd], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_notify_unit_is_unprivileged_and_outbound_only(self):
+        unit = {}
+        for line in self.read("systemd/nuc-console-notify.service").splitlines():
+            if "=" in line and not line.lstrip().startswith(("#", "[")):
+                k, _, v = line.partition("=")
+                unit[k.strip()] = v.strip()
+        self.assertEqual((unit["User"], unit["Group"]), ("nuc-console-notify", "nuc-console-notify"))   # not the web view's user
+        self.assertEqual(unit["UMask"], "0077")
+        self.assertEqual(unit["ExecStart"], "/usr/bin/python3 -B /opt/nuc-console/notify.py")
+        self.assertEqual((unit["Restart"], unit["RestartSec"]), ("on-failure", "30"))              # exit 0 (off / not paired) = idle
+        self.assertEqual((unit["StateDirectory"], unit["StateDirectoryMode"]), ("nuc-console-notify", "0711"))
+        self.assertEqual(set(unit["RestrictAddressFamilies"].split()), {"AF_INET", "AF_INET6", "AF_UNIX"})   # no AF_NETLINK, no AF_PACKET
+        self.assertEqual(unit["CapabilityBoundingSet"], "")
+        for k in ("NoNewPrivileges", "PrivateTmp", "ProtectHome", "PrivateDevices", "RestrictSUIDSGID"):
+            self.assertEqual(unit[k], "yes", k)
+        self.assertEqual(unit["ProtectSystem"], "strict")
+        self.assertTrue(unit["MemoryMax"])
+        src = self.read("systemd/nuc-console-notify.service")
+        self.assertNotIn("Listen", src)                                                             # no ListenStream & co: it never listens
+        self.assertFalse([f for f in os.listdir(os.path.join(ROOT, "systemd")) if f.endswith((".socket", ".path"))])
+
+    def test_linux_installer_installs_starts_and_uninstalls_the_notifier(self):
+        s = self.read("install.sh")
+        self.assertIn("install -m 0644 systemd/*.service /etc/systemd/system/", s)                 # the unit goes in with the others
+        self.assertIn("install -m 0755 bin/nuc-console-telegram /usr/local/bin/", s)
+        self.assertIn("useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify", s)
+        self.assertIn("install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify", s)
+        self.assertIn("systemctl enable nuc-console-notify.service", s)
+        self.assertRegex(s, r'if python3 "\$DEST/notify\.py" --enabled; then systemctl restart nuc-console-notify\.service\n'
+                            r'else systemctl stop nuc-console-notify\.service 2>/dev/null \|\| true; fi')
+        down = s[s.index('"--uninstall" ]'):s.index("exit 0")]                                       # the uninstall branch
+        self.assertRegex(down, r"for u in [^\n]*nuc-console-notify\.service; do\n\s+systemctl disable --now \"\$u\"")   # one by one
+        self.assertIn("/etc/systemd/system/nuc-console-notify.service", down)
+        self.assertIn("/usr/local/bin/nuc-console-telegram", down)
+        self.assertRegex(down, r"rm -rf /var/lib/nuc-console-notify\b")                            # the token must not outlive the install
+
+    def test_macos_installer_runs_the_notifier_as_the_service_account(self):
+        s = self.read("install-macos.sh")
+        loops = re.findall(r"for label in ([^;]+); do launchctl bootout", s)
+        self.assertEqual(len(loops), 2)                                                              # uninstall and install
+        for loop in loops:
+            self.assertIn("com.nuc-console.notify", loop.split())
+        self.assertIn('install -d -m 0711 -o "$SVC_USER" -g "$SVC_USER" "$NOTIFY_LIB"', s)
+        self.assertIn('load system "$LD/com.nuc-console.notify.plist"', s)
+        self.assertRegex(s, r'rm -rf "\$DEST" "\$NOTIFY_LIB"')
+        self.assertIn("NOTIFY_LIB=/var/lib/nuc-console-notify", s)
+        self.assertIn("nuc-console-telegram", s)
+        # the account is created by one function, called by the web view and by the notifier (which is always installed)
+        self.assertEqual(s.count('dscl . -create "/Users/$SVC_USER" UniqueID'), 1)
+        self.assertGreaterEqual(s.count("ensure_service_user"), 3)
+
+    def test_windows_installer_registers_the_notifier_with_a_private_folder(self):
+        s = self.read("install-windows.ps1")
+        self.assertIn("Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log'", s)          # NETWORK SERVICE: not the web view's account
+        acl = next(l for l in s.splitlines() if "icacls.exe" in l and '"$Data\\notify"' in l and "/inheritance:r" in l)
+        self.assertIn("'*S-1-5-20:(OI)(CI)M'", acl)                                                 # the notifier writes status.json there
+        self.assertIn("'*S-1-5-19:(OI)(CI)RX'", acl)                                                # the web view reads it
+        private = next(l for l in s.splitlines() if "icacls.exe" in l and '"$Data\\notify\\private"' in l)
+        self.assertEqual(sorted(re.findall(r"\*(S-[0-9-]+):", private)), ["S-1-5-18", "S-1-5-20", "S-1-5-32-544"])  # SYSTEM, NETWORK SERVICE, Admins
+        self.assertIn("/inheritance:r", private)                                                    # nobody else, Users and the web view included
+        down = s[s.index("if ($Uninstall) {"):s.index("# ---- 1. data folder")]
+        self.assertLess(down.index('Remove-Item -Recurse -Force "$Data\\notify"'), down.index("Remove-Item -Recurse -Force $Dest"))  # the token first
+        self.assertIn("bin\\*.cmd", s)                                                              # nuc-console-telegram.cmd rides along
 
     def test_windows_wrappers_clear_the_redirect_variables(self):
         s = self.read("bin/nuc-console-accept.cmd")

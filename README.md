@@ -42,6 +42,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
+| 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
@@ -187,6 +188,9 @@ gpu = auto            # auto | no: with no, `nuc-console-ai serve` never puts th
 
 [web]                 # optional read-only web view, see docs/WEB.md
 enabled = no
+
+[telegram]            # optional alerts on your phone, see docs/TELEGRAM.md
+enabled = no          # set up with: sudo nuc-console-telegram --setup
 ```
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
@@ -251,6 +255,12 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, binds to loopback unless you give it a token; no JavaScript except the small, hash-pinned script that lets you drag and zoom the MAP's graph view.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
+
+## Telegram alerts (optional)
+
+Want the problems on your phone? Create a bot with @BotFather (free), run `sudo nuc-console-telegram --setup` (token and your `@username`), tap the link it prints and press Start: new and resolved ATTENTION problems then arrive as messages (titles only unless `detail = full`).
+It only sends: no listener, no webhook, the service never reads messages and has no commands; the token stays in its own 0600 folder, never in `config.ini`. Off by default.
+Set-up, what leaves the machine, troubleshooting: **[docs/TELEGRAM.md](docs/TELEGRAM.md)**.
 
 ## Security
 

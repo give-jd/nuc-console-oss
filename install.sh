@@ -23,10 +23,14 @@ TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
+    for u in nuc-console.service nuc-console-collector.service nuc-console-web.service nuc-console-notify.service; do
+        systemctl disable --now "$u" 2>/dev/null || true  # one by one: a unit an older version did not have must not stop the others
+    done
     # the AI model server exists only after `nuc-console-ai serve --install-service`; it runs code from $DEST, so it goes too
     systemctl disable --now nuc-console-ai.service 2>/dev/null || true
     rm -f /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service /etc/systemd/system/nuc-console-ai.service
+    rm -f /usr/local/bin/nuc-console-telegram /etc/systemd/system/nuc-console-notify.service
+    rm -rf /var/lib/nuc-console-notify  # the Telegram bot token is in there: it must not outlive the installation
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai
     systemctl daemon-reload
@@ -43,6 +47,8 @@ fi
 [ "$(tty 2>/dev/null)" != "/dev/tty$VT" ] || { echo "do not run from tty$VT: use SSH or another terminal" >&2; exit 1; }
 
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
+# the Telegram notifier has a user of its own: the web view (user nuc-console, maybe reachable on the LAN) cannot read the bot token
+id nuc-console-notify >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify
 install -d "$DEST"
 rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
 install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
@@ -50,6 +56,7 @@ install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept bin/nuc-console-update /usr/local/sbin/
 install -m 0755 bin/nuc-console-ai /usr/local/sbin/  # the optional local AI model: models, setup, serve (docs/AI.md); nothing runs until you ask
 install -m 0755 bin/nuc-console-problems /usr/local/bin/
+install -m 0755 bin/nuc-console-telegram /usr/local/bin/
 install -m 0755 bin/nuc-console-ask /usr/local/bin/  # questions to that model (read-only)
 install -d "$UNITD"
 {
@@ -61,6 +68,7 @@ install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
 install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
 install -d /var/lib/nuc-console
+install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service
 # restart, not --now: on an upgrade the service is already running and would keep the old code
@@ -77,5 +85,9 @@ python3 "$DEST/render.py" --accept --if-missing || echo "warning: baseline not c
 # optional read-only web view: only if [web] enabled = yes in config.ini (never opens a port otherwise)
 if python3 "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
 else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
+# optional Telegram notifier (outbound HTTPS only): always installed, it idles (exit 0) until [telegram] enabled = yes and paired
+systemctl enable nuc-console-notify.service
+if python3 "$DEST/notify.py" --enabled; then systemctl restart nuc-console-notify.service
+else systemctl stop nuc-console-notify.service 2>/dev/null || true; fi
 systemctl restart nuc-console.service
 echo "ok: dashboard on tty$VT${TZ_VAL:+ (time zone $TZ_VAL)}. Logs: journalctl -u nuc-console -u nuc-console-collector"

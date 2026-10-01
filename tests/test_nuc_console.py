@@ -1140,7 +1140,7 @@ class Config(unittest.TestCase):
             doc = f.read()
         keys = list(nuc_config.FEATURES) + ["mode", "sections", "columns", "rows", "spacing", "details", "overview_seconds",
                                             "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds",
-                                            "browser", "zoom"]
+                                            "browser", "zoom", "username", "detail", "resolved"]
         self.assertEqual([k for k in keys if "`%s`" % k not in doc], [])
         for name in nuc_config.SECTIONS:
             self.assertIn(name, doc)
@@ -1836,6 +1836,107 @@ class ChangedMessage(unittest.TestCase):
         self.assertLessEqual(len(out), 2 * 21 + 3)
         old, new = out.split(" → ")
         self.assertNotEqual(old, new)
+
+
+class TelegramProblems(unittest.TestCase):
+    """telegram-unpaired / telegram-failing come from the notifier's status.json (docs/TELEGRAM.md) and only when [telegram] is on."""
+
+    def setUp(self):
+        import tempfile
+        self.saved = dict(render.CFG["telegram"]), nuc_config.NOTIFY_DIR
+        self.tmp = tempfile.TemporaryDirectory()
+        nuc_config.NOTIFY_DIR = self.tmp.name
+        render.CFG["telegram"]["enabled"] = True
+
+    def tearDown(self):
+        render.CFG["telegram"].clear()
+        render.CFG["telegram"].update(self.saved[0])
+        nuc_config.NOTIFY_DIR = self.saved[1]
+        self.tmp.cleanup()
+
+    def status(self, **kw):
+        d = {"ts": time.time(), "enabled": True, "paired": True, "username": "someone", "last_sent_ts": None, "last_error": None,
+             "failing_since": None}
+        d.update(kw)
+        with open(os.path.join(self.tmp.name, "status.json"), "w") as f:
+            json.dump(d, f)
+
+    def found(self):
+        return [(sev, t, pid) for sev, t, pid in render.problems_raw(NET, CONT) if pid.startswith("telegram-")]
+
+    def test_nothing_is_read_or_said_when_switched_off(self):
+        render.CFG["telegram"]["enabled"] = False
+        orig = render.telegram_status
+        render.telegram_status = lambda *a: self.fail("status.json read although [telegram] is off")
+        try:
+            self.assertEqual(self.found(), [])           # no status.json at all
+        finally:
+            render.telegram_status = orig
+        self.status(paired=False, ts=time.time() - 9999, failing_since=time.time() - 9999)
+        self.assertEqual(self.found(), [])
+
+    def test_healthy_notifier_says_nothing(self):
+        self.status(last_sent_ts=time.time() - 5)
+        self.assertEqual(self.found(), [])
+        self.status(failing_since=time.time() - 120, last_error="HTTP 502")      # a blip of two minutes is not worth a line
+        self.assertEqual(self.found(), [])
+
+    def test_enabled_but_not_paired(self):
+        self.status(paired=False)
+        self.assertEqual(self.found(), [(1, "Telegram notifications on, but not paired", "telegram-unpaired")])
+        self.status(paired=False, ts=time.time() - 9999)   # it exits at once when there is no chat: its last word still counts
+        self.assertEqual([pid for _, _, pid in self.found()], ["telegram-unpaired"])
+
+    def test_not_running(self):
+        self.assertEqual(self.found(), [(1, "Telegram notifier not running", "telegram-failing")])    # no status.json
+        self.status(ts=time.time() - 400)
+        self.assertEqual(self.found(), [(1, "Telegram notifier not running", "telegram-failing")])
+        self.status(ts=time.time() - 200)                                                           # 30 s cycle: 200 s is still alive
+        self.assertEqual(self.found(), [])
+        for junk in ("[1, 2]", "not json", "", '{"ts": true}', '{"ts": "now"}', '{"paired": true}'):
+            with open(os.path.join(self.tmp.name, "status.json"), "w") as f:
+                f.write(junk)
+            self.assertEqual([pid for _, _, pid in self.found()], ["telegram-failing"], junk)
+
+    def test_failing_for_ten_minutes_says_how_long_and_why(self):
+        self.status(failing_since=time.time() - 12 * 60, last_error="HTTP 401 Unauthorized")
+        self.assertEqual(self.found(), [(1, "Telegram notifications failing for 12 min: HTTP 401 Unauthorized", "telegram-failing")])
+        self.status(failing_since=time.time() - 3 * 3600, last_error=None)
+        self.assertEqual(self.found(), [(1, "Telegram notifications failing for 3 h", "telegram-failing")])
+
+    def test_the_error_is_short_clean_and_never_a_token(self):
+        token = "123456789:" + "AbC_dE-" * 6
+        self.status(failing_since=time.time() - 700, last_error="\x1b[31mred\nHTTP 404 for https://api.telegram.org/bot" + token + "/sendMessage " + "x" * 200)
+        (_, text, pid), = self.found()
+        self.assertEqual(pid, "telegram-failing")
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("\n", text)
+        self.assertNotIn(token, text)
+        self.assertNotIn("AbC_dE", text)
+        self.assertLess(len(text), 130)
+
+    def test_a_folder_this_user_cannot_open_is_neither_ok_nor_a_problem(self):
+        from unittest import mock
+        with mock.patch("builtins.open", side_effect=PermissionError(13, "denied")):
+            self.assertEqual(render.telegram_state(time.time())[0], "unreadable")
+        self.assertEqual(render.telegram_state(time.time())[0], "down")                             # missing is not the same thing
+
+    def test_catalog_has_both_ids_for_every_os_and_the_fingerprint_ignores_the_minutes(self):
+        for pid in ("telegram-unpaired", "telegram-failing"):
+            self.assertIn(pid, render.CATALOG)
+            self.assertIn("nuc-console-telegram", render.CATALOG[pid][2])
+            for os_name in ("windows", "darwin"):
+                self.assertIn("nuc-console-telegram", render.OS_CATALOG[os_name][pid][2])
+        self.assertIn("nuc-console-telegram.cmd --setup", render.OS_CATALOG["windows"]["telegram-unpaired"][2])
+        self.assertNotIn("telegram-failing", render.COUNT_MATTERS)
+        self.assertEqual(render.fingerprint(1, "Telegram notifications failing for 12 min: x", "telegram-failing"),
+                         render.fingerprint(1, "Telegram notifications failing for 45 min: x", "telegram-failing"))
+
+    def test_shipped_config_leaves_it_off_and_documents_it(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")
+        self.assertFalse(nuc_config.load(path)["telegram"]["enabled"])
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("[telegram]", f.read())
 
 
 class NoClipping(unittest.TestCase):

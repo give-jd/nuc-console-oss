@@ -10,7 +10,8 @@
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
 #   3. starts the collector as a LaunchDaemon (root) and the read-only web view as user _nuc-console, on 127.0.0.1 only
-#      (as configured in [web] if enabled there): it shows the dashboard to this Mac's browser;
+#      (as configured in [web] if enabled there): it shows the dashboard to this Mac's browser; and the optional Telegram
+#      notifier (outbound HTTPS to api.telegram.org only, idle until switched on: docs/TELEGRAM.md) as the same user;
 #   4. a LaunchAgent opens the dashboard at every desktop login, and now: [display] mode = browser (default) in a normal
 #      window of your browser; fullscreen: full screen (a Chrome/Edge/Brave window if installed, else Safari: press
 #      Ctrl+Cmd+F once; Cmd+Q closes it); none: never. /Applications/nuc-console.webloc opens it again any time.
@@ -23,6 +24,7 @@ cd "$(dirname "$0")"
 DEST=/opt/nuc-console
 ETC=/etc/nuc-console
 LIB=/var/lib/nuc-console
+NOTIFY_LIB=/var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
 LOG=/var/log/nuc-console
 LD=/Library/LaunchDaemons
 LA=/Library/LaunchAgents
@@ -35,13 +37,13 @@ CONSOLE_UID="$(stat -f %u /dev/console)"  # the user at the screen (0 at the log
 
 if [ "${1:-}" = "--uninstall" ]; then
     # com.nuc-console.ai: the local AI model server, there only after `nuc-console-ai serve --install-service`
-    for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.ai; do launchctl bootout "system/$label" 2>/dev/null || true; done
+    for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify com.nuc-console.ai; do launchctl bootout "system/$label" 2>/dev/null || true; done
     [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
     rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /etc/newsyslog.d/nuc-console-ai.conf /Applications/nuc-console.webloc
-    for link in /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai; do
+    for link in /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask /usr/local/bin/nuc-console-telegram /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai; do
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
-    rm -rf "$DEST"
+    rm -rf "$DEST" "$NOTIFY_LIB"  # the Telegram bot token is in the notifier's folder: it must not outlive the installation
     echo "removed ($ETC, $LIB, $LOG, the download cache $CACHE and the user $SVC_USER are left in place; so are the AI runtime and models in \"/Library/Application Support/nuc-console/ai\": delete that folder to free the disk)"
     exit 0
 fi
@@ -119,17 +121,35 @@ load() {  # right after a bootout launchd may still be unloading the job: retry 
     for _ in 1 2 3 4 5; do launchctl bootstrap "$1" "$2" 2>/dev/null && return 0; sleep 1; done
     launchctl bootstrap "$1" "$2"
 }
-for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout "system/$label" 2>/dev/null || true; done
+ensure_service_user() {  # the web view and the Telegram notifier run as this account, never as root
+    if ! dscl . -read "/Users/$SVC_USER" >/dev/null 2>&1; then  # a hidden service account, like Apple's _www
+        id=""
+        for i in $(seq 400 499); do
+            if [ -z "$(dscl . -search /Users UniqueID "$i")" ] && [ -z "$(dscl . -search /Groups PrimaryGroupID "$i")" ]; then id=$i; break; fi
+        done
+        [ -n "$id" ] || { echo "no free id for $SVC_USER" >&2; exit 1; }
+        dscl . -create "/Groups/$SVC_USER" PrimaryGroupID "$id"
+        dscl . -create "/Groups/$SVC_USER" RealName "nuc-console web view"
+        dscl . -create "/Users/$SVC_USER" UniqueID "$id"
+        dscl . -create "/Users/$SVC_USER" PrimaryGroupID "$id"
+        dscl . -create "/Users/$SVC_USER" UserShell /usr/bin/false
+        dscl . -create "/Users/$SVC_USER" NFSHomeDirectory /var/empty
+        dscl . -create "/Users/$SVC_USER" RealName "nuc-console web view"
+        dscl . -create "/Users/$SVC_USER" IsHidden 1
+        dscl . -create "/Users/$SVC_USER" Password '*'
+    fi
+}
+for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify; do launchctl bootout "system/$label" 2>/dev/null || true; done
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
 rm -f "$DEST"/*.py
 install -m 0644 src/*.py "$DEST/"
-for f in nuc-console-accept nuc-console-ai nuc-console-problems nuc-console-ask nuc-console-update; do
+for f in nuc-console-accept nuc-console-ai nuc-console-problems nuc-console-ask nuc-console-update nuc-console-telegram; do
     sed -e "s|/usr/bin/python3|$PY|g" -e "s|/opt/nuc-console/|$DEST/|g" "bin/$f" > "$DEST/bin/$f"
     chmod 0755 "$DEST/bin/$f"
 done
 # commands on the PATH, but only into folders root owns (on Intel Macs Homebrew makes /usr/local/bin a user's folder:
 # a link there could be swapped for anything, then run with sudo)
-for pair in "bin:nuc-console-problems" "bin:nuc-console-ask" "sbin:nuc-console-accept" "sbin:nuc-console-update" "sbin:nuc-console-ai"; do
+for pair in "bin:nuc-console-problems" "bin:nuc-console-ask" "bin:nuc-console-telegram" "sbin:nuc-console-accept" "sbin:nuc-console-update" "sbin:nuc-console-ai"; do
     dir="/usr/local/${pair%%:*}" cmd="${pair#*:}"
     [ -d "$dir" ] || { [ "$(stat -f %u /usr/local 2>/dev/null || echo 1)" = 0 ] && install -d -m 0755 "$dir"; } || true
     if [ -d "$dir" ] && [ "$(stat -f %u "$dir")" = 0 ]; then ln -sf "$DEST/bin/$cmd" "$dir/$cmd"
@@ -156,22 +176,7 @@ load system "$LD/com.nuc-console.collector.plist"
 WEB=no
 if "$PY" -B "$DEST/web.py" --enabled || [ "$MODE" != none ]; then WEB=yes; fi
 if [ "$WEB" = yes ]; then
-    if ! dscl . -read "/Users/$SVC_USER" >/dev/null 2>&1; then  # a hidden service account, like Apple's _www
-        id=""
-        for i in $(seq 400 499); do
-            if [ -z "$(dscl . -search /Users UniqueID "$i")" ] && [ -z "$(dscl . -search /Groups PrimaryGroupID "$i")" ]; then id=$i; break; fi
-        done
-        [ -n "$id" ] || { echo "no free id for $SVC_USER" >&2; exit 1; }
-        dscl . -create "/Groups/$SVC_USER" PrimaryGroupID "$id"
-        dscl . -create "/Groups/$SVC_USER" RealName "nuc-console web view"
-        dscl . -create "/Users/$SVC_USER" UniqueID "$id"
-        dscl . -create "/Users/$SVC_USER" PrimaryGroupID "$id"
-        dscl . -create "/Users/$SVC_USER" UserShell /usr/bin/false
-        dscl . -create "/Users/$SVC_USER" NFSHomeDirectory /var/empty
-        dscl . -create "/Users/$SVC_USER" RealName "nuc-console web view"
-        dscl . -create "/Users/$SVC_USER" IsHidden 1
-        dscl . -create "/Users/$SVC_USER" Password '*'
-    fi
+    ensure_service_user
     touch "$LOG/web.log" && chown "$SVC_USER:$SVC_USER" "$LOG/web.log"
     echo "$LOG/web.log  $SVC_USER:$SVC_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
     fill launchd/com.nuc-console.web.plist > "$LD/com.nuc-console.web.plist"
@@ -184,6 +189,15 @@ if [ "$WEB" = yes ]; then
 else
     rm -f "$LD/com.nuc-console.web.plist" /Applications/nuc-console.webloc
 fi
+# the Telegram notifier, as the same account: always loaded, it exits 0 at once (and stays idle) unless [telegram] enabled = yes and
+# the chat is paired; outbound HTTPS to api.telegram.org only. Its folder holds the bot token: nobody else can list it (0711)
+ensure_service_user
+install -d -m 0711 -o "$SVC_USER" -g "$SVC_USER" "$NOTIFY_LIB"
+touch "$LOG/notify.log" && chown "$SVC_USER:$SVC_USER" "$LOG/notify.log"
+echo "$LOG/notify.log  $SVC_USER:$SVC_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
+fill launchd/com.nuc-console.notify.plist > "$LD/com.nuc-console.notify.plist"
+chown root:wheel "$LD/com.nuc-console.notify.plist" && chmod 0644 "$LD/com.nuc-console.notify.plist"
+load system "$LD/com.nuc-console.notify.plist"
 
 # ---- 4. first snapshot, baseline, dashboard ---------------------------------------------------------------------------
 # wait for a net.json written AFTER the collector start: an older one would be stale

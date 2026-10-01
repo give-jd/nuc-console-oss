@@ -18,7 +18,8 @@
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
        and the read-only web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser;
        at every logon the dashboard opens: in a normal browser window ([display] mode = browser, the default) or full screen
-       (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen);
+       (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen); and the optional Telegram notifier (LOCAL SERVICE,
+       outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md);
     4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
        %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept and, for the optional
        local AI model, nuc-console-ai and nuc-console-ask: nothing is downloaded or started until you run them);
@@ -27,6 +28,7 @@
 .PARAMETER Uninstall
   Removes the tasks (the AI model server's too, if you installed it), the program folder and the PATH entry.
   %ProgramData%\nuc-console (config, baseline, and the AI runtime and models in its ai\ folder) is left in place.
+  The Telegram notifier's folder (%ProgramData%\nuc-console\notify, with the bot token) is deleted.
 
 .PARAMETER Display
   browser (default): at every logon the dashboard opens in a normal window of your browser. fullscreen (or kiosk): it opens
@@ -139,6 +141,7 @@ if (-not (Test-Admin)) { throw 'administrator rights required: right-click insta
 
 if ($Uninstall) {
     Remove-Tasks
+    if (Test-Path "$Data\notify") { Remove-Item -Recurse -Force "$Data\notify" }  # the Telegram bot token is in there: first
     try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\').DeleteFolder('nuc-console', 0) } catch { }
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
@@ -154,6 +157,16 @@ foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs", $Cache)) { New-I
 & icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
 & icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+# the Telegram notifier runs as NETWORK SERVICE, not as the web view's LOCAL SERVICE (the web view may be reachable on the LAN):
+# notify\ holds status.json only (no secret: readable by the dashboard and its users); notify\private\ holds the bot token
+# and the paired chat: SYSTEM, Administrators and NETWORK SERVICE only
+& icacls.exe $Data /grant '*S-1-5-20:(OI)(CI)RX' | Out-Null  # it reads config.ini and the state, like the web view
+& icacls.exe "$Data\logs" /grant '*S-1-5-20:(OI)(CI)M' | Out-Null
+New-Item -ItemType Directory -Force -Path "$Data\notify", "$Data\notify\private" | Out-Null
+& icacls.exe "$Data\notify" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify" }
+& icacls.exe "$Data\notify\private" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\private" }
 
 # ---- 2. private Python ---------------------------------------------------------------------------------------------------
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -221,6 +234,11 @@ if ($web) {
     Start-ScheduledTask -TaskPath $TaskPath -TaskName 'web'
     Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
 } elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
+
+# the Telegram notifier: always registered; it exits at once (and stays idle) unless [telegram] enabled = yes and the chat is paired.
+# Outbound HTTPS to api.telegram.org only, as LOCAL SERVICE; its folder (token, chat) is the one locked above
+Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log' 'nuc-console Telegram notifier: outbound only (NETWORK SERVICE)'
+Start-ScheduledTask -TaskPath $TaskPath -TaskName 'notify'
 
 if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a full-screen one (--kiosk)
     $arg = @{ browser = '--open'; fullscreen = '--kiosk' }[$mode]
