@@ -20,7 +20,10 @@ def raw(srv, path="/", headers=()):
     c.sendall((f"GET {path} HTTP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers) + "\r\n").encode())
     data = b""
     while True:
-        chunk = c.recv(4096)
+        try:
+            chunk = c.recv(4096)
+        except ConnectionError:  # Windows reports a connection closed by the server as aborted/reset
+            break
         if not chunk:
             break
         data += chunk
@@ -147,14 +150,15 @@ class Safety(unittest.TestCase):
                     web.read_token(f.name)
             finally:
                 os.unlink(f.name)
-        with tempfile.NamedTemporaryFile("w", delete=False) as f:
-            f.write(TOKEN + "\n")
-        os.chmod(f.name, 0o644)
-        try:
-            with self.assertRaises(ValueError):          # group/other readable
-                web.read_token(f.name)
-        finally:
-            os.unlink(f.name)
+        if os.name == "posix":  # mode bits: Windows protects the token with the folder ACL (install-windows.ps1)
+            with tempfile.NamedTemporaryFile("w", delete=False) as f:
+                f.write(TOKEN + "\n")
+            os.chmod(f.name, 0o644)
+            try:
+                with self.assertRaises(ValueError):          # group/other readable
+                    web.read_token(f.name)
+            finally:
+                os.unlink(f.name)
         with tempfile.NamedTemporaryFile("w", delete=False) as f:
             f.write("short\n")
         try:

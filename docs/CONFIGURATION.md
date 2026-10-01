@@ -4,9 +4,9 @@ Everything is optional: a missing file, a missing key or a broken value means th
 
 | | |
 |---|---|
-| File | `/etc/nuc-console/config.ini` (created on first install, **never overwritten**) |
-| Reference copy | `/etc/nuc-console/config.ini.dist`, refreshed on every install: `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied it |
-| Apply | `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web` |
+| File | Linux and macOS: `/etc/nuc-console/config.ini` · Windows: `%ProgramData%\nuc-console\config.ini` (created on first install, **never overwritten**; UTF-8) |
+| Reference copy | `config.ini.dist` next to it, refreshed on every install: `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied it |
+| Apply | Linux: `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web` · macOS: run `sudo ./install.sh` again · Windows: run `install-windows.cmd` again (the installers restart everything and keep `config.ini`) |
 | Override | `NUC_CONSOLE_CONFIG=<path>` (config file), `NUC_CONSOLE_MODE` (`overview`/`rotate`) |
 
 ## `[features]` — switch sections on or off
@@ -19,12 +19,12 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `databases` | DATABASE: ports and who connects | `docker`, `ss`, `nsenter` |
 | `exposure` | EXPOSURE, port alarms, Funnel (also the "DB open on LAN" alarm) | `ss`, `tailscale serve` |
 | `webapps` | WEB APPS | — |
-| `firewall` | FIREWALL: ufw, iptables, `DOCKER-USER`, drops | `ufw`, `iptables`, `journalctl` |
+| `firewall` | FIREWALL: ufw, iptables, `DOCKER-USER`, drops (macOS: Application Firewall and pf; Windows: Windows Firewall) | `ufw`, `iptables`, `journalctl` (macOS: `socketfilterfw`, `pfctl`; Windows: PowerShell `HNetCfg.FwPolicy2`) |
 | `fail2ban` | jails and bans (drawn inside FIREWALL) | `fail2ban-client` |
 | `tailscale` | TAILSCALE peers | `tailscale` |
-| `boot` | BOOT: time, slowest units, failed units, journal | `systemd-analyze`, `journalctl` |
+| `boot` | BOOT: time, slowest units, failed units, journal (Windows: boot time, failed services, System event log; macOS: launch daemons) | `systemd-analyze`, `journalctl` (Windows: PowerShell; macOS: `launchctl`) |
 | `docker_disk` | DOCKER · DISK | `docker system df` |
-| `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels | — (reads `/proc`, `/sys`) |
+| `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels (thermal: Linux only) | — (reads `/proc`, `/sys`; macOS/Windows: system calls) |
 
 ## `[dashboard]` — layout
 
@@ -39,6 +39,19 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `rotate_seconds` | `15` | How long each page stays in `rotate` mode and each Details page (3-600) |
 
 Sections fill the columns in the given order and never back-fill, so a line more or less in one block does not move the others. Per-core CPU bars are always one per core, except on tiny consoles (the last two fitting levels).
+
+## `[display]` — the monitor on macOS and Windows
+
+macOS and Windows have no text console to take over: at every login the dashboard opens full screen in a browser
+(`render.py --kiosk`). It reads a local HTML page rewritten every 2 s: no network port is opened. Linux ignores this section.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `browser` | `auto` | `auto`: Microsoft Edge, then Google Chrome (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). `none`: only write the page (`%LOCALAPPDATA%\nuc-console\display.html`, `~/Library/Application Support/nuc-console/display.html`). Or the full path of a Chromium-based browser or Firefox |
+
+The grid is `[dashboard] columns` × `rows` when set; otherwise 64 rows and as many columns as the monitor's shape allows
+(16:9 → 237 columns, the 3-column layout). The page scales its font to fill the screen. The browser runs with a profile of its own
+(never your tabs or logins); closing it (Alt+F4, Cmd+Q) ends the dashboard until the next login.
 
 ## `[webapps]` — the web apps you expect
 
@@ -57,12 +70,14 @@ admin-console = 9443
 | `enabled` | `no` | The only network listener of the project. Details and threat model: [WEB.md](WEB.md) |
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
-| `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console`. Never put the token in `config.ini` (world-readable) |
+| `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | `5` | Page auto-refresh |
 
 ## Commands
+
+Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept`; they are on the system PATH after the install.
 
 | Command | |
 |---|---|
@@ -70,6 +85,8 @@ admin-console = 9443
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
-| `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`) |
+| `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
+| `render.py --kiosk [--no-browser] [--html FILE]` | the full-screen browser dashboard (macOS/Windows; also works on a Linux desktop) |
 
-Install-time options (environment of `install.sh`): `NUC_CONSOLE_VT` (virtual terminal, default 1) and `NUC_CONSOLE_TZ` (time zone); a re-install keeps them.
+Install-time options: Linux `install.sh` reads `NUC_CONSOLE_VT` (virtual terminal, default 1) and `NUC_CONSOLE_TZ` (time zone), and a re-install keeps them.
+macOS: `NUC_CONSOLE_DISPLAY=no` (no dashboard at login). Windows: `install-windows.cmd -NoDisplay`, `-PythonZip <file>` (offline), `-Uninstall`.

@@ -74,3 +74,11 @@ or a privileged helper — a large jump in risk for a file you change a few time
 
 The page shows your topology (ports, container names, client IPs seen on databases), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
 With a token, anyone holding the token can. It cannot change anything on the machine. Rendering is cached for half the refresh interval per layout size.
+
+## macOS and Windows
+
+The web view is the same program. Set `[web] enabled = yes` in `config.ini` and run the installer again: it starts it as the
+hidden user `_nuc-console` (macOS LaunchDaemon) or as LOCAL SERVICE (Windows scheduled task `\nuc-console\web`). The full-screen
+dashboard on those systems does **not** use it: it reads a local file, so no port is opened unless you enable the web view.
+Windows has no mode bits: keep `token_file` inside `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write
+(and limit who can read the file with an ACL if other people use the machine).

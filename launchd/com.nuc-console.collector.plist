@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- nuc-console collector (root): ports, firewall, containers, launch daemons. Installed by install-macos.sh, which fills @PYTHON@ and @DEST@. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.nuc-console.collector</string>
+    <key>ProgramArguments</key>
+    <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/collector.py</string></array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>5</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>StandardOutPath</key><string>/var/log/nuc-console/collector.log</string>
+    <key>StandardErrorPath</key><string>/var/log/nuc-console/collector.log</string>
+</dict>
+</plist>

@@ -94,6 +94,7 @@ class FakeDocker:
         return self.r()
 
 
+@unittest.skipIf(sys.platform == "win32", "scripts/ are Linux/macOS helpers (POSIX paths and permissions)")
 class Rebind(unittest.TestCase):
     def run_main(self, **kw):
         d = tempfile.mkdtemp()
