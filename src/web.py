@@ -27,7 +27,7 @@ import graphjs
 import graphlayout
 import nuc_config
 import render
-from htmlview import CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
+from htmlview import AI_CSS, CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
@@ -52,6 +52,7 @@ LEVEL_CLASS = {"err": "r", "warn": "y", "ok": "g"}
 HEALTH_SEL_MAX = 200  # characters of a finding id taken from a URL (an id is "<rule>:<subject>", the subject is capped at 64)
 HEALTH_COLS = 140     # the health page's default width in columns: wider than that scrolls sideways on a laptop (cols=200 asks for the 3-column layout)
 PILL_CLASS = {"err": "r", "warn": "y", "info": "d"}  # htmlview.HEALTH_CSS
+AI_SEL_MAX = render.AI_ID_MAX + 1  # characters of a model id taken from a URL: one more than an id has, so that a longer text never equals one
 # the MAP's graph view (?view=map&as=graph): the same graph as circles and lines
 GRAPH_NODES = 400    # nodes drawn on one graph page: beyond, the most relevant ones, and a note says how to see the others
 GZOOMS = (50, 67, 80, 100, 125, 150, 200, 250, 300)  # z=: the drawing's size in % of the window (no script needed)
@@ -204,13 +205,14 @@ def view_params(q):
     view=cpu: the CPU screen: sort=mem|time|pid|user (default cpu), sel= the pid whose details are shown (only digits; dropped when
     no such process).
     view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
-    report does not have), pause=1 no reload."""
+    report does not have), pause=1 no reload.
+    view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai") else ""
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
-        one("sel")[:HEALTH_SEL_MAX] if view == "health" else \
+        one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
         str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
     return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
             "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
@@ -320,6 +322,11 @@ class Server(http.server.ThreadingHTTPServer):
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
             return self.cached(key, r / 2, lambda: self.health_page(here, days, sel, pause, zoom, r))
+        if view == "ai":  # the selected model is checked here too: the cache key holds only ids the catalog has
+            ids = {m["id"] for m in render.ai_rows(render.ai_data()["cat"])} if render.CFG["features"].get("ai", True) else set()  # one catalog per AI_TTL
+            sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
+            key = ("ai", zoom, r, sel, pause) + tuple(here.items())
+            return self.cached(key, r / 2, lambda: self.ai_page(here, sel, pause, zoom, r))
         return self.cached((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda: self.dashboard(here, zoom, r))
 
     def grid(self, here, zoom):
@@ -349,7 +356,7 @@ class Server(http.server.ThreadingHTTPServer):
             body = "render error (see the service log)"
         link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
         views = [link("compact", cols=100), link("wide", cols=200), link("overview", full=False) if full else link("full details", full=True)]
-        for name in ("map", "cpu", "health"):
+        for name in ("map", "cpu", "health", "ai"):
             if render.CFG["features"].get(name, True):
                 views.append(f'<a href="{html.escape(page_url(dict({"view": name}, **here)))}">{name}</a>')
         page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -527,15 +534,100 @@ class Server(http.server.ThreadingHTTPServer):
             bar.append(html.escape(render.KIOSK_HINT))
         return doc(body, bar, refresh=not pause)
 
+    def ai_page(self, here, sel, pause, zoom, r):
+        """The AI page: what this machine can run and which model to choose. The hardware and the status are the console's lines; the models are
+        a table of links (sel=<id> shows the details and the commands beside or under it). Read-only like every page: the commands are
+        shown, never run. The URL holds the whole view, so the reload keeps it."""
+        def doc(body, foot, refresh=True):
+            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
+                    + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
+                    + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
+        dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
+        if not render.CFG["features"].get("ai", True):
+            return doc("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", [dash, "read-only"], refresh=False)
+        ahere = dict({"view": "ai", "sel": sel, "pause": pause}, **here)
+        cols, rows = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), []
+        try:
+            data, pb = render.ai_state(self.smp)
+            rows = render.ai_rows(data["cat"])
+            body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname())
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+            print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+            body = "<pre>render error (see the service log)</pre>"
+        anchor = f"#m-{next((i for i, m in enumerate(rows) if m['id'] == sel), 0)}" if sel else ""  # the footer's links keep the selected model in sight
+        link = lambda text, **kw: f'<a href="{html.escape(page_url(ahere, **kw) + anchor)}">{text}</a>'  # noqa: E731
+        bar = [dash, link("compact", cols=100), link("wide", cols=200), "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
+        if here["kiosk"]:
+            bar.append(html.escape(render.KIOSK_HINT))
+        return doc(body, bar, refresh=not pause)
+
 
 def sel_index(data, sel):
     return next((i for i, f in enumerate(render.health_findings(data["report"])) if f["id"] == sel), 0)
 
 
 def health_extra_html(report):
-    """THE HOOK for the AI advisor (feat/ai): an HTML block (already escaped: html.escape every word of it) shown as ADVICE under the
-    findings list, or "" for none. The console calls render.health_extra_lines(report, w) at the same place."""
-    return ""
+    """The ADVICE block under the findings list: the advisor's CACHED answer (render.health_advice: never a generation on a request path),
+    as the advisor's own escaped HTML, or "" when the advisor is off. The console calls render.health_extra_lines(report, w) at the same place."""
+    on_, res = render.health_advice(report)
+    if not on_:
+        return ""
+    try:
+        import advisor
+        return advisor.html(res) if res else ('<div class="advice"><p class="advice-head">ADVICE (AI) — none yet</p><p>'
+                                              f'{html.escape(render.ADVICE_NONE)}</p></div>')
+    except Exception:  # noqa: BLE001 - a broken advisor is no advice
+        return ""
+
+
+def ai_row_html(r, i, sel, here):
+    """One model of the table: its marks, its name (a link: the details), the columns of the console, the pill with its symbol."""
+    esc, cur = html.escape, r["id"] == sel
+    label, _, cls, _ = render.AI_VERDICT.get(r["verdict"], render.AI_UNKNOWN)
+    marks = "".join(f'<span class="{col}" title="{what}">{sym}</span>' if on else " "
+                    for sym, col, what, on in (("★", "y", "recommended", r["rec"]), ("✓", "g", "installed", r["installed"]), ("●", "c", "active", r["active"])))
+    on, no = ' class="sel"' if cur else "", ' class="no"' if r["verdict"] == "no" else ""  # the selected row, a model that is too big (dim)
+    return (f'<tr{on} id="m-{i}"><td class="mk">{marks}</td>'
+            f'<td{no}><a class="lb" href="{esc(page_url(here, sel="" if cur else r["id"]) + f"#m-{i}")}">{esc(r["name"])}</a></td>'
+            f'<td class="pm">{esc(r["params"])}</td><td class="r sz">{esc(render.ai_mb(r["size_mb"]))}</td><td class="r">{esc(render.ai_mb(r["need_mb"]))}</td>'
+            f'<td><span class="pl {cls}">{esc(label)}</span></td><td>{esc(render.ai_tok(r["tok"]))}</td><td class="nn"><div>{esc(r["notes"])}</div></td></tr>')
+
+
+def ai_panel_html(r, here, i, windows):
+    """The details of a model: what the console's pane says, as a table (the commands selectable in one click), and a link that closes it."""
+    esc = html.escape
+    title, items = render.ai_details(r, windows)
+    trs = [f'<tr class="top"><th>model</th><td>{esc(title)}</td></tr>']
+    for label, value, kind in items:
+        cell = (f'<span class="pl {render.AI_VERDICT[kind][2]}">{esc(value)}</span>' if kind in render.AI_VERDICT else f'<code class="cmd">{esc(value)}</code>' if kind == "cmd"
+                else f'<span class="{"y" if kind == "warn" else "d"}">{esc(value)}</span>' if kind in ("warn", "dim") else esc(value))
+        trs.append(f"<tr><th>{esc(label)}</th><td>{cell}</td></tr>")
+    return (f'<aside class="dp" id="details"><div class="dh"><span>DETAILS</span><a href="{esc(page_url(here, sel="") + f"#m-{i}")}">close ✕</a></div>'
+            f'<table>{"".join(trs)}</table></aside>')
+
+
+def ai_body(data, st, pb, rows, sel, here, cols, host):
+    """Header, title, HARDWARE, the models (every one a link; the selected one's details beside or under the table), the legend and STATUS, as HTML.
+    The lines are the console's (render.ai_*), cleaned by render.hclean() and escaped by to_html()/html.escape()."""
+    esc, cat = html.escape, data["cat"]
+    text, code = render.status_pill(pb)
+    out = [f'<div class="hd {sgr_class(code)}"><span> {esc(host)} │ AI │ {time.strftime("%H:%M:%S")}</span><span>{esc(text)} </span></div>',
+           f'<pre class="ht">{to_html(render.ai_title(rows if cat is not None else None, cols))}</pre>']
+    if cat is None:  # the catalog could not be read
+        return "".join(out) + f'<p class="hn {"r" if data.get("err") else ""}">{esc(render.hclean(data["msg"]))}</p>'
+    ids, windows = {m["id"] for m in rows}, render.dd(cat.get("hw")).get("os") == "windows"
+    out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_hw_lines(cat.get("hw"), cols, 0)))}</pre>')
+    i = next((j for j, m in enumerate(rows) if m["id"] == sel), None)
+    panel = ai_panel_html(rows[i], here, i, windows) if i is not None else ""
+    table = ('<div class="mw"><table class="mt"><thead><tr><th></th><th>model</th><th class="pm">params</th><th class="r sz">size</th><th class="r">needs</th><th>verdict</th><th>est tok/s</th>'
+             '<th class="nn">notes</th></tr></thead><tbody>' + "".join(ai_row_html(m, j, sel, here) for j, m in enumerate(rows)) + "</tbody></table></div>"
+             if rows else '<div class="nt">the catalog lists no model</div>')
+    out.append(f'<div class="hs">MODELS · best first</div><main class="mp{" two" if panel else ""}"><div class="tree">{table}'
+               f'<pre class="ht">{to_html(render.ai_legend(cols))}</pre></div>{panel}</main>')
+    out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_status_lines(st, cat, ids, cols, 0)))}</pre>')
+    return "".join(out)
 
 
 def health_body(data, pb, days, sel, here, cols, host):

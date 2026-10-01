@@ -72,7 +72,17 @@ CPU_CSS = "a.pr{color:inherit;text-decoration:none}a.pr:hover{background:#161b22
 # the web HEALTH page (web.py): level pills on the findings rows (the rows and the details panel reuse MAP_CSS)
 HEALTH_CSS = (".pl{display:inline-block;min-width:6ch;padding:0 .6ch;border-radius:3px;text-align:center;font-weight:700;white-space:pre}"
               ".pl.r{background:#da3633;color:#fff}.pl.y{background:#d29922;color:#0d1117}.pl.d{color:#6e7681;font-weight:400}"
-              ".ht{margin:8px 0 0}.hs{margin:10px 0 2px;color:#8b949e}.hn{margin:6px 0 0;white-space:pre-wrap}")
+              ".ht{margin:8px 0 0}.hs{margin:10px 0 2px;color:#8b949e}.hn{margin:6px 0 0;white-space:pre-wrap}"
+              # the advisor's ADVICE block under the findings (advisor.html): its own words, set apart from the rules' findings
+              ".advice{margin:10px 0 0;padding:4px 10px;border-left:3px solid #39c5cf}.advice p{margin:3px 0;white-space:pre-wrap;overflow-wrap:anywhere}"
+              ".advice-head,.advice-cites,.advice-tools{color:#8b949e}.advice-head{font-weight:700}.advice-error{border-left-color:#d29922}")
+# the web AI page (web.py): the models as a table of links (the details panel reuses MAP_CSS, the pills HEALTH_CSS), a verdict pill besides its symbol
+AI_CSS = (".pl.g{background:#3fb950;color:#0d1117}.pl.c{background:#39c5cf;color:#0d1117}"
+          ".mw{overflow-x:auto}.mt{border-collapse:collapse;width:100%}.mt th{text-align:left;font-weight:400;color:#8b949e;padding:2px 2ch 2px 0;white-space:nowrap}"
+          ".mt td{padding:1px 2ch 1px 0;white-space:nowrap}.mt .r{text-align:right}.mt .mk{white-space:pre;padding-left:4px}.mt .pl{min-width:11ch}"
+          ".mt tbody tr:hover{background:#161b22}.mt tr.sel,.mt tr.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.mt .no a{color:#8b949e}"
+          ".mt .nn div{max-width:44ch;overflow:hidden;text-overflow:ellipsis;color:#8b949e}.cmd{background:#161b22;padding:1px 6px;border-radius:3px;user-select:all;overflow-wrap:anywhere}"
+          "@media(max-width:1399px){.mp.two .nn{display:none}}@media(max-width:699px){.mt .nn,.mt .pm,.mt .sz{display:none}}")
 
 
 def to_html(text):

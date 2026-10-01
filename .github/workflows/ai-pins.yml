@@ -1,0 +1,73 @@
+name: ai-pins
+
+# The AI manifest (src/aisetup.py: RUNTIME, MODELS) pins a commit, a SHA-256 and a size for every download. This workflow, on a
+# machine with network access: reads them from the Hugging Face and GitHub APIs (`aisetup.py pins`) for a maintainer to compare
+# and paste; shows the runtime's assets, hash and options; and, once everything is pinned, tries it for real: installs the smallest
+# model with `nuc-console-ai setup`, starts `serve`, asks it a question and checks `status`. It never changes the repository and
+# never fails a pull request (the unit tests do that).
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - src/aisetup.py
+      - src/advisor.py
+      - .github/workflows/ai-pins.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: read the values to pin
+        continue-on-error: true
+        run: python3 src/aisetup.py pins | tee pins.txt
+      - name: the runtime release (assets, SHA-256, size, options)
+        continue-on-error: true
+        run: |
+          v=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['version'])")
+          url=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['url'])")
+          curl -fsSL "https://api.github.com/repos/mozilla-ai/llamafile/releases/tags/$v" \
+            | python3 -c "import json, sys; [print('asset', a['name'], a['size'], a.get('digest')) for a in json.load(sys.stdin)['assets']]" | tee -a pins.txt
+          curl -fsSL -o "$RUNNER_TEMP/llamafile" "$url"
+          echo "runtime $url sha256 $(sha256sum "$RUNNER_TEMP/llamafile" | cut -d' ' -f1) size $(stat -c %s "$RUNNER_TEMP/llamafile")" | tee -a pins.txt
+          sh "$RUNNER_TEMP/llamafile" --help 2>&1 | head -150
+      - name: summary
+        if: always()
+        run: |
+          { echo '```'; cat pins.txt 2>/dev/null || echo "no output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  for-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install the smallest model, serve it, ask it
+        continue-on-error: true
+        run: |
+          if python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; sys.exit(1 if aisetup.missing_pins(aisetup.RUNTIME, False) else 0)"; then
+            d="$RUNNER_TEMP/ai"
+            printf '[ai]\nenabled = yes\nendpoint = http://127.0.0.1:8091/v1\nmodel = qwen3-0.6b\n' > "$RUNNER_TEMP/config.ini"
+            export NUC_CONSOLE_CONFIG="$RUNNER_TEMP/config.ini"
+            python3 src/aisetup.py models --dir "$d"
+            python3 src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d"
+            python3 src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d" | grep -q "not downloaded again"   # never twice
+            python3 src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" --dry-run
+            python3 src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" > "$RUNNER_TEMP/serve.log" 2>&1 &
+            for i in $(seq 1 90); do curl -fs http://127.0.0.1:8091/v1/models > /dev/null && break; sleep 2; done
+            tail -20 "$RUNNER_TEMP/serve.log"
+            curl -fsS http://127.0.0.1:8091/v1/chat/completions -H 'Content-Type: application/json' \
+              -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "/no_think Say hello in five words."}], "max_tokens": 40}'
+            echo
+            python3 src/aisetup.py status --dir "$d" --endpoint http://127.0.0.1:8091/v1
+            python3 src/advisor.py status
+          else
+            echo "the runtime is not pinned yet: nothing to try"
+          fi
