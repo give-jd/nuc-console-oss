@@ -1131,6 +1131,8 @@ def collect_net():
         rc, out, err = run("docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Status}}\t{{.Names}}")
         if rc != 0 and DOCKER_DOWN.search(err or ""):
             raise NotRecorded("Docker is installed but its engine is not running")
+        if rc is None and "TimeoutExpired" in (err or ""):  # an engine still starting (Docker Desktop) answers late: next cycle
+            raise NotRecorded("Docker did not answer in time (its engine may be starting)")
         if rc != 0:
             raise RuntimeError(err or "docker ps failed")
         rows = [ln.split("\t", 2) + ["", ""] for ln in out.splitlines()]

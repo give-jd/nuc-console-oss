@@ -411,6 +411,10 @@ class CollectNet(unittest.TestCase):
             self.assertNotIn("dbs", d["errors"], err)
             self.assertIn("dbs", d["absent"])
             self.assertEqual(d["notes"]["dbs"], "Docker is installed but its engine is not running")
+        collector.run = lambda name, *a, **k: (None, "", "TimeoutExpired(['docker', 'ps'], 15)") if name == "docker" else real(name, *a, **k)
+        d = collector.collect_net()
+        self.assertNotIn("dbs", d["errors"])                                         # an engine still starting: a note too
+        self.assertEqual(d["notes"]["dbs"], "Docker did not answer in time (its engine may be starting)")
         collector.run = lambda name, *a, **k: (1, "", "permission denied") if name == "docker" else real(name, *a, **k)
         self.assertIn("dbs", collector.collect_net()["errors"])                     # any other failure is still an error
 
