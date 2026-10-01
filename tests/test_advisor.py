@@ -1195,6 +1195,163 @@ class Cli(Base):
         self.assertEqual(cmd.count(b"\n"), cmd.count(b"\r\n"))
 
 
+class WebState(Base):
+    """web.json: what the AI page and screen chose (on/off, the model, the endpoint of their server), laid over config.ini by effective_cfg();
+    only a trusted file counts, root reads none of the web account's, and [ai] web_actions = no is the admin's lock."""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.path = advisor.web_state_path()
+        self.base = {"ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
+                            "daily": False, "gpu": "auto", "web_actions": True}}
+
+    def write_raw(self, text, mode=0o644):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(self.path, mode)
+
+    def test_the_file_lives_in_the_ai_folder(self):
+        self.assertEqual(self.path, os.path.join(self.tmp, "cache", "ai", "web.json"))
+
+    def test_no_file_no_change(self):
+        self.assertEqual(advisor.read_web_state(), {})
+        self.assertIs(advisor.effective_cfg(self.base), self.base)
+        self.assertEqual(advisor.web_switch(self.base), {"on": False, "by": "", "locked": False})
+
+    def test_write_and_read_back_atomically_with_mode_0644(self):
+        out = advisor.write_web_state(lambda s: s.update(enabled=True, model="qwen3-8b", endpoint="http://127.0.0.1:8081/v1"))
+        self.assertEqual(out, {"v": 1, "enabled": True, "model": "qwen3-8b", "endpoint": "http://127.0.0.1:8081/v1"})
+        self.assertEqual(advisor.read_web_state(), {"enabled": True, "model": "qwen3-8b", "endpoint": "http://127.0.0.1:8081/v1"})
+        if os.name == "posix":
+            self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o644)
+        self.assertEqual(os.listdir(os.path.dirname(self.path)), ["web.json"], "no temporary file is left")
+        advisor.write_web_state(lambda s: s.update(model="", endpoint=None))  # "" and None remove a key, the others stay
+        self.assertEqual(advisor.read_web_state(), {"enabled": True})
+        with open(self.path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"v": 1, "enabled": True})
+
+    def test_a_failed_write_leaves_the_old_file_and_no_temporary_one(self):
+        advisor.write_web_state(lambda s: s.update(enabled=True))
+        with mock.patch.object(advisor.json, "dump", side_effect=OSError("disk full")):
+            self.assertRaises(OSError, advisor.write_web_state, lambda s: s.update(enabled=False))
+        self.assertEqual(advisor.read_web_state(), {"enabled": True})
+        self.assertEqual(os.listdir(os.path.dirname(self.path)), ["web.json"])
+
+    def test_the_page_turns_it_on_and_chooses_the_model_and_the_endpoint(self):
+        advisor.write_web_state(lambda s: s.update(enabled=True, model="qwen3-8b", endpoint="http://127.0.0.1:8081/v1"))
+        eff = advisor.effective_cfg(self.base)
+        self.assertEqual((eff["ai"]["enabled"], eff["ai"]["model"], eff["ai"]["endpoint"]), (True, "qwen3-8b", "http://127.0.0.1:8081/v1"))
+        self.assertEqual(eff["ai"]["timeout_s"], 120, "the rest of [ai] is config.ini's")
+        self.assertFalse(self.base["ai"]["enabled"], "a copy: the loaded config is not changed")
+        self.assertEqual(advisor.web_switch(self.base), {"on": True, "by": "web", "locked": False})
+        self.assertEqual(advisor.available(eff)[0], True)
+
+    def test_off_in_the_page_and_off_in_config_is_off(self):
+        advisor.write_web_state(lambda s: s.update(enabled=False, model="qwen3-8b"))
+        eff = advisor.effective_cfg(self.base)
+        self.assertFalse(eff["ai"]["enabled"])
+        self.assertEqual(advisor.web_switch(self.base)["on"], False)
+
+    def test_config_ini_yes_forces_it_on_whatever_the_page_says(self):
+        self.base["ai"]["enabled"] = True
+        advisor.write_web_state(lambda s: s.update(enabled=False))
+        eff = advisor.effective_cfg(self.base)
+        self.assertTrue(eff["ai"]["enabled"])
+        self.assertEqual(advisor.web_switch(self.base), {"on": True, "by": "config", "locked": False})
+        advisor.write_web_state(lambda s: s.update(model="phi-4"))   # what the page chose still goes in place of config.ini's model
+        self.assertEqual(advisor.effective_cfg(self.base)["ai"]["model"], "phi-4")
+
+    def test_web_actions_no_is_the_lock_the_file_counts_for_nothing(self):
+        advisor.write_web_state(lambda s: s.update(enabled=True, model="qwen3-8b"))
+        self.base["ai"]["web_actions"] = False
+        self.assertIs(advisor.effective_cfg(self.base), self.base)
+        self.assertEqual(advisor.web_switch(self.base), {"on": False, "by": "", "locked": True})
+        self.base["ai"]["enabled"] = True
+        self.assertEqual(advisor.web_switch(self.base), {"on": True, "by": "config", "locked": True})
+
+    def test_only_valid_values_are_taken_one_by_one(self):
+        for text, want in (
+                ('{"v":1,"enabled":true,"model":"qwen3-8b"}', {"enabled": True, "model": "qwen3-8b"}),
+                ('{"v":1,"enabled":"yes","model":"a b"}', {}),
+                ('{"v":1,"enabled":1,"model":""}', {}),
+                ('{"v":1,"model":"../../etc/passwd"}', {}),
+                ('{"v":1,"model":"x" }', {"model": "x"}),
+                ('{"v":1,"model":"%s"}' % ("m" * 81), {}),
+                ('{"v":1,"endpoint":"http://127.0.0.1:8080/v1"}', {"endpoint": "http://127.0.0.1:8080/v1"}),
+                ('{"v":1,"endpoint":"http://localhost:8080/v1"}', {"endpoint": "http://localhost:8080/v1"}),
+                ('{"v":1,"endpoint":"http://[::1]:8080/v1"}', {"endpoint": "http://[::1]:8080/v1"}),
+                ('{"v":1,"endpoint":"http://192.0.2.7:8080/v1"}', {}),          # another machine: never, whatever allow_remote says
+                ('{"v":1,"endpoint":"http://127.0.0.1.example.com:8080/v1"}', {}),
+                ('{"v":1,"endpoint":"https://127.0.0.1:8080/v1"}', {}),
+                ('{"v":1,"endpoint":"http://user:pw@127.0.0.1:8080/v1"}', {}),
+                ('{"v":1,"endpoint":"http://127.0.0.1/v1"}', {}),
+                ('{"v":1,"endpoint":"http://127.0.0.1:8080/v1?x=1"}', {}),
+                ('{"v":2,"enabled":true}', {}), ('{"enabled":true}', {}), ('[1]', {}), ('"x"', {}), ('{', {}), ('', {}),
+                ('{"v":1,"enabled":true,"x":1.5}', {}),                          # a float is not part of this file
+                ('{"v":1,"enabled":true,"x":NaN}', {})):
+            with self.subTest(text):
+                self.write_raw(text)
+                self.assertEqual(advisor.read_web_state(), want)
+
+    def test_a_big_file_a_directory_and_a_link_to_nowhere_are_nothing(self):
+        self.write_raw('{"v":1,"enabled":true,"pad":"%s"}' % ("x" * advisor.WEB_MAX_BYTES))
+        self.assertEqual(advisor.read_web_state(), {})
+        os.unlink(self.path)
+        os.mkdir(self.path)
+        self.assertEqual(advisor.read_web_state(), {})
+        os.rmdir(self.path)
+        self.assertEqual(advisor.effective_cfg(self.base), self.base)
+
+    @unittest.skipUnless(os.name == "posix", "owners and mode bits")
+    def test_a_file_that_others_can_write_is_not_trusted(self):
+        self.write_raw('{"v":1,"enabled":true}', mode=0o666)
+        self.assertEqual(advisor.read_web_state(), {})
+        os.chmod(self.path, 0o664)
+        self.assertEqual(advisor.read_web_state(), {})
+        os.chmod(self.path, 0o644)
+        self.assertEqual(advisor.read_web_state(), {"enabled": True})
+
+    @unittest.skipUnless(os.name == "posix", "owners")
+    def test_root_never_reads_what_the_web_account_wrote(self):
+        """The daily digest and the command `nuc-console-ask` run as root keep to config.ini: a file of another account is nothing to them
+        (a user able to write the folder could otherwise choose the endpoint root sends the findings to)."""
+        advisor.write_web_state(lambda s: s.update(enabled=True, endpoint="http://127.0.0.1:8081/v1"))
+        if os.geteuid() == 0:   # the tests run as root: the file would be root's own, so hand it to the web account
+            os.chown(self.path, 12345, 12345)
+            self.addCleanup(os.chown, self.path, 0, 0)
+        with mock.patch.object(advisor.os, "geteuid", return_value=0):  # (not root: the file is a user's, the reader is root)
+            self.assertEqual(advisor.read_web_state(), {})
+            self.assertIs(advisor.effective_cfg(self.base), self.base)
+            self.assertEqual(advisor.web_switch(self.base)["on"], False)
+        if os.geteuid() != 0:
+            self.assertEqual(advisor.read_web_state(), {"enabled": True, "endpoint": "http://127.0.0.1:8081/v1"}, "its own account reads it")
+
+    def test_effective_cfg_never_raises(self):
+        for cfg in (None, {}, {"ai": None}, {"ai": {}}):
+            with self.subTest(cfg):
+                self.assertEqual(advisor.effective_cfg(cfg), cfg)
+        with mock.patch.object(advisor, "_read_json", side_effect=RuntimeError("boom")):
+            self.assertEqual(advisor.effective_cfg(self.base), self.base)
+            self.assertEqual(advisor.read_web_state(), {})
+
+    def test_the_command_reads_it_too_when_the_account_is_the_one_that_wrote_it(self):
+        with open(os.environ["NUC_CONSOLE_CONFIG"], "w", encoding="utf-8") as f:
+            f.write("[ai]\nenabled = no\n")
+        advisor.write_web_state(lambda s: s.update(enabled=True, model="tiny-model", endpoint=self.srv.url))
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = advisor.main(["status"])
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        self.assertIn("AI advisor: enabled", out.getvalue())
+        self.assertIn(self.srv.url, out.getvalue())
+        with open(os.environ["NUC_CONSOLE_CONFIG"], "w", encoding="utf-8") as f:
+            f.write("[ai]\nenabled = no\nweb_actions = no\n")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = advisor.main(["status"])
+        self.assertEqual(code, 3, "locked: config.ini alone says off")
+
+
 class Docs(unittest.TestCase):
     def test_module_docstring_names_the_exit_codes(self):
         for code in ("0 ok", "1 the model/server failed", "3 off", "4 no history", "5 busy"):
