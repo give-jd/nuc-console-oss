@@ -325,7 +325,7 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 | `install-windows.cmd -Display` | |
 |---|---|
 | `browser` (default) | at install and at every logon it opens in a normal window of your browser (http://127.0.0.1:8787) |
-| `fullscreen` (or `kiosk`) | at install and at every logon it opens full screen in Edge, overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
+| `fullscreen` (or `kiosk`) | at install and at every logon it opens full screen in Edge (or Chrome; Firefox opens a window to take full screen with **F11**; with none of them, your default browser), overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
 | `none` | it never opens by itself (a machine without a monitor: `nuc-console-problems`) |
 
 **Start › nuc-console** opens it again any time. A plain re-install (double-click) keeps the mode you chose.
@@ -400,7 +400,7 @@ so the next install or update finds it. An already installed, unchanged Python i
 |---|---|
 | "collector not running" | Task Scheduler › `nuc-console` › `collector` (Last Run Result); `%ProgramData%\nuc-console\logs\collector.log` |
 | The page does not open | task `web`; `%ProgramData%\nuc-console\logs\web.log`; http://127.0.0.1:8787/healthz must answer `ok` |
-| Nothing opens at logon | `[display] mode` is not `none`?; task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; full screen needs Edge (or `[display] browser`) |
+| Nothing opens at logon | `[display] mode` is not `none`?; task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; full screen needs Edge or Chrome (or `[display] browser`); with Firefox or no supported browser the window is not full screen until **F11** |
 | Docker "not installed" or "not responding" | Docker Desktop must be running (it runs in a user's session) |
 | Many `?` in EXPOSURE | rules the evaluation cannot read with certainty: see the NOTE column; `Get-NetFirewallRule` shows them |
 

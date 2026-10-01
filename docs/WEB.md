@@ -1,7 +1,7 @@
 # Read-only web view
 
 The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no forms, no API,
-GET only, no JavaScript** — except one small script on the graph view of the MAP, pinned by its hash (see below). Configuration is *not* editable from the web on purpose (see below).
+GET (and HEAD) only, no JavaScript** — except one small script on the graph view of the MAP, pinned by its hash (see below). Configuration is *not* editable from the web on purpose (see below).
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -42,6 +42,8 @@ token_file = /etc/nuc-console/web.token
 The token must be 16+ characters from `A-Z a-z 0-9 . _ ~ -` and the file must be mode 0600 owned by root or `nuc-console`: otherwise the service refuses to start.
 
 Open `http://192.168.0.10:8787/?token=<the token>` once: the token is moved into an `HttpOnly; SameSite=Strict` cookie and the URL is cleaned.
+The view you asked for stays: `/?token=<the token>&view=map` lands on the MAP, `…&view=cpu&sort=mem` on the CPU page sorted by memory. The redirect
+rebuilds the address from the parameters the page understands, with their values checked; anything else is dropped, and the token never comes back.
 Scripts can send `Authorization: Bearer <token>`. The token lives in a file, never in `config.ini` (world-readable).
 Plain HTTP on a LAN sends the token in clear text: prefer `tailscale serve` or a TLS reverse proxy for anything you don't fully trust.
 
@@ -71,8 +73,10 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 
-Everything else is 404; any method but GET is 405. Security headers: strict CSP (`default-src 'none'`), `no-store`, `nosniff`,
-`frame-ancestors 'none'`, `no-referrer`. No access log (URLs may carry a token).
+Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`). HEAD is answered like GET (same status, same headers,
+`Content-Length` included, the same token and `Host` checks), without the body. Security headers, on every response: strict CSP
+(`default-src 'none'`), `no-store`, `nosniff`, `frame-ancestors 'none'`, `no-referrer`, `Cross-Origin-Resource-Policy: same-origin` and
+`Cross-Origin-Opener-Policy: same-origin`. No access log (URLs may carry a token).
 
 ## The one script (graph view)
 
@@ -108,6 +112,11 @@ non-loopback `bind`) to reach it from other devices as described above, then run
 with `[web] enabled = no` runs no web view at all.
 Windows has no mode bits: keep `token_file` inside `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write
 (and limit who can read the file with an ACL if other people use the machine).
+
+With a token, what opens the dashboard at login (`render.py --open`, `[display] mode = browser`) puts it in the address as `?token=` when the
+logged-in user can read the token file (the web view moves it into a cookie, as above; for a moment it is in the browser's command line,
+which other users of the machine can list). When that user cannot read it (the usual case on macOS, where the file is the service user's),
+the dashboard is shown from a page written to a file instead, as the full-screen window does, and `display.log` says why.
 
 A portable run ([PORTABLE.md](PORTABLE.md): `./run.sh --web` (the default on macOS) or `run.cmd`) starts the web view the same way on any system: 127.0.0.1 only, no
 token, a free port (or `--port`), whatever `[web]` says; it stops with the run.

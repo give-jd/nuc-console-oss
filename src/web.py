@@ -152,8 +152,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for k, v in (("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
                      ("Content-Security-Policy", csp), ("X-Frame-Options", "DENY")) + tuple(extra):
             self.send_header(k, v)
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")  # no other site can embed or read this
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.end_headers()
-        if body:
+        if body and self.command != "HEAD":  # HEAD: the headers of the GET (Content-Length included), no body
             self.wfile.write(body)
 
     def _token_from(self, query):
@@ -180,15 +182,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             given = self._token_from(q)
             if not hmac.compare_digest(given.encode(), srv.token.encode()):
                 return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
-            if "token" in q:  # move the token out of the URL (history, logs, referrers) into a cookie
-                return self._send(302, extra=(("Location", "/"), ("Set-Cookie",
+            if "token" in q:  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
+                return self._send(302, extra=(("Location", view_url(view_params(q))), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
         page = srv.page(**view_params(q))
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP))
 
     def _no(self):
-        self._send(405, b"read-only\n", extra=(("Allow", "GET"),))
-    do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_HEAD = _no
+        self._send(405, b"read-only\n", extra=(("Allow", "GET, HEAD"),))
+    do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _no
+    do_HEAD = do_GET  # the same checks and headers as GET: _send writes no body for HEAD
 
 
 def view_params(q):
@@ -227,6 +230,20 @@ def view_params(q):
             "z": gzoom(num("z")),
             "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else "",
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {})}
+
+
+HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh")  # the size and refresh parameters every view has
+VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause")}  # and what each view reads besides (the dashboard: nothing)
+
+
+def view_url(p):
+    """The address of a view as view_params() read it, for the redirect that follows ?token=: only validated values of the parameters that
+    view reads (an unknown one, `token` included, is not echoed), the defaults left out, like the links of the pages."""
+    p = map_mode(p) if p["view"] == "map" else p
+    p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ())}
+    p.update({k: ".".join(p[k]) for k in ("open", "shut") if k in p})  # row keys: 'k1.k2', like the pages' own links
+    return page_url(p).rstrip("?")  # nothing left: "/"
 
 
 def gzoom(z):

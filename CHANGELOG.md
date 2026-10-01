@@ -155,6 +155,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - **The web view has one script now.** Every page is still GET only, with no JavaScript and `default-src 'none'`, except the MAP's graph
   view: one inline script whose SHA-256 is in that page's Content-Security-Policy. It builds no markup, opens no connection and loads
   nothing; `tests/test_graphjs.py` rejects changes that would let it. The MAP pages are bounded (unknown keys dropped, a capped page cache).
+- Every answer of the web view now carries `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`: no
+  other site can load a page as a resource, and a page opened from another site gets a window of its own.
 - macOS and Windows run the web view by default, bound to `127.0.0.1` with no token: not reachable from the network, but readable by any
   local user or program, like the state files. `[display] mode = none` with `[web] enabled = no` runs none.
 - macOS and Windows collector: Apple's tools run as root only from protected system folders; third-party tools (`docker`, `tailscale`,
@@ -190,6 +192,15 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - A long host name no longer pushes the problem status off the header (`✖ 4 PROBLEMS` was cut to `✖ 4 PROBLE`).
 - Docker installed but not running (Docker Desktop closed, the daemon stopped) is shown as such in DATABASE, not as a collector
   error on every cycle.
+- The web view answers `HEAD` like `GET` (same status and headers, no body) instead of `405`: link checkers and monitors that probe
+  with `HEAD` work. The token and `Host` checks are the same.
+- `/?token=…&view=map` (any view) kept the token in the cookie but landed on the dashboard. The redirect now keeps the view, rebuilt from
+  the parameters the page understands, checked; anything else is dropped and the token is never in the new address.
+- `render.py --open` (`[display] mode = browser`) ignored `[web] token_file`: the browser got `401`. It now puts the token in the address when
+  the logged-in user can read the file; when not (the usual case on macOS) it shows the dashboard from a page written to a file, as the
+  full-screen window does, and `display.log` says why.
+- Windows, `[display] mode = fullscreen` with neither Edge nor Chrome: nothing opened. Firefox is now found (it opens a window: **F11** for
+  full screen), and with no supported browser at all the default one opens (**F11** again), with a line in `display.log`.
 
 ## [1.4.0] - 2026-10-01
 

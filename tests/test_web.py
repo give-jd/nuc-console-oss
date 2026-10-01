@@ -16,10 +16,10 @@ import web  # noqa: E402
 TOKEN = "t" * 24
 
 
-def raw(srv, path="/", headers=()):
+def raw(srv, path="/", headers=(), method="GET"):
     import socket
     c = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=5)
-    c.sendall((f"GET {path} HTTP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers) + "\r\n").encode())
+    c.sendall((f"{method} {path} HTTP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers) + "\r\n").encode())
     data = b""
     while True:
         try:
@@ -72,11 +72,52 @@ class Web(unittest.TestCase):
         self.assertEqual(h["Cache-Control"], "no-store")
         self.assertEqual(h["X-Content-Type-Options"], "nosniff")
 
-    def test_only_get_on_known_paths(self):
-        for m in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
-            self.assertEqual(get(self.open, "/", m)[0], 405, m)
+    def test_only_get_and_head_on_known_paths(self):
+        for m in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
+            st, h, _ = get(self.open, "/", m)
+            self.assertEqual((st, h["Allow"]), (405, "GET, HEAD"), m)
         self.assertEqual(get(self.open, "/api/state")[0], 404)
         self.assertEqual(get(self.open, "/healthz")[2].strip(), "ok")
+
+    def test_head_is_get_without_the_body(self):
+        """A monitor or a browser asking HEAD gets the answer GET would give: the same status, the same headers (Content-Length included)
+        and nothing after them. Not read through http.client, which would hide a body written anyway."""
+        for path in ("/", "/?refresh=10", "/?view=map&refresh=10", "/healthz", "/nothing", "/?token=x"):
+            st, h, body = get(self.open, path, "GET")
+            hst, hh, hbody = get(self.open, path, "HEAD")
+            self.assertEqual((hst, hbody), (st, ""), path)
+            same = lambda d: {k: v for k, v in d.items() if k not in ("Date", "Server")}  # noqa: E731 - the clock and the name differ by nothing that matters
+            self.assertEqual(same(hh), same(h), path)
+            self.assertEqual(int(hh["Content-Length"]), len(body.encode()), path)
+            wire = raw(self.open, path, [("Host", "localhost")], "HEAD")
+            self.assertEqual(wire.split("\r\n\r\n", 1)[1], "", path)                            # nothing after the headers, on the wire
+            self.assertEqual(wire.split(" ", 2)[1], str(st), path)
+        self.assertGreater(int(get(self.open, "/", "HEAD")[1]["Content-Length"]), 1000)             # the length of the page, not of nothing
+
+    def test_head_has_the_same_access_rules_as_get(self):
+        self.assertEqual(get(self.locked, "/", "HEAD")[0], 401)                                      # no token
+        st, h, body = get(self.locked, "/", "HEAD", {"Authorization": "Bearer wrong"})
+        self.assertEqual((st, h["WWW-Authenticate"], body), (401, 'Bearer realm="nuc-console"', ""))
+        self.assertEqual(get(self.locked, "/", "HEAD", {"Authorization": "Bearer " + TOKEN})[0], 200)
+        self.assertEqual(get(self.locked, "/", "HEAD", {"Cookie": "nuc_token=" + TOKEN})[0], 200)
+        st, h, _ = get(self.locked, "/?token=" + TOKEN, "HEAD")                                      # the cookie is set by HEAD too
+        self.assertEqual((st, h["Location"]), (302, "/"))
+        self.assertIn("HttpOnly", h["Set-Cookie"])
+        self.assertEqual(get(self.locked, "/?token=nope", "HEAD")[0], 401)
+        self.assertEqual(get(self.locked, "/healthz", "HEAD")[0], 200)                               # like GET: no token needed
+        self.assertEqual(get(self.open, "/", "HEAD", {"Host": "evil.example.com"})[0], 421)         # DNS rebinding
+        self.assertEqual(get(self.open, "/", "HEAD", {"Host": "localhost:8787"})[0], 200)
+
+    def test_cross_origin_isolation_headers_on_every_response(self):
+        """Every answer says that no other site may embed it (CORP) and that its window is not shared with another origin's (COOP)."""
+        answers = [get(self.open, "/"), get(self.open, "/", "HEAD"), get(self.open, "/healthz"), get(self.open, "/nothing"),
+                   get(self.open, "/", "POST"), get(self.open, "/", "OPTIONS"), get(self.open, "/", headers={"Host": "evil.example.com"}),
+                   get(self.open, "/?view=map&as=graph"), get(self.locked, "/"), get(self.locked, "/?token=" + TOKEN),
+                   get(self.locked, "/", headers={"Authorization": "Bearer " + TOKEN})]
+        self.assertEqual([a[0] for a in answers], [200, 200, 200, 404, 405, 405, 421, 200, 401, 302, 200])  # pages, errors, redirect
+        for st, h, _ in answers:
+            self.assertEqual(h["Cross-Origin-Resource-Policy"], "same-origin", st)
+            self.assertEqual(h["Cross-Origin-Opener-Policy"], "same-origin", st)
 
     def test_token_bearer_cookie_and_query(self):
         self.assertEqual(get(self.locked)[0], 401)
@@ -89,6 +130,45 @@ class Web(unittest.TestCase):
         self.assertIn("SameSite=Strict", h["Set-Cookie"])
         self.assertEqual(get(self.locked, "/?token=nope")[0], 401)
         self.assertEqual(get(self.locked, "/healthz")[0], 200)
+
+    def test_token_redirect_keeps_the_view(self):
+        """`/?token=X&view=map` used to land on the dashboard. The redirect carries the view back, rebuilt from what view_params() validated:
+        what the view does not read, what is not a parameter at all, and the token itself are left out."""
+        def moved(query):
+            st, h, _ = get(self.locked, "/?token=" + TOKEN + query)
+            self.assertEqual(st, 302, query)
+            self.assertTrue(h["Set-Cookie"].startswith("nuc_token=" + TOKEN + ";"), query)
+            self.assertNotIn(TOKEN, h["Location"])
+            return h["Location"]
+        self.assertEqual(moved("&view=map&sort=mem"), "/?view=map")                                  # sort= is the CPU page's
+        self.assertEqual(moved("&sort=mem&view=map&refresh=5&zoom=133&fit=1"), "/?view=map&zoom=125&fit=1&refresh=5")  # clamped like the page
+        self.assertEqual(moved("&view=cpu&sort=mem&sel=0042&cols=133"), "/?view=cpu&cols=140&sort=mem&sel=42")
+        self.assertEqual(moved("&view=health&period=30&pause=1&sel=cpu-hog:chrome"), "/?view=health&period=30&sel=cpu-hog%3Achrome&pause=1")
+        self.assertEqual(moved("&view=ai&sel=qwen&pause=1&period=30"), "/?view=ai&sel=qwen&pause=1")
+        self.assertEqual(moved("&view=map&open=0123456789.abcdef0123&shut=zz&all=1&only=1&sel=0123456789&pause=1"),
+                         "/?view=map&open=0123456789.abcdef0123&all=1&sel=0123456789&only=1&pause=1")
+        self.assertEqual(moved("&view=map&as=graph&local=2&sel=0123456789&z=140&stacks=1&ext=0&open=0123456789"),
+                         "/?view=map&sel=0123456789&as=graph&stacks=1&ext=0&local=2&z=150")          # the tree's open= means nothing to the graph
+        self.assertEqual(moved("&open=0123456789&sel=1&pause=1&only=1&fit=1"), "/?fit=1")            # the dashboard reads only the size and refresh
+        self.assertEqual(moved(""), "/")
+        self.assertEqual(moved("&view=map&token=again"), "/?view=map")                               # the first token is the one checked; no token comes back
+        for junk in ("&evil=1&view=nope", "&view=%0d%0aSet-Cookie:%20a=b", "&cols=%C2%B2&refresh=" + "9" * 5000):  # unknown, malformed, huge
+            self.assertEqual(moved(junk), "/", junk)
+        loc = moved("&view=health&sel=x%0d%0aSet-Cookie:%20evil=1%3b%20Domain=.example.com")         # a free-text value is encoded, never echoed raw
+        self.assertEqual(loc.count("\n") + loc.count("\r") + loc.count(" "), 0)
+        self.assertEqual(get(self.locked, "/?token=nope&view=map")[0], 401)                          # a wrong token never redirects
+        st, _, page = get(self.locked, moved("&view=map&refresh=9"), headers={"Cookie": "nuc_token=" + TOKEN})
+        self.assertEqual(st, 200)
+        self.assertIn("· map ·", page)                                                               # the redirect lands on the map, not the dashboard
+
+    def test_view_url_is_the_pages_own_address(self):
+        """view_url() writes a view as the links of the pages do, so that the redirect and a click on the same view agree."""
+        q = lambda s: web.view_url(web.view_params(web.parse_qs(s)))  # noqa: E731
+        self.assertEqual(q(""), "/")
+        self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), web.page_url(dict(web.map_here({k: 0 for k in web.HERE_KEYS}, web.graph.State(
+            open=("aaaaaaaaaa", "bbbbbbbbbb")), "", False))))
+        self.assertEqual(q("view=cpu&sort=cpu"), "/?view=cpu")                                       # the default is not written
+        self.assertEqual(q("fit=1&kiosk=1&rotate=1&cols=220&rows=64"), "/?cols=220&rows=64&fit=1&rotate=1&kiosk=1")
 
     def test_host_header_guard_blocks_dns_rebinding(self):
         self.assertIn(" 421 ", raw(self.open, "/", [("Host", "evil.example.com")]).split("\r\n")[0] + " ")

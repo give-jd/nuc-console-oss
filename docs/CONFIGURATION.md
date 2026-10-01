@@ -68,7 +68,7 @@ macOS and Windows have no text console to take over. The installers start the re
 |---|---|---|
 | `mode` | `browser` | How the dashboard opens, at install and at every login. `browser`: a normal window of your default browser. `fullscreen` (or `kiosk`): full screen, overview and Details pages taking turns. `none`: never by itself (a machine without a monitor). The **nuc-console** shortcut (Windows Start menu, macOS Applications) opens it again any time. The installers apply it: run them again after a change, or choose with `install-windows.cmd -Display fullscreen` / `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (that writes this key; a plain re-install keeps it) |
 | `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). In a browser window **nothing is left out**: every section and every item, the page scrolls; full screen shows what does not fit on the rotating Details pages. The **A− / A+** links at the bottom of the page change it while you look |
-| `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
+| `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome, then Firefox (Windows: Firefox cannot start full screen, press F11; with none of them the default browser opens a normal window, F11 again); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
 
 The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
 **Alt+F4** (Cmd+Q) closes it until the next login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows.
@@ -168,7 +168,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-ai models` | what this machine can run: hardware and a verdict per model (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big), no root; `status` (is it installed, does it answer) also needs none. `/usr/local/sbin/nuc-console-ai` if your PATH lacks the folder |
 | `sudo nuc-console-ai setup [MODEL ...]` | download the local model server's runtime and the models you name (none: the recommended one), once, SHA-256 checked. Also `use MODEL`, `serve [--gpu-layers N] [--install-service]`, `remove [MODEL]` ([AI.md](AI.md#the-commands)) |
 | `nuc-console-ask "question"`, `nuc-console-ask advise [--days N]`, `nuc-console-ask status` | ask the local model about this machine, get advice on the HEALTH findings, check the server (read-only, no root; needs `[ai] enabled = yes`) |
-| `render.py --open` | the dashboard in a normal window of the default browser (what `browser` mode runs at login) |
+| `render.py --open` | the dashboard in a normal window of the default browser (what `browser` mode runs at login). With `[web] token_file`: the token goes in the address if this user can read the file, else the page is written to a file as `--kiosk --file` does ([WEB.md](WEB.md)) |
 | `render.py --kiosk` | the full-screen window on the local web view (macOS/Windows; `--file` writes a local page instead, also on a Linux desktop: `--html FILE`, `--no-browser`) |
 
 Install-time options: Linux `install.sh` reads `NUC_CONSOLE_VT` (virtual terminal, default 1) and `NUC_CONSOLE_TZ` (time zone), and a re-install keeps them.
