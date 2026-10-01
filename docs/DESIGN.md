@@ -107,6 +107,25 @@ on screen with a note; processes are sampled only while the screen is shown (it 
 are read. Temperatures on macOS and Windows need root/SYSTEM, so the collector writes them to `sensors.json` every 10 s
 (30 s on Windows, where each reading starts PowerShell) and the screen merges them.
 
+## Health
+
+The HEALTH screen answers questions about time ("what keeps crashing?", "when will this disk be full?"), which a snapshot
+cannot. Decisions:
+
+- **A history, in SQLite**: the data is numbers and events, and the questions are aggregations (top apps of the week, a
+  trend), which is what SQL is for; `sqlite3` is in the standard library on every OS, the embeddable Windows Python
+  included. One writer (the collector, WAL mode), readers open it read-only. No vector database: there is no free text to
+  search, log lines become templates and are counted.
+- **Rules before any model**: every finding is a small function with named thresholds (`src/health.py`) and the numbers it
+  used, so it can be checked and tested; a rule that needs days says "collecting" until it has them. An optional local
+  model can only rephrase these findings (docs/HEALTH.md), never replace them.
+- **Cheap and bounded**: the collector samples once a minute, writes every five, reads only what is new since its last
+  look (journal cursor, event-log record id, crash-report mtime), keeps the top 200 apps an hour, prunes daily.
+- **Nothing that can hold a secret**: process names, not command lines; templates, not log lines; counts, not the IP
+  addresses or user names of failed logins.
+
+Full description, what is collected per OS and every rule: [docs/HEALTH.md](HEALTH.md).
+
 ## macOS and Windows
 
 There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every

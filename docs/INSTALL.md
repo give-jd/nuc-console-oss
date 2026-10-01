@@ -129,7 +129,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT 
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want.
+Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` user; remove them by hand if you want.
 
 ## Troubleshooting (Linux)
 
@@ -201,8 +201,8 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console`, the download cache `/Library/Caches/nuc-console` and the
-`_nuc-console` user are left in place.
+`/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the download cache
+`/Library/Caches/nuc-console` and the `_nuc-console` user are left in place.
 
 ## What is different from Linux
 
@@ -283,7 +283,8 @@ so the next install or update finds it. An already installed, unchanged Python i
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (with `config.ini`, the baseline and the download cache) is left in place.
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state, the HEALTH history
+`lib\history.db` and the download cache) is left in place.
 
 ## What is different from Linux
 
