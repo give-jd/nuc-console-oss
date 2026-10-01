@@ -233,4 +233,4 @@ Read the threat model, how releases are built and verified, and how to report a 
 
 ## Contributing · License
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Released under the [MIT License](LICENSE). Copyright © 2026 [Gi.Ve Group S.r.l.](https://givegroup.it)
+See [CONTRIBUTING.md](CONTRIBUTING.md); what changed in each release: [CHANGELOG.md](CHANGELOG.md). Released under the [MIT License](LICENSE). Copyright © 2026 [Gi.Ve Group S.r.l.](https://givegroup.it)
