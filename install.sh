@@ -52,6 +52,7 @@ install -d "$UNITD"
 } > "$UNITD/local.conf"
 install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
+install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
 install -d /var/lib/nuc-console
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service

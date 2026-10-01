@@ -1055,6 +1055,14 @@ class Config(unittest.TestCase):
     def test_garbage_file_does_not_crash(self):
         self.assertTrue(all(self._load("this is not ini\n\x00")["features"].values()))
 
+    def test_configuration_reference_documents_every_key(self):
+        doc = open(os.path.join(os.path.dirname(__file__), "..", "docs", "CONFIGURATION.md")).read()
+        keys = list(nuc_config.FEATURES) + ["mode", "sections", "columns", "rows", "spacing", "details", "overview_seconds",
+                                            "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds"]
+        self.assertEqual([k for k in keys if "`%s`" % k not in doc], [])
+        for name in nuc_config.SECTIONS:
+            self.assertIn(name, doc)
+
     def test_shipped_config_parses_and_lists_every_feature(self):
         path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")
         cfg = nuc_config.load(path)

@@ -63,6 +63,8 @@ The login prompt of that terminal disappears while the service runs. Use **Ctrl+
 
 ## 4. Configure
 
+Every option is described in [CONFIGURATION.md](CONFIGURATION.md). Each install also refreshes `/etc/nuc-console/config.ini.dist` (your `config.ini` is never touched): `diff /etc/nuc-console/config.ini{,.dist}` lists the options added by a newer version.
+
 Edit `/etc/nuc-console/config.ini` (see [config/config.ini](../config/config.ini) for every key), then:
 
 ```bash
