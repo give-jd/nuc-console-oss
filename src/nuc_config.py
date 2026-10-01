@@ -18,7 +18,7 @@ else:  # macOS uses the Linux paths, except the runtime directory (no /run there
     ETC_DIR, RUN_DIR, LIB_DIR = "/etc/nuc-console", "/var/run/nuc-console" if MACOS else "/run/nuc-console", "/var/lib/nuc-console"
 DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
-            "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health")
+            "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health", "ai")
 MODES = ("overview", "rotate")
 REFRESH_MIN, REFRESH_MAX = 1, 10  # seconds between two redraws ([dashboard] refresh_seconds): every screen and page
 # macOS/Windows: how the dashboard is shown ([display] mode). 'kiosk' is accepted for the full-screen window.
