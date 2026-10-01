@@ -30,7 +30,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
-| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link) |
+| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
@@ -50,6 +50,12 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
 <img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+</details>
+
+<details>
+<summary><b>The MAP as a graph</b> (browser: circles and lines, drag and zoom)</summary>
+<br>
+<img src="docs/img/graph.png" alt="nuc-console MAP graph view in a browser: zones, ports, containers and databases as coloured circles linked by solid, dashed and dotted lines, one container selected with its details, demo data" width="100%">
 </details>
 
 ## Why
@@ -167,7 +173,7 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 ## Web view (optional)
 
-Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, no JavaScript, binds to loopback unless you give it a token.
+Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only, binds to loopback unless you give it a token; no JavaScript except the small, hash-pinned script that lets you drag and zoom the MAP's graph view.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
 
 ## Security
