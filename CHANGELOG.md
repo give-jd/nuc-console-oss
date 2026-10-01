@@ -112,6 +112,14 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - New `[ai]` section: `enabled` (`no`), `endpoint` (`http://127.0.0.1:11434/v1`), `model`, `gpu` (`auto` | `no`), `allow_remote` (`no`),
   `timeout_s` (`120`), `daily` (`no`: one digest a day). New `[features] ai`. Documentation: [docs/AI.md](docs/AI.md).
 
+**Expected vs actual exposure**
+
+- New `[expose]` section: the widest reach you intend for a service (`local`, `tailnet`, `lan`, `internet`), by name (container,
+  compose service or project, process, unit, database name or kind, `[webapps]` name) or by port (`8080`, `8080/udp`). ATTENTION raises
+  `over-exposed` when the real reach is wider (unknown counts as open; a Funnel is followed to its backend; the most restrictive key wins)
+  and `expose-unmatched` for a name that matches nothing. The EXPOSURE matrix marks each declared row `expected: …` or
+  `beyond config.ini: …`; the MAP shows the declared reach on the port nodes. It never silences another alarm.
+
 **Releases**
 
 - Archives per system, built by CI on a version tag and attested: `nuc-console-X.Y.Z-linux.tar.gz`, `-macos.tar.gz`,
@@ -128,6 +136,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
+- A `config.ini` that cannot be read at all (for example a key starting with `:`) raises `config-unreadable` in ATTENTION instead of
+  falling back to the defaults in silence; a key written twice no longer makes the whole file unreadable (the last one wins).
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
 - The root collector looks inside every running container for the MAP (see the upgrade notes); the state files carry an `os` field.
 - `install.sh` copies every module of `src/` and removes the ones no longer shipped.
