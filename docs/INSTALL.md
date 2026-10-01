@@ -114,7 +114,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT 
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
+Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` user; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -186,7 +186,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
+`/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console` and the `_nuc-console` user are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
 
 ## What is different from Linux
 
@@ -260,7 +260,7 @@ Python is downloaded only the first time: a re-install reuses it.
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place, except its `notify` folder (the Telegram token), which is deleted.
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state and the HEALTH history `lib\history.db`) is left in place, except its `notify` folder (the Telegram token), which is deleted.
 
 ## What is different from Linux
 

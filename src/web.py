@@ -27,7 +27,7 @@ import graphjs
 import graphlayout
 import nuc_config
 import render
-from htmlview import CPU_CSS, CSS, GRAPH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
+from htmlview import CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
@@ -49,6 +49,9 @@ STATE_MARK = {"down": "✖ ", "unknown": "? "}  # a symbol besides the colour
 EV_CLASS = {"seen": "w B", "declared": "n", "possible": "d", "bind": "d"}  # evidence: seen bright, declared plain, possible dim
 EV_OF = {glyph: ev for (_, ev), glyph in graph.ARROW.items()}
 LEVEL_CLASS = {"err": "r", "warn": "y", "ok": "g"}
+HEALTH_SEL_MAX = 200  # characters of a finding id taken from a URL (an id is "<rule>:<subject>", the subject is capped at 64)
+HEALTH_COLS = 140     # the health page's default width in columns: wider than that scrolls sideways on a laptop (cols=200 asks for the 3-column layout)
+PILL_CLASS = {"err": "r", "warn": "y", "info": "d"}  # htmlview.HEALTH_CSS
 # the MAP's graph view (?view=map&as=graph): the same graph as circles and lines
 GRAPH_NODES = 400    # nodes drawn on one graph page: beyond, the most relevant ones, and a note says how to see the others
 GZOOMS = (50, 67, 80, 100, 125, 150, 200, 250, 300)  # z=: the drawing's size in % of the window (no script needed)
@@ -199,12 +202,15 @@ def view_params(q):
     as=graph: the MAP drawn as a graph (anything else: the tree), with stacks=1 the compose projects, ext=0 no remote
     addresses, local=1|2 only the selected node and its neighbours within 1 or 2 hops, z= the drawing's size in % (GZOOMS).
     view=cpu: the CPU screen: sort=mem|time|pid|user (default cpu), sel= the pid whose details are shown (only digits; dropped when
-    no such process)."""
+    no such process).
+    view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
+    report does not have), pause=1 no reload."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
-    view = one("view") if one("view") in ("map", "cpu") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health") else ""
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
+        one("sel")[:HEALTH_SEL_MAX] if view == "health" else \
         str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
     return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
             "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
@@ -217,7 +223,8 @@ def view_params(q):
             "ext": "0" if one("ext") == "0" else "",  # remote addresses are shown unless ext=0 (the only value written)
             "local": int(one("local")) if one("local") in ("1", "2") else 0,
             "z": gzoom(num("z")),
-            "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else ""}
+            "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else "",
+            **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {})}
 
 
 def gzoom(z):
@@ -306,6 +313,13 @@ class Server(http.server.ThreadingHTTPServer):
             state = map_mode(state)
             key = ("map", zoom, r) + tuple(here.items()) + tuple(sorted(state.items()))
             return self.cached(key, r / 2, lambda: self.map_page(here, state, zoom, r))
+        if view == "health":  # the period and the selected finding are checked here, so that the cache key holds only values that exist
+            days = state.get("period") if state.get("period") in render.HEALTH_DAYS else 7
+            on = render.CFG["features"].get("health", True)
+            ids = {f["id"] for f in render.health_findings(render.health_data(days)["report"])} if on else set()  # one report a minute per period
+            sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
+            key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
+            return self.cached(key, r / 2, lambda: self.health_page(here, days, sel, pause, zoom, r))
         return self.cached((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda: self.dashboard(here, zoom, r))
 
     def grid(self, here, zoom):
@@ -335,7 +349,7 @@ class Server(http.server.ThreadingHTTPServer):
             body = "render error (see the service log)"
         link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
         views = [link("compact", cols=100), link("wide", cols=200), link("overview", full=False) if full else link("full details", full=True)]
-        for name in ("map", "cpu"):
+        for name in ("map", "cpu", "health"):
             if render.CFG["features"].get(name, True):
                 views.append(f'<a href="{html.escape(page_url(dict({"view": name}, **here)))}">{name}</a>')
         page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -482,6 +496,87 @@ class Server(http.server.ThreadingHTTPServer):
             while len(self.layouts) > LAYOUTS_MAX:
                 self.layouts.popitem(last=False)
             return pos
+
+
+    def health_page(self, here, days, sel, pause, zoom, r):
+        """The HEALTH page: the console screen's parts as HTML. The findings are links (sel=<id>) whose details show beside or under the
+        list; the sections of tables are the console's, drawn at the page's width. The URL holds the whole view, so the reload keeps it."""
+        def doc(body, foot, refresh=True):
+            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
+                    + f'<title>{html.escape(socket.gethostname())} · health · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}'
+                    + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
+        dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
+        if not render.CFG["features"].get("health", True):
+            return doc("<p>health disabled in config.ini (<b>[features] health = no</b>)</p>", [dash, "read-only"], refresh=False)
+        hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": pause}, **here)
+        cols, data = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), {"report": None}
+        try:
+            data, pb = render.health_state(self.smp, days)
+            body = health_body(data, pb, days, sel, hhere, cols, socket.gethostname())
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+            print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+            body = "<pre>render error (see the service log)</pre>"
+        anchor = f"#f-{sel_index(data, sel)}" if sel else ""  # the footer's links keep the selected finding in sight
+        link = lambda text, **kw: f'<a href="{html.escape(page_url(hhere, **kw) + anchor)}">{text}</a>'  # noqa: E731
+        periods = " ".join(f"<b>{lab}</b>" if d == days else link(lab, period=d if d != 7 else 0) for d, lab in ((1, "24h"), (7, "7d"), (30, "30d")))
+        bar = [dash, "period " + periods, link("compact", cols=100), link("wide", cols=200),
+               "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
+        if here["kiosk"]:
+            bar.append(html.escape(render.KIOSK_HINT))
+        return doc(body, bar, refresh=not pause)
+
+
+def sel_index(data, sel):
+    return next((i for i, f in enumerate(render.health_findings(data["report"])) if f["id"] == sel), 0)
+
+
+def health_extra_html(report):
+    """THE HOOK for the AI advisor (feat/ai): an HTML block (already escaped: html.escape every word of it) shown as ADVICE under the
+    findings list, or "" for none. The console calls render.health_extra_lines(report, w) at the same place."""
+    return ""
+
+
+def health_body(data, pb, days, sel, here, cols, host):
+    """Header, title, notes, the findings (every one a link; the selected one's details beside or under them) and the sections, as HTML.
+    Everything from the report goes through render.hclean() (control, format and wide characters out) and html.escape()."""
+    esc, R = html.escape, data["report"]
+    text, code = render.status_pill(pb)
+    out = [f'<div class="hd {sgr_class(code)}"><span> {esc(host)} │ HEALTH │ {time.strftime("%H:%M:%S")}</span><span>{esc(text)} </span></div>']
+    fl = render.health_findings(R)
+    title = render.health_title(R, cols, days, fl, selector=False)
+    if R is None:
+        return "".join(out) + f'<pre class="ht">{to_html(title)}</pre><p class="hn {"r" if data.get("err") else ""}">{esc(render.hclean(data["msg"]))}</p>'
+    notes = [render.hclean(x) for x in R.get("notes") or [] if isinstance(x, str)]
+    if not (R.get("coverage") or {}).get("since"):
+        notes = [x for x in notes if x != "no history yet"]
+    out.append(f'<pre class="ht">{to_html(title)}</pre>' + "".join(f'<div class="nt">· {esc(x)}</div>' for x in notes))
+    if not render.hnum((R.get("coverage") or {}).get("hours")):
+        return "".join(out) + f'<p class="hn">{esc("no data in this period" if (R.get("coverage") or {}).get("since") else render.HEALTH_NONE)}</p>'
+    rows = []
+    for i, f in enumerate(fl):
+        level, ttl, txt, _, _ = render.health_details(f)
+        label = render.LEVEL_PILL[level][0].strip()
+        cur = f["id"] == sel
+        rows.append(f'<div class="ro{" sel" if cur else ""}" id="f-{i}"><span class="tr"><span class="pl {PILL_CLASS[level]}">{esc(label)}</span> </span>'
+                    f'<span class="bd"><a class="lb {LEVEL_CLASS.get(level, "n")}" href="{esc(page_url(here, sel="" if cur else f["id"]) + f"#f-{i}")}">'
+                    f'{esc(ttl)}</a>  <span class="d">{esc(txt)}</span>' + (' <a class="dl" href="#details">details ↓</a>' if cur else "") + '</span></div>')
+    if not fl:
+        rows.append(f'<div class="nt">{esc(render.health_nothing(R))}</div>')
+    panel = ""
+    cur = next((f for f in fl if f["id"] == sel), None)
+    if cur:
+        level, ttl, txt, facts, fix = render.health_details(cur)
+        trs = [f'<tr class="top"><th>finding</th><td class="{LEVEL_CLASS.get(level, "")}">{esc(ttl)}</td></tr>', f"<tr><th>what</th><td>{esc(txt)}</td></tr>"]
+        trs += ([f'<tr><th>facts</th><td></td></tr>'] if facts else []) + [f'<tr><th class="in">{esc(k)}</th><td>{esc(v)}</td></tr>' for k, v in facts]
+        trs.append(f"<tr><th>fix</th><td>{esc(fix)}</td></tr>")
+        panel = (f'<aside class="dp" id="details"><div class="dh"><span>DETAILS</span><a href="{esc(page_url(here, sel="") + f"#f-{sel_index(data, sel)}")}">'
+                 f'close ✕</a></div><table>{"".join(trs)}</table></aside>')
+    out.append(f'<div class="hs">FINDINGS</div><main class="mp{" two" if panel else ""}"><div class="tree">{"".join(rows)}{health_extra_html(R)}</div>{panel}</main>')
+    if R.get("coverage"):
+        out.append(f'<pre class="ht">{to_html(chr(10).join(render.health_tables(R, cols)))}</pre>')
+    return "".join(out)
 
 
 def map_state(state):
@@ -930,6 +1025,9 @@ def main(argv):
         token = read_token(cfg["token_file"])
         check_bind(cfg["bind"], token)
         port = int(argv[argv.index("--port") + 1]) if "--port" in argv else cfg["port"]
+        if demo:  # --demo-os windows|darwin: the demo as that OS's collector writes it; --demo-health little|none: the HEALTH page of a young history
+            render.DEMO_OS = argv[argv.index("--demo-os") + 1] if "--demo-os" in argv[:-1] else None
+            render.DEMO_HEALTH = argv[argv.index("--demo-health") + 1] if "--demo-health" in argv[:-1] else ""
         srv = Server((cfg["bind"], port), cfg, token, demo, zoom=full_cfg["display"]["zoom"])
         if demo and "--demo-os" in argv[:-1]:  # --demo as the macOS/Windows collector writes it (windows|darwin)
             render.DEMO_OS = argv[argv.index("--demo-os") + 1]

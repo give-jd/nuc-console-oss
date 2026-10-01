@@ -24,6 +24,7 @@ import collect_windows as cwin  # noqa: E402
 import collector  # noqa: E402
 import cpuinfo  # noqa: E402
 import demo  # noqa: E402
+import history  # noqa: E402
 import hostinfo  # noqa: E402
 import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
@@ -898,6 +899,27 @@ class Installers(unittest.TestCase):
             self.assertIn(f"set {var}=", s)
 
 
+def history_job_on_this_machine(case):
+    """The real history sources of this OS, once: results may be empty (a quiet machine, a tool that is not there), a crash or
+    a failure that is not reported is never allowed. The first step reads every source once (events() runs at the first step)."""
+    with tempfile.TemporaryDirectory() as d:
+        store = history.Store(os.path.join(d, "history.db"))
+        try:
+            job = collector.HistoryJob(store)
+            job.step()
+            job.step()
+            job.flush()
+            case.assertEqual(store.meta("schema_version"), "1")
+            case.assertEqual(store.meta("os"), nuc_config.OS_NAME)
+            case.assertGreaterEqual(int(store.meta("cores")), 1)
+            case.assertIsInstance(json.loads(store.meta("last_errors") or "{}"), dict)
+            disks, mem = collector.disk_rows(), collector.hist_meminfo()
+            case.assertTrue(disks and all(r["used"] <= r["total"] for r in disks))
+            case.assertTrue(0 < mem["MemAvailable"] <= mem["MemTotal"])
+        finally:
+            store.close()
+
+
 # ---- the real system calls, on the OS they are about ----------------------------------------------------------------------
 
 
@@ -958,6 +980,19 @@ class OnWindows(unittest.TestCase):
         self.assertIn("profiles", f)
         out = cwin.listeners(f)
         self.assertTrue(all(x["fw"][0] in render.CELL for x in out))
+
+    def test_history_event_log_reader(self):
+        got = cwin.parse_events(cwin.powershell(collector.run, cwin.events_script({}), timeout=120))
+        self.assertEqual(set(got["cursors"]) | set(got["errors"]), {"System", "Application"})
+        self.assertTrue(all(e["kind"] in history.KINDS and e["source"] == "eventlog" for e in got["events"]))
+        # incremental: from the newest record read, only newer ones come, and the cursors never go back
+        again = cwin.parse_events(cwin.powershell(collector.run, cwin.events_script(got["cursors"]), timeout=120))
+        self.assertEqual(set(again["cursors"]) | set(again["errors"]), {"System", "Application"})
+        for log, rec in got["cursors"].items():
+            self.assertGreaterEqual(again["cursors"].get(log, rec), rec)
+
+    def test_history_job(self):
+        history_job_on_this_machine(self)
 
     def test_cpu_sensors(self):
         data = cwin.powershell(collector.run, cwin.PS_SENSORS, timeout=60)               # the script runs and answers JSON
@@ -1056,6 +1091,17 @@ class OnMacOS(unittest.TestCase):
         rc, out, _ = collector.run("socketfilterfw", "--getglobalstate")
         self.assertEqual(rc, 0)
         self.assertIn(cmac.parse_alf(out, "", "", "", "")["state"], (0, 1, 2))
+
+    def test_history_crash_reports_reader(self):
+        evs, newest = cmac.diag_events(0, cap=10 ** 6)
+        self.assertTrue(all(e["kind"] in history.KINDS and e["source"] == "diag" for e in evs))
+        self.assertGreaterEqual(newest, 0)
+        self.assertEqual(cmac.diag_events(newest + 1, cap=10 ** 6)[0], [])  # nothing is newer than the newest
+        failed = cmac.daemons(collector.run)[1]
+        self.assertEqual(cmac.new_failed_daemons(None, failed, time.time()), [])
+
+    def test_history_job(self):
+        history_job_on_this_machine(self)
 
     def test_cpu_sensors(self):
         d = check_sensors(self, collector.collect_sensors(), "darwin")
