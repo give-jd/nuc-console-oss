@@ -33,6 +33,7 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
+| 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
 <details>
@@ -95,6 +96,8 @@ rotate_seconds = 15
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
 rows = 0              # e.g. 65 if the bottom lines are cut by the monitor
 spacing = 1           # a blank line under each section title (0 = compact)
+details = yes         # pages with everything the overview cuts ("… +N more"), rotating on the monitor
+overview_seconds = 45
 
 [webapps]             # apps you EXPECT to be reachable: shown as active or DOWN; not a Docker-bypass problem
 ethibid = 8180, 8543
