@@ -146,6 +146,10 @@ class SetupError(Exception):
     """An expected failure: printed as one line, exit status 1."""
 
 
+class Cancelled(Exception):
+    """The caller asked download() to stop (the cancel of the web page and of the screen): the partial file stays, a later download resumes it."""
+
+
 def model_url(m):
     """https://huggingface.co/<repo>/resolve/<commit>/<file>, or None while the model is not pinned."""
     if not m.get("revision"):
@@ -430,9 +434,35 @@ def _stream(opener, url, part, have, size, timeout, progress):
         return done
 
 
-def download(url, dest, sha256, size, *, mode=0o644, allow_loopback_http=False, progress=None, retries=4, timeout=30, backoff=2.0):
+def _nap(seconds, stop=None):
+    """time.sleep(seconds); with `stop` (a cancel check) in slices of a fifth of a second, calling it before each."""
+    if stop is None:
+        time.sleep(seconds)
+        return
+    left = seconds
+    while left > 0:
+        stop()
+        step = min(0.2, left)
+        time.sleep(step)
+        left -= step
+    stop()
+
+
+def download(url, dest, sha256, size, *, mode=0o644, allow_loopback_http=False, progress=None, retries=4, timeout=30, backoff=2.0, cancel=None):
     """Download `url` to `dest` (resuming "<dest>.part"), check size and SHA-256, then rename. -> "cached" | "downloaded".
-    A file already at `dest` with the right hash is never downloaded again. A wrong hash deletes the download and raises."""
+    A file already at `dest` with the right hash is never downloaded again. A wrong hash deletes the download and raises.
+    cancel: a function that says True when the caller wants to stop: looked at at every chunk and while waiting to try again, it raises
+    Cancelled and keeps the partial file."""
+    def stop():
+        if cancel is not None and cancel():
+            raise Cancelled()
+    if cancel is not None:
+        inner = progress
+
+        def progress(done, total):  # noqa: F811 - the caller's progress, behind the cancel check
+            stop()
+            if inner:
+                inner(done, total)
     check_url(url, allow_loopback_http)
     if not (sha256 and HEX64.match(sha256) and isinstance(size, int) and size > 0):
         raise SetupError("%s: SHA-256 and size are not pinned: refusing to download" % os.path.basename(dest))
@@ -441,6 +471,7 @@ def download(url, dest, sha256, size, *, mode=0o644, allow_loopback_http=False, 
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     part, opener, last = dest + ".part", _opener(allow_loopback_http), None
     for attempt in range(retries + 1):
+        stop()
         have = os.path.getsize(part) if os.path.exists(part) else 0
         if have > size:
             os.unlink(part)
@@ -473,7 +504,7 @@ def download(url, dest, sha256, size, *, mode=0o644, allow_loopback_http=False, 
         if os.path.exists(part) and os.path.getsize(part) == size:
             break
         if attempt < retries:
-            time.sleep(backoff * (attempt + 1))
+            _nap(backoff * (attempt + 1), stop if cancel is not None else None)
     if not os.path.exists(part) or os.path.getsize(part) != size:
         raise SetupError("download incomplete (%s); run the command again to resume" % (last or "unknown error"))
     got = sha256_file(part)

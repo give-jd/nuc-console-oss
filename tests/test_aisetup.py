@@ -619,6 +619,42 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual(self.dl(srv), "downloaded")
         self.assertEqual(get(self.dest, "rb"), self.data)
 
+    def test_cancel_stops_at_the_next_chunk_keeps_the_partial_file_and_a_later_download_resumes_it(self):
+        data, seen = blob(2_500_000, b"c"), []
+        with Server({"/m.gguf": data}) as srv:
+            with self.assertRaises(aisetup.Cancelled):
+                self.dl(srv, data=data, progress=lambda done, total: seen.append(done), cancel=lambda: len(seen) >= 1)
+            self.assertFalse(os.path.exists(self.dest), "nothing is installed")
+            part = os.path.getsize(self.dest + ".part")
+            self.assertTrue(1 << 20 <= part < len(data), part)
+            self.assertEqual(self.dl(srv, data=data), "downloaded")
+            self.assertEqual(srv.requests[-1][1], "bytes=%d-" % part, "the second one starts where the first stopped")
+        self.assertEqual(get(self.dest, "rb"), data)
+
+    def test_cancel_before_the_start_does_not_even_connect(self):
+        with Server({"/m.gguf": self.data}) as srv:
+            with self.assertRaises(aisetup.Cancelled):
+                self.dl(srv, cancel=lambda: True)
+            self.assertEqual(srv.requests, [])
+
+    def test_cancel_is_looked_at_while_waiting_to_try_again(self):
+        slept = []
+        with Server({"/m.gguf": self.data}) as srv:
+            srv.cuts = [100, 100, 100, 100, 100]  # every answer is cut short: the download keeps trying
+            with mock.patch.object(aisetup.time, "sleep", side_effect=lambda s: slept.append(s)):
+                with self.assertRaises(aisetup.Cancelled):
+                    self.dl(srv, backoff=5.0, cancel=lambda: len(slept) >= 2)
+        self.assertLessEqual(max(slept), 0.2, "in slices of a fifth of a second, not one long sleep")
+        self.assertEqual(len(srv.requests), 1, "no second attempt after the cancel")
+
+    def test_without_cancel_the_wait_is_one_sleep(self):
+        slept = []
+        with Server({"/m.gguf": self.data}) as srv:
+            srv.cuts = [100]
+            with mock.patch.object(aisetup.time, "sleep", side_effect=lambda s: slept.append(s)):
+                self.assertEqual(self.dl(srv, backoff=5.0), "downloaded")
+        self.assertEqual(slept, [5.0])
+
     def test_resume_from_partial_file(self):
         os.makedirs(os.path.dirname(self.dest))
         put(self.dest + ".part", self.data[:100_000])
