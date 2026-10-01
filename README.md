@@ -87,11 +87,12 @@ Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **
 containers = yes      databases = yes     exposure = yes      firewall = yes
 fail2ban   = yes      tailscale = yes     boot     = yes      docker_disk = yes
 network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
+webapps  = yes
 
 [dashboard]
 mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
 rotate_seconds = 15
-# sections = attention, exposure, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
+# sections = attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
 #            ^ fixed on-screen order (this is the default, by priority); columns fill left to right, never back-filled
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
 rows = 0              # e.g. 65 if the bottom lines are cut by the monitor
@@ -107,8 +108,8 @@ enabled = no
 ```
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
-Apply with `sudo systemctl restart nuc-console nuc-console-collector`. Environment overrides: `NUC_CONSOLE_CONFIG`, `NUC_CONSOLE_MODE`.
-Details in [config/config.ini](config/config.ini).
+Apply with `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web`. After an upgrade, `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied the file.
+**Full reference of every key, default and command: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)** (commented example: [config/config.ini](config/config.ini)).
 
 ## ATTENTION: inventory, analysis, accepting
 

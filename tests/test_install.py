@@ -40,5 +40,12 @@ class ReinstallKeepsChoices(unittest.TestCase):
         self.assertEqual(old_values(None, None), ("", ""))
 
 
+class ConfigStaysAndDistRefreshes(unittest.TestCase):
+    def test_config_is_never_overwritten_but_the_dist_copy_is_refreshed(self):
+        src = open(INSTALL).read()
+        self.assertRegex(src, r"\[ -e /etc/nuc-console/config\.ini \] \|\| install .* /etc/nuc-console/config\.ini\b")
+        self.assertIn("config/config.ini /etc/nuc-console/config.ini.dist", src)
+
+
 if __name__ == "__main__":
     unittest.main()
