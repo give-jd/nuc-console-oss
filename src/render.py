@@ -2607,6 +2607,16 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
+def host_sample(smp):
+    """The Sampler's reading for a screen. Under --demo it is the demo machine's (demo.sampler_data), whatever sampler is given (the web view
+    always has a real one) and without calling it: nothing of the machine running the demo is read or shown. Without a sampler: no figures
+    ({"thermal": {}}: the screens that only judge the header's problems)."""
+    if DEMO:
+        import demo
+        return demo.sampler_data(DEMO_OS)
+    return smp.sample() if smp else {"thermal": {}}
+
+
 def demo_defaults():
     """--demo: the host name and the [webapps] the screenshots show (one up, one expected-but-down)."""
     socket.gethostname = lambda: "demo-host"
@@ -2619,7 +2629,7 @@ def demo_defaults():
 def map_graph(smp=None):
     """(MAP graph, header problems) of the current state: shared by the console's Map screen and the web view's map page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
@@ -3597,7 +3607,7 @@ def fill_cpu(sl, idx, w, body_h, feed):
 def cpu_problems(smp=None):
     """The header's problems of the current state: the CPU screen has no graph of its own to take them from."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -3629,10 +3639,8 @@ def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
 def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False, cpu_feed=None):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
@@ -3645,10 +3653,8 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
 
 def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
@@ -3693,9 +3699,10 @@ def once(argv):
             return 2
         out = ai_once(argv, w, h)
     else:
-        smp = Sampler()
-        smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
-        time.sleep(0.5)
+        smp = None if DEMO else Sampler()  # the demo reads nothing from this machine (render_screen)
+        if smp:
+            smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
+            time.sleep(0.5)
         out, _ = render_screen(smp, w, h, n=n)
     print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
@@ -4330,7 +4337,7 @@ def health_select(fl, hv, text):
 def health_state(smp, days):
     """(the cached report data, the header's problems): shared by the console loop and --once."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return health_data(days), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -4452,7 +4459,7 @@ def ai_status(wait=0.0):
 def ai_state(smp):
     """(the catalog's data, the header's problems): shared by the console loop, --once and the web page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])

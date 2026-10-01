@@ -520,7 +520,7 @@ class NativeRenderer(unittest.TestCase):
     def test_every_width_draws_and_nothing_is_wider_than_the_screen(self):
         for os_name in ("windows", "darwin"):
             cont, net, boot, base = self.snap(os_name)
-            sm = demo.sampler_data({"cpu": {f"cpu{i}": 0.1 * i for i in range(8)}, "thermal": {}, "net": {}}, os_name)
+            sm = demo.sampler_data(os_name)
             for w, h in ((79, 24), (120, 33), (200, 50), (226, 50), (237, 64)):
                 with self.subTest(os=os_name, size=(w, h)):
                     lines = render.page_overview(sm, cont, net, boot, w, h - 2, baseline=base)
