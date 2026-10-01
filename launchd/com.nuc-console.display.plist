@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- nuc-console dashboard, full screen in the browser, for every user who logs in to the desktop (LaunchAgent).
-     Cmd+Q closes it until the next login. Installed by install-macos.sh with [display] mode = fullscreen. -->
+<!-- nuc-console dashboard at every desktop login (LaunchAgent), as [display] mode says: a normal browser window (open)
+     or a full-screen one (kiosk). Installed by install-macos.sh, which fills @DISPLAY@, unless mode = none. -->
 <plist version="1.0">
 <dict>
     <key>Label</key><string>com.nuc-console.display</string>
     <key>ProgramArguments</key>
-    <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/render.py</string><string>--kiosk</string></array>
+    <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/render.py</string><string>@DISPLAY@</string></array>
     <key>LimitLoadToSessionType</key><string>Aqua</string>
     <key>RunAtLoad</key><true/>
     <key>ProcessType</key><string>Interactive</string>

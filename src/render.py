@@ -2379,6 +2379,35 @@ def web_up(port, wait):
         time.sleep(2)
 
 
+def dashboard_url(fullscreen=False, cols=0, rows=0):
+    query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
+    from urllib.parse import urlencode
+    return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
+
+
+def open_in_browser(argv):
+    """`render.py --open`: the dashboard in a normal window of the default browser ([display] mode = browser, at every login).
+
+    The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more."""
+    base = user_dir()
+    os.makedirs(base, exist_ok=True)
+    if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
+        nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
+    url = dashboard_url()
+    if not web_up(CFG["web"]["port"], 60):
+        print(f"the web view does not answer on 127.0.0.1:{CFG['web']['port']}: dashboard not opened", file=sys.stderr, flush=True)
+        return 1
+    print(f"open -> {url}", file=sys.stderr, flush=True)
+    if WINDOWS:
+        os.startfile(url)  # the default browser, as this user
+    elif MACOS:
+        subprocess.run(["/usr/bin/open", url], timeout=30)
+    else:
+        import webbrowser
+        webbrowser.open(url)
+    return 0
+
+
 def kiosk(argv):
     """`render.py --kiosk`: the dashboard full screen, for the monitor of a Mac or a Windows PC (the display at login).
 
@@ -2392,8 +2421,7 @@ def kiosk(argv):
     cols, rows = kiosk_grid()
     web = CFG["web"]
     if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
-        from urllib.parse import urlencode
-        url = f"http://127.0.0.1:{web['port']}/?" + urlencode({"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1})
+        url = dashboard_url(fullscreen=True, cols=cols, rows=rows)
         cmd = browser_command(find_browser(), url, os.path.join(base, "browser"))
         print(f"kiosk -> {url}", file=sys.stderr, flush=True)
         if not cmd or "--no-browser" in argv:
@@ -2466,6 +2494,8 @@ def main(argv):
         return once(argv)
     if "--kiosk" in argv:
         return kiosk(argv)
+    if "--open" in argv:
+        return open_in_browser(argv)
     smp = Sampler()
     fd = sys.stdin.fileno() if sys.stdin else -1
     old = termios.tcgetattr(fd) if termios and fd >= 0 and os.isatty(fd) else None
