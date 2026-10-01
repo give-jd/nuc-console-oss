@@ -68,6 +68,12 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 </details>
 
 <details>
+<summary><b>The AI screen</b> (which local model this machine can run: fits on the GPU, in RAM, slows the PC, too big)</summary>
+<br>
+<img src="docs/img/ai.png" alt="nuc-console AI page in a browser: hardware (CPU, RAM, GPU memory), the list of local models with a verdict for each (fits GPU, GPU+CPU, slow, too big), estimated speed, recommended model, and the details with the commands to install it, demo data" width="100%">
+</details>
+
+<details>
 <summary><b>The MAP as a graph</b> (browser: circles and lines, drag and zoom)</summary>
 <br>
 <img src="docs/img/graph.png" alt="nuc-console MAP graph view in a browser: zones, ports, containers and databases as coloured circles linked by solid, dashed and dotted lines, one container selected with its details, demo data" width="100%">

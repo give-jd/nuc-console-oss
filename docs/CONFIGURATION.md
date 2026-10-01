@@ -98,6 +98,7 @@ What it is, how to choose a model for your hardware, the commands and the securi
 | `gpu` | `auto` | `auto`: `nuc-console-ai serve` puts the model on the GPU (all of it, or some layers) when the hardware advice says it fits there; `no`: the server it starts never uses the GPU (and the hardware is not even read for it). Only for the server that `nuc-console-ai` starts: Ollama and the others decide for themselves. An installed service keeps what it was installed with: after changing `gpu` (or `model`, with `use`) run `sudo nuc-console-ai serve --install-service` again |
 | `allow_remote` | `no` | An endpoint that is not on this machine is refused unless `yes`: it would receive this machine's history |
 | `timeout_s` | `120` | Seconds a generation may take (10–600) |
+| `daily` | `no` | `yes`: the collector asks for one digest of the last 7 days a day, at low priority, shown on the HEALTH screen ([AI.md](AI.md#the-daily-digest)) |
 
 ## Commands
 

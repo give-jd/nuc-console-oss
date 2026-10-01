@@ -82,10 +82,10 @@ With `[ai] enabled = yes` and a model server running ([AI.md](AI.md)), an **ADVI
 tables: a few lines in plain language about this period's findings, headed `ADVICE (AI, <model>) — check before acting`, with the
 findings it relies on cited in `[brackets]` and listed on a `cites:` line. The screens never ask the model (a key press or a page would have to wait for it):
 they show an answer that already exists, and with none yet a line says so and names the command that asks. That command is
-`nuc-console-ask advise [--days N]` (1-30 days, default 7); a question: `nuc-console-ask "why is the disk filling up?"`. The answer is kept
-in the advisor's cache (`advisor-cache.json`, 20 answers for 7 days, in the user cache folder of the account that asked:
-[AI.md](AI.md#files-and-disk)) for these findings and this model: a screen shows it when it runs as that account and the findings
-have not changed since; once the history has moved on, ask again. The model gets the findings as data (names and numbers,
+`sudo nuc-console-ask advise [--days N]` (1, 7 or 30 days; default 7), or `[ai] daily = yes` for one digest of the last 7 days a day
+([AI.md](AI.md#the-daily-digest)); a question: `nuc-console-ask "why is the disk filling up?"`. The screens show the latest answer
+for the period in view from the shared `advice.json` when it is at most 36 hours old, with its age ("generated 5 h ago"); a cited
+finding that no longer exists is not a link. The model gets the findings as data (names and numbers,
 never log lines), may only read the history through fixed queries, and cannot run or change anything: the commands in its advice are
 for you to check and run. Without `[ai] enabled = yes` the screen is exactly as above.
 

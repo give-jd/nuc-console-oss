@@ -271,6 +271,7 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
 |---|---|---|---|
 | Runtime and models | `/var/lib/nuc-console/ai` (run as root); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (root); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` |
 | Service | unit `nuc-console-ai.service`, user `nuc-console-ai`, state `/var/lib/nuc-console-ai`; log: `journalctl -u nuc-console-ai` | `/Library/LaunchDaemons/com.nuc-console.ai.plist`, user `_nuc-console-ai`; log `/var/log/nuc-console/ai.log` | scheduled task `\nuc-console\ai` (LOCAL SERVICE); log `%ProgramData%\nuc-console\logs\ai.log` |
+| Shared advice (what the screens show) | `/var/lib/nuc-console/advice.json` | same | `%ProgramData%\nuc-console\lib\advice.json` |
 | Advice cache | `advisor-cache.json` in `~/.cache/nuc-console` (`$XDG_CACHE_HOME`) of whoever asked | `~/Library/Caches/nuc-console` | `%LOCALAPPDATA%\nuc-console` |
 
 The screens and `models` and `status` read the system-wide folder when it holds `verified.json` (what `sudo setup` leaves there),
@@ -280,8 +281,16 @@ else your own. `NUC_CONSOLE_HOME=<dir>` moves the first row to `<dir>/ai` (and t
 was checked, so that `status` does not hash 2 GB each time). `setup` needs the missing files plus 300 MB free and stops, naming the
 folder, if there is not enough. At its first start llamafile unpacks a small loader into the service account's home.
 
-The advice cache keeps up to 20 answers for 7 days; it belongs to the account that asked, which is why a screen run by another
-account does not see an answer you asked for (see [HEALTH.md](HEALTH.md#advice-optional)).
+The advice cache keeps up to 20 answers for 7 days and belongs to the account that asked. What the screens show is the shared
+`advice.json`: the latest answer for 1, 7 or 30 days, written only by root / Administrator (the collector's daily digest, or
+`sudo nuc-console-ask advise --days N`), readable by everyone and checked again when read (size, owner, types, text cleaned).
+
+### The daily digest
+
+`[ai] daily = yes` (with `enabled = yes` and `[features] health` on): the collector asks the model for the advice on the last
+7 days about 10 minutes after it starts, then every 24 hours, in a low-priority child process (`advisor.py advise --store`, timeout
+`timeout_s` + 2 minutes) that never holds up the collector. A failure is logged once and tried again the next day; the last attempt
+is remembered in `advice.json`, so a restart does not ask again. The screens show an answer up to 36 hours old, with its age.
 
 The installers add the two commands and remove them on uninstall, together with the service. They **keep** the runtime and
 the models (and the `nuc-console-ai` account and its state), because downloading them again is the expensive part: to give
@@ -292,9 +301,9 @@ the disk back, run `sudo nuc-console-ai remove` before uninstalling, or delete t
 `setup` downloads only what the code pins: for the runtime a SHA-256 and a size, for each model a Hugging Face commit
 (40 hex), a SHA-256 and a size. They are written in `src/aisetup.py` (`RUNTIME` and `MODELS`); they are never read from
 the network at run time and never filled in from memory. A value that is still empty means "not pinned": `setup` says
-which and downloads nothing. In this release the twelve models are pinned; the runtime's SHA-256 and size are the part still
-to be confirmed, so `setup` stops and names `runtime` until they are. The AI screen and `models` keep working either way, because
-the verdicts use the approximate sizes, not the pins; the details of a model that is not pinned say "not pinned yet".
+which and downloads nothing. In this release everything is pinned: llamafile 0.10.6 (from `github.com/mozilla-ai/llamafile`) and
+the twelve models (read with `pins` by the `ai-pins` workflow, which also installs the smallest model on a GitHub runner, serves it
+and asks it a question). The verdicts use the approximate sizes, not the pins; a model that is not pinned says "not pinned yet".
 
 A maintainer pins a release with `python3 src/aisetup.py pins` (it asks the Hugging Face and GitHub APIs, so it needs the
 network); the steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#pinning-the-ai-manifest). A model counts as installed
@@ -312,5 +321,5 @@ when its file has the pinned size and hash.
 | The first answer takes a minute | the model is loaded into memory on its first request; later ones are faster |
 | Answers are slow, the GPU is idle | the GPU backend did not load and llamafile fell back to the CPU: run `nuc-console-ai serve` in the foreground, read the start-up lines; [GPU support](#gpu-support) |
 | A new `[ai] model`, or `[ai] gpu`, changed nothing in the running server | an installed service keeps what it was installed with: `sudo nuc-console-ai serve --install-service` again |
-| HEALTH shows "no advice yet" | the screens only show an answer that is already in their own account's cache: [HEALTH.md](HEALTH.md#advice-optional) |
+| HEALTH shows "no advice yet" | the screens show the shared answer of the last 36 hours: `sudo nuc-console-ask advise`, or `[ai] daily = yes`: [HEALTH.md](HEALTH.md#advice-optional) |
 | macOS: the server does not start the first time | `xcode-select --install` (Apple silicon needs the Command Line Tools once) |
