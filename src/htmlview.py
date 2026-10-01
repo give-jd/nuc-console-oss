@@ -13,7 +13,10 @@ PALETTE = (".r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}
            ".w{color:#f0f6fc}.d{color:#6e7681}.k{color:#0d1117}.B{font-weight:700}.bR{background:#da3633}.bY{background:#d29922}"
            ".rv{background:#c9d1d9;color:#0d1117}")
 CSS = ("html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
-       "pre{margin:0;overflow-x:auto}" + PALETTE + "footer{margin-top:10px;color:#6e7681;font:12px sans-serif}"
+       "pre{margin:0;overflow-x:auto}" + PALETTE +
+       # the bar with A- / A+ and the views stays at the bottom of the window while the page scrolls
+       "footer{position:sticky;bottom:0;margin-top:10px;padding:8px 0;background:#0d1117;border-top:1px solid #30363d;"
+       "color:#6e7681;font:12px sans-serif}"
        "a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}")
 
 

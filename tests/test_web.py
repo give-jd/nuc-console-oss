@@ -150,6 +150,7 @@ class Web(unittest.TestCase):
         _, _, plain = get(self.open, "/?zoom=150")
         self.assertIn("font-size:21.0px", plain)                                                     # without fit: the font grows
         self.assertNotIn("<script", (big + kiosk + plain).lower())
+        self.assertIn("footer{position:sticky;bottom:0", big)                                        # the bar follows the scroll
 
     def test_local_mode_serves_loopback_only_when_web_is_off(self):
         seen = {}
