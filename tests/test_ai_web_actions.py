@@ -4,8 +4,9 @@ the demo; then the POST endpoints of the web view (CSRF, Origin, token, body, re
 
 Hermetic: a fake loopback server stands in for GitHub and Hugging Face (allow_loopback_http), a fake runtime script for llamafile, the
 fake OpenAI-compatible server of test_advisor.py for the model, a temporary AI folder; no test waits for the clock (events and joins).
-Platform-aware: Windows has no POSIX runtime script (the start and stop tests are for Unix), macOS runners are arm64, and a temporary
-folder's parents are not always readable by others.
+Platform-aware: the start and stop tests are for Unix (/bin/sh, process groups, signals); on Windows, where the engine starts the runtime as an
+.exe, the fake one is Python source that Base.popen runs with this interpreter. macOS runners are arm64, and a temporary folder's parents are not
+always readable by others.
 """
 import contextlib
 import hashlib
@@ -41,7 +42,7 @@ import test_aisetup as tas  # noqa: E402  (the fake download server, the fake ad
 
 POSIX = os.name == "posix"
 RUNTIME_NAME = "llamafile-0.0"
-unix_only = unittest.skipUnless(POSIX, "the fake runtime is a Unix script (Windows runs a real .exe)")
+unix_only = unittest.skipUnless(POSIX, "start and stop on Unix: /bin/sh, process groups, signals")
 
 
 def sha(b):
@@ -50,7 +51,8 @@ def sha(b):
 
 def runtime_script(kind="serve"):
     """The bytes of a fake llamafile for `/bin/sh runtime --server --host H --port N -m FILE -a ID ...`: serve = answers GET /v1/models on that port
-    until it is stopped; die = writes a line and exits; stubborn = ignores SIGTERM."""
+    until it is stopped; die = writes a line and exits; stubborn = ignores SIGTERM. Windows starts `runtime.exe --server ...`: serve and stubborn
+    are then the Python source itself, which Base.popen hands to this interpreter (a script cannot be an .exe)."""
     serve = ("import http.server, json, sys\\n"
              "a = sys.argv[1:]\\nport = int(a[a.index(\"--port\") + 1])\\nmodel = a[a.index(\"-a\") + 1]\\n"
              "print(\"fake runtime up on\", port, flush=True)\\n"
@@ -69,6 +71,8 @@ def runtime_script(kind="serve"):
     if kind == "mute":  # loads for ever: it never answers
         return ("#!/bin/sh\nexec '%s' -c 'import time\nprint(\"loading\", flush=True)\nwhile True:\n    time.sleep(0.05)\n'\n" % sys.executable).encode()
     code = (stubborn if kind == "stubborn" else serve).replace("\\n", "\n")
+    if not POSIX:
+        return code.encode()
     return ("#!/bin/sh\nexec '%s' -c '%s' \"$@\"\n" % (sys.executable, code.replace("'", "'\"'\"'"))).encode()
 
 
@@ -119,6 +123,8 @@ class Base(unittest.TestCase):
 
     def popen(self, argv, **kw):
         self.popens.append((argv, kw))
+        if not POSIX and argv and argv[0] == aisetup.runtime_path(self.d, self.runtime):
+            argv = [sys.executable] + list(argv)  # the fake runtime.exe is Python source (runtime_script): this interpreter runs it
         return subprocess.Popen(argv, **kw)
 
     def m(self, name="tiny"):
@@ -607,7 +613,7 @@ class Delete(Base):
 
     def test_a_model_the_server_started_here_runs_is_not_deleted_under_it(self):
         if not POSIX:
-            self.skipTest("the fake runtime is a Unix script")
+            self.skipTest("alive() is POSIX's: on Windows os.kill(pid, 0) sends a Ctrl+C")
         self.install()
         self.eng.start_server("tiny")
         self.assertEqual(self.job()["state"], "done")

@@ -702,7 +702,8 @@ def find_dir(plat=None):
 def work_dir(plat=None):
     """The folder the web page and the console screen download into: find_dir()'s, except that the system-wide folder comes before an own folder
     with nothing installed in it yet when this account can write there (the installers hand it to the account of the web view and the console: a
-    service account has no home to download into). Same files as the commands, same place: `sudo nuc-console-ai setup` and a button meet there."""
+    service account has no home to download into). Same files as the commands, same place: `sudo nuc-console-ai setup` and a button meet there.
+    Windows has one folder for every account (ProgramData's): os.access, which reads the mode bits but not an ACL, is only asked on Unix."""
     d, system = find_dir(plat), default_dir(plat, euid=0)
     if d != system and not os.path.isfile(stamp_path(d)) and os.path.isdir(system) and os.access(system, os.W_OK | os.X_OK):
         return system

@@ -148,7 +148,9 @@ class AiFolderIsTheWebAccounts(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(text)
                 r = subprocess.run(["systemd-analyze", "verify", "--man=no", path], capture_output=True, text=True)
-            bad = [ln for ln in (r.stdout + r.stderr).splitlines() if any(k in ln for k in ("ReadWritePaths", "MemoryMax", "TasksMax", "Unknown key", "Invalid"))]
+            bad = [ln for ln in (r.stdout + r.stderr).splitlines()  # only about this unit: the runner's own units have their warnings (snapd.service: RestartMode)
+                   if name in ln and any(k in ln for k in ("ReadWritePaths", "MemoryMax", "TasksMax", "Unknown key", "Unknown section", "Unknown lvalue",
+                                                            "Invalid", "Failed to parse"))]
             self.assertEqual(bad, [], name)
 
     def test_macos_the_web_users_folder_is_made_after_the_user_and_owned_by_it(self):

@@ -493,9 +493,8 @@ class FolderTests(unittest.TestCase):
             self.assertEqual(aisetup.work_dir(), own, "no system-wide folder: the account's own")
             os.makedirs(own)
             os.makedirs(system)
-            os.chmod(system, 0o755)
-            writable = hasattr(os, "geteuid") and (os.geteuid() == 0 or os.access(system, os.W_OK | os.X_OK))
-            self.assertEqual(aisetup.work_dir(), system if writable else own)
+            os.chmod(system, 0o755)  # made by this account, in its temporary folder: it can write there, root or not, on every system
+            self.assertEqual(aisetup.work_dir(), system, "a system-wide folder this account can write to comes first")
             with mock.patch.object(aisetup.os, "access", return_value=False):
                 self.assertEqual(aisetup.work_dir(), own, "a folder this account cannot write to is not one to download into")
             put(aisetup.stamp_path(own), "{}")
@@ -503,6 +502,9 @@ class FolderTests(unittest.TestCase):
             put(aisetup.stamp_path(system), "{}")
             with mock.patch.object(aisetup.os, "access", return_value=False):
                 self.assertEqual(aisetup.work_dir(), system, "what the administrator installed is shown, writable or not")
+        with mock.patch.object(aisetup.os, "access", side_effect=AssertionError("os.access is not asked on Windows")):
+            self.assertEqual(aisetup.work_dir("win32"), aisetup.default_dir("win32", euid=0),
+                             "Windows has one folder for every account (ProgramData's): os.access, which does not read its ACL, is never asked")
 
     def test_work_dir_is_find_dir_with_nuc_console_home(self):
         with mock.patch.dict(os.environ, {"NUC_CONSOLE_HOME": self.tmp.name}):
@@ -1557,7 +1559,10 @@ class ModelsCommandTests(unittest.TestCase):
                 for m in aisetup.MODELS:
                     self.assertIn(m["id"], out)
                 self.assertTrue(out.isascii())
-                self.assertLess(max(len(ln) for ln in out.splitlines()), 110, "fits a terminal")
+                # measured with the system-wide folder of this OS in place of this test's temporary one, whose length is the runner's
+                # (C:\Users\RUNNER~1\AppData\Local\Temp\tmp... on Windows, /var/folders/../T/tmp... on macOS, /tmp/tmp... on Linux)
+                real = aisetup.default_dir(env={}, euid=0)
+                self.assertLess(max(len(ln.replace(self.d, real)) for ln in out.splitlines()), 110, "fits a terminal")
 
 
 class FormatTests(unittest.TestCase):
