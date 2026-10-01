@@ -22,10 +22,12 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the ho
 import collect_darwin as cmac  # noqa: E402
 import collect_windows as cwin  # noqa: E402
 import collector  # noqa: E402
+import cpuinfo  # noqa: E402
 import demo  # noqa: E402
 import hostinfo  # noqa: E402
 import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
+import procs  # noqa: E402
 import render  # noqa: E402
 import winapi  # noqa: E402
 
@@ -39,6 +41,7 @@ def lst(port, proc="", addr="0.0.0.0", proto="tcp", fw=None):
 
 
 # ---- Windows: IP helper buffers ----------------------------------------------------------------------------------------
+
 
 class WinApiBuffers(unittest.TestCase):
     def test_structure_sizes_match_the_windows_headers(self):
@@ -309,6 +312,7 @@ class MacHostParsers(unittest.TestCase):
 
 # ---- collector on macOS/Windows, with fakes -----------------------------------------------------------------------------
 
+
 class NativeCollector(unittest.TestCase):
     def setUp(self):
         self.saved = {k: getattr(collector, k) for k in ("LINUX", "MACOS", "WINDOWS", "OS_NAME", "UNSUPPORTED_BOOT", "run", "OFF", "boot_time")}
@@ -422,6 +426,7 @@ class NativeCollector(unittest.TestCase):
 
 # ---- renderer with macOS/Windows data ------------------------------------------------------------------------------------
 
+
 class NativeRenderer(unittest.TestCase):
     def snap(self, os_name):
         cont, net, boot, base = demo.snapshot(os_name=os_name)
@@ -533,6 +538,7 @@ class NativeRenderer(unittest.TestCase):
 
 
 # ---- kiosk, HTML, config ------------------------------------------------------------------------------------------------
+
 
 class Kiosk(unittest.TestCase):
     def test_html_colours_banner_and_escaping(self):
@@ -766,6 +772,7 @@ class Kiosk(unittest.TestCase):
 
 # ---- installers -----------------------------------------------------------------------------------------------------------
 
+
 class Installers(unittest.TestCase):
     def read(self, name):
         with open(os.path.join(ROOT, name), encoding="utf-8") as f:
@@ -828,6 +835,45 @@ class Installers(unittest.TestCase):
 
 # ---- the real system calls, on the OS they are about ----------------------------------------------------------------------
 
+
+def check_sensors(tc, d, os_name):
+    """collect_sensors() on the real machine (fixtures: tests/test_sensors.py): valid JSON with the contract's keys,
+    whatever this machine can read; when it reads no temperature it says why (errors or absent), never silently."""
+    d = json.loads(json.dumps(d, allow_nan=False))
+    tc.assertEqual((set(d), d["os"]), ({"ts", "os", "cpu", "errors", "absent"}, os_name))
+    cpu = d["cpu"]
+    tc.assertEqual(set(cpu), {"package", "cores", "sensors", "source", "pressure", "clusters"})
+    tc.assertTrue(cpu["package"] is None or -20 <= cpu["package"] <= 150, cpu)
+    tc.assertTrue(all(-20 <= s["c"] <= 150 for s in cpu["sensors"]), cpu)
+    tc.assertTrue(all(isinstance(v, str) for v in d["errors"].values()), d["errors"])
+    tc.assertTrue(cpu["source"] or d["errors"] or d["absent"], d)
+    return d
+
+
+def sample_real_procs(test):
+    """Two samples of the real process list around a CPU burst, with a child whose command line holds a (runtime) secret:
+    -> (second sample indexed by pid, the child's pid, the JSON of the sample, seconds one sample took)."""
+    secret = "tok" + os.urandom(6).hex()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "--token=" + secret])
+    try:
+        s = procs.ProcSampler()
+        s.sample()
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            sum(i * i for i in range(1000))
+        t = time.perf_counter()
+        out = s.sample()
+        took = time.perf_counter() - t
+    finally:
+        child.kill()
+        child.wait()
+    test.assertNotIn(secret, json.dumps(out))  # names only, never arguments
+    test.assertEqual(set(out), {"procs", "total", "notes"})
+    test.assertEqual(set(out["total"]), {"count", "running", "threads", "unreadable"})
+    test.assertEqual(out["total"]["count"], len(out["procs"]))
+    test.assertLessEqual(out["total"]["unreadable"], out["total"]["count"])
+    return {p["pid"]: p for p in out["procs"]}, child.pid, took
+
 @unittest.skipUnless(sys.platform == "win32", "Windows")
 class OnWindows(unittest.TestCase):
     def test_host_metrics(self):
@@ -848,6 +894,85 @@ class OnWindows(unittest.TestCase):
         out = cwin.listeners(f)
         self.assertTrue(all(x["fw"][0] in render.CELL for x in out))
 
+    def test_cpu_sensors(self):
+        data = cwin.powershell(collector.run, cwin.PS_SENSORS, timeout=60)               # the script runs and answers JSON
+        self.assertEqual(set(data), {"LibreHardwareMonitor", "OpenHardwareMonitor", "ACPI"})
+        self.assertEqual([src for src, _, _ in cwin.sensor_sources(data)], ["LibreHardwareMonitor", "OpenHardwareMonitor", "ACPI"])
+        d = check_sensors(self, collector.collect_sensors(), "windows")                    # a runner has no sensors: absent, not a crash
+        self.assertEqual((d["cpu"]["pressure"], d["cpu"]["clusters"]), (None, []))
+
+    def test_process_list(self):
+        by, child, took = sample_real_procs(self)
+        me = by[os.getpid()]
+        self.assertTrue(me["name"].lower().startswith("python"), me["name"])
+        self.assertGreater(me["mem"], 0)
+        self.assertTrue(me["user"])
+        self.assertGreater(me["cpu"], 10)  # busy for 0.3 s of the interval
+        self.assertGreater(me["threads"], 0)
+        self.assertLessEqual(me["start"], time.time())
+        self.assertIn(child, by)
+        self.assertIn(4, by)  # System: listed, whatever we may read of it
+        self.assertNotIn(0, by)  # Idle
+        self.assertIsNone(me["state"])  # Windows has no process states
+        self.assertLess(took, 2.0)  # ~50 ms for 200 processes; generous for CI
+
+    def test_cpu_structures(self):
+        """The raw buffers of the CPU screen (cpuinfo.py parses them; the parsers are tested on every OS in test_cpuinfo.py)."""
+        lay = cpuinfo.parse_slpi_ex(winapi.logical_processor_info())
+        n = sum(lay["groups"])
+        self.assertGreaterEqual(lay["cores"], 1)
+        self.assertGreaterEqual(lay["sockets"], 1)
+        self.assertEqual(n, sum(c for _, c in winapi.processor_groups()))
+        self.assertGreaterEqual(n, lay["cores"])
+        for size in lay["cache"].values():
+            self.assertGreater(size, 0)
+        power = cpuinfo.parse_power_info(winapi.power_info(n))
+        self.assertEqual(len(power), n)
+        self.assertTrue(any(p["max"] > 0 for p in power), power)
+        parts, complete = winapi.cpu_perf()
+        rows = [r for _, raw in parts for r in cpuinfo.parse_cpu_perf(raw)]
+        self.assertTrue(complete)
+        self.assertEqual(len(rows), n)
+        self.assertTrue(all(idle <= kernel for idle, kernel, *_ in rows))  # kernel time includes the idle time
+        reg = winapi.processor_registry()
+        self.assertTrue(reg["name"] and reg["vendor"], reg)
+
+    def test_cpu_counters_that_move(self):
+        a = cpuinfo.parse_context_switches(winapi.system_performance_info())
+        time.sleep(0.1)
+        b = cpuinfo.parse_context_switches(winapi.system_performance_info())
+        self.assertTrue(0 < (b - a) % (1 << 32) < 10 ** 7, (a, b))  # a wrong field offset would give a constant or garbage
+        pdh = winapi.PdhCounter(cpuinfo.PDH_PERFORMANCE)
+        try:
+            time.sleep(0.2)
+            values = pdh.values()
+        finally:
+            pdh.close()
+        self.assertTrue(any(k.endswith("_Total") for k in values), values)
+        perf = cpuinfo.pdh_cpu_values(values, cpuinfo.parse_slpi_ex(winapi.logical_processor_info())["offsets"])
+        self.assertTrue(perf and all(v >= 0 for v in perf.values()), values)
+
+    def test_cpu_sampler(self):
+        s = cpuinfo.CpuSampler()
+        time.sleep(0.3)
+        t0 = time.perf_counter()
+        out = s.sample()
+        took = time.perf_counter() - t0
+        self.assertLess(took, 0.5, f"sample() took {took * 1000:.0f} ms")
+        self.assertEqual([n for n in out["notes"] if "unreadable" in n], [], out["notes"])  # no part failed
+        self.assertTrue(out["model"] and out["vendor"])
+        self.assertEqual(out["threads"], os.cpu_count())
+        self.assertTrue(1 <= out["cores"] <= out["threads"] and out["sockets"] >= 1)
+        self.assertTrue(0 <= out["usage"]["total"]["busy"] <= 100)
+        self.assertTrue(out["usage"]["cores"] and len(out["usage"]["cores"]) <= out["threads"])
+        self.assertTrue(all(0 <= c["busy"] <= 100 for c in out["usage"]["cores"]))
+        self.assertIsNone(out["usage"]["total"]["iowait"])
+        self.assertIsNone(out["load"])
+        self.assertGreater(out["uptime"], 0)
+        self.assertGreater(out["rates"]["ctxt"], 0)
+        self.assertTrue(out["freq"]["cur"] and all(v > 0 for v in out["freq"]["cur"].values()), out["freq"])
+        self.assertEqual((out["temps"]["package"], out["temps"]["source"]), (None, None))  # from the collector's sensors.json
+
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS")
 class OnMacOS(unittest.TestCase):
@@ -866,6 +991,60 @@ class OnMacOS(unittest.TestCase):
         rc, out, _ = collector.run("socketfilterfw", "--getglobalstate")
         self.assertEqual(rc, 0)
         self.assertIn(cmac.parse_alf(out, "", "", "", "")["state"], (0, 1, 2))
+
+    def test_cpu_sensors(self):
+        d = check_sensors(self, collector.collect_sensors(), "darwin")
+        if os.geteuid() != 0:                                                                # powermetrics needs root (the collector is)
+            self.assertNotEqual(d["cpu"]["source"], "powermetrics")
+        elif "powermetrics" not in d["errors"]:
+            self.assertIsNotNone(d["cpu"]["pressure"])                                       # thermal is a sampler of every Mac
+
+    def test_process_list(self):
+        by, child, took = sample_real_procs(self)
+        me = by[os.getpid()]
+        self.assertTrue(me["name"])
+        self.assertGreater(me["mem"], 0)
+        self.assertEqual(me["user"], procs.pwd.getpwuid(os.getuid()).pw_name)
+        self.assertGreater(me["cpu"], 10)  # busy for 0.3 s of the interval
+        self.assertIn(child, by)
+        self.assertEqual(by[1]["name"], "launchd")
+        self.assertLessEqual(me["start"], time.time())
+        self.assertLess(took, 2.0)  # ~100 ms for 500 processes; generous for CI
+
+    def test_cpu_sysctls(self):
+        n = os.cpu_count()
+        self.assertEqual(cpuinfo.sysctl_int(hostinfo.mac_sysctl("hw.logicalcpu")), n)
+        self.assertGreaterEqual(cpuinfo.sysctl_int(hostinfo.mac_sysctl("hw.physicalcpu")), 1)
+        self.assertTrue(cpuinfo.sysctl_str(hostinfo.mac_sysctl("machdep.cpu.brand_string")))
+        self.assertIsNone(hostinfo.mac_sysctl("hw.no_such_value"))  # hw.cpufrequency on Apple Silicon is such a case
+        boot = cpuinfo.parse_timeval(hostinfo.mac_sysctl("kern.boottime"))
+        self.assertTrue(0 < time.time() - boot < 3650 * 86400)
+        ticks = hostinfo.mac_cpu_ticks()
+        self.assertEqual(len(ticks), n)
+        self.assertTrue(all(len(t) == 4 and all(isinstance(v, int) and v >= 0 for v in t) for t in ticks))
+        facts = cpuinfo.mac_facts(hostinfo.mac_sysctl)
+        self.assertTrue(facts["model"] and facts["cores"] >= 1, facts)
+
+    def test_cpu_sampler(self):
+        s = cpuinfo.CpuSampler()
+        time.sleep(0.3)
+        t0 = time.perf_counter()
+        out = s.sample()
+        took = time.perf_counter() - t0
+        self.assertLess(took, 0.5, f"sample() took {took * 1000:.0f} ms")
+        self.assertEqual([n for n in out["notes"] if "unreadable" in n], [], out["notes"])  # no part failed
+        self.assertTrue(out["model"])
+        self.assertEqual(out["threads"], os.cpu_count())
+        self.assertTrue(1 <= out["cores"] <= out["threads"])
+        self.assertTrue(0 <= out["usage"]["total"]["busy"] <= 100)
+        self.assertEqual(len(out["usage"]["cores"]), out["threads"])
+        self.assertTrue(all(0 <= c["busy"] <= 100 and c["iowait"] is None for c in out["usage"]["cores"]))
+        self.assertEqual((out["usage"]["total"]["iowait"], out["usage"]["total"]["steal"]), (None, None))
+        self.assertEqual(len(out["load"]), 3)
+        self.assertGreater(out["uptime"], 0)
+        self.assertEqual((out["rates"]["ctxt"], out["temps"]["package"]), (None, None))  # the collector provides the temperatures
+        if out["vendor"] == "Apple":
+            self.assertEqual(out["freq"]["cur"], {})  # no clock sysctl on Apple Silicon: unknown, not a guess
 
 
 if __name__ == "__main__":
