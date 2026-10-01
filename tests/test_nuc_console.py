@@ -1016,7 +1016,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
 class Config(unittest.TestCase):
     def _load(self, text):
         import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
+        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False, encoding="utf-8") as f:  # Windows would write cp1252
             f.write(text)
         try:
             return nuc_config.load(f.name)

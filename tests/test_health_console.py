@@ -85,7 +85,7 @@ class HealthCase(unittest.TestCase):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
         self.saved_time = demo.time
         cfg = render.CFG
-        self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["health_in_rotation"], cfg["map_in_rotation"])
+        self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["expose"], cfg["health_in_rotation"], cfg["map_in_rotation"])
         self.saved_cache = dict(render._HEALTH)
         render._HEALTH.clear()
         self.tmp = tempfile.TemporaryDirectory()
@@ -106,7 +106,7 @@ class HealthCase(unittest.TestCase):
         for k, v in self.saved.items():
             setattr(render, k, v)
         demo.time = self.saved_time
-        features, render.CFG["webapps"], render.CFG["health_in_rotation"], render.CFG["map_in_rotation"] = self.saved_cfg
+        features, render.CFG["webapps"], render.CFG["expose"], render.CFG["health_in_rotation"], render.CFG["map_in_rotation"] = self.saved_cfg
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render._HEALTH.clear()
