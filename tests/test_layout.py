@@ -10,6 +10,8 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "src")
 sys.path.insert(0, SRC)
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import ansi  # noqa: E402
+import exposure  # noqa: E402
+import graph  # noqa: E402
 import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
@@ -174,6 +176,59 @@ class Moved(unittest.TestCase):
         std = {"math", "re", "unicodedata"}
         self.assertEqual(imports_of("ui"), std)
         self.assertEqual(imports_of("ansi"), {"re", "ui"})
+
+
+EXPOSURE_NAMES = ("CELL", "DOCKER_PROXIES", "EXPOSE_LABEL", "EXPOSED_RANK", "EXPOSURE_SECTIONS", "GROUPS", "INFRA_PROCS", "PRIVATE_NETS",
+                  "REACH_ORDER", "SENSITIVE", "SHARED_UDP", "TS4", "TS6", "baseline_diff", "bind_scope", "docker_verdict", "expose_apply",
+                  "expose_cts", "expose_note", "expose_over", "expose_over_items", "expose_policy", "expose_unmatched", "exposure_keys",
+                  "exposure_partial", "exposure_rows", "fw_verdict", "group_of", "is_private_addr", "name_change", "new_ports", "os_of",
+                  "rule_match", "webapp_rows")
+
+
+class ExposureModule(unittest.TestCase):
+    """exposure.py is the model alone: it reads the configuration through nuc_config.current() and imports nothing of render.py."""
+
+    def test_the_old_names_are_the_same_objects(self):
+        for name in EXPOSURE_NAMES:
+            self.assertIs(getattr(render, name), getattr(exposure, name), name)
+
+    def test_the_model_does_not_import_the_renderer(self):
+        self.assertEqual(imports_of("exposure"), {"ipaddress", "re", "nuc_config", "ui"})
+        graph_imports = imports_of("graph")
+        self.assertIn("exposure", graph_imports)
+        self.assertNotIn("render", graph_imports)
+        self.assertFalse(hasattr(graph, "_render"))  # the callback into render.py is gone
+
+    def test_the_map_and_the_console_use_the_same_functions(self):
+        # graph.build() asks exposure for the rows, the [expose] verdicts and who is behind a row: nothing is looked up in render.py
+        self.assertIs(graph.exposure, exposure)
+        self.assertTrue(callable(exposure.row_owners) and callable(exposure.serve_by_port))
+
+    def test_expose_and_webapps_are_read_from_the_shared_config_at_call_time(self):
+        cfg = nuc_config.current()
+        saved = cfg["expose"], cfg["webapps"]
+        try:
+            cfg["expose"], cfg["webapps"] = {"Shop-DB": "LOCALE", "8080": "LAN"}, {"shop": [8080]}
+            self.assertEqual(exposure.expose_policy(), [("shop-db", None, "LOCALE"), ("8080", (8080, "tcp"), "LAN")])
+            net = {"listeners": [{"port": 8080, "proto": "tcp", "addr": "0.0.0.0", "proc": "node"}]}
+            self.assertEqual([(r["name"], r["state"], r["reach"]) for r in exposure.webapp_rows(net, None)], [("shop", "up", "LAN")])
+            cfg["webapps"] = {}
+            self.assertEqual([(r["name"], r["state"]) for r in exposure.webapp_rows(net, None)], [("node", "up")])
+        finally:
+            cfg["expose"], cfg["webapps"] = saved
+
+    def test_the_feature_switches_are_read_from_the_shared_config_too(self):
+        cur = {"22/t:LAN": {"name": "sshd", "lan": 1}, "80/t:LAN": {"name": "nginx", "lan": 1}}
+        base = {"ports": {"22/t:LAN": {"name": "sshd", "lan": 1}, "80/t:LAN": {"name": "apache", "lan": 1}}}
+        features = nuc_config.current()["features"]
+        saved = features["containers"]
+        try:
+            features["containers"] = True
+            self.assertEqual(exposure.baseline_diff(cur, base)[2], {"80/t:LAN": "service apache → nginx"})
+            features["containers"] = False  # names cannot be resolved without the container collector: not a change
+            self.assertEqual(exposure.baseline_diff(cur, base)[2], {})
+        finally:
+            features["containers"] = saved
 
 
 if __name__ == "__main__":
