@@ -58,8 +58,12 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 
 | Path | |
 |---|---|
-| `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` |
+| `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` every `[dashboard] refresh_seconds` |
 | `/?full=1` | the overview **plus every Details page**: everything the overview cuts ("… +N more"), stacked |
+| `/?zoom=150` | text size in % (50–200, the **A− / A+** links); default `[display] zoom` |
+| `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out; every section and item is shown and the page scrolls. With `rows=` it fills the height instead (one screen, like the console) |
+| `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
+| `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 
 Everything else is 404; any method but GET is 405. Security headers: strict CSP (`default-src 'none'`), `no-store`, `nosniff`,
@@ -74,3 +78,13 @@ or a privileged helper — a large jump in risk for a file you change a few time
 
 The page shows your topology (ports, container names, client IPs seen on databases), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
 With a token, anyone holding the token can. It cannot change anything on the machine. Rendering is cached for half the refresh interval per layout size.
+
+## macOS and Windows
+
+There the web view **is** the dashboard: the installers run it as the hidden user `_nuc-console` (macOS LaunchDaemon) or as
+LOCAL SERVICE (Windows scheduled task `\nuc-console\web`), with `--local`: while `[web] enabled = no` it listens on **127.0.0.1
+only**, without a token (nothing on the network can reach it), whatever `bind` says. Set `[web] enabled = yes` (and a token for a
+non-loopback `bind`) to reach it from other devices as described above, then run the installer again. `[display] mode = none`
+with `[web] enabled = no` runs no web view at all.
+Windows has no mode bits: keep `token_file` inside `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write
+(and limit who can read the file with an ACL if other people use the machine).

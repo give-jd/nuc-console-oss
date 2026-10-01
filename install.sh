@@ -7,6 +7,8 @@
 #                                                             use a free one, e.g. 3: GDM takes tty1 and tty2). Re-running
 #                                                             without options keeps the values already chosen.
 set -euo pipefail
+# macOS: the same command, its own installer (launchd instead of systemd, BSD tools); Windows: install-windows.cmd
+if [ "$(uname -s)" = Darwin ]; then exec /bin/bash "$(dirname "$0")/install-macos.sh" "$@"; fi
 [ "$(id -u)" -eq 0 ] || { echo "root required: sudo $0" >&2; exit 1; }
 cd "$(dirname "$0")"
 DEST=/opt/nuc-console

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- nuc-console dashboard at every desktop login (LaunchAgent), as [display] mode says: a normal browser window (open)
+     or a full-screen one (kiosk). Installed by install-macos.sh, which fills @DISPLAY@, unless mode = none. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.nuc-console.display</string>
+    <key>ProgramArguments</key>
+    <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/render.py</string><string>@DISPLAY@</string></array>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>RunAtLoad</key><true/>
+    <key>ProcessType</key><string>Interactive</string>
+    <!-- render.py opens the browser and exits: without this launchd would close the browser with it -->
+    <key>AbandonProcessGroup</key><true/>
+</dict>
+</plist>

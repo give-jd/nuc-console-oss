@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""nuc-console renderer: full-screen ANSI dashboard on tty1. Stdlib only, no privileges."""
+"""nuc-console renderer: full-screen ANSI dashboard on tty1. Stdlib only, no privileges.
+
+On macOS and Windows there is no text console to take over: `--kiosk` writes the same screen as an HTML file and shows it
+in a full-screen browser (see kiosk()); host metrics come from hostinfo.py instead of /proc.
+"""
 import collections
 import glob
 import ipaddress
@@ -12,18 +16,36 @@ import signal
 import socket
 import subprocess
 import sys
-import termios
 import threading
 import time
-import tty
 
 import nuc_config  # same directory
 
-STATE = os.environ.get("NUC_CONSOLE_STATE", "/run/nuc-console/containers.json")
-NET_STATE = os.environ.get("NUC_CONSOLE_NET", "/run/nuc-console/net.json")
-BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", "/run/nuc-console/boot.json")
-BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", "/var/lib/nuc-console/baseline.json")
+try:  # POSIX terminals only: on Windows the keys come from msvcrt
+    import termios
+    import tty
+except ImportError:
+    termios = tty = None
+LINUX, WINDOWS, MACOS = nuc_config.LINUX, nuc_config.WINDOWS, nuc_config.MACOS
+if not LINUX:
+    import hostinfo
+
+STATE = os.environ.get("NUC_CONSOLE_STATE", os.path.join(nuc_config.RUN_DIR, "containers.json"))
+NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "net.json"))
+BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
+BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
 CFG = nuc_config.load()
+# the commands the advice on screen refers to, in the words of this OS
+if WINDOWS:
+    ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
+    CMD = {"restart": "Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName collector (administrator PowerShell)",
+           "logs": r"%ProgramData%\nuc-console\logs\collector.log"}
+elif MACOS:
+    ACCEPT_CMD = "sudo nuc-console-accept"
+    CMD = {"restart": "sudo launchctl kickstart -k system/com.nuc-console.collector", "logs": "/var/log/nuc-console/collector.log"}
+else:
+    ACCEPT_CMD = "sudo nuc-console-accept"
+    CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"}
 MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]  # overview = a single screen, no rotation
 
 
@@ -31,7 +53,7 @@ def on(feature):
     """Section enabled in config.ini (default: yes)."""
     return CFG["features"].get(feature, True)
 
-ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], 2, 60, 60
+ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
@@ -269,6 +291,9 @@ def cached(key, ttl, fn):
 
 
 def read_sessions():
+    if not LINUX:
+        return hostinfo.sessions()
+
     def run(*a):
         r = subprocess.run(list(a), capture_output=True, text=True, timeout=3)
         if r.returncode != 0:  # failed != "none": the block must say "unavailable", not reassure
@@ -290,6 +315,8 @@ def parse_mounts(text):
 
 
 def read_filesystems():
+    if not LINUX:
+        return hostinfo.filesystems()
     with open("/proc/mounts") as f:
         mounts = parse_mounts(f.read())
     out = []
@@ -316,13 +343,20 @@ class Sampler:
     @staticmethod
     def _netdev():
         try:
+            if not LINUX:
+                return hostinfo.net_counters()
             with open("/proc/net/dev") as f:
                 return parse_netdev(f.read())
-        except (OSError, ValueError):
+        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
             return {}
 
     @staticmethod
     def _cpu():
+        if not LINUX:
+            try:
+                return hostinfo.cpu_times()
+            except (OSError, ValueError, AttributeError):  # no per-core figures: the CPU bars are left out, nothing invented
+                return {}
         out = {}
         with open("/proc/stat") as f:
             for line in f:
@@ -363,12 +397,41 @@ class Sampler:
 
 
 def meminfo():
+    if not LINUX:
+        return hostinfo.meminfo()
     d = {}
     with open("/proc/meminfo") as f:
         for line in f:
             k, v = line.split(":")
             d[k] = int(v.split()[0]) * 1024
     return d
+
+
+def loadavg():
+    """['0.12', '0.30', '0.25'], or None where the OS has no load average (Windows)."""
+    if not LINUX:
+        return hostinfo.loadavg()
+    with open("/proc/loadavg") as f:
+        return f.read().split()[:3]
+
+
+def uptime_s():
+    if not LINUX:
+        return hostinfo.uptime()
+    with open("/proc/uptime") as f:
+        return float(f.read().split()[0])
+
+
+def root_disk():
+    """(used, total, label) of the system volume."""
+    if not LINUX:
+        return hostinfo.root_disk()
+    st = os.statvfs("/")
+    return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, "/"
+
+
+def up_load_note(up, load):
+    return f"up {fmt_dur(up)}" + (f" · load {' '.join(load)}" if load else "")
 
 
 def columns(cols, w, gap=2):
@@ -398,6 +461,10 @@ def unavail_msg(d, key, prefix="unavailable"):
     """Line for a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
     if is_disabled(d, key):
         return msg("info", "disabled in config.ini")
+    if isinstance(d, dict) and key in (d.get("unsupported") or []):
+        return msg("info", "not available on this OS")
+    if isinstance(d, dict) and key in (d.get("notes") or {}):
+        return msg("info", safe(d["notes"][key])[:70])
     if is_absent(d, key):
         return msg("info", "not installed on this machine")
     return msg("warn", f"{prefix}: " + safe(((d or {}).get("errors") or {}).get(key, "collector needs updating"))[:60])
@@ -430,13 +497,9 @@ def thermal_lines(th, bw, maxw=None):
 
 def page_sistema(s, w, cont=None):
     m, lines = meminfo(), []
-    with open("/proc/loadavg") as f:
-        load = f.read().split()[:3]
-    with open("/proc/uptime") as f:
-        up = float(f.read().split()[0])
-    st = os.statvfs("/")
-    disk_tot, disk_used = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize
-    lines.append(f" up {fmt_dur(up)}   load {' '.join(load)}")
+    load, up = loadavg(), uptime_s()
+    disk_used, disk_tot, disk_label = root_disk()
+    lines.append(f" up {fmt_dur(up)}" + (f"   load {' '.join(load)}" if load else ""))
     lines.append("")
     bw = max(10, min(60, w - 40))
     ram_used = m["MemTotal"] - m["MemAvailable"]
@@ -445,7 +508,7 @@ def page_sistema(s, w, cont=None):
                  f"  cache {human(m['Cached'])}")
     if m["SwapTotal"]:
         lines.append(f" SWAP  {bar(swap_used / m['SwapTotal'], bw)} {human(swap_used)}/{human(m['SwapTotal'])}")
-    lines.append(f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}  /")
+    lines.append(f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}  {safe(disk_label)}")
     if on("thermal"):
         lines += thermal_lines(s.get("thermal") or {}, bw)
     lines.append("")
@@ -531,7 +594,15 @@ TS4, TS6 = ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115
 NET_STALE_S = 120
 # network sections the exposure classification depends on: if one is missing, the baseline comparison is not reliable.
 # The others (Tailscale, fail2ban, drops, databases...) are secondary: an error there must not silence the port alarms.
-EXPOSURE_SECTIONS = frozenset(("listeners", "ufw", "docker_user", "serve"))
+EXPOSURE_SECTIONS = frozenset(("listeners", "ufw", "docker_user", "serve", "firewall"))
+# processes that listen on behalf of containers: docker-proxy (Linux), the Docker Desktop / OrbStack / Rancher backends
+DOCKER_PROXIES = {"docker-proxy", "com.docker.backend", "com.docker.vpnkit", "vpnkit", "vpnkit-bridge", "com.docker.proxy",
+                  "OrbStack Helper", "limactl", "rancher-desktop"}  # not wslrelay: it forwards any WSL port, not only containers
+
+
+def os_of(d):
+    """Which OS wrote a state file: 'linux' for files written before the field existed."""
+    return (d or {}).get("os") or "linux"
 
 
 def exposure_partial(net):
@@ -656,6 +727,10 @@ def docker_verdict(du):
 
 
 CELL = {"open": 1, "nofw": 1, "filtered": 2, "blocked": 0, "unknown": 3}
+# UDP discovery ports that every browser or OS component binds at the same time (macOS/Windows): one stable name, or the
+# "service" of the port would flip between chrome and msedge at every pass and raise CHANGED alarms
+SHARED_UDP = {5353: "mDNS", 5355: "LLMNR", 1900: "SSDP", 3702: "WS-Discovery", 137: "NetBIOS", 138: "NetBIOS"}
+EXPOSED_RANK = {"open": 4, "nofw": 4, "unknown": 3, "filtered": 2, "blocked": 1}
 
 
 def exposure_rows(net, cont):
@@ -667,6 +742,9 @@ def exposure_rows(net, cont):
     The container name is looked up by port only (two containers on the same port with different IPs: the first wins).
     """
     ls, ufw, du = net.get("listeners") or [], net.get("ufw"), net.get("docker_user")
+    # macOS/Windows: the collector already judged each socket against the firewall (it works per program there); the same
+    # firewall filters the Tailscale interface too, and Docker Desktop's port proxy is an ordinary program behind it
+    native = os_of(net) != "linux"
     serve_err = "serve" in (net.get("errors") or {})
     serve = {x["port"]: x for x in net.get("serve") or []}
     funnel_ports = {x["port"] for x in net.get("serve") or [] if x["funnel"]}
@@ -679,8 +757,13 @@ def exposure_rows(net, cont):
     rows = {}
     for l in ls:
         sc = bind_scope(l["addr"])
-        r = rows.setdefault((l["port"], l["proto"], sc), {"proc": ""})
+        r = rows.setdefault((l["port"], l["proto"], sc), {"proc": "", "fw": None, "procs": set()})
         r["proc"] = r["proc"] or l["proc"]
+        if l["proc"]:
+            r["procs"].add(l["proc"])
+        v = l.get("fw")
+        if v and v[0] in CELL and (r["fw"] is None or EXPOSED_RANK[v[0]] > EXPOSED_RANK[r["fw"][0]]):
+            r["fw"] = v  # IPv4 and IPv6 sockets of one port: the most exposed verdict counts
     # ports published by Docker with no listening socket (userland-proxy disabled): hidden from ss
     have = {(port, proto) for (port, proto, _sc) in rows}
     for ct in (cont or {}).get("containers", []):
@@ -689,16 +772,28 @@ def exposure_rows(net, cont):
         for p in ct["ports"]:
             if isinstance(p["p"], int) and (p["p"], "tcp") not in have:
                 sc = "lo" if p["s"] == "lo" else "wild" if p["s"] == "*" else bind_scope(p["s"])
-                rows.setdefault((p["p"], "tcp", sc), {"proc": "docker-proxy"})
+                rows.setdefault((p["p"], "tcp", sc), {"proc": "docker-proxy", "fw": None, "procs": set()})
     out = []
     for (port, proto, sc), r in rows.items():
-        via_docker = r["proc"] == "docker-proxy" or (not r["proc"] and port in published)
+        via_docker = r["proc"] in DOCKER_PROXIES or (not r["proc"] and port in published)
         name = published.get(port, "container?") if via_docker else (r["proc"] or "?")
+        if native and not via_docker and proto == "udp" and port in SHARED_UDP:
+            name = f"{SHARED_UDP[port]} ({', '.join(sorted(r['procs'])) or '?'})"
+        elif native and not via_docker and len(r["procs"]) > 1:  # several programs on one port: the same name whatever the order
+            name = ", ".join(sorted(r["procs"]))
         sv = serve.get(port) if sc == "ts" else None
         if sv:
             name = f"{'funnel' if sv['funnel'] else 'serve'} {sv['path']} → " + sv["target"].replace("http://", "")
         lan_cell, note, bad = 0, "", False
-        if sc in ("wild", "lan"):
+        ts_cell = 1 if sc in ("wild", "ts") else 0
+        if native and sc in ("wild", "lan", "ts"):
+            state, fnote = r["fw"] or ("unknown", "firewall n/a")
+            if sc == "ts":
+                ts_cell, note = CELL[state], "tailnet only" + ("" if state in ("open", "nofw") else " · " + fnote)
+            else:
+                lan_cell, note, bad = CELL[state], fnote, state in ("unknown", "nofw")
+                ts_cell = CELL[state] if sc == "wild" else 0
+        elif sc in ("wild", "lan"):
             if via_docker:
                 lan_cell, note, bad = docker_verdict(du)
             else:
@@ -712,7 +807,7 @@ def exposure_rows(net, cont):
         if net_cell == 1:
             note, bad = "FUNNEL: public", True
         out.append({"port": port, "proto": proto, "name": safe(name), "loc": 0 if sc == "ts" else 1,
-                    "lan": lan_cell, "ts": 1 if sc in ("wild", "ts") else 0, "net": net_cell,
+                    "lan": lan_cell, "ts": ts_cell, "net": net_cell,
                     "note": safe(note), "bad_note": bad, "warn": port in SENSITIVE and lan_cell in (1, 3)})
     out.sort(key=lambda x: (-(x["net"] == 1), -(x["lan"] in (1, 3)), -x["ts"], -x["warn"], x["port"], x["proto"]))
     return out
@@ -734,18 +829,40 @@ def fs(x):
     return f"{x:.1f}s"
 
 
-BOOT_COLORS = {"firmware": 35, "loader": 34, "kernel": 36, "initrd": 33, "userspace": 32}
+BOOT_COLORS = {"firmware": 35, "loader": 34, "kernel": 36, "initrd": 33, "userspace": 32, "main path": 36, "post boot": 32}
+# the same BOOT blocks speak of systemd units, Windows services or launchd daemons depending on who wrote boot.json
+BOOT_LABELS = {
+    "linux": {"failed_one": "failed systemd unit", "failed_short": "failed unit", "journal_in": " in this boot's journal",
+              "failed_title": "FAILED UNITS", "enabled_title": "SERVICES ENABLED AT BOOT", "journal_title": "BOOT JOURNAL",
+              "journal_short": "journal", "kernel": "kernel "},
+    "windows": {"failed_one": "failed service", "failed_short": "failed service", "journal_in": " in the System event log since boot",
+                "failed_title": "FAILED SERVICES", "enabled_title": "AUTOMATIC SERVICES", "journal_title": "SYSTEM EVENT LOG",
+                "journal_short": "events", "kernel": ""},
+    "darwin": {"failed_one": "failed launch daemon", "failed_short": "failed daemon", "journal_in": " in the system log",
+               "failed_title": "FAILED LAUNCH DAEMONS", "enabled_title": "LAUNCH DAEMONS (third-party)", "journal_title": "SYSTEM LOG",
+               "journal_short": "log", "kernel": ""},
+}
+
+
+def boot_labels(b):
+    return BOOT_LABELS.get(os_of(b), BOOT_LABELS["linux"])
+
+
+def unsupported(d, key):
+    """The collector of this OS has no such section (e.g. systemd-analyze blame on Windows): leave the block out."""
+    return isinstance(d, dict) and key in (d.get("unsupported") or [])
 
 
 def boot_block_avvio(b, up, w):
-    an = b.get("analyze")
+    an, lbl = b.get("analyze"), boot_labels(b)
     lines = [section("BOOT", w), ""]
     if an is None:
-        return lines + [unavail_msg(b, "analyze", "boot times unavailable")]
+        head = [f"   {safe(b.get('kernel', '?'))}   up {fmt_dur(up)}"] if os_of(b) != "linux" else []
+        return lines + head + [unavail_msg(b, "analyze", "boot times unavailable")]
     parts, total = an["parts"], max(an["total"], 0.001)
     bw = max(20, min(w - 8, 80))
     widths = {k: max(1, round(bw * v / total)) for k, v in parts.items()}
-    lines.append(f"   boot finished in {c(1, fs(total))}   kernel {safe(b.get('kernel', '?'))}   up {fmt_dur(up)}")
+    lines.append(f"   boot finished in {c(1, fs(total))}   {lbl['kernel']}{safe(b.get('kernel', '?'))}   up {fmt_dur(up)}")
     lines.append("   " + "".join(c(BOOT_COLORS.get(k, 37), "█" * n) for k, n in widths.items()))
     lines += wrap_items([c(BOOT_COLORS.get(k, 37), "■") + f" {k} {fs(v)}" for k, v in parts.items()], w, indent=3, sep="  ")
     return lines
@@ -766,7 +883,7 @@ def boot_block_lente(b, w, k):
 
 
 def boot_block_fallite(b, w):
-    lines = [section("FAILED UNITS", w), ""]
+    lines = [section(boot_labels(b)["failed_title"], w), ""]
     f = b.get("failed")
     if f is None:
         return lines + [unavail_msg(b, "failed")]
@@ -774,7 +891,7 @@ def boot_block_fallite(b, w):
 
 
 def boot_block_servizi(b, w, k):
-    lines = [section("SERVICES ENABLED AT BOOT", w), ""]
+    lines = [section(boot_labels(b)["enabled_title"], w), ""]
     en = b.get("enabled")
     if en is None:
         return lines + [unavail_msg(b, "enabled")]
@@ -805,7 +922,7 @@ def boot_block_container(b, w, k, now):
 
 def boot_block_journal(b, w, k):
     j = b.get("journal")
-    lines = [section("BOOT JOURNAL", w, "warning and worse"), ""]
+    lines = [section(boot_labels(b)["journal_title"], w, "warning and worse"), ""]
     if j is None:
         return lines + [unavail_msg(b, "journal")]
     cap = " (last 500)" if j.get("capped") else ""
@@ -835,17 +952,20 @@ def page_boot(b, w, body_h, now=None):
     up = now - b.get("btime", now)
     wide = w >= WIDE
     # a single page: if it does not fit the height the lists shrink (k), then it splits like the others
+    # macOS/Windows: the blocks their collector has no data for are left out, not shown empty
+    slow = (lambda bw, k: []) if unsupported(b, "blame") else (lambda bw, k: boot_block_lente(b, bw, k) + [""])
+    jour = (lambda bw, k: []) if unsupported(b, "journal") else (lambda bw, k: [""] + boot_block_journal(b, bw, k))
     for k in (10, 8, 6, 4, 3):
         if wide:
             lw, rw = int(w * 0.5), w - int(w * 0.5) - 3
-            left = boot_block_avvio(b, up, lw) + [""] + boot_block_lente(b, lw, k) + [""] + boot_block_fallite(b, lw)
+            left = boot_block_avvio(b, up, lw) + [""] + slow(lw, k) + boot_block_fallite(b, lw)
             right = (boot_block_servizi(b, rw, k // 2 + 1) + [""] + boot_block_container(b, rw, k // 2, now)
-                     + [""] + boot_block_journal(b, rw, k))
+                     + jour(rw, k))
             lines = head + columns([(left, lw), (right, rw)], w, gap=3)
         else:
-            lines = (head + boot_block_avvio(b, up, w) + [""] + boot_block_lente(b, w, k) + [""]
+            lines = (head + boot_block_avvio(b, up, w) + [""] + slow(w, k)
                      + boot_block_fallite(b, w) + [""] + boot_block_servizi(b, w, k // 3 + 1) + [""]
-                     + boot_block_container(b, w, k // 3, now) + [""] + boot_block_journal(b, w, k))
+                     + boot_block_container(b, w, k // 3, now) + jour(w, k))
         if len(lines) <= body_h:
             return lines
     return tight(lines) if len(tight(lines)) <= body_h else lines
@@ -861,7 +981,9 @@ def exposure_keys(net, cont):
     """
     if net is None or net.get("listeners") is None:
         return None
-    return {f"{r['port']}/{r['proto'][0]}:{group_of(r)}": {"name": r["name"], "lan": r["lan"]}
+    # macOS/Windows: a shared discovery port is that protocol, whichever browser happens to hold it now
+    stable = lambda r: SHARED_UDP[r["port"]] if os_of(net) != "linux" and r["proto"] == "udp" and r["port"] in SHARED_UDP else r["name"]  # noqa: E731
+    return {f"{r['port']}/{r['proto'][0]}:{group_of(r)}": {"name": stable(r), "lan": r["lan"]}
             for r in exposure_rows(net, cont)
             if group_of(r) != "LOCALE" and not (r["name"] == "tailscaled" and r["port"] >= 32768 and r["port"] != 41641)}
 
@@ -894,10 +1016,12 @@ def baseline_diff(cur, base):
     new = {k: v for k, v in cur.items() if k not in old}
     gone = {k: val(v) for k, v in old.items() if k not in cur}
     changed = {}
+    # a shared discovery port now named by its protocol (macOS/Windows): whatever program a baseline recorded there is the same
+    renamed = lambda k, new: new in SHARED_UDP.values() and "/u:" in k  # noqa: E731
     for k, v in cur.items():
         if k in old:
             o = val(old[k])
-            if o["name"] != v["name"] and on("containers"):  # containers off: container names can't be resolved
+            if o["name"] != v["name"] and on("containers") and not renamed(k, v["name"]):  # containers off: names can't be resolved
                 changed[k] = "service " + name_change(o["name"], v["name"])
             elif o["lan"] == 2 and v["lan"] in (1, 3) and on("firewall"):  # firewall off: verdict unknown, not a rule change
                 changed[k] = "was filtered by source, now open to the whole LAN"
@@ -976,10 +1100,11 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     elif boot is None:
         out.append((1, "boot collector not running", "collector-boot"))
     elif boot:
+        lbl = boot_labels(boot)
         if boot.get("failed"):
-            out.append((2, plural(len(boot["failed"]), "failed systemd unit") + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
+            out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
-            out.append((1, plural(boot["journal"]["err"], "error") + " in this boot's journal", "journal-errors"))
+            out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -987,8 +1112,20 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)", "stale-net"))
     if net.get("errors"):
         out.append((1, "network sections not collected: " + ", ".join(net["errors"]), "net-sections"))
-    ufw = net.get("ufw")
-    if ufw is None and is_disabled(net, "ufw"):
+    ufw, fw = net.get("ufw"), net.get("firewall")
+    if os_of(net) != "linux":  # the OS firewall (Windows Firewall, macOS Application Firewall) instead of ufw
+        name = (fw or {}).get("name") or "firewall"
+        if fw is None and is_disabled(net, "firewall"):
+            pass
+        elif fw is None:
+            out.append((2, "firewall state unreadable: LAN exposure unknown", "firewall-unreadable"))
+        else:
+            if fw.get("off"):
+                where = f" on the {', '.join(fw['off'])} network" if fw.get("kind") == "windows" else ""
+                out.append((2, f"{name} off{where}: listening services are reachable from the LAN", "firewall-off"))
+            if fw.get("policy"):
+                out.append((1, f"{name} has rules from Group Policy: they are not read", "firewall-policy"))
+    elif ufw is None and is_disabled(net, "ufw"):
         pass  # firewall switched off in config.ini: the user's choice, not an alarm
     elif ufw is None and is_absent(net, "ufw"):
         out.append((1, "ufw not installed: LAN filtering cannot be verified", "ufw-missing"))
@@ -997,9 +1134,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     elif not ufw["active"]:
         out.append((2, "ufw off: no LAN filtering for non-Docker services", "ufw-off"))
     if net.get("listeners") is not None and baseline == "corrotta":
-        out.append((2, "port baseline unreadable: regenerate it with sudo nuc-console-accept", "baseline-unreadable"))
+        out.append((2, f"port baseline unreadable: regenerate it with {ACCEPT_CMD}", "baseline-unreadable"))
     elif net.get("listeners") is not None and baseline is None:
-        out.append((1, "port baseline missing: create it with sudo nuc-console-accept", "baseline-missing"))
+        out.append((1, f"port baseline missing: create it with {ACCEPT_CMD}", "baseline-missing"))
     elif isinstance(baseline, dict) and net.get("listeners") is not None:
         if exposure_partial(net):  # partial data: a comparison would raise false alarms (or hide real ones)
             out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
@@ -1013,7 +1150,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             for k, why in lim(list(changed.items()), 3, "attention"):
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
-                out.append((1, plural(len(gone), "port") + " no longer exposed: if intended, sudo nuc-console-accept", "port-gone"))
+                out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
     if net.get("listeners") is not None:
         rows = exposure_rows(net, cont)
         pub = [r for r in rows if r["net"] == 1]
@@ -1030,7 +1167,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     return sorted(out, key=lambda x: -x[0])
 
 
-ACCEPTED_PATH = os.environ.get("NUC_CONSOLE_ACCEPTED", "/var/lib/nuc-console/accepted.json")
+ACCEPTED_PATH = os.environ.get("NUC_CONSOLE_ACCEPTED", os.path.join(nuc_config.LIB_DIR, "accepted.json"))
 
 # id -> (what it is, why it matters, how to handle it). Shown by `nuc-console-problems`.
 CATALOG = {
@@ -1059,6 +1196,59 @@ CATALOG = {
     "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port", "check what changed; if intended: sudo nuc-console-accept"),
     "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: sudo nuc-console-accept"),
 }
+
+
+CATALOG.update({  # macOS/Windows: the OS firewall in place of ufw (the advice is per OS, below)
+    "firewall-off": ("Firewall off", "every listening service is reachable from the network", "turn the firewall on"),
+    "firewall-unreadable": ("Firewall state unreadable", "LAN exposure cannot be judged: ports are shown as unknown", f"{CMD['logs']}"),
+    "firewall-policy": ("Firewall rules from Group Policy", "rules set by policy are not in the local store: those ports are shown as unknown",
+                        "Get-NetFirewallRule -PolicyStore ActiveStore lists the effective rules"),
+})
+# the same problems, explained with the commands of this OS
+OS_CATALOG = {
+    "windows": {
+        "collector-containers": ("Container collector not running", "no container data",
+                                 r"Get-ScheduledTask -TaskPath \nuc-console\ ; log: " + CMD["logs"]),
+        "collector-net": ("Network collector not running", "no exposure/firewall data", CMD["restart"]),
+        "collector-boot": ("Boot collector not running", "no boot data", CMD["restart"]),
+        "stale-containers": ("Container state is old", "the collector stopped updating", CMD["restart"]),
+        "stale-net": ("Network data is old", "the collector stopped updating", CMD["restart"]),
+        "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete",
+                         CMD["logs"] + "; the section name is in the message"),
+        "failed-units": ("Automatic services stopped with an error", "a service that should run is down",
+                         "Get-Service <name>; Event Viewer > Windows Logs > System says why; Start-Service <name>"),
+        "journal-errors": ("Errors in the System event log since boot", "usually noise (DCOM permissions, drivers), sometimes a real fault",
+                           "Event Viewer > Windows Logs > System; accept it if it is known noise"),
+        "db-open-lan": ("Database/broker open on the LAN", "data services should not be reachable from the network",
+                        "publish the DB on 127.0.0.1 (compose: \"127.0.0.1:5432:5432\") or stop it if unused"),
+        "firewall-off": ("Windows Firewall off", "every listening service is reachable from that network",
+                         "Windows Security > Firewall & network protection: turn it on; or, as administrator: Set-NetFirewallProfile -All -Enabled True"),
+        "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
+        "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
+        "port-new": ("New exposed port", "something started listening where it did not before",
+                     "identify it (Get-NetTCPConnection -State Listen); if intended: nuc-console-accept (administrator); if not, stop it"),
+        "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port",
+                         "check what changed; if intended: nuc-console-accept (administrator)"),
+        "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: nuc-console-accept (administrator)"),
+    },
+    "darwin": {
+        "collector-containers": ("Container collector not running", "no container data",
+                                 "sudo launchctl print system/com.nuc-console.collector; log: " + CMD["logs"]),
+        "collector-net": ("Network collector not running", "no exposure/firewall data", CMD["restart"]),
+        "collector-boot": ("Boot collector not running", "no boot data", CMD["restart"]),
+        "stale-containers": ("Container state is old", "the collector stopped updating", CMD["restart"]),
+        "stale-net": ("Network data is old", "the collector stopped updating", CMD["restart"]),
+        "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete",
+                         CMD["logs"] + "; the section name is in the message"),
+        "failed-units": ("Launch daemons that exited with an error", "a service that should run is down",
+                         "sudo launchctl print system/<label>; its log is named in the plist (StandardErrorPath)"),
+        "firewall-off": ("macOS firewall off", "every listening service is reachable from the network",
+                         "System Settings > Network > Firewall: turn it on (or: sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on)"),
+        "port-new": ("New exposed port", "something started listening where it did not before",
+                     "identify it (sudo lsof -nP -iTCP -sTCP:LISTEN); if intended: sudo nuc-console-accept; if not, stop it"),
+    },
+}
+CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 
 
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
@@ -1109,7 +1299,7 @@ def accept_problem(pid, reason="", forget=False, path=None, now=None, records=No
         cur.pop(pid, None)
     else:
         if pid in NOT_ACCEPTABLE:
-            print("port changes are accepted with the baseline: sudo nuc-console-accept (no --problem)", file=sys.stderr)
+            print(f"port changes are accepted with the baseline: {ACCEPT_CMD} (no --problem)", file=sys.stderr)
             return 2
         reason = CTRL.sub(" ", reason).strip()
         if not reason:
@@ -1176,9 +1366,9 @@ def print_problems(argv):
         if r["fix"]:
             print(f"    fix: {r['fix']}")
         if r["acceptable"]:
-            print(f"    accept if known:  sudo nuc-console-accept --problem {r['id']} --reason \"...\"")
+            print(f"    accept if known:  {ACCEPT_CMD} --problem {r['id']} --reason \"...\"")
         else:
-            print("    port changes are accepted with the baseline: sudo nuc-console-accept")
+            print(f"    port changes are accepted with the baseline: {ACCEPT_CMD}")
     return 0
 
 
@@ -1249,8 +1439,65 @@ def exposure_block(net, cont, w, new=None):
     return lines
 
 
+def native_fw_lines(net):
+    """macOS/Windows: the status line of the OS firewall (Windows Firewall per network profile, macOS Application Firewall)."""
+    fw, err = net.get("firewall"), net.get("errors") or {}
+    if fw is None and is_disabled(net, "firewall"):
+        return [msg("info", "firewall check disabled in config.ini")]
+    if fw is None:
+        return [msg("err", "firewall unreadable: " + safe(err.get("firewall", "?"))[:70])]
+    name = safe(fw.get("name") or "firewall")
+    if fw.get("kind") == "windows":
+        active = [n for n, p in (fw.get("profiles") or {}).items() if p.get("active")]
+        line = (msg("err", c("1;31", f"{name} OFF") + f" on {safe(', '.join(fw['off']))}: no filtering there") if fw.get("off")
+                else msg("ok", f"{name} on" + (f" (active: {safe(', '.join(active))})" if active else "")))
+        return [line] + ([msg("warn", "rules from Group Policy are not read: those ports show ?")] if fw.get("policy") else [])
+    if fw.get("state") == 0:
+        return [msg("err", c("1;31", f"{name} OFF") + ": every listening program is reachable from the LAN")]
+    return [msg("ok", f"{name} " + ("blocking all incoming" if fw.get("block_all") else "on") + (" · stealth" if fw.get("stealth") else ""))]
+
+
+def native_fw_details(net, w, max_rules=None):
+    """macOS/Windows FIREWALL body: the configuration in a few lines, then which rule or setting opens each listening port."""
+    fw, lines = net.get("firewall"), []
+    if fw and fw.get("kind") == "windows":
+        for name, p in (fw.get("profiles") or {}).items():
+            state = "on" if p.get("enabled", True) else c(31, "OFF")
+            lines.append(kv(name, f"{state}   inbound {'allow' if p.get('inbound') == 1 else 'block'}"
+                            + ("   block all" if p.get("block_all") else "") + (c(36, "   ← active") if p.get("active") else "")))
+        if fw.get("networks"):
+            lines.append(kv("networks", "  ".join(f"{safe(n['alias'])}: {safe(n['category'])}" for n in fw["networks"])))
+        lines.append(kv("rules", f"{fw.get('allow_rules', 0)} allow · {fw.get('block_rules', 0)} block (enabled, inbound)"))
+    elif fw:
+        pf = fw.get("pf")
+        lines.append(kv("signed apps", f"built-in {'allowed' if fw.get('builtin') else 'asked'} · downloaded "
+                        f"{'allowed' if fw.get('downloaded') else 'asked'}"))
+        lines.append(kv("app rules", f"{fw.get('apps_allowed', 0)} allowed · {fw.get('apps_blocked', 0)} blocked"))
+        lines.append(kv("pf", "unreadable" if pf is None else
+                        (f"on, {plural(pf.get('rules', 0), 'rule')} of its own (not interpreted)" if pf.get("enabled") else "off")))
+    opened = {}
+    for lst in net.get("listeners") or []:
+        st, note = (lst.get("fw") or ["", ""])[:2]
+        if st in ("open", "nofw") and bind_scope(lst["addr"]) != "lo":
+            opened.setdefault(note, set()).add((lst["port"], lst["proto"][0]))
+    if opened:
+        rows = sorted(opened.items(), key=lambda kv_: min(kv_[1]))
+        shown = rows if (max_rules is None or FULL or "firewall" in EXPAND) else rows[:max_rules]
+        if len(shown) < len(rows):
+            TRUNC.add("firewall")
+        lines += ["", c(1, f"   WHAT LETS PORTS IN ({len(rows)})"), c(1, "   " + pad("RULE / SETTING", 44) + "PORTS")]
+        for note, ports in shown:
+            plist = ", ".join(f"{p}/{x}" for p, x in sorted(ports))
+            lines.append(f"   {pad(safe(note)[:42], 44)}{clip(plist, max(10, w - 48))}")
+        if len(shown) < len(rows):
+            lines.append(c(90, f"   … +{len(rows) - len(shown)} more"))
+    return lines
+
+
 def fw_status_lines(net):
-    """The two most important status lines: ufw and DOCKER-USER."""
+    """The two most important status lines: ufw and DOCKER-USER (macOS/Windows: the OS firewall)."""
+    if os_of(net) != "linux":
+        return native_fw_lines(net)
     err = net.get("errors") or {}
     ufw, du = net.get("ufw"), net.get("docker_user")
     lines = []
@@ -1284,6 +1531,8 @@ def firewall_block(net, w, max_rules=None):
     err = net.get("errors") or {}
     ufw, du, ipt = net.get("ufw"), net.get("docker_user"), net.get("iptables")
     lines = [section("FIREWALL", w), ""] + fw_status_lines(net) + [""]  # the status before any detail
+    if os_of(net) != "linux":
+        return lines + native_fw_details(net, w, max_rules)
     if ufw is not None:
         lines.append(kv("ufw", f"{short_default(ufw['default'])}   log: {safe(ufw['logging'])}" if ufw["active"]
                         else c(31, "off (no rules in force)")))
@@ -1399,15 +1648,10 @@ def stack_lines(cont, w, cap):
 
 def ov_sistema(s, w, k, cont=None):
     m = meminfo()
-    with open("/proc/loadavg") as f:
-        load = f.read().split()[:3]
-    with open("/proc/uptime") as f:
-        up = float(f.read().split()[0])
-    st = os.statvfs("/")
-    disk_tot, disk_used = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize
+    disk_used, disk_tot, _ = root_disk()
     bw = max(8, min(40, w - 52))
     ram = m["MemTotal"] - m["MemAvailable"]
-    lines = [section("SYSTEM", w, f"up {fmt_dur(up)} · load {' '.join(load)}"),
+    lines = [section("SYSTEM", w, up_load_note(uptime_s(), loadavg())),
              f" RAM   {bar(ram / m['MemTotal'], bw)} {human(ram)}/{human(m['MemTotal'])}   cache {human(m['Cached'])}",
              f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}"]
     lines += thermal_lines(s.get("thermal") or {}, bw, w)
@@ -1551,6 +1795,10 @@ def ov_firewall(net, w, k):
     lines += fw_status_lines(net)
     ipt, f2b, dr = net.get("iptables"), net.get("f2b"), net.get("drops")
     bits = []
+    if os_of(net) != "linux" and net.get("firewall"):
+        let_in = {(x["port"], x["proto"]) for x in net.get("listeners") or []
+                  if (x.get("fw") or [""])[0] in ("open", "nofw") and bind_scope(x["addr"]) != "lo"}
+        bits.append(f"{plural(len(let_in), 'listening port')} let in")
     if ipt:
         bits.append("INPUT " + ipt["policy"].get("INPUT", "?") + " · FORWARD " + ipt["policy"].get("FORWARD", "?"))
         bits.append(c(32, "ts-input ✔") if ipt["ts_input"] else c(33, "ts-input ?"))
@@ -1565,18 +1813,22 @@ def ov_firewall(net, w, k):
 def ov_boot(b, w, k, now=None):
     if k <= -2 and b is not None:  # the full boot detail only if there really is room to spare
         up = (now or time.time()) - b.get("btime", time.time())
-        return boot_block_avvio(b, up, w) + [""] + boot_block_lente(b, w, 5) + [""] + boot_block_journal(b, w, 4)
+        lines = boot_block_avvio(b, up, w)
+        for key, blk in (("blame", lambda: boot_block_lente(b, w, 5)), ("journal", lambda: boot_block_journal(b, w, 4))):
+            if not unsupported(b, key):  # macOS/Windows: no empty "not available" blocks
+                lines += [""] + blk()
+        return lines
     lines = [section("BOOT", w)]
     if b is None:
         return lines + [msg("warn", "boot collector not running")]
-    an, j, failed = b.get("analyze"), b.get("journal"), b.get("failed")
+    an, j, failed, lbl = b.get("analyze"), b.get("journal"), b.get("failed"), boot_labels(b)
     bits = []
     if an:
         bits.append(f"finished in {c(1, fs(an['total']))}")
     if failed is not None:
-        bits.append(c(31, f"✖ {plural(len(failed), 'failed unit')}") if failed else c(32, "✔ 0 failed units"))
+        bits.append(c(31, f"✖ {plural(len(failed), lbl['failed_short'])}") if failed else c(32, f"✔ 0 {lbl['failed_short']}s"))
     if j:
-        bits.append(f"journal {c(31, str(j['err'])) if j['err'] else 0} err · {c(33, str(j['warn'])) if j['warn'] else 0} warn")
+        bits.append(f"{lbl['journal_short']} {c(31, str(j['err'])) if j['err'] else 0} err · {c(33, str(j['warn'])) if j['warn'] else 0} warn")
     lines.append(fit_join(bits, "   ", w, " "))
     if b.get("blame") and k < 3:
         top = [f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
@@ -1627,6 +1879,12 @@ def ov_sessioni(s, w, k):
                      + (c(31, "address NOT local or Tailscale") if ip in remote else c(90, "LAN or Tailscale")))
     if len(sess["ssh"]) > 4 and not FULL:
         lines.append(c(90, f" … +{len(sess['ssh']) - 4} more ssh clients"))
+    for key, label in (("rdp", "remote desktop"), ("vnc", "screen sharing")):  # Windows RDP, macOS Screen Sharing
+        peers = sess.get(key) or []
+        if peers:
+            far = [ip for ip in peers if not is_private_addr(ip)]
+            lines.append(f" {c(31, '✖') if far else c(32, '●')} {label} from {safe(', '.join(peers[:3]))}"
+                         + (c(31, "  address NOT local or Tailscale") if far else c(90, "  LAN or Tailscale")))
     ttys = sorted({x["tty"] for x in sess["local"] if x["tty"]})
     if ttys:
         lines += wrap_items([safe(t) for t in ttys], w, indent=1, sep=" ", max_lines=1, section="sessions")
@@ -1656,7 +1914,10 @@ def ov_tailscale(net, w, k):
     return lines
 
 
-INFRA_PROCS = {"sshd", "tailscaled", "systemd-resolve", "systemd-resolved", "cupsd", "avahi-daemon", "chronyd", "rpcbind", "dnsmasq", "named"}
+INFRA_PROCS = {"sshd", "tailscaled", "systemd-resolve", "systemd-resolved", "cupsd", "avahi-daemon", "chronyd", "rpcbind", "dnsmasq", "named",
+               # Windows and macOS system services that listen on their own (not web apps)
+               "System", "svchost", "lsass", "wininit", "services", "spoolsv", "launchd", "mDNSResponder", "rapportd", "ControlCenter",
+               "sharingd", "remoted", "configd", "netbiosd", "Tailscale", "tailscale-ipn"}
 REACH_ORDER = ("INTERNET", "LAN", "TAILNET", "LOCALE")
 REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
 
@@ -1677,8 +1938,12 @@ def webapp_rows(net, cont):
         out.append({"name": name, "ports": list(ports), "state": "up" if hit else "down", "reach": widest(hit), "expected": True})
         used |= set(ports)
     found = {}
+    desktop = os_of(net) != "linux"  # macOS/Windows desktops: dozens of apps listen on 127.0.0.1, list only what is reachable
     for r in rows:
-        if r["port"] in used or r["port"] in SENSITIVE or r["port"] == 22 or r["proto"] != "tcp" or r["name"] in INFRA_PROCS or r["name"] in db_names:
+        if desktop and group_of(r) == "LOCALE":
+            continue
+        if (r["port"] in used or r["port"] in SENSITIVE or r["port"] == 22 or r["proto"] != "tcp" or r["name"] in INFRA_PROCS
+                or r["name"].startswith("svchost/") or r["name"] in db_names or r["name"] == "?"):
             continue
         found.setdefault(r["name"], []).append(r)
     for name, rs in found.items():
@@ -1777,10 +2042,13 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     return columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else cols[0]
 
 
-def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None):
+def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None, scroll=False):
     """Everything on one screen. If it does not fit, details shrink (k = 0..3); at the last level no empty lines.
 
-    `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides()."""
+    `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides().
+    `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
+    in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
+    global FULL
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
@@ -1812,7 +2080,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
             cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
             cand["webapps"] = ("webapps", lambda c_: block(ov_webapp, "WEB APPS", c_, net, cont, c_, k))
-        if k <= 3 and w >= WIDE:  # wide consoles: the detail sections stay at every level (they shrink, they do not vanish)
+        if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
             cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
                         sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
                         tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
@@ -1846,6 +2114,23 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         if any(cols):
             flush()
         return pages
+
+    if scroll:
+        FULL = True
+        try:
+            pre = [fn(cw) for _, fn in make_cand(-2)]
+        finally:
+            FULL = False
+        blocks = [(lambda c_, lines=lines: lines) for lines in pre]
+        # the shortest column height that holds every section in the fixed order: the columns come out even
+        lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if pack(blocks, ncol, cw, w, mid, [""]) is None:
+                lo = mid + 1
+            else:
+                hi = mid
+        return pack(blocks, ncol, cw, w, hi, [""])
 
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
@@ -1896,9 +2181,11 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             return lines  # the last level has a 10**6 limit: we always return here
 
 
-def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None):
-    """Each page is split into chunks body_h tall: (page name, index, total, lines)."""
+def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll=False):
+    """Each page is split into chunks body_h tall: (page name, index, total, lines). scroll: one page, any height, nothing cut."""
     det = []
+    if scroll:
+        return [("Overview", 1, 1, page_overview(s, cont, net, boot, w, body_h, baseline=baseline, scroll=True))]
     if (mode or MODE) == "overview":
         pages = (("Overview", lambda: page_overview(s, cont, net, boot, w, body_h, baseline=baseline, details=det)),)
     else:
@@ -1934,16 +2221,23 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None):
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False):
+    """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1)."""
     name, part, parts, body = slide
-    left = (" " * (int(time.time() // 600) % 3) + f" {socket.gethostname()} │ {name}"  # every 10 min shift the header
-            + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}")
     text, code = status_pill(pb or [])
+    shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
+    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}"
+    host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
+    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+        host = host[:max(room - 1, 1)] + "…"
+    left = shift + f" {host}" + tail
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
-    foot = c(90, (f" single screen   console {w + 1}x{h}" if n == 1 else
+    size = f"{w}x{h}" if page else f"{w + 1}x{h}"
+    foot = c(90, (f" single screen   console {size}" if n == 1 else
                   f" screen {idx + 1}/{n}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                  + f"   keys 1-{len(PAGES)}: jump to page   console {w + 1}x{h}"))
+                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
+    foot = clip(foot, w)
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
@@ -1954,57 +2248,272 @@ def first_slide_of(sl, page_idx):
 
 
 DEMO = False  # --demo: synthetic data (src/demo.py) instead of the real state
+DEMO_OS = None  # --demo-os windows|darwin: the demo as the macOS/Windows collector would write it
 
 
 def snapshot(w):
     """State read from disk, as the main loop sees it."""
     if DEMO:
         import demo
-        cont, net, boot, base = demo.snapshot()
+        cont, net, boot, base = demo.snapshot(os_name=DEMO_OS)
         return dict(cont=cont, net=net, boot=boot, baseline=base)
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
-def render_screen(smp, w, h, mode=None, n=0):
-    """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py)."""
+def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False):
+    """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
+    at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
         import demo
-        sm = demo.sampler_data(sm)
+        sm = demo.sampler_data(sm, DEMO_OS)
         socket.gethostname = lambda: "demo-host"
         if not CFG["webapps"]:
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}  # one up, one expected-but-down
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll)
+    if scroll:  # the page is as tall as its content (header + body + footer)
+        h = len(sl[0][3]) + 2
+    n = pick_slide(sl, at) if at is not None else n
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])), len(sl)
+                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)
 
 
-def render_screens(smp, w, h, mode=None):
+def render_screens(smp, w, h, mode=None, keys=True, page=False):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
         import demo
-        sm = demo.sampler_data(sm)
+        sm = demo.sampler_data(sm, DEMO_OS)
         socket.gethostname = lambda: "demo-host"
         if not CFG["webapps"]:
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-    return [frame(x, i, len(sl), w, h, pb) for i, x in enumerate(sl)]
+    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
+
+
+def utf8_stdout():
+    """Windows pipes default to the ANSI code page: the bars and symbols must not crash `--once > file` or `| tool`."""
+    enc = (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "")
+    if sys.stdout is not None and enc != "utf8" and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 def once(argv):
-    global DEMO
+    global DEMO, DEMO_OS
     DEMO = "--demo" in argv
+    DEMO_OS = argv[argv.index("--demo-os") + 1] if "--demo-os" in argv[:-1] else None
     arg = lambda k, d: int(argv[argv.index(k) + 1]) if k in argv else d
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
     smp = Sampler()
+    smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
     time.sleep(0.5)
     out, _ = render_screen(smp, w, h, n=n)
     print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 
+# ---- kiosk: macOS/Windows have no text console to take over, the monitor shows the screen in a full-screen browser -----
+
+def user_dir():
+    """Per-user folder for the kiosk page and the browser profile (the kiosk runs as the logged-in user)."""
+    if WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+    elif MACOS:
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "nuc-console")
+
+
+def kiosk_grid():
+    """(columns, rows) of the kiosk screen: [dashboard] columns/rows if set, else from the monitor's aspect ratio.
+
+    The page scales its font so the grid fills the screen; 64 rows of text, as many columns as the shape allows
+    (16:9 -> 237 columns, the 3-column layout; 16:10 -> 213 columns, 2 columns)."""
+    rows = CFG["rows"] or 64
+    if CFG["columns"]:
+        return CFG["columns"], rows
+    size = hostinfo.screen_size() if not LINUX else None
+    aspect = size[0] / size[1] if size else 16 / 9
+    return max(100, min(400, round(rows * aspect * 1.25 / 0.6))), rows
+
+
+BROWSERS = {
+    "windows": [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
+                r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"],
+    "darwin": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+               "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
+    "linux": ["chromium", "chromium-browser", "google-chrome", "microsoft-edge", "brave-browser", "firefox"],
+}
+
+
+def find_browser(choice=None):
+    """Path of the browser that will show the kiosk: [display] browser in config.ini, else the first one installed."""
+    choice = choice or CFG["display"]["browser"]
+    if choice == "none":
+        return None
+    if choice != "auto":
+        return choice
+    for cand in BROWSERS[nuc_config.OS_NAME]:
+        path = re.sub(r"%([^%]+)%", lambda m: os.environ.get(m.group(1), m.group(0)), cand)
+        found = shutil.which(path) if LINUX else (path if os.path.isfile(path) else None)
+        if found:
+            return found
+    return ""  # none found: macOS falls back on Safari through `open`
+
+
+# shown in the kiosk's footer: the page has nothing to click, the keyboard is the way out
+KIOSK_HINT = "Cmd+Q closes · Ctrl+Cmd+F leaves full screen" if MACOS else "Alt+F4 closes · F11 leaves full screen"
+
+
+def browser_command(exe, url, profile):
+    """A full-screen app window (no tabs, no address bar), no first-run pages, a profile of its own (never the user's tabs
+    and logins). Not the browsers' locked "kiosk" mode: that one swallows Alt+F4 & co. and the screen could not be closed."""
+    if exe == "" and MACOS:
+        return ["/usr/bin/open", "-a", "Safari", url]  # Safari has no full-screen flag: Ctrl+Cmd+F once
+    if not exe:
+        return None
+    if "firefox" in os.path.basename(exe).lower():
+        return [exe, "--new-window", url]  # Firefox: only its locked kiosk mode starts full screen; F11 instead
+    return [exe, "--app=" + url, "--start-fullscreen", "--no-first-run", "--no-default-browser-check",
+            "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
+
+
+def launch(cmd):
+    """Starts the browser, detached from our console (its output is not ours to show)."""
+    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def write_text_atomic(path, text):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:  # no CRLF translation on Windows
+        f.write(text)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return True
+        except PermissionError:  # Windows: the browser is reading the previous frame right now
+            time.sleep(0.05)
+    return False
+
+
+def web_up(port, wait):
+    """True once the local web view answers; at login it may still be starting (it starts at boot)."""
+    end = time.time() + wait
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
+                conn.sendall(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                if b" 200 " in conn.recv(64):
+                    return True
+        except OSError:
+            pass
+        if time.time() >= end:
+            return False
+        time.sleep(2)
+
+
+def dashboard_url(fullscreen=False, cols=0, rows=0):
+    query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
+    from urllib.parse import urlencode
+    return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
+
+
+def open_in_browser(argv):
+    """`render.py --open`: the dashboard in a normal window of the default browser ([display] mode = browser, at every login).
+
+    The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more."""
+    base = user_dir()
+    os.makedirs(base, exist_ok=True)
+    if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
+        nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
+    url = dashboard_url()
+    if not web_up(CFG["web"]["port"], 60):
+        print(f"the web view does not answer on 127.0.0.1:{CFG['web']['port']}: dashboard not opened", file=sys.stderr, flush=True)
+        return 1
+    print(f"open -> {url}", file=sys.stderr, flush=True)
+    if WINDOWS:
+        os.startfile(url)  # the default browser, as this user
+    elif MACOS:
+        subprocess.run(["/usr/bin/open", url], timeout=30)
+    else:
+        import webbrowser
+        webbrowser.open(url)
+    return 0
+
+
+def kiosk(argv):
+    """`render.py --kiosk`: the dashboard full screen, for the monitor of a Mac or a Windows PC (the display at login).
+
+    It opens the local web view (127.0.0.1, started by the installer) in a full-screen browser window: overview and Details
+    pages take turns, A- / A+ change the text size. Without the web view (a Linux desktop, or a token in [web]) it falls
+    back on a page written to a file every 2 s (`--file` forces it; `--html FILE`, `--no-browser`)."""
+    base = user_dir()
+    os.makedirs(base, exist_ok=True)
+    if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
+        nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
+    cols, rows = kiosk_grid()
+    web = CFG["web"]
+    if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
+        url = dashboard_url(fullscreen=True, cols=cols, rows=rows)
+        cmd = browser_command(find_browser(), url, os.path.join(base, "browser"))
+        print(f"kiosk -> {url}", file=sys.stderr, flush=True)
+        if not cmd or "--no-browser" in argv:
+            print("no browser started: open " + url, file=sys.stderr, flush=True)
+            return 0 if "--no-browser" in argv else 1
+        launch(cmd)
+        return 0
+    return kiosk_file(argv, base, cols, rows)
+
+
+def kiosk_file(argv, base, cols, rows):
+    """The fallback: the dashboard as an HTML file rewritten every 2 s (no network at all). Ends when the browser closes."""
+    import htmlview
+    zoom = CFG["display"]["zoom"]
+    cols, rows = max(60, round(cols * 100 / zoom)), max(16, round(rows * 100 / zoom))  # bigger text = a smaller grid
+    path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
+    w, h = cols, rows  # a browser page: every column is usable (no Linux console last-column quirk)
+    print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
+    smp, t0, browser, started, cmd = Sampler(), time.time(), None, 0.0, None
+    while True:
+        try:
+            st, sm = snapshot(w), smp.sample()
+            sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
+            idx = pick_slide(sl, time.time() - t0)
+            screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
+                           safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
+                           keys=False, hint=KIOSK_HINT, page=True)
+            write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
+        except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
+            print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
+        if browser is None and "--no-browser" not in argv:
+            import pathlib
+            cmd = browser_command(find_browser(), pathlib.Path(path).resolve().as_uri(), os.path.join(base, "browser"))
+            if cmd:
+                browser, started = launch(cmd), time.time()
+            else:
+                browser = False
+                print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
+        # the viewer closed the window (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
+        if browser and cmd[0] != "/usr/bin/open" and browser.poll() is not None and time.time() - started > 10:
+            return 0
+        time.sleep(REFRESH_S)
+
+
+def windows_key(timeout):
+    """A key typed in a Windows console within `timeout` seconds, or '' (msvcrt has no select)."""
+    import msvcrt
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if msvcrt.kbhit():
+            return msvcrt.getwch()
+        time.sleep(0.05)
+    return ""
+
+
 def main(argv):
+    utf8_stdout()
     if "--problems" in argv:
         return print_problems(argv)
     if "--accept" in argv and ("--problem" in argv or "--forget" in argv):
@@ -2018,9 +2527,17 @@ def main(argv):
         return 2
     if "--once" in argv:
         return once(argv)
+    if "--kiosk" in argv:
+        return kiosk(argv)
+    if "--open" in argv:
+        return open_in_browser(argv)
     smp = Sampler()
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd) if os.isatty(fd) else None
+    fd = sys.stdin.fileno() if sys.stdin else -1
+    old = termios.tcgetattr(fd) if termios and fd >= 0 and os.isatty(fd) else None
+    win_keys = WINDOWS and fd >= 0 and os.isatty(fd)
+    if WINDOWS:
+        import winapi
+        winapi.enable_vt()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     out = sys.stdout
     try:
@@ -2045,17 +2562,20 @@ def main(argv):
                                         safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"],
                                                       baseline=st["baseline"])))
             out.flush()
+            k = ""
             if old and select.select([fd], [], [], REFRESH_S)[0]:
                 raw = os.read(fd, 8)
                 if not raw:  # tty closed/hangup: select always fires, without a pause it would be a busy loop
                     time.sleep(REFRESH_S)
                     continue
                 k = raw.decode(errors="ignore")[:1]
-                if k.isdigit() and 1 <= int(k) <= len(PAGES):
-                    held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
-                    out.write("\x1b[2J")
+            elif win_keys:
+                k = windows_key(REFRESH_S)
             elif not old:
                 time.sleep(REFRESH_S)
+            if k.isdigit() and 1 <= int(k) <= len(PAGES):
+                held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
+                out.write("\x1b[2J")
     finally:
         out.write("\x1b[?25h\x1b[0m")
         out.flush()
@@ -2064,4 +2584,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))  # --accept must be able to fail: install.sh and the user's script check the exit code
+    try:
+        sys.exit(main(sys.argv))  # --accept must be able to fail: install.sh and the user's script check the exit code
+    except PermissionError as e:  # --accept as a normal user: say what to do instead of a traceback
+        print(f"permission denied: {e.filename or e}: run it as " + ("administrator" if WINDOWS else "root (sudo)"), file=sys.stderr)
+        sys.exit(1)

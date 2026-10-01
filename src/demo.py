@@ -39,8 +39,8 @@ def _ufw():
     return d
 
 
-def snapshot(now=None):
-    """-> (containers, net, boot, baseline) in the same shape the collector writes."""
+def snapshot(now=None, os_name=None):
+    """-> (containers, net, boot, baseline) in the same shape the collector writes; os_name 'windows'/'darwin' = that collector."""
     now = now or time.time()
     cont = {"ts": now, "containers": [
         _ct("shop-web-1", "shop", ports=[{"p": 8080, "s": "*"}], mem=310 * 2 ** 20),
@@ -79,14 +79,73 @@ def snapshot(now=None):
                                    {"type": "Containers", "count": "7", "active": "6", "size": "180MB", "reclaimable": "0B (0%)"},
                                    {"type": "Local Volumes", "count": "5", "active": "5", "size": "1.4GB", "reclaimable": "0B (0%)"}],
                           "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}}}
+    if os_name in ("windows", "darwin"):
+        net, boot = _native(net, boot, os_name, now)
     import render
     base = {"ts": now, "ports": render.exposure_keys(net, cont)}  # baseline = current exposure: no "new port" alarm
     return cont, net, boot, base
 
 
-def sampler_data(real):
+def _native(net, boot, os_name, now):
+    """The same machine as seen by the macOS/Windows collector: OS firewall verdicts per socket, no ufw/iptables/fail2ban."""
+    win = os_name == "windows"
+    proxy = "com.docker.backend"
+    allow = (lambda r: ["open", f'rule "{r}" (Private)']) if win else (lambda r: ["open", r])
+    lst = lambda addr, port, proc, fw, proto="tcp": {"proto": proto, "addr": addr, "port": port, "proc": proc, "fw": fw}
+    common = [lst("0.0.0.0", 8080, proxy, allow("Docker Desktop Backend") if win else ["unknown", "not listed: macOS decides"]),
+              lst("0.0.0.0", 5432, proxy, allow("Docker Desktop Backend") if win else ["unknown", "not listed: macOS decides"]),
+              lst("127.0.0.1", 8081, proxy, ["open", "local"]), lst("127.0.0.1", 5433, proxy, ["open", "local"]),
+              lst("127.0.0.1", 6379, proxy, ["open", "local"]), lst("127.0.0.1", 5678, "node", ["open", "local"]),
+              lst(TS + ".1", 8444, "tailscaled", allow("Tailscale") if win else ["open", "allowed in the firewall"])]
+    if win:
+        own = [lst("0.0.0.0", 22, "sshd", allow("OpenSSH SSH Server (sshd)")),
+               lst("0.0.0.0", 445, "System", ["blocked", "default block (Private)"]),
+               lst("0.0.0.0", 135, "svchost/RpcSs", ["blocked", "default block (Private)"]),
+               lst("0.0.0.0", 3389, "svchost/TermService", ["filtered", f"only {LAN}.0/24"]),
+               lst("0.0.0.0", 7680, "svchost/DoSvc", ["unknown", "rule not understood (Private)"])]
+        fw = {"kind": "windows", "name": "Windows Firewall", "off": [], "policy": False, "allow_rules": 87, "block_rules": 3,
+              "networks": [{"alias": "Ethernet", "category": "Private"}],
+              "profiles": {n: {"enabled": True, "inbound": 0, "block_all": False, "active": n == "Private"}
+                           for n in ("Domain", "Private", "Public")}}
+        boot = dict(boot, analyze={"parts": {"main path": 14.2, "post boot": 9.1}, "total": 23.3}, kernel="Windows 11 (10.0.26100)",
+                    enabled=[{"unit": f"Service{i}", "state": "active" if i % 6 else "inactive"} for i in range(40)],
+                    journal={"err": 3, "warn": 12, "capped": False, "top": [
+                        {"id": "Microsoft-Windows-DistributedCOM", "n": 9, "pr": 4, "last": "example DCOM warning"},
+                        {"id": "Service Control Manager", "n": 3, "pr": 3, "last": "example service error"}]},
+                    unsupported=["blame"], absent=["blame"])
+        boot.pop("blame", None)
+    else:
+        own = [lst("*", 22, "launchd", ["open", "built-in, allowed"]), lst("*", 5000, "ControlCenter", ["open", "built-in, allowed"]),
+               lst("*", 7000, "ControlCenter", ["open", "built-in, allowed"]),
+               lst("*", 5353, "mDNSResponder", ["open", "essential service"], proto="udp")]
+        fw = {"kind": "darwin", "name": "macOS firewall", "state": 1, "off": [], "block_all": False, "stealth": True, "builtin": True,
+              "downloaded": True, "apps_allowed": 3, "apps_blocked": 1, "pf": {"enabled": False, "rules": 0}}
+        boot = dict(boot, kernel="macOS 15.6", enabled=[{"unit": f"com.example.daemon{i}", "state": "active"} for i in range(6)],
+                    unsupported=["analyze", "blame", "journal"], absent=["analyze", "blame", "journal"])
+        for k in ("analyze", "blame", "journal"):
+            boot.pop(k, None)
+    gone = ("ufw", "docker_user", "iptables", "f2b", "drops")
+    net = {k: v for k, v in net.items() if k not in gone}
+    net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
+    for it in net["dbs"]["items"]:
+        it["ext_source"] = "n/d"  # Docker Desktop: the containers' namespaces are inside a VM
+        it["external"] = []
+    return net, dict(boot, os=os_name, ts=now)
+
+
+def sampler_data(real, os_name=None):
     """Replace machine-specific parts of a real Sampler.sample() result (users, mounts, interface names)."""
     real = dict(real)
+    if os_name == "windows":
+        real["sessions"] = {"local": [{"user": "alice", "tty": "Console"}], "ssh": [], "rdp": [LAN + ".20"]}
+        real["fs"] = [{"mount": "C:", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "D:", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
+        real["net"] = {"Ethernet": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}
+        return real
+    if os_name == "darwin":
+        real["sessions"] = {"local": [{"user": "alice", "tty": "console"}], "ssh": [LAN + ".20"], "vnc": []}
+        real["fs"] = [{"mount": "/", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "/Volumes/Data", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
+        real["net"] = {"en0": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}
+        return real
     real["sessions"] = {"local": [{"user": "alice", "tty": "tty1"}], "ssh": [LAN + ".20"]}
     real["fs"] = [{"mount": "/", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "/data", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
     real["net"] = {"eth0": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}

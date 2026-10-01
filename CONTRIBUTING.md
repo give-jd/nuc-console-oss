@@ -6,14 +6,19 @@ Thanks for helping. The project is small on purpose: **Python standard library o
 
 ```bash
 git clone <this repository> && cd nuc-console
-python3 -m unittest discover -s tests            # must pass on Python 3.8 - 3.13
+python3 -m unittest discover -s tests            # must pass on Python 3.8+, on Linux, macOS and Windows (CI runs all three)
 python3 src/render.py --once --demo --cols 200 --rows 50
+python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
 shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
 ```
 
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
 - Never add a dependency. If you need one, the answer is almost certainly a stdlib function or fewer features.
 - Keep Python 3.8 compatibility (no `match`, no `X | Y` types, no `str.removeprefix`).
+- Platform code lives in `collect_darwin.py` / `collect_windows.py` (collector), `hostinfo.py` / `winapi.py` (renderer metrics):
+  parsers are pure functions with fixtures, so they are tested on every OS; the classes `OnWindows` / `OnMacOS` in
+  `tests/test_platforms.py` exercise the real system calls on their own OS. Text output of system tools is localised on Windows:
+  use the API or PowerShell objects (`ConvertTo-Json`), never `netstat`/`netsh` text.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`.
@@ -21,9 +26,9 @@ shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
 ## Most wanted
 
 1. **Translations.** All on-screen strings are English and live in `src/render.py`. A small translation layer (a dict of message keys, `NUC_CONSOLE_LANG` / `[dashboard] language`) would let other languages be added without touching the layout code. Keep strings within the widths the tables allot them, and discuss the approach in an issue first.
-2. nftables-native and firewalld support in the exposure logic.
+2. nftables-native and firewalld support in the exposure logic; macOS `pf` rules; verifying macOS code signatures for the Application Firewall.
 3. Other container runtimes (podman).
-4. More sensors (AMD/ARM thermal), multiple NVMe.
+4. More sensors (AMD/ARM thermal, macOS, Windows), multiple NVMe.
 
 ## Pull requests
 

@@ -15,47 +15,18 @@ import socket
 import sys
 import threading
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import nuc_config
 import render
+from htmlview import CSS, fit_css, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
-SGR = re.compile(r"\x1b\[([0-9;]*)m")
-ESC = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-COLOR = {31: "r", 32: "g", 33: "y", 34: "b", 35: "m", 36: "c", 37: "w", 90: "d"}
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
 CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-CSS = ("html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
-       "pre{margin:0;overflow-x:auto}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}.m{color:#bc8cff}"
-       ".c{color:#39c5cf}.w{color:#f0f6fc}.d{color:#6e7681}.B{font-weight:700}footer{margin-top:10px;color:#6e7681;font:12px sans-serif}"
-       "a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}")
-
-
-def to_html(text):
-    """ANSI text -> HTML. Everything is escaped; only <span class> elements with fixed class names are produced."""
-    out, cls, bold, pos = [], "", False, 0
-    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)  # cursor/erase/OSC sequences (anything but SGR 'm')
-
-    def span(s):
-        if not s:
-            return ""
-        names = (cls + (" B" if bold else "")).strip()
-        return f'<span class="{names}">{html.escape(s)}</span>' if names else html.escape(s)
-    for m in SGR.finditer(text):
-        out.append(span(text[pos:m.start()]))
-        for code in (int(x) for x in (m.group(1) or "0").split(";") if x):
-            if code == 0:
-                cls, bold = "", False
-            elif code == 1:
-                bold = True
-            elif code in COLOR:
-                cls = COLOR[code]
-        pos = m.end()
-    out.append(span(ESC.sub("", text[pos:])))
-    return "".join(out)
+ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), like a browser's: few values, bounded cache
 
 
 def is_loopback(bind):
@@ -73,10 +44,11 @@ def read_token(path):
         return ""
     with open(path) as f:
         st = os.fstat(f.fileno())
-        if st.st_mode & 0o077:
-            raise ValueError(f"{path} must not be readable by group/others (chmod 600)")
-        if st.st_uid not in (0, os.geteuid()):
-            raise ValueError(f"{path} must be owned by root or by the service user")
+        if not nuc_config.WINDOWS:  # Windows has no mode bits: install-windows.ps1 protects the folder with an ACL instead
+            if st.st_mode & 0o077:
+                raise ValueError(f"{path} must not be readable by group/others (chmod 600)")
+            if st.st_uid not in (0, os.geteuid()):
+                raise ValueError(f"{path} must be owned by root or by the service user")
         tok = f.read().strip()
     if not TOKEN_OK.fullmatch(tok):
         raise ValueError(f"token in {path} must be {MIN_TOKEN}+ characters from A-Z a-z 0-9 . _ ~ -")
@@ -158,29 +130,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "token" in q:  # move the token out of the URL (history, logs, referrers) into a cookie
                 return self._send(302, extra=(("Location", "/"), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
-        try:
-            cols = int((q.get("cols") or [0])[0])
-        except ValueError:
-            cols = 0
-        cols = max(60, min(300, (cols + 10) // 20 * 20)) if cols else srv.cfg["columns"]  # few distinct sizes: bounded cache and CPU
-        self._send(200, srv.page(cols, (q.get("full") or [""])[0] == "1").encode(), "text/html; charset=utf-8")
+        self._send(200, srv.page(**view_params(q)).encode(), "text/html; charset=utf-8")
 
     def _no(self):
         self._send(405, b"read-only\n", extra=(("Allow", "GET"),))
     do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_HEAD = _no
 
 
+def view_params(q):
+    """Query string -> page() arguments, clamped and rounded to a few distinct values (bounded cache and CPU).
+
+    cols/rows: the layout grid (rows 0 = config); zoom: text size in % (0 = [display] zoom); fit=1: the text fills the window width (and the
+    height, when rows is given), so a bigger zoom means fewer columns, re-laid out; full=1: every Details page;
+    rotate=1: overview and Details pages take turns like on the console; kiosk=1: the footer says how to close the window;
+    refresh: seconds between two reloads (1-10; default [dashboard] refresh_seconds)."""
+    one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
+    num = lambda k: int(one(k)) if one(k).isdigit() else 0  # noqa: E731
+    cols, rows, zoom = num("cols"), num("rows"), num("zoom")
+    return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
+            "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
+            "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
+            "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
+            "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0}  # 0 = config
+
+
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = not nuc_config.WINDOWS  # on Windows SO_REUSEADDR lets another program bind the same port
 
-    def __init__(self, addr, cfg, token="", demo=False):
-        self.cfg, self.token = cfg, token
+    def __init__(self, addr, cfg, token="", demo=False, zoom=100):
+        self.cfg, self.token, self.zoom = cfg, token, zoom
         self.allowed = {"localhost", "127.0.0.1", "::1", addr[0].lower(), socket.gethostname().lower()} | set(cfg.get("allowed_hosts", []))
         self.slots = threading.BoundedSemaphore(MAX_CONN)
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
         render.DEMO = demo
         self.smp = render.Sampler()
+        self.smp.sample()  # starts the background reads (sessions, disks): the first page must not say "unavailable"
         self.lock = threading.Lock()
         self.cache = {}  # cols -> (time, page): a burst of requests renders once
         super().__init__(addr, Handler)
@@ -197,34 +183,67 @@ class Server(http.server.ThreadingHTTPServer):
         finally:
             self.slots.release()
 
-    def page(self, cols, full=False):
+    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0):
+        """zoom/refresh 0 = the configured ones: only what the viewer changed is written in the links."""
+        r = refresh or self.cfg["refresh_seconds"]
+        here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh}
+        zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
+        key = (cols, rows, zoom, fit, full, rotate, kiosk, r)
         with self.lock:
-            hit = self.cache.get((cols, full))
-            if hit and time.time() - hit[0] < self.cfg["refresh_seconds"] / 2:
+            hit = self.cache.get(key)
+            if hit and time.time() - hit[0] < r / 2:
                 return hit[1]
+            base_cols, base_rows = cols or self.cfg["columns"], rows or self.cfg["rows"]
+            if fit:  # the text fills the window: a bigger zoom = fewer columns and rows, re-laid out like a smaller console
+                gcols, grows = max(60, round(base_cols * 100 / zoom)), max(16, round(base_rows * 100 / zoom))
+                style = fit_css(gcols, grows if rows else 0)
+            else:    # a fixed grid whose font grows, like the browser's own zoom (Ctrl +/-)
+                gcols, grows = base_cols, base_rows
+                style = "body{font-size:%.1fpx}" % (14 * zoom / 100)
             try:
                 if full:  # overview + every detail page: nothing hidden behind "… +N more"
-                    body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, cols - 1, self.cfg["rows"], mode="overview"))
+                    body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True))
                 else:
-                    screen, _ = render.render_screen(self.smp, cols - 1, self.cfg["rows"], mode="overview")
+                    # all the columns ("wide" 200 = the 2-column layout); fit without rows = a normal browser window: the page
+                    # scrolls, so it shows every section in full at any text size (full screen fits instead, and rotates)
+                    screen, _ = render.render_screen(self.smp, gcols, grows, mode="overview", at=time.time() if rotate else None,
+                                                     keys=False, page=True, scroll=fit and not rows)
                     body = to_html(screen)
             except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
                 print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
                 body = "render error (see the service log)"
-            r = self.cfg["refresh_seconds"]
+            link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
+            i = ZOOMS.index(zoom)
+            size = (link("A−", zoom=ZOOMS[i - 1]) if i else "A−") + f" {zoom}% " + (link("A+", zoom=ZOOMS[i + 1]) if i + 1 < len(ZOOMS) else "A+")
+            lo, hi = nuc_config.REFRESH_MIN, nuc_config.REFRESH_MAX  # − = more often, + = less often
+            every = (link("−", refresh=r - 1) if r > lo else "−") + f" {r}s " + (link("+", refresh=r + 1) if r < hi else "+")
+            views = " · ".join((link("compact", cols=100), link("wide", cols=200),
+                                link("overview", full=False) if full else link("full details", full=True)))
             page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     f'<meta http-equiv="refresh" content="{r}"><title>{html.escape(socket.gethostname())} · nuc-console</title>'
-                    f'<style>{CSS}</style><pre>{body}</pre><footer>read-only · {time.strftime("%H:%M:%S")} · refreshes every {r}s · '
-                    f'<a href="/?cols=100">compact</a> · <a href="/?cols=200">wide</a> · <a href="/?full=1">full details</a></footer></html>')
-            self.cache[(cols, full)] = (time.time(), page)
+                    f'<style>{CSS}{style}</style><pre>{body}</pre><footer>text {size} · refresh every {every} · {views} · read-only · '
+                    f'{time.strftime("%H:%M:%S")}' + (f" · {html.escape(render.KIOSK_HINT)}" if kiosk else "") + '</footer></html>')
+            self.cache[key] = (time.time(), page)
             return page
 
 
+def page_url(params, **change):
+    """The current view with some parameters changed (only the ones that differ from the defaults are written)."""
+    p = dict(params, **change)
+    return "/?" + urlencode([(k, "1" if v is True else v) for k, v in p.items() if v not in (0, False, None, "")])
+
+
 def main(argv):
-    cfg = nuc_config.load()["web"]
+    if "--log" in argv[:-1]:  # Windows scheduled task: no journal
+        nuc_config.log_to(argv[argv.index("--log") + 1])
+    full_cfg = nuc_config.load()
+    cfg = full_cfg["web"]
     demo = "--demo" in argv
     if "--enabled" in argv:  # used by install.sh
         return 0 if cfg["enabled"] else 1
+    if "--local" in argv and not cfg["enabled"]:
+        # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says
+        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="")
     if not cfg["enabled"] and not demo:
         print("nuc-console web view is disabled ([web] enabled = no in config.ini)")
         return 0
@@ -232,7 +251,7 @@ def main(argv):
         token = read_token(cfg["token_file"])
         check_bind(cfg["bind"], token)
         port = int(argv[argv.index("--port") + 1]) if "--port" in argv else cfg["port"]
-        srv = Server((cfg["bind"], port), cfg, token, demo)
+        srv = Server((cfg["bind"], port), cfg, token, demo, zoom=full_cfg["display"]["zoom"])
     except (OSError, ValueError, IndexError) as e:
         print("nuc-console web:", e, file=sys.stderr)
         return 2

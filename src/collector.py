@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""nuc-console collector: runs as root, writes the container state to /run.
+"""nuc-console collector: runs as root (Windows: SYSTEM), writes the container, network and boot state as JSON.
 
 The renderer (unprivileged user) only reads this JSON: the Docker socket is equivalent to root
 and must not live in the process that owns the tty.
+Linux sections run the tools below; macOS and Windows sections live in collect_darwin.py and collect_windows.py and write
+the same shapes, plus "os" so the renderer knows which firewall model the verdicts come from.
 """
 import ipaddress
 import json
@@ -20,19 +22,40 @@ import nuc_config  # noqa: E402  (same directory)
 
 CFG = nuc_config.load()
 OFF = {k for k, v in CFG["features"].items() if not v}
+LINUX, MACOS, WINDOWS, OS_NAME = nuc_config.LINUX, nuc_config.MACOS, nuc_config.WINDOWS, nuc_config.OS_NAME
+if WINDOWS:
+    import collect_windows as cwin
+    import winapi
+elif MACOS:
+    import collect_darwin as cmac
 # collected section -> feature that enables it (disabled = like a missing tool: no error, no alarm)
 NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailscale", "ufw": "firewall",
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
-               "f2b": "fail2ban"}
+               "f2b": "fail2ban", "firewall": "firewall"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "enabled": ("boot",), "journal": ("boot",),
                 "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
-OUT = "/run/nuc-console/containers.json"
-OUT_NET = "/run/nuc-console/net.json"
-OUT_BOOT = "/run/nuc-console/boot.json"
+# Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
+LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal"), "windows": ("blame",)}.get(OS_NAME, ())
+OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
+OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
+OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
-SBIN = "/usr/sbin:/usr/bin:/sbin:/bin"
+if WINDOWS:  # only directories that need Administrator rights to write to
+    _root, _pf = os.environ.get("SystemRoot") or r"C:\Windows", os.environ.get("ProgramFiles") or r"C:\Program Files"
+    SBIN = os.pathsep.join((os.path.join(_root, "System32", "WindowsPowerShell", "v1.0"), os.path.join(_root, "System32"),
+                            os.path.join(_pf, "Docker", "Docker", "resources", "bin"), os.path.join(_pf, "Tailscale")))
+elif MACOS:  # Apple's tools first: a same-named binary in /usr/local/bin can never shadow lsof, pfctl & co.
+    SBIN = ("/usr/sbin:/usr/bin:/sbin:/bin:/usr/libexec/ApplicationFirewall:/usr/local/bin:/opt/homebrew/bin"
+            ":/Applications/Docker.app/Contents/Resources/bin:/Applications/Tailscale.app/Contents/MacOS")
+else:
+    SBIN = "/usr/sbin:/usr/bin:/sbin:/bin"
+APPLE_SYSTEM = ("/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/usr/libexec/", "/System/")  # SIP-protected: safe to run as root
+# processes that listen on behalf of containers: docker-proxy (Linux), the Docker Desktop / OrbStack / Rancher backends
+DOCKER_PROXIES = {"docker-proxy", "com.docker.backend", "com.docker.vpnkit", "vpnkit", "vpnkit-bridge", "com.docker.proxy",
+                  "OrbStack Helper", "limactl", "rancher-desktop"}  # not wslrelay: it forwards any WSL port, not only containers
 PROJECT = re.compile(r"(?:^|,)com\.docker\.compose\.project=([^,]+)")
 PORT = re.compile(r"^(?:(\[[^\]]+\]|[\d.]+):)?(\d+(?:-\d+)?)->")
 DUR = re.compile(r"(\d+(?:\.\d+)?)(us|ms|min|s|h)")
@@ -88,6 +111,29 @@ def mem_bytes(cid):
     return None
 
 
+MEM_MIB = {"B": 1, "KiB": 2 ** 10, "MiB": 2 ** 20, "GiB": 2 ** 30, "TiB": 2 ** 40, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9}
+
+
+def parse_mem_usage(text):
+    """docker stats MemUsage '12.5MiB / 7.66GiB' -> bytes used (None if unreadable)."""
+    m = re.match(r"\s*([\d.]+)\s*([KMGT]?i?B|kB)\b", str(text))
+    return int(float(m.group(1)) * MEM_MIB[m.group(2)]) if m and m.group(2) in MEM_MIB else None
+
+
+_STATS = {"ts": 0, "mem": {}}
+
+
+def docker_mem():
+    """{container id: bytes} from `docker stats` (macOS/Windows: the containers live in a VM, no cgroup files here).
+    It costs ~2 s per call: refreshed every 30 s, not at every 10 s container pass."""
+    if time.time() - _STATS["ts"] > 30:
+        rc, out, _ = run("docker", "stats", "--no-stream", "--no-trunc", "--format", "{{.ID}}\t{{.MemUsage}}", timeout=30)
+        if rc == 0:
+            _STATS["mem"] = {i: parse_mem_usage(u) for i, _, u in (ln.partition("\t") for ln in out.splitlines()) if i}
+        _STATS["ts"] = time.time()
+    return _STATS["mem"]
+
+
 def collect():
     if "containers" in OFF:
         return {"ts": time.time(), "containers": [], "disabled": True}
@@ -99,6 +145,10 @@ def collect():
     if rc != 0:
         return {"ts": time.time(), "error": err[:200] or "docker not responding", "containers": []}
     rows, bad = [], 0
+    try:
+        mem_of = mem_bytes if LINUX else docker_mem().get
+    except Exception:  # noqa: BLE001 - memory is a detail: without it the list still shows (RAM '-')
+        mem_of = lambda _cid: None  # noqa: E731
     for line in out.splitlines():
         try:
             d = json.loads(line)
@@ -107,7 +157,7 @@ def collect():
             m = PROJECT.search(d.get("Labels", ""))
             rows.append({"name": d["Names"], "status": d["Status"], "state": d["State"],
                          "project": m.group(1) if m else "", "ports": parse_ports(d.get("Ports")),
-                         "mem": mem_bytes(d["ID"])})
+                         "mem": mem_of(d["ID"])})
         except (ValueError, KeyError):
             bad += 1  # one unreadable line must not empty the whole list
     out = {"ts": time.time(), "containers": rows}
@@ -120,14 +170,51 @@ class Absent(Exception):
     """The tool is not installed: on another machine that is normal, not a fault (no error, no alarm)."""
 
 
+def mac_identity(exe):
+    """macOS: None = run as root (Apple's SIP-protected tools); else the user a third-party tool must run as.
+
+    docker, tailscale... live in user-writable places (/usr/local/bin, apps dragged to /Applications): run as root, a
+    replaced binary would be root code. They run as their owner, or as the user at the console when root owns them
+    (Docker Desktop and the Tailscale app run in that user's session anyway)."""
+    if os.geteuid() != 0:
+        return None
+    real = os.path.realpath(exe)
+    if real.startswith(APPLE_SYSTEM):
+        return None
+    uid = os.stat(real).st_uid or os.stat("/dev/console").st_uid
+    if uid == 0:
+        raise RuntimeError(f"{os.path.basename(real)}: nobody logged in at the console, not run as root")
+    import pwd
+    return pwd.getpwuid(uid)
+
+
+def _as_user(pw):
+    env = {"PATH": SBIN, "HOME": pw.pw_dir, "USER": pw.pw_name, "LOGNAME": pw.pw_name, "TMPDIR": "/tmp", "LANG": "C"}
+    if sys.version_info >= (3, 9):
+        return {"user": pw.pw_uid, "group": pw.pw_gid, "extra_groups": [], "env": env}
+
+    def drop():  # Python 3.8: no user= argument
+        os.setgroups([])
+        os.setgid(pw.pw_gid)
+        os.setuid(pw.pw_uid)
+    return {"preexec_fn": drop, "env": env}
+
+
 def run(name, *args, timeout=15):
     """(rc, stdout, stderr); rc=None on timeout. Raises Absent if the binary does not exist."""
     exe = shutil.which(name, path=SBIN)
     if not exe:
         raise Absent(name)
+    kw = {}
+    if MACOS:
+        pw = mac_identity(exe)
+        if pw:
+            kw = _as_user(pw)
+    elif WINDOWS:
+        kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     try:
-        r = subprocess.run([exe, *args], capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        r = subprocess.run([exe, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, **kw)
+    except (OSError, subprocess.SubprocessError) as e:
         return None, "", repr(e)[:120]
     return r.returncode, r.stdout, r.stderr.strip()[:120]
 
@@ -349,20 +436,70 @@ def parse_iso(text):
     return dt.timestamp() + (float("0." + frac[:9]) if frac else 0)
 
 
+def os_release():
+    """What the BOOT section prints next to the boot time: the kernel on Linux, the OS version elsewhere."""
+    if MACOS:
+        return f"macOS {platform.mac_ver()[0]}"
+    if WINDOWS:
+        return f"Windows {platform.release()} ({platform.version()})"
+    return platform.release()
+
+
+class NotRecorded(Exception):
+    """The OS keeps no record of it this time (e.g. Windows boot time without its diagnostics event): info, not an error."""
+
+
+def boot_time():
+    if MACOS:
+        rc, out, err = run("sysctl", "-n", "kern.boottime")
+        if rc != 0:
+            raise RuntimeError(err or "sysctl failed")
+        m = re.search(r"sec = (\d+)", out)
+        return int(m.group(1)) if m else int(time.time())
+    if WINDOWS:
+        return int(time.time() - winapi.uptime())
+    with open("/proc/stat") as f:
+        return next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
+
+
 def collect_boot():
-    d = {"ts": time.time(), "errors": {}, "absent": [], "kernel": platform.release()}
+    d = {"ts": time.time(), "errors": {}, "absent": [], "kernel": os_release(), "os": OS_NAME}
 
     def section(key, fn):
         if OFF.intersection(BOOT_FEATURE.get(key, ())):
             d["absent"].append(key)
             d.setdefault("disabled", []).append(key)
             return
+        if key in UNSUPPORTED_BOOT:
+            d["absent"].append(key)
+            d.setdefault("unsupported", []).append(key)
+            return
         try:
             d[key] = fn()
         except Absent:
             d["absent"].append(key)
+        except NotRecorded as e:
+            d["absent"].append(key)
+            d.setdefault("notes", {})[key] = str(e)
         except Exception as e:  # noqa: BLE001 - a broken section does not empty the others
             d["errors"][key] = repr(e)[:120]
+
+    native = {}  # the macOS/Windows boot data comes from one call shared by several sections
+
+    def from_native(key):
+        def fn():
+            if "data" not in native:
+                try:
+                    native["data"] = (cwin.boot_sections(cwin.powershell(run, cwin.PS_BOOT, timeout=90)) if WINDOWS
+                                      else dict(zip(("enabled", "failed"), cmac.daemons(run))))
+                except Exception as e:  # noqa: BLE001 - remembered: every section of this pass reports the same failure
+                    native["data"] = e
+            if isinstance(native["data"], Exception):
+                raise native["data"]
+            if native["data"].get(key) is None:
+                raise NotRecorded("not recorded for this boot (Diagnostics-Performance log)")
+            return native["data"][key]
+        return fn
 
     def need(rc_ok, err, what):
         if not rc_ok:
@@ -422,8 +559,9 @@ def collect_boot():
                 "volumes_unused_anonymous": sum(bool(ANON_VOLUME.match(v)) for v in unused) if unused is not None else None,
                 "dangling_images": {"count": len(dimg.split()), "bytes": sum(parse_size(x) for x in dimg.split())} if rc == 0 else None}
 
-    with open("/proc/stat") as f:
-        d["btime"] = next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
+    d["btime"] = boot_time()
+    if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal') stay unsupported
+        analyze, failed, enabled, journal = (from_native(k) for k in ("analyze", "failed", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("enabled", enabled),
                     ("journal", journal), ("containers", containers), ("docker_df", docker_df)):
         section(key, fn)
@@ -551,7 +689,7 @@ def db_items(inspected, host_conns, conn_fn=None, local_addrs=(), now=None):
                 ext[peer] = now
         hp = {x["p"] for x in ports if x["p"]}
         host_clients = sorted({c["proc"] for c in host_conns
-                               if c["p_port"] in hp and c["proc"] and c["proc"] != "docker-proxy"
+                               if c["p_port"] in hp and c["proc"] and c["proc"] not in DOCKER_PROXIES
                                and is_local(c["p_addr"], local_addrs)})
         for ip in [i for i, t in ext.items() if now - t > EXTERNAL_TTL_S]:
             del ext[ip]
@@ -570,12 +708,16 @@ def db_items(inspected, host_conns, conn_fn=None, local_addrs=(), now=None):
 
 def collect_net():
     """Each section fails on its own: a broken command does not empty the others."""
-    d = {"ts": time.time(), "errors": {}, "absent": []}
+    d = {"ts": time.time(), "errors": {}, "absent": [], "os": OS_NAME}
 
     def section(key, fn):
         if NET_FEATURE.get(key) in OFF:
             d["absent"].append(key)
             d.setdefault("disabled", []).append(key)
+            return
+        if not LINUX and key in LINUX_ONLY_NET:
+            d["absent"].append(key)
+            d.setdefault("unsupported", []).append(key)
             return
         try:
             d[key] = fn()
@@ -584,11 +726,29 @@ def collect_net():
         except Exception as e:  # noqa: BLE001 - any unexpected output ends up in errors, not in a crash
             d["errors"][key] = repr(e)[:120]
 
+    fw = {}  # macOS/Windows: the firewall state the listener verdicts are computed from
+
+    def firewall():
+        if WINDOWS:
+            fw["win"] = cwin.powershell(run, cwin.PS_FIREWALL)
+            return cwin.fw_summary(fw["win"])
+        fw["alf"], fw["pf"] = cmac.firewall(run)
+        return cmac.fw_summary(fw["alf"], fw["pf"])
+
     def listeners():
-        rc, out, err = run("ss", "-tulnpH")
-        if rc != 0:
-            raise RuntimeError(err or "ss failed")
-        return parse_ss(out)
+        if WINDOWS:
+            out = cwin.listeners(fw.get("win"))
+        elif MACOS:
+            out = cmac.listeners(run, fw.get("alf"), fw.get("pf"))
+        else:
+            rc, out, err = run("ss", "-tulnpH")
+            if rc != 0:
+                raise RuntimeError(err or "ss failed")
+            return parse_ss(out)
+        if "firewall" in OFF:  # nothing was read: say so, never a verdict
+            for x in out:
+                x["fw"] = ["unknown", "firewall check off in config.ini"]
+        return out
 
     def serve():
         rc, out, err = run("tailscale", "serve", "status", "--json")
@@ -635,6 +795,10 @@ def collect_net():
             rc, insp, err = run("docker", "inspect", *ids)
             if rc != 0 and not insp.strip().startswith("["):
                 raise RuntimeError(err or "docker inspect failed")
+        if WINDOWS:  # Docker Desktop: the containers live in a VM, their namespaces are out of reach (no 'who connects')
+            return db_items(json.loads(insp or "[]"), cwin.established(), None, cwin.local_addrs())
+        if MACOS:
+            return db_items(json.loads(insp or "[]"), cmac.established(run), None, cmac.local_addrs(run))
         rc, est, err = run("ss", "-tnpH", "state", "established")
         if rc != 0:
             raise RuntimeError(err or "ss failed")
@@ -650,6 +814,8 @@ def collect_net():
             raise RuntimeError(err or "tailscale failed")
         return parse_ts_peers(out)
 
+    if not LINUX:
+        section("firewall", firewall)  # before the listeners: their verdicts depend on it
     section("listeners", listeners)
     section("serve", serve)
     section("ufw", ufw)
@@ -664,10 +830,17 @@ def collect_net():
 
 def write_atomic(data, path=OUT):
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f)
     os.chmod(tmp, 0o644)
-    os.replace(tmp, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:  # Windows: the renderer has the file open this very moment; it closes it in milliseconds
+            if not WINDOWS or attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def net_loop():
@@ -689,9 +862,14 @@ def boot_loop():
 
 
 def main():
+    if "--log" in sys.argv[:-1]:  # Windows scheduled task: no journal, the log goes to %ProgramData%\nuc-console\logs
+        nuc_config.log_to(sys.argv[sys.argv.index("--log") + 1])
+    if WINDOWS:
+        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"  # never look for docker.exe & co. in the working directory
     if "--once" in sys.argv:
         print(json.dumps({"containers": collect(), "net": collect_net(), "boot": None if {"boot", "docker_disk"} <= OFF else collect_boot()}, indent=1))
         return
+    os.makedirs(nuc_config.RUN_DIR, exist_ok=True)  # systemd creates it (RuntimeDirectory); launchd and Task Scheduler do not
     if not {"boot", "docker_disk"} <= OFF:
         threading.Thread(target=boot_loop, daemon=True).start()
     # separate thread: slow ufw/iptables/fail2ban must not stop the container refresh

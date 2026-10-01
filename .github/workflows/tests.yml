@@ -1,0 +1,87 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit · ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, python: "3.8" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.11" }
+          - { os: macos-latest, python: "3.14" }   # the python.org one install-macos.sh installs
+          - { os: windows-latest, python: "3.8" }
+          - { os: windows-latest, python: "3.14" } # the embeddable one install-windows.ps1 installs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+      - run: python src/render.py --once --demo --cols 200 --rows 50
+      - run: python src/render.py --once --cols 120 --rows 40   # the real host, no collector: must not crash
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems
+
+  # The real installers on fresh machines: install, collect, problems, uninstall.
+  install-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo NUC_CONSOLE_VT=3 ./install.sh
+      - run: python3 -c "import json; d = json.load(open('/run/nuc-console/net.json')); assert d['os'] == 'linux' and d['listeners'], d"
+      - run: nuc-console-problems
+      - run: sudo ./install.sh --uninstall
+
+  install-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
+      - run: sudo cat /var/log/nuc-console/collector.log || true
+      - run: /opt/nuc-console/bin/nuc-console-problems
+      - run: |
+          python3 - <<'PY'
+          import json
+          d = json.load(open("/var/run/nuc-console/net.json"))
+          assert d["os"] == "darwin" and d["listeners"] and d["firewall"]["kind"] == "darwin", d
+          assert not d["errors"], d["errors"]
+          b = json.load(open("/var/run/nuc-console/boot.json"))
+          assert not b["errors"], b["errors"]
+          PY
+      - run: curl -fsS http://127.0.0.1:8787/healthz && curl -fsS "http://127.0.0.1:8787/?fit=1&zoom=150" | grep -q "A+"
+      - run: sudo ./install.sh --uninstall
+
+  install-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Display browser
+      - shell: powershell
+        run: |
+          Get-Content "$env:ProgramData\nuc-console\logs\collector.log" -ErrorAction SilentlyContinue
+          & "$env:ProgramFiles\nuc-console\bin\nuc-console-problems.cmd"
+          $d = Get-Content "$env:ProgramData\nuc-console\run\net.json" -Raw | ConvertFrom-Json
+          if ($d.os -ne 'windows' -or -not $d.listeners -or $d.firewall.kind -ne 'windows') { throw "unexpected net.json" }
+          if (@($d.errors.PSObject.Properties).Count) { throw ("net errors: " + ($d.errors | ConvertTo-Json)) }
+          if (-not (Test-Path "$env:ProgramData\nuc-console\lib\baseline.json")) { throw "no baseline" }
+          $page = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/?fit=1&zoom=150"
+          if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'A\+') { throw "local web view not serving the dashboard" }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\nuc-console.url")) { throw "no Start menu shortcut" }
+      - shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Uninstall

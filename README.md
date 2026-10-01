@@ -2,13 +2,15 @@
 
 # 🖥️ nuc-console
 
-**Turn the forgotten monitor of your headless Linux box into a live security & health board.**<br>
-No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
+**Turn the forgotten monitor of your headless Linux box — or Mac, or Windows PC — into a live security & health board.**<br>
+Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dependencies · one screen · ~0.5 % of a CPU core
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/give-jd/nuc-console-oss?style=flat-square&color=58a6ff)](https://github.com/give-jd/nuc-console-oss/releases)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776ab?style=flat-square&logo=python&logoColor=white)](#requirements)
 [![Linux + systemd](https://img.shields.io/badge/linux-systemd-fcc624?style=flat-square&logo=linux&logoColor=black)](#requirements)
+[![macOS 11+](https://img.shields.io/badge/macOS-11%2B-999999?style=flat-square&logo=apple&logoColor=white)](docs/INSTALL.md#macos)
+[![Windows 10/11](https://img.shields.io/badge/windows-10%20%7C%2011-0078d4?style=flat-square)](docs/INSTALL.md#windows)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-8957e5?style=flat-square)](#security)
 
 [**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
@@ -30,8 +32,9 @@ No X11 · no browser · no dependencies · one screen · ~0.5 % of a CPU core
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
-| 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
-| 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size |
+| 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
+| 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
+| 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
@@ -55,17 +58,18 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 - **Port alarms.** A baseline of the exposed ports is stored on install; a new, changed or vanished port raises a red banner until you accept it (`sudo nuc-console-accept`).
 - **Honest about missing data.** Unreadable or missing sections show `?` and are treated as open, never as "OK". A tool that isn't installed is reported as such, not as an error.
 - **Databases.** Finds postgres/redis/mysql/mongo/… containers, shows their *real* published ports and which containers/hosts actually connect (seen inside the container's network namespace, so Docker's DNAT can't hide external clients).
-- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view.
+- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view (macOS/Windows show the dashboard through it, on 127.0.0.1 only).
 - **Adaptive layout.** One screen from 79×24 up to 4K consoles: 1 column → 2 (≥200 cols) → 3 (≥225 cols), dropping detail before dropping sections.
 
 ## Requirements
 
 | | |
 |---|---|
-| OS | Linux with **systemd** (Debian/Ubuntu/Fedora/Arch… anything with `systemd`, `/proc`, `/sys`) |
-| Python | 3.8 or newer (tests run on 3.8 – 3.13), standard library only |
-| Root | only for `install.sh` and the collector service |
-| Optional tools | `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. Each one that is missing simply disables its section — nothing crashes |
+| OS | **Linux** with systemd (Debian/Ubuntu/Fedora/Arch… anything with `systemd`, `/proc`, `/sys`) · **macOS** 11 or newer · **Windows** 10/11 or Server 2019+ (64-bit x86 or ARM) |
+| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
+| Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
+| Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
+| Display | Linux: a virtual terminal. macOS/Windows: it opens at every login, your choice how — a normal browser window (default) or full screen (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
 
 ## Quick start
 
@@ -73,8 +77,12 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 git clone <this repository> nuc-console && cd nuc-console
 python3 src/render.py --once --demo --cols 200 --rows 50    # try it: synthetic data, no root, no install
 python3 -m unittest discover -s tests                        # optional: run the test-suite
-sudo ./install.sh                                            # install + switch tty1 to the dashboard now
+sudo ./install.sh                                            # Linux: install + switch tty1 to the dashboard now
+sudo ./install.sh                                            # macOS: the same command (launchd, full-screen browser at login)
 ```
+
+Windows: download the ZIP, extract it, double-click **`install-windows.cmd`** (it asks for administrator rights).
+Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `--demo-os windows`.
 
 Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
@@ -92,6 +100,7 @@ webapps  = yes
 [dashboard]
 mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
 rotate_seconds = 15
+refresh_seconds = 2   # redraw every 1-10 s: console, full-screen window and browser pages (- / + on the page)
 # sections = attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
 #            ^ fixed on-screen order (this is the default, by priority); columns fill left to right, never back-filled
 columns = 0           # 0 = real console size; set e.g. 235 if elements run off the screen
@@ -134,11 +143,15 @@ For web apps you expose on purpose, declare them under `[webapps]` instead: they
 ```
 
 - `nuc-console.service` owns the VT (`TTYPath=/dev/tty1`), `Restart=always`. `install.sh` masks `getty@tty1` so nothing draws over it; login stays on **tty2** (Ctrl+Alt+F2) and SSH.
+- **macOS / Windows**: the collector is a LaunchDaemon (root) / a scheduled task (SYSTEM) that reads sockets, the OS firewall and services
+  with native tools (`lsof`, `socketfilterfw`, `launchctl` / the IP helper API and PowerShell) and judges every listening port against the
+  firewall *per program*. The read-only web view (unprivileged) serves the same screen on **127.0.0.1 only**, and at every login it opens
+  in a normal browser window (or full screen: `[display] mode = fullscreen`); a *nuc-console* shortcut reopens it. Same layout, same alarms.
 - Exposure rules and the design principles behind the layout: [docs/DESIGN.md](docs/DESIGN.md). Hardening the things it reports: [docs/HARDENING.md](docs/HARDENING.md).
 
 ### Cost
 
-Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, 240×67) **≈0.5 % of one core, ~14 MB RSS**; the root collector runs its commands every 10–30 s (< 0.5 s CPU in total). Per-container memory is read from cgroup files, not `docker stats` (2 s per call).
+Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67) **≈0.5 % of one core, ~14 MB RSS**; the root collector runs its commands every 10–30 s (< 0.5 s CPU in total). Per-container memory is read from cgroup files, not `docker stats` (2 s per call).
 
 ## Web view (optional)
 
@@ -152,7 +165,9 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 
 ## Limitations
 
-- Linux + systemd only. The exposure logic knows `ufw`, `iptables`/`ts-input` and Docker; **nftables-native** or firewalld rulesets are not interpreted (shown as unknown `?`).
+- Linux: the exposure logic knows `ufw`, `iptables`/`ts-input` and Docker; **nftables-native** or firewalld rulesets are not interpreted (shown as unknown `?`).
+- macOS/Windows: no thermal sensors, fail2ban or "who connects" inside containers (Docker Desktop runs them in a VM); Windows Firewall rules from Group Policy, port keywords (RPC…) and macOS `pf` rules show as unknown `?`. Details: [docs/INSTALL.md](docs/INSTALL.md#macos).
+- Non-systemd Linux (OpenRC, runit…) and the BSDs are not supported.
 - Docker-published ports are assumed TCP; `tailscaled` ephemeral ports (≥32768 except 41641) are ignored; one NVMe sensor is read.
 - Connections shorter than the 30 s sampling window are not seen by the database "who connects" view.
 
