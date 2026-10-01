@@ -73,6 +73,21 @@ VM: their own connections are out of reach, the map says that too and shows the 
 State propagates along `seen` and `declared` edges: a database that is down turns what depends on it yellow, all the way
 up to the entry the LAN uses to reach it.
 
+### Tree or graph
+
+On the console the MAP is only a tree, for the reason above. In a browser the same graph can also be drawn as circles and
+lines (the **tree | graph** switch): it shows at a glance the hubs and the islands that a tree spreads over many rows, and
+the *local graph* of one node (what is one or two links away) answers "what touches this?" without scrolling. The tree
+stays the default because it is the one that reads the same everywhere and states every path in words.
+
+- The positions are computed by the server (`src/graphlayout.py`, a force-directed layout): deterministic, each node starting
+  from a hash of its id, so the same graph is always drawn the same way and a refresh does not move what did not change.
+- The page is complete without a script: every circle is a link to its details, zoom is a link. One small inline script
+  (`src/graphjs.py`) adds dragging, panning, wheel zoom and a light physics; it is pinned by its SHA-256 in that page's CSP,
+  cannot open connections, and is the only script of the web view (docs/WEB.md).
+- Edges keep the tree's evidence styles: seen solid, declared dashed, same network dotted; zone → port and port → owner
+  links are thin and grey (structure, not traffic).
+
 ## macOS and Windows
 
 There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every
