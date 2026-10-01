@@ -1063,6 +1063,25 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(rc, 3)
         self.assertIn("allow_remote = no", out)
 
+    def test_without_a_directory_argument_it_looks_where_the_administrator_installed(self):
+        """`sudo nuc-console-ai setup` puts the files in the system-wide folder; an unprivileged `status` must look there, like `models`."""
+        self.install()  # in self.d, which stands for the system-wide folder
+        mine = os.path.join(self.tmp.name, "mine")
+        put(self.cfg, "[ai]\nendpoint = http://127.0.0.1:%d/v1\nmodel = tiny\n" % free_port())
+        args = aisetup.build_parser().parse_args(["status", "--config", self.cfg])
+        self.assertIsNone(args.dir)
+        with mock.patch.object(aisetup, "find_dir", return_value=self.d) as fd, mock.patch.object(aisetup, "default_dir", return_value=mine):
+            rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model])
+        fd.assert_called()
+        self.assertIn("directory : %s" % self.d, out)
+        self.assertIn("installed, SHA-256 verified", out)
+        self.assertEqual(rc, 3, "installed, the server is not running")
+        args = aisetup.build_parser().parse_args(["status", "--config", self.cfg, "--dir", mine])
+        with mock.patch.object(aisetup, "find_dir", return_value=self.d):
+            rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model])
+        self.assertIn("directory : %s" % mine, out, "an explicit --dir is kept")
+        self.assertEqual(rc, 1)
+
     def test_endpoint_option_probes_another_url(self):
         s, httpd = self.models_server((200, b'{"data": [{"id": "tiny"}]}'))
         rc, out, err = self.status("http://127.0.0.1:1/v1", "--endpoint", s.base + "/v1")
@@ -1238,6 +1257,49 @@ class ModelsCommandTests(unittest.TestCase):
         self.assertIn("could not be assessed", out)
         self.assertEqual(len(out.splitlines()) > 8, True)
 
+    def test_a_speed_below_10_keeps_its_decimal(self):
+        real = aisetup.assess_model
+        for tok_s, want in (([0.5, 3.2], "0.5-3.2"), ([8.4, 17], "8.4-17"), ([120, 340], "120-340"), ([4.0, 4.0], "4.0"), ([12, 12], "12")):
+            with self.subTest(tok_s), mock.patch.object(aisetup, "assess_model", side_effect=lambda m, hw, ctx=aisetup.DEFAULT_CTX: dict(real(m, hw, ctx), tok_s=list(tok_s))):
+                rc, out, err = self.models_cmd(HW_CPU8)
+                self.assertRegex(self.row(out, "mid"), r"\s%s\s" % re.escape(want))
+                header = next(ln for ln in out.splitlines() if "TOK/S" in ln)
+                self.assertEqual(self.row(out, "mid").index("not installed"), header.index("STATE"), "the columns stay aligned")
+
+    def test_every_verdict_has_a_label_and_a_speed_where_there_is_one(self):
+        seen = set()
+        for hw in (HW_BIG, HW_SMALL_GPU, HW_APPLE, HW_CPU8, HW_UNKNOWN):
+            rc, out, err = self.models_cmd(hw)
+            for m in self.models:
+                row = self.row(out, m["id"])
+                fits = re.search(r"\s(GPU\+CPU|GPU|RAM|SLOW|TOO BIG)\s+(\S+)\s{2}", row)
+                self.assertTrue(fits, row)
+                seen.add(fits.group(1))
+                if fits.group(2) != "?":  # below 10 tokens/s a decimal, from 10 on whole numbers
+                    self.assertRegex(fits.group(2), r"^(\d\.\d|\d{2,})(-(\d\.\d|\d{2,}))?$", row)
+        self.assertEqual(seen, {"GPU+CPU", "GPU", "RAM", "SLOW", "TOO BIG"})
+
+    def test_without_advice_every_row_is_neutral(self):
+        with mock.patch.dict(sys.modules, {"aihw": None}):
+            args = aisetup.build_parser().parse_args(["models", "--dir", self.d, "--config", self.cfg])
+            put(self.cfg, "")
+            rc, out, err = call(aisetup.cmd_models, args, runtime=self.runtime, models=self.models, hw={})
+        for m in self.models:
+            row = self.row(out, m["id"])
+            self.assertRegex(row, r"~\d+(\.\d)? (GB|MB)\s+\?\s+\?\s+(not pinned yet|not installed)$", "a neutral ? for the verdict and the speed: nothing is guessed")
+            self.assertFalse(row.startswith("*"))
+        self.assertNotRegex(out, r"TOO BIG\s+\?|SLOW\s+\?")
+
+    def test_needs_agree_with_the_sentence_that_explains_the_verdict(self):
+        """The NEEDS column and the "needs 5.7 GB" of the recommendation are one number, in the same unit as the RAM line."""
+        real = aisetup.assess_model
+        with mock.patch.object(aisetup, "assess_model", side_effect=lambda m, hw, ctx=aisetup.DEFAULT_CTX: dict(real(m, hw, ctx), need_mb=5888, why="needs 5.8 GB")):
+            rc, out, err = self.models_cmd(HW_CPU8)
+        self.assertRegex(self.row(out, "mid"), r"~5\.8 GB")
+        self.assertEqual(aisetup.fmt_mem(5888), "5.8 GB")
+        self.assertEqual(aisetup.fmt_mem(700), "700 MB")
+        self.assertEqual(aisetup.fmt_mem(None), "?")
+
     def test_installed_active_and_unpinned(self):
         install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
         models = [dict(m, revision=None, sha256=None, size=None) if m["id"] == "huge" else m for m in self.models]
@@ -1292,6 +1354,91 @@ class ModelsCommandTests(unittest.TestCase):
                     self.assertIn(m["id"], out)
                 self.assertTrue(out.isascii())
                 self.assertLess(max(len(ln) for ln in out.splitlines()), 110, "fits a terminal")
+
+
+class FormatTests(unittest.TestCase):
+    def test_speed_text(self):
+        t = lambda lo_hi: aisetup.speed_text({"tok_s": lo_hi})  # noqa: E731
+        self.assertEqual(t([0.5, 3.2]), "0.5-3.2", "a range below 10 keeps its decimal: 0-3 would be wrong")
+        self.assertEqual(t([8.4, 17]), "8.4-17")
+        self.assertEqual(t([9.96, 41.2]), "10-41")
+        self.assertEqual(t([37, 82]), "37-82")
+        self.assertEqual(t([384, 1024]), "384-1024")
+        self.assertEqual(t([4, 4]), "4.0")
+        self.assertEqual(t([20, 20]), "20")
+        self.assertEqual(t([0, 0.04]), "0.1", "never 0.0: it runs")
+        for none in (None, [], {}, "x", [1], ["a", "b"], [float("nan"), 3], [1, float("inf")]):
+            self.assertEqual(aisetup.speed_text({"tok_s": none}), "?", none)
+        self.assertEqual(aisetup.speed_text(None), "?")
+        self.assertEqual(aisetup.speed_text({}), "?")
+
+    def test_gpu_text(self):
+        m = {"layers": 36}
+        self.assertEqual(aisetup.gpu_text(0, m), "CPU only")
+        self.assertEqual(aisetup.gpu_text(20, m), "20 of 36 layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(35, m), "35 of 36 layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(36, m), "all 36 layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(37, m), "all 36 layers on the GPU", "aihw counts the output layer: one more than the model's own")
+        self.assertEqual(aisetup.gpu_text(aisetup.ALL_LAYERS, m), "all 36 layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(12), "12 layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(aisetup.ALL_LAYERS), "all layers on the GPU")
+        self.assertEqual(aisetup.gpu_text(0), "CPU only")
+
+
+class RealAdviceTests(unittest.TestCase):
+    """aihw.assess() says gpu_layers = the model's layers + 1 for a full fit (the output layer is one more): what serve passes to the
+    runtime and prints, and what a service unit shows, must read as "all layers"."""
+
+    def setUp(self):
+        import aihw
+        self.aihw = aihw
+        patcher = mock.patch.dict(sys.modules, {"aihw": aihw})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.m = aisetup.find_model("qwen3-8b")  # 36 layers
+
+    def test_a_full_fit(self):
+        a = self.aihw.assess(self.m, HW_BIG)
+        self.assertEqual((a["verdict"], a["gpu_layers"]), ("gpu", self.m["layers"] + 1))
+        layers, why = aisetup.gpu_plan(self.m, HW_BIG)
+        self.assertEqual(layers, aisetup.ALL_LAYERS)
+        self.assertIn("all on the GPU", why)
+        argv = aisetup.serve_argv("/c", self.m, 8080, 2, plat="linux", gpu_layers=layers)
+        self.assertEqual(argv[argv.index("-ngl") + 1], "999")
+        self.assertEqual(aisetup.gpu_text(layers, self.m), "all 36 layers on the GPU")
+        service = aisetup.service_argv("/c", self.m, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu_layers=layers)
+        self.assertEqual(service[-2:], ["--gpu-layers", "999"])
+        self.assertEqual(aisetup.build_parser().parse_args(service[3:]).gpu_layers, 999)
+        self.assertNotIn("37", service)
+
+    def test_a_partial_fit_says_how_many_of_how_many(self):
+        a = self.aihw.assess(self.m, HW_SMALL_GPU)
+        self.assertEqual(a["verdict"], "partial")
+        layers, why = aisetup.gpu_plan(self.m, HW_SMALL_GPU)
+        self.assertEqual(layers, a["gpu_layers"])
+        self.assertTrue(0 < layers < 36)
+        self.assertEqual(aisetup.gpu_text(layers, self.m), "%d of 36 layers on the GPU" % layers)
+
+    def test_serve_says_all_layers_in_its_start_line_and_a_service_install_too(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d, cfg = os.path.join(tmp.name, "ai"), os.path.join(tmp.name, "config.ini")
+        runtime, models, data = fake_catalog()
+        install_files(d, runtime, models, data)
+        put(cfg, "")
+        mid = models[2]
+        hw = hw_of(65536, 60000, [gpu_of("NVIDIA GeForce RTX 4090", 24576, 22000)])
+        args = aisetup.build_parser().parse_args(["serve", "--dir", d, "--config", cfg, "--model", "mid"])
+        with mock.patch.object(aisetup, "run_server", return_value=0):
+            rc, out, err = call(aisetup.cmd_serve, args, runtime=runtime, models=models, hw=hw)
+        self.assertIn("all 32 layers on the GPU", out)
+        self.assertNotRegex(out, r"\b(33|999) layers")
+        args = aisetup.build_parser().parse_args(["serve", "--dir", d, "--config", cfg, "--model", "mid", "--gpu-layers", "999"])
+        with mock.patch.object(aisetup, "run_server", return_value=0):
+            rc, out, err = call(aisetup.cmd_serve, args, runtime=runtime, models=models, hw=hw)
+        self.assertIn("all 32 layers on the GPU", out)
+        self.assertIn("as given by --gpu-layers", out)
+        self.assertEqual(mid["layers"], 32)
 
 
 class CatalogTests(unittest.TestCase):
@@ -1592,9 +1739,9 @@ class ServeGpuTests(unittest.TestCase):
             with self.subTest(name):
                 layers, why = aisetup.gpu_plan(self.models[2], hw)  # "mid": 32 layers
                 if mid_all_on_gpu:
-                    self.assertEqual(layers, 32)
+                    self.assertEqual(layers, aisetup.ALL_LAYERS, "all of it: -ngl says so (not a number one past the last layer)")
                 elif mid_all_on_gpu is None:
-                    self.assertTrue(0 < layers <= 33, layers)
+                    self.assertTrue(0 < layers <= aisetup.ALL_LAYERS, layers)
                 else:
                     self.assertEqual(layers, 0)
                 self.assertTrue(why)
@@ -1618,11 +1765,11 @@ class ServeGpuTests(unittest.TestCase):
     def test_dry_run_on_a_big_gpu(self):
         words = self.dry_run(HW_BIG)
         self.assertEqual(words[words.index("--gpu") + 1], "auto")
-        self.assertEqual(words[words.index("-ngl") + 1], "32")
+        self.assertEqual(words[words.index("-ngl") + 1], str(aisetup.ALL_LAYERS))
 
     def test_dry_run_on_apple_silicon(self):
         words = self.dry_run(HW_APPLE)
-        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", "32"))
+        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", str(aisetup.ALL_LAYERS)))
 
     def test_dry_run_on_a_gpu_that_holds_part_of_it(self):
         words = self.dry_run(HW_SMALL_GPU)
@@ -1664,7 +1811,7 @@ class ServeGpuTests(unittest.TestCase):
 
     def test_start_message_says_where_it_runs(self):
         put(self.cfg, "")
-        for hw, want in ((HW_BIG, "32 layers on the GPU"), (HW_CPU8, "CPU only")):
+        for hw, want in ((HW_BIG, "all 32 layers on the GPU"), (HW_CPU8, "CPU only")):
             args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", "mid"])
             with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}), mock.patch.object(aisetup, "run_server", return_value=0) as rs:
                 rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
@@ -1707,7 +1854,7 @@ class ServeGpuTests(unittest.TestCase):
             self.assertIn("--gpu-layers 24\n", unit)
             self.assertIn("PrivateDevices=no\n", unit, "the sandbox must let the service see the GPU")
             self.assertIn("SupplementaryGroups=render video\n", unit)
-            self.assertIn("24 layers on the GPU", out)
+            self.assertIn("24 of 32 layers on the GPU", out)
             wrote.clear()
             call(aisetup.install_service, self.d, m, 8080, 2, 4096, "linux", gpu_layers=0)
             unit = wrote["/etc/systemd/system/nuc-console-ai.service"]

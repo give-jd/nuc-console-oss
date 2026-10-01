@@ -46,6 +46,7 @@ import nuc_config
 LOOPBACK = "127.0.0.1"  # the only address the server is ever started on (serve_argv has no parameter for it)
 DEFAULT_PORT = 8080
 DEFAULT_CTX = 4096  # tokens of context: bounds the memory of the KV cache (a 32k default would need gigabytes)
+ALL_LAYERS = 999  # the -ngl that means "every layer" (aihw counts the output layer too, so its number is one more than the model's own)
 ALLOWED_LICENSES = ("Apache-2.0", "MIT")  # permissive only; tests refuse anything else in MODELS and RUNTIME
 SHIPPED_ENDPOINT = "http://127.0.0.1:11434/v1"  # nuc_config's default [ai] endpoint (Ollama): setup --yes never replaces another one
 UA = "nuc-console-ai/1"
@@ -587,17 +588,30 @@ def recommend_id(models, hw):
 
 
 def gpu_plan(model, hw, cfg_gpu="auto", ctx=DEFAULT_CTX):
-    """-> (layers, why). layers > 0: that many layers on the GPU (serve passes --gpu auto -ngl N); 0: the CPU only (--gpu disable).
-    The GPU is used when aihw says the model fits there (all of it, or in part) and [ai] gpu is not "no"."""
+    """-> (layers, why). layers > 0: that many layers on the GPU (serve passes --gpu auto -ngl N; a model that fits entirely gets
+    ALL_LAYERS); 0: the CPU only (--gpu disable). The GPU is used when aihw says the model fits there (all of it, or in part: verdict
+    gpu or partial) and [ai] gpu is not "no"."""
     if cfg_gpu == "no":
         return 0, "[ai] gpu = no: CPU only"
     a = assess_model(model, hw, ctx)
     if a is None:
         return 0, "%s: CPU only" % NO_ADVICE
-    layers = a.get("gpu_layers") or 0
+    layers = int(a.get("gpu_layers") or 0)
     if a.get("verdict") in ("gpu", "partial") and layers > 0:
-        return min(int(layers), 999), a.get("why") or ""
+        every = model.get("layers")
+        return (ALL_LAYERS if every and layers >= every else min(layers, ALL_LAYERS)), a.get("why") or ""
     return 0, a.get("why") or "CPU only"
+
+
+def gpu_text(layers, model=None):
+    """Where the server runs, in words: 'CPU only', 'all 36 layers on the GPU', '20 of 36 layers on the GPU'. `layers` is what -ngl gets:
+    the model's own number or more (ALL_LAYERS, or aihw's one more for the output layer) means all of them."""
+    n = (model or {}).get("layers")
+    if not layers:
+        return "CPU only"
+    if n:
+        return "all %d layers on the GPU" % n if layers >= n else "%d of %d layers on the GPU" % (layers, n)
+    return "all layers on the GPU" if layers >= ALL_LAYERS else "%d layers on the GPU" % layers
 
 
 def find_dir(plat=None):
@@ -647,8 +661,8 @@ def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
 def serve_argv(d, model, port=DEFAULT_PORT, threads=None, ctx=DEFAULT_CTX, runtime=None, plat=None, gpu_layers=0):
     """argv list that starts the server. The host is fixed to 127.0.0.1. Unix: the runtime is an "actually portable executable"
     that the kernel cannot start by itself without binfmt_misc; started through sh it works everywhere (and avoids binfmt/WINE
-    interference). Windows: the file is a real .exe. gpu_layers > 0: that many layers on the GPU (--gpu auto -ngl N); 0: the CPU
-    only (--gpu disable), so that the server never starts compiling GPU code on a machine whose GPU cannot hold the model."""
+    interference). Windows: the file is a real .exe. gpu_layers > 0: that many layers on the GPU (--gpu auto -ngl N; ALL_LAYERS = all
+    of them); 0: the CPU only (--gpu disable), so that the server never starts compiling GPU code on a machine whose GPU cannot hold the model."""
     runtime = runtime or RUNTIME
     exe = runtime_path(d, runtime, plat)
     args = ["--server", "--host", LOOPBACK, "--port", str(int(port)), "-m", model_path(d, model, plat), "-a", model["id"],
@@ -751,17 +765,35 @@ def fmt_ram(mb):
     return "unknown" if mb is None else "%.1f GB" % (mb / 1024.0)
 
 
+def fmt_mem(mb):
+    """What a model needs is memory, counted in MiB like the RAM it is compared with -> '5.7 GB' / '700 MB' (as aihw's sentences say it)."""
+    if not mb:
+        return "?"
+    return "%.1f GB" % (mb / 1024.0) if mb >= 1024 else "%d MB" % mb
+
+
 def size_text(m):
     """The pinned size when there is one, else the approximate one ('~5.0 GB'): for choosing, not for downloading."""
     return fmt_size(m["size"]) if m.get("size") else "~" + fmt_mb(m.get("approx_mb"))
 
 
+def _rate(x):
+    """One speed like aihw rounds it: a decimal below 10 tokens/s ('0.5': a whole number would show 0), whole numbers from 10 on."""
+    x = float(x)
+    if x != x or x in (float("inf"), float("-inf")):
+        raise ValueError("not a speed")
+    x = max(x, 0.1)
+    return "%d" % round(x) if round(x, 1) >= 10 else "%.1f" % x
+
+
 def speed_text(a):
+    """The estimated tokens/s of an assessment as a range: '0.5-3.2', '8.4-17', '120-340'; '?' when there is no estimate."""
     t = (a or {}).get("tok_s")
-    if not t:
+    try:
+        lo, hi = _rate(t[0]), _rate(t[1])
+    except (TypeError, ValueError, IndexError, KeyError):
         return "?"
-    lo, hi = int(round(t[0])), int(round(t[1]))
-    return str(lo) if lo == hi else "%d-%d" % (lo, hi)
+    return lo if lo == hi else "%s-%s" % (lo, hi)
 
 
 def hw_lines(hw):
@@ -795,8 +827,8 @@ def state_text(m, active):
 
 def model_row(m, mark, state):
     a = m["assess"]
-    need = "~" + fmt_mb(a["need_mb"]) if a["need_mb"] else "?"
-    return "%s %-15s %-27s %8s %8s  %-8s %7s  %s" % (mark, m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a["verdict"], "?"), speed_text(a), state)
+    need = "~" + fmt_mem(a["need_mb"]) if a["need_mb"] else "?"
+    return "%s %-15s %-27s %8s %8s  %-8s %9s  %s" % (mark, m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a["verdict"], "?"), speed_text(a), state)
 
 
 def cmd_models(args, runtime=None, models=None, hw=None):
@@ -807,7 +839,7 @@ def cmd_models(args, runtime=None, models=None, hw=None):
     print("This machine (the advice below is based on it):")
     for ln in hw_lines(hw):
         print("  " + ln)
-    print("\n  %-15s %-27s %8s %8s  %-8s %7s  %s" % ("ID", "MODEL", "SIZE", "NEEDS", "FITS", "TOK/S", "STATE"))
+    print("\n  %-15s %-27s %8s %8s  %-8s %9s  %s" % ("ID", "MODEL", "SIZE", "NEEDS", "FITS", "TOK/S", "STATE"))
     for m in cat["models"]:
         print(model_row(m, "*" if m["id"] == cat["recommended"] else " ", state_text(m, cat["active"])))
     rec = next((m for m in cat["models"] if m["id"] == cat["recommended"]), None)
@@ -832,7 +864,7 @@ def show_choices(chosen, runtime, hw, recommended=False):
     print("   %-15s %-27s %8s %8s  %-8s %s" % ("ID", "NAME", "SIZE", "NEEDS", "FITS", "LICENCE"))
     for m in chosen:
         a = assess_model(m, hw) or {}
-        need = "~" + fmt_mb(a.get("need_mb") or m["ram_mb"])
+        need = "~" + fmt_mem(a.get("need_mb") or m["ram_mb"])
         print("   %-15s %-27s %8s %8s  %-8s %s" % (m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a.get("verdict"), "?"), m["license"]))
     print("   runtime: %s %s (%s), %s" % (runtime["name"], runtime["version"], runtime["license"], fmt_size(runtime["size"])))
 
@@ -844,8 +876,8 @@ def check_fit(chosen, hw, total, force):
         a = assess_model(m, hw)
         if a is None:  # no advice: the plain RAM rule
             if total and total < m["ram_mb"]:
-                print("\nwarning: this machine has about %.1f GB of RAM and %s needs about %.1f GB: it will swap or fail. "
-                      "Choose a smaller one (nuc-console-ai models)." % (total / 1000.0, m["id"], m["ram_mb"] / 1000.0))
+                print("\nwarning: this machine has about %s of RAM and %s needs about %s: it will swap or fail. "
+                      "Choose a smaller one (nuc-console-ai models)." % (fmt_mem(total), m["id"], fmt_mem(m["ram_mb"])))
         elif a["verdict"] == "no":
             if force:
                 print("\nwarning: %s will not work on this machine, installing it anyway (--force): %s" % (m["id"], safe(a["why"], 200)))
@@ -1152,7 +1184,7 @@ def install_service(d, model, port, threads, ctx, plat=None, gpu_layers=0):
         run([systemctl, "restart", SERVICE_NAME + ".service"])
         print("service: %s.service (user %s, sandboxed, 127.0.0.1 only) started. Logs: journalctl -u %s" % (SERVICE_NAME, SERVICE_NAME, SERVICE_NAME))
     print("model %s on %s, %s (the first answer may take a minute: the model is loaded into memory)"
-          % (model["id"], endpoint_for(port), "%d layers on the GPU" % gpu_layers if gpu_layers else "CPU only"))
+          % (model["id"], endpoint_for(port), gpu_text(gpu_layers, model)))
 
 
 def remove_service(plat=None):
@@ -1188,7 +1220,7 @@ def cmd_serve(args, runtime=None, models=None, hw=None):
         raise SetupError("%s handles %d tokens of context at most: use --ctx %d or less" % (model["id"], model["ctx_max"], model["ctx_max"]))
     threads = args.threads or default_threads()
     if args.gpu_layers is not None:  # explicit (the service passes it: it was decided when the service was installed)
-        layers, why = args.gpu_layers, "--gpu-layers %d" % args.gpu_layers
+        layers, why = args.gpu_layers, "GPU layers as given by --gpu-layers"
     else:
         layers, why = gpu_plan(model, hw if hw is not None else (_hardware() if ai["gpu"] != "no" else {}), ai["gpu"], args.ctx)
     argv = serve_argv(d, model, args.port, threads, args.ctx, runtime, gpu_layers=layers)
@@ -1200,8 +1232,8 @@ def cmd_serve(args, runtime=None, models=None, hw=None):
         return 0
     if args.log:
         nuc_config.log_to(args.log)
-    where = "%d layers on the GPU" % layers if layers else "CPU only"
-    print("nuc-console-ai: %s on %s (%d threads, context %d, %s, low priority). Ctrl+C stops." % (model["id"], endpoint_for(args.port), threads, args.ctx, where),
+    print("nuc-console-ai: %s on %s (%d threads, context %d, %s, low priority). Ctrl+C stops."
+          % (model["id"], endpoint_for(args.port), threads, args.ctx, gpu_text(layers, model)),
           flush=True)
     if why:
         print("nuc-console-ai: %s" % safe(why, 200), flush=True)
@@ -1243,7 +1275,7 @@ def cmd_status(args, runtime=None, models=None):
     1 it does not and nothing is installed (run setup)."""
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
-    d = args.dir or default_dir()
+    d = args.dir or find_dir()  # like `models`: after `sudo setup`, an unprivileged status looks where the administrator installed
     cfg_file = config_path(args.config)
     ai = nuc_config.load(cfg_file)["ai"]
     print("nuc-console-ai status")
@@ -1421,12 +1453,13 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", metavar="{models,setup,use,serve,status,remove}")
     sub.required = True
 
-    def common(p, config=True):
-        p.add_argument("--dir", help="cache directory (default: %s)" % default_dir())
+    def common(p, config=True, reads=False):
+        p.add_argument("--dir", help=("cache directory (default: the system-wide one if `setup` put models there, else %s)" if reads
+                                      else "cache directory (default: %s)") % default_dir())
         if config:
             p.add_argument("--config", help="config.ini to read/write (default: %s)" % config_path())
     p = sub.add_parser("models", help="the hardware found and every model: does it fit, how fast, installed, active, recommended")
-    common(p)
+    common(p, reads=True)
     p.set_defaults(func=cmd_models)
     p = sub.add_parser("setup", help="download the runtime and one or more models once, verify them, offer to write config.ini")
     common(p)
@@ -1448,15 +1481,15 @@ def build_parser():
     p.add_argument("--port", type=_port, default=DEFAULT_PORT, help="default %(default)s")
     p.add_argument("--threads", type=_ranged(1, 512), help="default: cores minus two (at least 1)")
     p.add_argument("--ctx", type=_ranged(512, 131072), default=DEFAULT_CTX, help="context tokens, default %(default)s")
-    p.add_argument("--gpu-layers", type=_ranged(0, 999), metavar="N", help="layers on the GPU, 0 = CPU only (default: decided from this "
-                   "machine's hardware, unless [ai] gpu = no)")
+    p.add_argument("--gpu-layers", type=_ranged(0, ALL_LAYERS), metavar="N", help="layers on the GPU: 0 = CPU only, the model's own number "
+                   "or more (%d) = all of them (default: decided from this machine's hardware, unless [ai] gpu = no)" % ALL_LAYERS)
     p.add_argument("--dry-run", action="store_true", help="print the command, do not start it")
     p.add_argument("--install-service", action="store_true", help="install and start it as a system service (root / administrator)")
     p.add_argument("--remove-service", action="store_true", help="stop and remove that service")
     p.add_argument("--log", help="Windows service: send output to this file")
     p.set_defaults(func=cmd_serve)
     p = sub.add_parser("status", help="what is installed and verified, whether the configured endpoint answers")
-    common(p)
+    common(p, reads=True)
     p.add_argument("--endpoint", help="probe this /v1 URL instead of [ai] endpoint")
     p.add_argument("--verify", action="store_true", help="hash the files again instead of trusting the stamp")
     p.set_defaults(func=cmd_status)

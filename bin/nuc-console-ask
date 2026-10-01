@@ -1,7 +1,7 @@
 #!/bin/sh
 # Asks the optional local AI model about this machine (needs [ai] enabled = yes in config.ini). It suggests; it never runs anything.
-#   nuc-console-ask "why is the disk filling up?"    answer from the history (read-only queries; the model never sees SQL)
-#   nuc-console-ask --advise [--days N]              advice on the HEALTH findings of the last N days (default 7)
-#   nuc-console-ask --status                         is the model server reachable? which model is configured?
+#   nuc-console-ask QUESTION...        answer a question from the history (read-only queries; the model never sees SQL); also: ask QUESTION...
+#   nuc-console-ask advise [--days N]  advice on the HEALTH findings of the last N days (1-30, default 7); also: --advise
+#   nuc-console-ask status             is the model server reachable? which models? which one is configured? also: --status
 # Read-only, no root needed. Exit codes: 0 ok, 1 server/model failure, 2 usage, 3 [ai] off or endpoint refused, 4 no history, 5 busy.
 exec /usr/bin/python3 /opt/nuc-console/advisor.py "$@"
