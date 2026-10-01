@@ -85,6 +85,19 @@ admin-console = 9443
 
 `name = port[, port…]`. Listed apps appear in **WEB APPS** as active (with how far they are reachable: local, tailnet, LAN, Internet) or as **DOWN (expected)** when nothing listens. The ports are an *intended exposure*: they stop counting as "Docker port bypassing ufw" (database ports are never masked). Other web listeners found on the machine are listed as "not declared".
 
+## `[expose]` — how far each service may reach
+
+```ini
+[expose]
+shop-db = local      # a container, compose service or project, process, systemd unit, database name or kind, or a [webapps] name
+n8n     = tailnet
+8080    = lan        # or a port: 8080, 8080/udp
+```
+
+`name or port = local | tailnet | lan | internet` (any case; `tailscale` = `tailnet`, `localhost` and `loopback` = `local`, `public` = `internet`): the **widest** reach you intend. When the real reach, as the EXPOSURE section computes it, goes beyond that, ATTENTION raises **over-exposed** (an error that lists each service, its port and `LAN > local`), the matrix and the compact overview show a red `beyond config.ini: local` on that row (a grey `expected: LAN` when it is within), and the map port carries a "declared reach" fact and an error. A name matches a container (`shop-db` also matches `shop-db-1`, its compose service and its compose project), a process or systemd unit, a database name or kind (`postgres`), or a `[webapps]` name; for a Funnel or Serve entry it is whatever listens on the backend, so `n8n = tailnet` catches an n8n that is published on the Internet. A port key (`8080`, or `8080/udp`; tcp otherwise) matches what listens on it. When several keys match one service the most restrictive wins; an unknown firewall verdict counts as open. A name that matches nothing this machine knows (a typo) raises **expose-unmatched**, a warning; ports are never checked.
+
+`[expose]` only adds alarms: `db-open-lan`, `docker-bypass` and the port baseline are never silenced by it. `over-exposed` can be accepted like any ATTENTION item (`nuc-console-accept --problem over-exposed --reason "…"`); a new service going beyond makes it reappear. A bad value or a port that cannot exist is reported on stderr and only that line is skipped. Never write a port as `:8080`: configparser refuses a key that starts with `:` and the **whole file** falls back to the defaults. Containers with `network_mode: host` listen as plain host processes, so declare them by process, unit or port; a broken `config.ini` (such a key, or any file that cannot be read) now raises the **config-unreadable** error in ATTENTION instead of silently dropping `[expose]`.
+
 ## `[web]` — read-only web view (off by default)
 
 | Key | Default | Meaning |

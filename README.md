@@ -30,6 +30,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
+| 🎯 **Expected vs actual** | declare under `[expose]` how far each service may reach (`local`, `tailnet`, `lan`, `internet`): ATTENTION raises an error when it reaches further, and the matrix, overview and map mark it |
 | 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🧮 **CPU, like htop** | a screen of its own (console `c`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
@@ -54,7 +55,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <details>
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
-<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports (with the reach declared in config.ini) and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
 </details>
 
 <details>
@@ -208,6 +209,7 @@ sudo nuc-console-accept --forget docker-bypass
 
 Accepted items are dimmed ("N accepted" under ATTENTION) and no longer count in the header. The list lives in `/var/lib/nuc-console/accepted.json`; a missing or broken file accepts nothing.
 For web apps you expose on purpose, declare them under `[webapps]` instead: they appear in WEB APPS and stop counting as "Docker port bypassing ufw".
+To say how far a service may reach, declare it under `[expose]` (`shop-db = local`): ATTENTION raises "over-exposed" when it reaches further than that, and never hides the other alarms.
 
 ## AI advisor (optional)
 

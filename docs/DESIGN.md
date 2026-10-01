@@ -25,7 +25,6 @@ Choices made here **without a source**: 2 s refresh (configurable 1–10 s: `[da
 
 ## Not yet applied
 
-- "Expected vs actual" column/marker in the matrix (needs a baseline: issue #5).
 - Alternating rows or dotted guides on wide tables.
 
 ## Section order
@@ -42,6 +41,12 @@ The overview keeps a fixed order, top-left to bottom-right, following the "most 
 | port served by `tailscale funnel` | public Internet |
 
 tailscaled installs a ts-input rule accepting tailscale0 traffic before ufw, so tailnet peers reach a listening service regardless of ufw. For the LAN ufw applies, but Docker-published ports bypass ufw (Docker inserts rules in nat/FORWARD before the ufw chains), so only a DOCKER-USER rule or a 127.0.0.1 bind really protects them. The collector flags every 0.0.0.0 container port not covered by DOCKER-USER.
+
+## Expected vs actual
+
+The baseline says what *changed*; `[expose]` in `config.ini` says what you *meant*: the widest reach a service may have (`local`, `tailnet`, `lan`, `internet`, the same four groups as above). `render.py` compares it with the reach it computed: `expose_apply` gives each exposure row the declaration that names it, `expose_over` is true when the row's group is wider (INTERNET > LAN > TAILNET > LOCALE). A key names what is behind the row (container, compose service or project, process, unit, database name or kind, `[webapps]` name) or a port; behind a Funnel it is whatever listens on the backend, found by `graph.row_owners`, the same lookup the map draws. The most restrictive matching key wins and an unknown firewall verdict counts as open, as everywhere else.
+
+It shows in three places: ATTENTION (`over-exposed`, an error listing each service; `expose-unmatched`, a warning for a name that matches nothing), the matrix and the compact overview (a red "beyond config.ini: local" instead of the note, or a grey "expected: LAN" before it), and the MAP (a "declared reach" fact on the port node, an error finding when it is exceeded). It only adds alarms: `db-open-lan` and `docker-bypass` stay as they were, declared or not.
 
 ## Map
 

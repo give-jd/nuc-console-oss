@@ -68,14 +68,14 @@ def plain(page):
 class HealthPage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host, cls.webapps = socket.gethostname, render.CFG["webapps"]    # demo_defaults() changes both for good: put them back
+        cls.host, cls.webapps, cls.expose = socket.gethostname, render.CFG["webapps"], render.CFG["expose"]  # demo_defaults() changes them for good: put them back
         cls.srv = serve()
         cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.DEMO_HEALTH, render.health_build, web.health_extra_html)
 
     @classmethod
     def tearDownClass(cls):
         render.DEMO = False
-        socket.gethostname, render.CFG["webapps"] = cls.host, cls.webapps
+        socket.gethostname, render.CFG["webapps"], render.CFG["expose"] = cls.host, cls.webapps, cls.expose
         cls.srv.shutdown()
         cls.srv.server_close()
 
