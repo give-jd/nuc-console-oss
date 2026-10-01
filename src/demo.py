@@ -3,6 +3,7 @@
 Invented: hostnames, users, containers and addresses (documentation ranges). CPU, RAM, temperature, uptime and root-disk
 figures are the real ones of the machine running it (read from /proc and /sys); nothing is written and no real state is read.
 """
+import random
 import time
 
 LAN = "192.168.0"    # private range, generic (a public TEST-NET would be flagged as "not local")
@@ -396,3 +397,260 @@ def proc_sample(os_name=None, now=None):
     total = {"count": len(procs) + 1, "running": sum(p["state"] == "R" for p in procs) if os_name != "windows" else None,
              "threads": sum(p["threads"] or 0 for p in procs) + 37, "unreadable": unreadable + 1}  # +1: one we could not even list
     return {"procs": procs, "total": total, "notes": []}
+
+
+# ---- HEALTH: a report as health.report() returns it (docs/DESIGN.md "## Health"), for --demo and the tests ------------------------------
+
+HEALTH_VARIANTS = ("", "little", "none")  # "": a machine with 16 days of history; little: 5 hours; none: the report of an empty history
+HISTORY_DAYS = 16                         # how long the demo machine has been recorded: 30 days of report cover only these 16
+
+
+def _fix(os_name, linux, darwin, windows):
+    return {"darwin": darwin, "windows": windows}.get(os_name, linux)
+
+
+def _series(name, n, base, spread=0.5, have=None):
+    """n values around base (a fixed shape per name: the demo is the same at every run); the first n - have are None (not recorded yet)."""
+    rnd = random.Random(sum(map(ord, name)))
+    have = n if have is None else min(n, have)
+    return [None] * (n - have) + [round(base * (1 - spread / 2 + spread * rnd.random()), 1) for _ in range(have)]
+
+
+def _growing(name, n, start, slope, have):
+    """RSS (MB) that grows by `slope` MB per step from `start`, with a little noise (a leak): None before the first record."""
+    rnd = random.Random(sum(map(ord, name)))
+    have = min(n, have)
+    return [None] * (n - have) + [round(start + slope * i + 20 * rnd.random(), 1) for i in range(have)]
+
+
+def _ev(subject, n, last, scale):
+    return {"subject": subject, "n": max(1, round(n * scale)), "last": last}
+
+
+def _when(ts):
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
+
+
+def _finding(rule, subject, level, title, text, facts, fix):
+    return {"id": "%s:%s" % (rule, subject or "host"), "level": level, "title": title, "text": text, "fix": fix, "facts": facts, "subject": subject}
+
+
+def _times(n):
+    return "1 time" if n == 1 else "%d times" % n
+
+
+def _health_linux(now, days):
+    scale = days / 7.0
+    last = lambda h: int(now - h * 3600)  # noqa: E731
+    when = lambda h: _when(last(h))  # noqa: E731
+    span = "the last 24 hours" if days == 1 else "the last %d days" % days
+    oom_n, restarts, hot_h = max(1, round(3 * scale)), max(9, round(31 * scale)), max(2, round(14 * scale))
+    hog_h, logins, noisy = max(6, round(31 * scale)), round(1204 * scale), round(18420 * scale)
+    f = _finding
+    found = [  # (the shortest period whose rules can say it, the finding)
+        (1, f("oom", "shop-worker-1", "err", "Out of memory: shop-worker-1",
+              "shop-worker-1 was hit by an out-of-memory event %s in %s (last %s)." % (_times(oom_n), span, when(2.5)),
+              {"n": oom_n, "last": last(2.5)},
+              "journalctl -k | grep -i 'killed process'; free -h; give it a limit it respects (docker update --memory 2g <name> or MemoryMax= in a "
+              "drop-in) and raise it if the app really needs more; add RAM or swap; look for a leak (mem-leak)")),
+        (1, f("restart-loop", "shop-worker-1", "warn", "Restarting: shop-worker-1",
+              "shop-worker-1 restarted 9 times within 24 hours (%d in total) and exited with an error 3 times in %s (last %s)."
+              % (restarts, span, when(2.4)),
+              {"max_restarts_24h": 9, "restarts": restarts, "exit_errors": 3, "last": last(2.4)},
+              "docker ps -a; docker inspect <name> (State.ExitCode, State.OOMKilled); docker logs --tail 100 <name>; systemctl status <unit>; fix the "
+              "cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU")),
+        (1, f("disk-full", "/data", "warn", "Disk filling up: /data", "/data is 83% full, growing 4.1 GB/day: full in about 12 days.",
+              {"used_gb": 1660.4, "total_gb": 2000.0, "growth_gb_day": 4.1, "fit_days": 30, "used_pct": 83.0, "days_to_full": 12.4},
+              "df -h; du -xh --max-depth=1 / 2>/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); "
+              "journalctl --vacuum-size=500M; apt clean")),
+        (3, f("mem-leak", "node", "warn", "Memory keeps growing: node",
+              "node grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.",
+              {"slope_mb_day": 180.2, "days": 5, "start_mb": 920, "now_mb": 1820, "r2": 0.93},
+              "ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart <unit> / docker restart <name>; cap it so "
+              "it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or MemoryMax=1G in a drop-in; then update it or report the leak")),
+        (1, f("cpu-hog", "chrome", "warn", "Keeps the CPU busy: chrome",
+              "chrome used over 80%% of one core for %d hours in %s (peak 143%%, busiest at %s)." % (hog_h, span, when(27)),
+              {"hours_over_80pct_core": hog_h, "hours_over_half_cores": 0, "cores": 4, "avg_pct": 62.3, "peak_pct": 143.0,
+               "cpu_s": round(375000 * scale), "peak_hour": last(27)},
+              "top (or htop) shows it now; docker stats / systemctl status <unit>; cap it: docker update --cpus 2 <name> or CPUQuota=200% in a "
+              "systemd drop-in (systemctl edit <unit>); check its log for a loop")),
+        (1, f("thermal", None, "warn", "Running hot",
+              "%d hours at or above the temperature limit in %s (about 2.0 h/day, max 91 C); busiest then: chrome, node, shop-worker-1." % (hot_h, span),
+              {"hours_hot": hot_h, "hours_per_day": 2.0, "max_c": 91.0, "apps": "chrome, node, shop-worker-1"},
+              "sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed")),
+        (3, f("login-fail", "sshd", "warn", "Failed logins: sshd",
+              "412 failed logins on 2026-09-28 against a median of 18 a day; %d in %s." % (logins, span),
+              {"peak_day": 412, "peak_date": "2026-09-28", "median_day": 18, "total": logins, "days_over": 2},
+              "journalctl -u ssh -u sshd | grep -i fail | tail; fail2ban-client status sshd; sudo ufw limit 22/tcp; PasswordAuthentication no in "
+              "sshd_config; do not expose port 22 to the Internet (use a VPN or Tailscale)")),
+        (1, f("log-noisy", "dockerd", "info", "Noisy log: dockerd",
+              "dockerd logged one message %d times in %s (about 2631 a day): \"level=<v> msg=<str> error=<str>\"." % (noisy, span),
+              {"n": noisy, "per_day": 2631, "source": "journal", "template": "level=<v> msg=<str> error=<str>"},
+              "journalctl -u <unit> -n 50 -p warning; docker logs --tail 50 <name>; fix what it complains about or lower its log level; "
+              "LogRateLimitIntervalSec in journald.conf as a stopgap")),
+        (3, f("log-new", None, "info", "New log messages",
+              "4 log messages appeared for the first time in the last 24 hours, most often from kernel (412 times).",
+              {"new_templates": 4, "top_unit": "kernel", "top_n": 412, "top_template": "nvme nvme<n>: I/O <n> QID <n> timeout, aborting"},
+              "journalctl -p warning --since '24 hours ago' | tail -50; new messages after an update or a config change are normal, otherwise look "
+              "at the unit that writes them")),
+        (7, f("boot-regression", None, "info", "Slower boot", "The last boot took 58 s, 2.5x the median of the 7 boots before (23 s).",
+              {"last_s": 58.4, "median_s": 23.0, "ratio": 2.54, "boots": 7},
+              "systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable <unit>)")),
+    ]
+    findings = [x for d, x in found if days >= d]
+    # app, share of CPU time, average % of one core, busiest hour (hours ago), RSS average and maximum (GB), RSS trend (MB/day)
+    names = [("chrome", .31, 62.3, 27, 2.4, 3.9, 14.5), ("node", .14, 28.0, 51, 1.3, 1.9, 180.2), ("dockerd", .06, 11.8, 5, .3, .4, None),
+             ("postgres", .05, 9.7, 77, .9, 1.1, 3.1), ("python3", .04, 7.2, 33, .2, .5, None), ("shop-worker-1", .03, 5.9, 2, .7, 2.0, None)]
+    n = days if days > 1 else 24
+    have = min(n, HISTORY_DAYS if days > 1 else 24)
+    top_cpu = [{"app": a, "cpu_s": round(1210000 * scale * sh, 1), "share": sh, "avg_pct": avg, "peak_hour": last(pk),
+                "series": _series("cpu" + a, n, avg, 0.9, have)} for a, sh, avg, pk, _, _, _ in names]
+    top_mem = [{"app": a, "rss_max": int(mx * 2 ** 30), "rss_avg": int(av * 2 ** 30), "trend_mb_day": tr if days >= 3 else None,
+                "series": _series("mem" + a, n, av * 1024, 0.25, have) if tr is None or days == 1 else
+                _growing("mem" + a, n, av * 1024 - tr * have / 2, tr, have)}
+               for a, _, _, _, av, mx, tr in sorted(names, key=lambda x: -x[4])]
+    events = {"oom": [_ev("shop-worker-1", 3, last(2.5), scale)],
+              "crash": [_ev("chrome", 4, last(30), scale), _ev("snapd", 1, last(90), scale)],
+              "restart": [_ev("shop-worker-1", 31, last(2.4), scale)],
+              "exit_error": [_ev("shop-worker-1", 3, last(2.4), scale)],
+              "service_failed": [_ev("snapd.service", 2, last(90), scale)],
+              "throttle": [_ev("host", 6, last(27), scale)],
+              "login_fail": [_ev("sshd", 1204, last(1.2), scale)]}
+    logs = [("dockerd", "level=<v> msg=<str> error=<str>", 18420, False), ("kernel", "nvme nvme<n>: I/O <n> QID <n> timeout, aborting", 412, True),
+            ("sshd", "Failed password for <str> from <ip> port <n> ssh2", 1204, False),
+            ("systemd-resolved", "Using degraded feature set UDP instead of UDP+EDNS0 for DNS server <ip>.", 260, False),
+            ("snapd", "cannot refresh snap <str>: <str>", 38, True), ("cron", "(<str>) CMD (<path>)", 2016, False)]
+    logs = sorted(({"source": "journal", "unit": u, "template": t, "n": max(1, round(k * scale)), "new": nw} for u, t, k, nw in logs),
+                  key=lambda r: -r["n"])
+    disks = [{"mount": "/data", "used_pct": 83.0, "days_to_full": 12.4}, {"mount": "/", "used_pct": 37.5, "days_to_full": None},
+             {"mount": "/boot/efi", "used_pct": 6.0, "days_to_full": None}]
+    thermal = {"hours_hot": hot_h, "max": 91.0, "apps_when_hot": [
+        {"app": "chrome", "cpu_s": round(41000 * scale, 1), "share": 0.38}, {"app": "node", "cpu_s": round(18000 * scale, 1), "share": 0.17},
+        {"app": "shop-worker-1", "cpu_s": round(9000 * scale, 1), "share": 0.08}]}
+    boots = [{"boot": int(now) - (8 - i) * 86400 * 2, "total_s": t} for i, t in enumerate((21.8, 22.5, 23.1, 21.9, 24.6, 22.2, 23.0, 58.4))]
+    notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
+    return findings, top_cpu, top_mem, events, logs, disks, thermal, boots, notes
+
+
+def _health_windows(now, days):
+    scale = days / 7.0
+    last = lambda h: int(now - h * 3600)  # noqa: E731
+    when = lambda h: _when(last(h))  # noqa: E731
+    span = "the last 24 hours" if days == 1 else "the last %d days" % days
+    crashes, dcom = max(3, round(4 * scale)), round(2311 * scale)
+    f = _finding
+    findings = [
+        f("unexpected-shutdown", None, "err", "Unexpected shutdown",
+          "The machine shut down unexpectedly 1 time in %s (last %s)." % (span, when(14)), {"n": 1, "last": last(14)},
+          "Event Viewer > Windows Logs > System: Kernel-Power 41 and the BugCheck 1001 after it; check the power supply, the temperature and "
+          "the drivers; analyse C:\\Windows\\Minidump with WinDbg"),
+        f("crash-loop", "contoso-sync.exe", "warn", "Crashing: contoso-sync.exe",
+          "contoso-sync.exe crashed %s in %s (last %s)." % (_times(crashes), span, when(3)),
+          {"n": crashes, "crashes": crashes, "hangs": 0, "last": last(3)},
+          "Event Viewer > Windows Logs > Application: Application Error / Application Hang name the faulting module; update or reinstall it; "
+          "sfc /scannow if it is a system component"),
+        f("crash-loop", "Spooler", "warn", "Crashing: Spooler", "Spooler crashed 3 times in %s (last %s)." % (span, when(60)),
+          {"n": 3, "crashes": 3, "hangs": 0, "last": last(60)},
+          "Get-Service <name>; Event Viewer > Windows Logs > System (Service Control Manager 7031) says why it stopped; services.msc > Recovery: "
+          "restart with a delay"),
+        f("cpu-share", "MsMpEng.exe", "info", "Biggest CPU user: MsMpEng.exe",
+          "MsMpEng.exe used 27%% of all CPU time in %s (average 17%% of one core, busiest at %s)." % (span, when(31)),
+          {"share_pct": 27.0, "avg_pct": 17.1, "cpu_s": round(167000 * scale), "peak_hour": last(31)},
+          "expected? then nothing to do. Else: Task Manager > Details shows what it does"),
+        f("log-noisy", "System", "info", "Noisy log: System",
+          "System logged one message %d times in %s (about 330 a day): \"Microsoft-Windows-DistributedCOM 10016\"." % (dcom, span),
+          {"n": dcom, "per_day": 330, "source": "System", "template": "Microsoft-Windows-DistributedCOM 10016"},
+          "Event Viewer > Windows Logs: filter by the source; fix its cause"),
+    ]
+    if days == 1:  # one day: the service crash of two days ago is not in the period
+        findings = [x for x in findings if x["id"] != "crash-loop:Spooler"]
+    names = [("MsMpEng.exe", .27, 17.1, 31, .4, .6, None), ("chrome.exe", .18, 11.4, 12, 2.1, 3.2, 20.5), ("Code.exe", .09, 5.7, 6, 1.2, 1.9, None),
+             ("SearchIndexer.exe", .07, 4.4, 44, .1, .2, None), ("svchost.exe", .05, 3.1, 8, .3, .4, None)]
+    n = days if days > 1 else 24
+    have = min(n, HISTORY_DAYS if days > 1 else 24)
+    top_cpu = [{"app": a, "cpu_s": round(620000 * scale * sh, 1), "share": sh, "avg_pct": avg, "peak_hour": last(pk),
+                "series": _series("cpu" + a, n, avg, 0.9, have)} for a, sh, avg, pk, _, _, _ in names]
+    top_mem = [{"app": a, "rss_max": int(mx * 2 ** 30), "rss_avg": int(av * 2 ** 30), "trend_mb_day": tr if days >= 3 else None,
+                "series": _series("mem" + a, n, av * 1024, 0.25, have)} for a, _, _, _, av, mx, tr in sorted(names, key=lambda x: -x[4])[:4]]
+    events = {"crash": [_ev("contoso-sync.exe", 4, last(3), scale), _ev("Spooler", 3, last(60), scale)],
+              "hang": [_ev("explorer.exe", 1, last(100), scale)],
+              "unexpected_shutdown": [{"subject": "host", "n": 1, "last": last(14)}],
+              "service_failed": [_ev("WSearch", 2, last(70), scale)]}
+    if days == 1:
+        events = {"crash": [_ev("contoso-sync.exe", 4, last(3), scale)], "unexpected_shutdown": [{"subject": "host", "n": 1, "last": last(14)}]}
+    logs = [{"source": "System", "unit": "", "template": "Microsoft-Windows-DistributedCOM 10016", "n": dcom, "new": False},
+            {"source": "System", "unit": "", "template": "Service Control Manager 7031", "n": max(1, round(3 * scale)), "new": False},
+            {"source": "Application", "unit": "", "template": "Application Error 1000", "n": max(1, round(4 * scale)), "new": False},
+            {"source": "System", "unit": "", "template": "Microsoft-Windows-Kernel-Power 41", "n": 1, "new": True}]
+    disks = [{"mount": "C:", "used_pct": 72.4, "days_to_full": None}, {"mount": "D:", "used_pct": 54.1, "days_to_full": None}]
+    thermal = {"hours_hot": 0, "max": None, "apps_when_hot": []}  # no temperature sensor file: the screen must say "no data", not "cool"
+    boots = [{"boot": int(now) - (6 - i) * 86400 * 2, "total_s": t} for i, t in enumerate((23.3, 24.1, 22.8, 25.0, 23.9, 26.2))]
+    notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
+    return findings, top_cpu, top_mem, events, logs, disks, thermal, boots, notes
+
+
+def _health_darwin(now, days):
+    scale = days / 7.0
+    last = lambda h: int(now - h * 3600)  # noqa: E731
+    when = lambda h: _when(last(h))  # noqa: E731
+    span = "the last 24 hours" if days == 1 else "the last %d days" % days
+    oom_n, crashes = max(1, round(2 * scale)), max(3, round(5 * scale))
+    f = _finding
+    findings = [
+        f("oom", "Google Chrome Helper", "err", "Out of memory: Google Chrome Helper",
+          "Google Chrome Helper was hit by an out-of-memory event %s in %s (last %s)." % (_times(oom_n), span, when(15)),
+          {"n": oom_n, "last": last(15)},
+          "Console > Crash Reports: JetsamEvent-*.ips lists the memory of every process; quit the biggest apps; add RAM"),
+        f("crash-loop", "photolibraryd", "warn", "Crashing: photolibraryd",
+          "photolibraryd crashed %s in %s (last %s)." % (_times(crashes), span, when(7)),
+          {"n": crashes, "crashes": crashes, "hangs": 0, "last": last(7)},
+          "Console > Crash Reports (~/Library/Logs/DiagnosticReports, /Library/Logs/DiagnosticReports): open the newest report of the app; "
+          "update or reinstall it"),
+        f("cpu-share", "mds_stores", "info", "Biggest CPU user: mds_stores",
+          "mds_stores used 28%% of all CPU time in %s (average 9%% of one core, busiest at %s)." % (span, when(55)),
+          {"share_pct": 28.0, "avg_pct": 9.3, "cpu_s": round(42000 * scale), "peak_hour": last(55)},
+          "expected? then nothing to do. Else: Activity Monitor > CPU shows what it does"),
+    ]
+    names = [("mds_stores", .28, 9.3, 55, .3, .5, None), ("Google Chrome Helper", .21, 7.0, 15, 1.8, 2.9, 11.0), ("WindowServer", .09, 3.1, 9, .5, .6, None),
+             ("kernel_task", .08, 2.7, 80, .1, .1, None), ("photolibraryd", .06, 2.0, 7, .4, .7, None)]
+    n = days if days > 1 else 24
+    have = min(n, HISTORY_DAYS if days > 1 else 24)
+    top_cpu = [{"app": a, "cpu_s": round(150000 * scale * sh, 1), "share": sh, "avg_pct": avg, "peak_hour": last(pk),
+                "series": _series("cpu" + a, n, avg, 0.9, have)} for a, sh, avg, pk, _, _, _ in names]
+    top_mem = [{"app": a, "rss_max": int(mx * 2 ** 30), "rss_avg": int(av * 2 ** 30), "trend_mb_day": tr if days >= 3 else None,
+                "series": _series("mem" + a, n, av * 1024, 0.25, have)} for a, _, _, _, av, mx, tr in sorted(names, key=lambda x: -x[4])[:4]]
+    events = {"oom": [_ev("Google Chrome Helper", 2, last(15), scale)], "crash": [_ev("photolibraryd", 5, last(7), scale)],
+              "hang": [_ev("Finder", 1, last(120), scale)]}
+    disks = [{"mount": "/", "used_pct": 61.3, "days_to_full": None}, {"mount": "/Volumes/Data", "used_pct": 46.8, "days_to_full": None}]
+    thermal = {"hours_hot": 0, "max": 74.0, "apps_when_hot": []}
+    notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
+    return findings, top_cpu, top_mem, events, [], disks, thermal, [], notes  # macOS: no log history, no boot time
+
+
+def health_report(os_name=None, days=7, now=None, variant=""):
+    """The dict health.report() returns, for a demo machine of this OS (linux, windows, darwin) and a period of 1, 7 or 30 days.
+    Findings, counts and series follow the period like the real rules do (memory trends need 3 days). variant: "little" = 5 hours
+    of data (the report says it is still collecting), "none" = the report of an empty history. Extra keys: the rows of top_cpu and
+    top_mem carry "series" (CPU seconds / mean RSS per hour for 24 h, per day otherwise; None before the first record), which the
+    screen otherwise reads from the history itself."""
+    now = int(now or time.time())
+    days = days if days in (1, 7, 30) else 7
+    period = {"from": now - days * 86400, "to": now, "days": days}
+    if variant == "none":
+        return {"period": period, "coverage": {"hours": 0, "since": None}, "findings": [], "top_cpu": [], "top_mem": [], "events": {}, "logs": [],
+                "disks": [], "thermal": {"hours_hot": 0, "max": None, "apps_when_hot": []}, "boots": [], "notes": ["no history yet"]}
+    hours = 5 if variant == "little" else min(days * 24, HISTORY_DAYS * 24)
+    since = (now // 3600 - (5 if variant == "little" else HISTORY_DAYS * 24)) * 3600
+    build = {"windows": _health_windows, "darwin": _health_darwin}.get(os_name, _health_linux)
+    findings, top_cpu, top_mem, events, logs, disks, thermal, boots, notes = build(now, days)
+    if variant == "little":  # what the rules say with less than a day: the ones that need days stay silent
+        keep = ("restart-loop", "oom", "cpu-share", "crash-loop", "unexpected-shutdown")
+        findings = [x for x in findings if x["id"].split(":")[0] in keep][:2]
+        top_cpu, top_mem, logs = [dict(x, series=x["series"][-5:]) for x in top_cpu[:3]], [dict(x, trend_mb_day=None, series=x["series"][-5:])
+                                                                                          for x in top_mem[:3]], logs[:2]
+        events = {k: v for k, v in events.items() if k in ("restart", "oom", "crash")}
+        disks, boots = [dict(d, days_to_full=None) for d in disks], boots[-1:]
+        thermal = {"hours_hot": 0, "max": thermal["max"] and 61.0, "apps_when_hot": []}
+        notes = ["collecting: 5 hours so far; trends need 24 hours of data"]
+    return {"period": period, "coverage": {"hours": hours, "since": since}, "findings": findings, "top_cpu": top_cpu, "top_mem": top_mem,
+            "events": events, "logs": logs, "disks": disks, "thermal": thermal, "boots": boots, "notes": notes}

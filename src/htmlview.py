@@ -69,6 +69,10 @@ GRAPH_CSS = (".gv{overflow:auto;max-height:calc(100vh - 140px);border:1px solid 
 
 # the web CPU page (web.py): a process row is a link that looks like the text around it
 CPU_CSS = "a.pr{color:inherit;text-decoration:none}a.pr:hover{background:#161b22}"
+# the web HEALTH page (web.py): level pills on the findings rows (the rows and the details panel reuse MAP_CSS)
+HEALTH_CSS = (".pl{display:inline-block;min-width:6ch;padding:0 .6ch;border-radius:3px;text-align:center;font-weight:700;white-space:pre}"
+              ".pl.r{background:#da3633;color:#fff}.pl.y{background:#d29922;color:#0d1117}.pl.d{color:#6e7681;font-weight:400}"
+              ".ht{margin:8px 0 0}.hs{margin:10px 0 2px;color:#8b949e}.hn{margin:6px 0 0;white-space:pre-wrap}")
 
 
 def to_html(text):
