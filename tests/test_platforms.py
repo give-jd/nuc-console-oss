@@ -828,6 +828,20 @@ class Installers(unittest.TestCase):
 
 # ---- the real system calls, on the OS they are about ----------------------------------------------------------------------
 
+def check_sensors(tc, d, os_name):
+    """collect_sensors() on the real machine (fixtures: tests/test_sensors.py): valid JSON with the contract's keys,
+    whatever this machine can read; when it reads no temperature it says why (errors or absent), never silently."""
+    d = json.loads(json.dumps(d, allow_nan=False))
+    tc.assertEqual((set(d), d["os"]), ({"ts", "os", "cpu", "errors", "absent"}, os_name))
+    cpu = d["cpu"]
+    tc.assertEqual(set(cpu), {"package", "cores", "sensors", "source", "pressure", "clusters"})
+    tc.assertTrue(cpu["package"] is None or -20 <= cpu["package"] <= 150, cpu)
+    tc.assertTrue(all(-20 <= s["c"] <= 150 for s in cpu["sensors"]), cpu)
+    tc.assertTrue(all(isinstance(v, str) for v in d["errors"].values()), d["errors"])
+    tc.assertTrue(cpu["source"] or d["errors"] or d["absent"], d)
+    return d
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows")
 class OnWindows(unittest.TestCase):
     def test_host_metrics(self):
@@ -848,6 +862,13 @@ class OnWindows(unittest.TestCase):
         out = cwin.listeners(f)
         self.assertTrue(all(x["fw"][0] in render.CELL for x in out))
 
+    def test_cpu_sensors(self):
+        data = cwin.powershell(collector.run, cwin.PS_SENSORS, timeout=60)               # the script runs and answers JSON
+        self.assertEqual(set(data), {"LibreHardwareMonitor", "OpenHardwareMonitor", "ACPI"})
+        self.assertEqual([src for src, _, _ in cwin.sensor_sources(data)], ["LibreHardwareMonitor", "OpenHardwareMonitor", "ACPI"])
+        d = check_sensors(self, collector.collect_sensors(), "windows")                    # a runner has no sensors: absent, not a crash
+        self.assertEqual((d["cpu"]["pressure"], d["cpu"]["clusters"]), (None, []))
+
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS")
 class OnMacOS(unittest.TestCase):
@@ -866,6 +887,13 @@ class OnMacOS(unittest.TestCase):
         rc, out, _ = collector.run("socketfilterfw", "--getglobalstate")
         self.assertEqual(rc, 0)
         self.assertIn(cmac.parse_alf(out, "", "", "", "")["state"], (0, 1, 2))
+
+    def test_cpu_sensors(self):
+        d = check_sensors(self, collector.collect_sensors(), "darwin")
+        if os.geteuid() != 0:                                                                # powermetrics needs root (the collector is)
+            self.assertNotEqual(d["cpu"]["source"], "powermetrics")
+        elif "powermetrics" not in d["errors"]:
+            self.assertIsNotNone(d["cpu"]["pressure"])                                       # thermal is a sampler of every Mac
 
 
 if __name__ == "__main__":

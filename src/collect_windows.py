@@ -65,6 +65,22 @@ foreach ($s in $svc) { if ($s.s -eq 'Stopped' -and $s.e -ne 0 -and $s.e -ne 1077
 @{ boot = ([DateTimeOffset]$boot).ToUnixTimeSeconds(); services = $svc; events = $ev; perf = $perf; deps = $dep } | ConvertTo-Json -Depth 4 -Compress
 """
 
+# CPU temperatures (sensors.json). Windows has no API for them: LibreHardwareMonitor / OpenHardwareMonitor publish their
+# sensors in WMI while they run; else the ACPI thermal zones. A namespace that does not exist = not installed ('absent');
+# errors carry their WMI code (not localised) next to the message. Every source is read; sensor_sources() picks.
+PS_SENSORS = PS_PRELUDE + r"""
+$ns = @(Get-CimInstance -Namespace root -ClassName __NAMESPACE -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Name })
+$out = @{}
+foreach ($src in 'LibreHardwareMonitor', 'OpenHardwareMonitor') {
+  if ($ns -notcontains $src) { $out[$src] = @{ absent = $true }; continue }
+  try { $out[$src] = @{ sensors = @(Get-CimInstance -Namespace "root/$src" -ClassName Sensor -Filter "SensorType='Temperature'" | ForEach-Object { @{ n = [string]$_.Name; id = [string]$_.Identifier; p = [string]$_.Parent; v = $_.Value } }) } }
+  catch { $out[$src] = @{ error = [string]$_.Exception.Message; code = [string]$_.Exception.NativeErrorCode; id = [string]$_.FullyQualifiedErrorId } }
+}
+try { $out['ACPI'] = @{ zones = @(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object { @{ n = [string]$_.InstanceName; t = $_.CurrentTemperature } }) } }
+catch { $out['ACPI'] = @{ error = [string]$_.Exception.Message; code = [string]$_.Exception.NativeErrorCode; id = [string]$_.FullyQualifiedErrorId } }
+$out | ConvertTo-Json -Depth 5 -Compress
+"""
+
 
 def powershell(run, script, timeout=60):
     """Runs a fixed script (never user input) and returns its JSON. -EncodedCommand: no quoting, no execution policy."""
@@ -318,3 +334,95 @@ def boot_sections(data):
     deps = {n: ([v] if isinstance(v, str) else [str(x) for x in v or []])[:20] for n, v in raw.items() if n in failed}
     return {"btime": int(data.get("boot") or time.time()), "analyze": analyze, "failed": failed, "deps": deps, "enabled": enabled,
             "journal": journal_from_events(data.get("events"))}
+
+
+# ---- CPU sensors (sensors.json; pure, tested with fixtures) -------------------------------------------------------------
+
+HWMON = ("LibreHardwareMonitor", "OpenHardwareMonitor")  # best first; then ACPI
+# WMI answers that mean "this machine / this tool does not provide it": NativeErrorCode names and their HRESULTs
+# (invalid namespace, invalid class, not supported, not found)
+WMI_ABSENT = ("invalidnamespace", "invalidclass", "notsupported", "notfound", "0x8004100e", "0x80041010", "0x8004100c", "0x80041002")
+CORE_SENSOR = re.compile(r"^(?:CPU )?Core #(\d+)$", re.I)
+
+
+def wmi_status(entry, key):
+    """One source of PS_SENSORS -> (None | 'absent' | short error, its rows)."""
+    if not isinstance(entry, dict):
+        return "unreadable answer", []
+    if entry.get("absent"):
+        return "absent", []
+    if any(k in entry for k in ("error", "code", "id")):
+        code = "{} {}".format(entry.get("code") or "", entry.get("id") or "").strip()
+        if any(k in code.lower() for k in WMI_ABSENT):
+            return "absent", []
+        return (str(entry.get("error") or "").strip() or code or "WMI error")[:120], []
+    rows = entry.get(key)
+    rows = [rows] if isinstance(rows, dict) else rows  # one object instead of a list of one: be lenient
+    if not isinstance(rows, list):
+        return "unreadable answer", []
+    return None, [r for r in rows if isinstance(r, dict)]
+
+
+def hwmon_readings(rows):
+    """LibreHardwareMonitor / OpenHardwareMonitor temperature sensors -> the CPU's [{'label', 'c', 'role', 'core'}].
+
+    The CPU's own sensors hang under '/intelcpu/N' or '/amdcpu/N': 'CPU Core #3' -> core 3 (numbered from 1, as named),
+    'CPU Package' (Intel), else 'Core (Tctl/Tdie)' (AMD) -> package; 'Core Max', 'Core Average', 'CCD1 (Tdie)' are listed
+    only. A motherboard sensor named 'CPU' ('/lpc/...') is listed as 'CPU (board)', never the package. 'Distance to TjMax' is a margin, not
+    a temperature: skipped. With several CPUs the cores and the package are the first one's; the others' are listed."""
+    found = []
+    for r in rows:
+        name, ident = str(r.get("n") or "").strip(), str(r.get("id") or "")
+        parent = str(r.get("p") or "") or ident.rsplit("/", 2)[0]
+        if not name or "distance" in name.lower():
+            continue
+        on_cpu = "cpu" in (parent + " " + ident).lower()
+        if on_cpu or re.search(r"\bcpu\b", name, re.I):
+            found.append((parent if on_cpu else None, name, r.get("v")))
+    cpus = sorted({p for p, _, _ in found if p})
+    out, package = [], None
+    for parent, name, value in sorted(found, key=lambda x: (x[0] is None, cpus.index(x[0]) if x[0] else 0, x[1].lower())):
+        label = f"{name} (board)" if parent is None else name if len(cpus) < 2 or parent == cpus[0] else f"{name} (CPU {cpus.index(parent) + 1})"
+        x = {"label": label, "c": value, "role": None}
+        if parent and parent == cpus[0]:
+            m = CORE_SENSOR.match(name)
+            if m:
+                x.update(role="core", core=int(m.group(1)))
+            rank = 0 if "package" in name.lower() else 1 if "tctl" in name.lower() else None
+            if rank is not None and (package is None or rank < package[0]):
+                package = (rank, x)
+        out.append(x)
+    if package:
+        package[1]["role"] = "package"
+    return sorted(out, key=lambda x: ({"package": 0, "core": 1}.get(x["role"], 2), x.get("core") or 0))
+
+
+def acpi_readings(zones):
+    """MSAcpi_ThermalZoneTemperature (tenths of kelvin) -> [{'label': 'ACPI <zone>', 'c', 'role'}]. A thermal zone is a
+    place on the board, not a core: it is the package only when it is the only zone (with several, which one is the CPU
+    is not known)."""
+    out = []
+    for z in zones:
+        t = z.get("t")
+        c = t / 10.0 - 273.15 if isinstance(t, (int, float)) and not isinstance(t, bool) else None
+        out.append({"label": "ACPI " + (str(z.get("n") or "").split("\\")[-1] or "zone"), "c": c, "role": None})
+    if len(out) == 1:
+        out[0]["role"] = "package"
+    return out
+
+
+def sensor_sources(data):
+    """PS_SENSORS JSON -> [(source, status, readings)], best first: LibreHardwareMonitor, OpenHardwareMonitor, ACPI.
+
+    status None = read (readings to validate), 'absent' = not installed or not provided by this machine, else a short
+    error. A hardware monitor that is installed but shows no CPU temperature is an error (said, not hidden)."""
+    if not isinstance(data, dict):
+        raise ValueError("unreadable answer from PowerShell")
+    out = []
+    for src in HWMON:
+        status, rows = wmi_status(data.get(src), "sensors")
+        readings = hwmon_readings(rows) if status is None else []
+        out.append((src, "no CPU temperature sensor" if status is None and not readings else status, readings))
+    status, zones = wmi_status(data.get("ACPI"), "zones")
+    out.append(("ACPI", "absent" if status is None and not zones else status, acpi_readings(zones)))
+    return out

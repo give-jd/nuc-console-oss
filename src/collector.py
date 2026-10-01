@@ -4,7 +4,8 @@
 The renderer (unprivileged user) only reads this JSON: the Docker socket is equivalent to root
 and must not live in the process that owns the tty.
 Linux sections run the tools below; macOS and Windows sections live in collect_darwin.py and collect_windows.py and write
-the same shapes, plus "os" so the renderer knows which firewall model the verdicts come from.
+the same shapes, plus "os" so the renderer knows which firewall model the verdicts come from. On macOS and Windows it also
+writes the CPU temperature (sensors.json): only root/SYSTEM can read it there; on Linux the renderer reads sysfs itself.
 """
 import ipaddress
 import json
@@ -40,9 +41,12 @@ UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps"), "windows"
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
+OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
+SENSORS_INTERVAL_S = 10
+TEMP_RANGE_C = (-20, 150)  # a CPU sensor outside it is broken, not hot or cold
 if WINDOWS:  # only directories that need Administrator rights to write to
     _root, _pf = os.environ.get("SystemRoot") or r"C:\Windows", os.environ.get("ProgramFiles") or r"C:\Program Files"
     SBIN = os.pathsep.join((os.path.join(_root, "System32", "WindowsPowerShell", "v1.0"), os.path.join(_root, "System32"),
@@ -1210,6 +1214,82 @@ def collect_net():
     return d
 
 
+def sane_c(value):
+    """A plausible CPU temperature (°C, 0.1 precision), else None. About 0 °C is what tools print when they read nothing
+    (osx-cpu-temp on Apple Silicon, a dummy ACPI zone at 273.2 K): no reading, not a cold CPU."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        return None
+    return round(float(value), 1) if TEMP_RANGE_C[0] <= value <= TEMP_RANGE_C[1] and abs(value) >= 0.5 else None
+
+
+def cpu_temps(source, readings, errors):
+    """One source's readings [{'label', 'c', 'role': 'package' | 'core' | None, 'core': n}] -> sensors.json's
+    {'package', 'cores', 'sensors', 'source'}, or None when no reading is plausible. Implausible readings are dropped,
+    with a note in errors[source]."""
+    out, bad = {"package": None, "cores": {}, "sensors": [], "source": source}, []
+    for r in readings:
+        c = sane_c(r.get("c"))
+        if c is None:
+            bad.append(f"{r.get('label')}: {r.get('c')}")
+            continue
+        out["sensors"].append({"label": str(r.get("label"))[:40], "c": c})
+        if r.get("role") == "package" and out["package"] is None:
+            out["package"] = c
+        elif r.get("role") == "core" and isinstance(r.get("core"), int):
+            out["cores"].setdefault(r["core"], c)
+    if bad:
+        errors[source] = ("no or implausible value, dropped: " + ", ".join(bad))[:120]
+    return out if out["sensors"] else None
+
+
+def collect_sensors():
+    """sensors.json: the CPU temperature on macOS and Windows. Every source fails on its own; a tool that is not installed
+    is 'absent', never an error; what cannot be read stays None.
+
+    macOS: Apple's powermetrics as root (Intel: CPU die temperature; every Mac: thermal pressure; Apple Silicon: cluster
+    frequency and residency, no temperature), then, only when it gives no temperature, the optional smctemp or
+    osx-cpu-temp as their owner (never root). Windows: one PowerShell call (WMI): LibreHardwareMonitor, else
+    OpenHardwareMonitor, else the ACPI thermal zones."""
+    d = {"ts": time.time(), "os": OS_NAME, "errors": {}, "absent": [],
+         "cpu": {"package": None, "cores": {}, "sensors": [], "source": None, "pressure": None, "clusters": []}}
+    if "cpu" in OFF:  # main() does not even start the thread: this is for a direct call
+        d["disabled"] = True
+        return d
+
+    def read(name, fn):
+        try:
+            return fn()
+        except Absent:
+            d["absent"].append(name)
+        except Exception as e:  # noqa: BLE001 - one broken source leaves the others
+            d["errors"][name] = (str(e) or repr(e))[:120]
+        return None
+
+    def use(source, readings):
+        temps = cpu_temps(source, readings, d["errors"])
+        if temps:
+            d["cpu"].update(temps)
+        return bool(temps)
+
+    if MACOS:
+        pm = read("powermetrics", lambda: cmac.powermetrics(run, platform.machine())) or {}
+        d["cpu"].update(pressure=pm.get("pressure"), clusters=pm.get("clusters") or [])
+        if not use("powermetrics", [{"label": "CPU die", "c": pm["die"], "role": "package"}] if pm.get("die") is not None else []):
+            for tool in cmac.TEMP_TOOLS:
+                c = read(tool, lambda tool=tool: cmac.temp_tool(run, tool))
+                if c is not None and use(tool, [{"label": f"CPU ({tool})", "c": c, "role": "package"}]):
+                    break
+    elif WINDOWS:
+        for src, status, readings in read("powershell", lambda: cwin.sensor_sources(cwin.powershell(run, cwin.PS_SENSORS, timeout=30))) or ():
+            if status == "absent":
+                d["absent"].append(src)
+            elif status:
+                d["errors"][src] = status
+            elif use(src, readings):
+                break
+    return d
+
+
 def write_atomic(data, path=OUT):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1243,19 +1323,48 @@ def boot_loop():
         time.sleep(BOOT_INTERVAL_S)
 
 
+def sensors_loop():
+    while True:
+        try:
+            write_atomic(collect_sensors(), OUT_SENSORS)
+        except Exception as e:  # noqa: BLE001 - the thread must not die: the file goes stale and the renderer flags it
+            print("collect_sensors:", repr(e), file=sys.stderr)
+        time.sleep(SENSORS_INTERVAL_S)
+
+
+def sensors_on():
+    """sensors.json is written on macOS and Windows only (Linux: the renderer reads sysfs), with [features] cpu on."""
+    return (MACOS or WINDOWS) and "cpu" not in OFF
+
+
+def loops():
+    """The background loops main() starts next to the container loop."""
+    out = [] if {"boot", "docker_disk"} <= OFF else [boot_loop]
+    out.append(net_loop)  # separate thread: slow ufw/iptables/fail2ban must not stop the container refresh
+    if sensors_on():
+        out.append(sensors_loop)  # powermetrics takes ~1 s, PowerShell longer: never in another loop's way
+    return out
+
+
+def once():
+    """`--once`: every state file's content in one document ("sensors" on macOS and Windows only)."""
+    out = {"containers": collect(), "net": collect_net(), "boot": None if {"boot", "docker_disk"} <= OFF else collect_boot()}
+    if MACOS or WINDOWS:
+        out["sensors"] = collect_sensors() if sensors_on() else None
+    return out
+
+
 def main():
     if "--log" in sys.argv[:-1]:  # Windows scheduled task: no journal, the log goes to %ProgramData%\nuc-console\logs
         nuc_config.log_to(sys.argv[sys.argv.index("--log") + 1])
     if WINDOWS:
         os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"  # never look for docker.exe & co. in the working directory
     if "--once" in sys.argv:
-        print(json.dumps({"containers": collect(), "net": collect_net(), "boot": None if {"boot", "docker_disk"} <= OFF else collect_boot()}, indent=1))
+        print(json.dumps(once(), indent=1))
         return
     os.makedirs(nuc_config.RUN_DIR, exist_ok=True)  # systemd creates it (RuntimeDirectory); launchd and Task Scheduler do not
-    if not {"boot", "docker_disk"} <= OFF:
-        threading.Thread(target=boot_loop, daemon=True).start()
-    # separate thread: slow ufw/iptables/fail2ban must not stop the container refresh
-    threading.Thread(target=net_loop, daemon=True).start()
+    for fn in loops():
+        threading.Thread(target=fn, daemon=True).start()
     while True:
         try:
             data = collect()
