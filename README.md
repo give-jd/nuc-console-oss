@@ -30,6 +30,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
+| 🎯 **Expected vs actual** | declare under `[expose]` how far each service may reach (`local`, `tailnet`, `lan`, `internet`): ATTENTION raises an error when it reaches further, and the matrix, overview and map mark it |
 | 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🧮 **CPU, like htop** | a screen of its own (console `c`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
@@ -41,6 +42,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Web view** | optional: the same screen in a browser over Tailscale/LAN, read-only except the AI page's buttons ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only; `[ai] web_actions = no` makes it read-only for good |
+| 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
@@ -53,7 +55,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <details>
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
-<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports (with the reach declared in config.ini) and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
 </details>
 
 <details>
@@ -189,6 +191,9 @@ web_actions = yes     # yes | no: the AI page and screen may set a model up, swi
 
 [web]                 # optional web view (read-only; the AI page has buttons), see docs/WEB.md
 enabled = no
+
+[telegram]            # optional alerts on your phone, see docs/TELEGRAM.md
+enabled = no          # set up with: sudo nuc-console-telegram --setup
 ```
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
@@ -207,6 +212,7 @@ sudo nuc-console-accept --forget docker-bypass
 
 Accepted items are dimmed ("N accepted" under ATTENTION) and no longer count in the header. The list lives in `/var/lib/nuc-console/accepted.json`; a missing or broken file accepts nothing.
 For web apps you expose on purpose, declare them under `[webapps]` instead: they appear in WEB APPS and stop counting as "Docker port bypassing ufw".
+To say how far a service may reach, declare it under `[expose]` (`shop-db = local`): ATTENTION raises "over-exposed" when it reaches further than that, and never hides the other alarms.
 
 ## AI advisor (optional)
 
@@ -254,6 +260,12 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; no JavaScript except the small, hash-pinned script that lets you drag and zoom the MAP's graph view.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
+
+## Telegram alerts (optional)
+
+Want the problems on your phone? Create a bot with @BotFather (free), run `sudo nuc-console-telegram --setup` (token and your `@username`), tap the link it prints and press Start: new and resolved ATTENTION problems then arrive as messages (titles only unless `detail = full`).
+It only sends: no listener, no webhook, the service never reads messages and has no commands; the token stays in its own 0600 folder, never in `config.ini`. Off by default.
+Set-up, what leaves the machine, troubleshooting: **[docs/TELEGRAM.md](docs/TELEGRAM.md)**.
 
 ## Security
 

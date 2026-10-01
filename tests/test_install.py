@@ -163,8 +163,9 @@ class AiFolderIsTheWebAccounts(unittest.TestCase):
     def test_windows_local_service_may_write_the_ai_folder_and_nothing_else_new(self):
         src = read_text(INSTALL_WINDOWS)
         self.assertIn("& icacls.exe \"$Data\\ai\" /grant '*S-1-5-19:(OI)(CI)M'", src)
-        grants = [ln for ln in src.splitlines() if "icacls.exe" in ln and "$Data" in ln and "S-1-5-19" in ln]
-        self.assertEqual(len(grants), 3, "the data folder (read), logs and ai (modify): no other grant to LOCAL SERVICE")
+        grants = [ln for ln in src.splitlines() if "icacls.exe" in ln and "$Data" in ln and "'*S-1-5-19:(OI)(CI)M'" in ln]
+        self.assertEqual(len(grants), 2, "logs and ai are the only folders LOCAL SERVICE may modify (the others it only reads)")
+        self.assertTrue(all(("$Data\\logs" in ln) or ("$Data\\ai" in ln) for ln in grants), grants)
         self.assertIn("& icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX'", src,
                       "the data folder's own ACL is as it was: users read, LOCAL SERVICE reads")
         self.assertLess(src.index("& icacls.exe $Data /inheritance:r"), src.index("& icacls.exe \"$Data\\ai\" /grant"))

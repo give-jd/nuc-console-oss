@@ -112,6 +112,22 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - New `[ai]` section: `enabled` (`no`), `endpoint` (`http://127.0.0.1:11434/v1`), `model`, `gpu` (`auto` | `no`), `allow_remote` (`no`),
   `timeout_s` (`120`), `daily` (`no`: one digest a day). New `[features] ai`. Documentation: [docs/AI.md](docs/AI.md).
 
+**Expected vs actual exposure**
+
+- New `[expose]` section: the widest reach you intend for a service (`local`, `tailnet`, `lan`, `internet`), by name (container,
+  compose service or project, process, unit, database name or kind, `[webapps]` name) or by port (`8080`, `8080/udp`). ATTENTION raises
+  `over-exposed` when the real reach is wider (unknown counts as open; a Funnel is followed to its backend; the most restrictive key wins)
+  and `expose-unmatched` for a name that matches nothing. The EXPOSURE matrix marks each declared row `expected: …` or
+  `beyond config.ini: …`; the MAP shows the declared reach on the port nodes. It never silences another alarm.
+
+**Telegram alerts** (optional, off by default)
+
+- `nuc-console-telegram --setup` pairs a Telegram bot of your own (free, made with @BotFather) with your **@username**: you tap the link it
+  prints and press Start, no number to type. New and resolved ATTENTION problems then reach your phone: titles only unless
+  `detail = full`, two checks in a row before a message, at most 20 an hour, a summary on the first run. `--on`, `--off`, `--test`,
+  `--status`, `--preview`, `--forget`. New `[telegram]` section: `enabled`, `username`, `detail`, `resolved`. Documentation:
+  [docs/TELEGRAM.md](docs/TELEGRAM.md). A portable run does not start it.
+
 **Releases**
 
 - Archives per system, built by CI on a version tag and attested: `nuc-console-X.Y.Z-linux.tar.gz`, `-macos.tar.gz`,
@@ -128,6 +144,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
+- A `config.ini` that cannot be read at all (for example a key starting with `:`) raises `config-unreadable` in ATTENTION instead of
+  falling back to the defaults in silence; a key written twice no longer makes the whole file unreadable (the last one wins).
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
 - The root collector looks inside every running container for the MAP (see the upgrade notes); the state files carry an `os` field.
 - `install.sh` copies every module of `src/` and removes the ones no longer shipped.
@@ -154,8 +172,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   `[ai] allow_remote = yes`; the model sees the findings as compact data, never raw logs, and answers questions only through a fixed set of
   read-only queries with validated arguments; its text is sanitised and capped; no command is ever run. Downloads are HTTPS only and pinned
   (size, SHA-256, and a Hugging Face commit for models).
-- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, and an installer that
-  has to fetch a Python.
+- The Telegram notifier (off until you run `--setup`) is HTTPS **out** to `api.telegram.org` only: no listener, no webhook, no commands; the
+  service never reads a message (only `--setup` reads the one `/start` that carries its one-time code). The bot token is never in
+  `config.ini`: it is in `/var/lib/nuc-console-notify` (0600, Linux user `nuc-console-notify`, not the web view's) or, on Windows,
+  `%ProgramData%\nuc-console\notify\private` (SYSTEM, Administrators, NETWORK SERVICE). The uninstallers delete it.
+- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, an installer that
+  has to fetch a Python, and the Telegram notifier once you have set it up.
 - Releases: built from the tag on a CI runner with only the built-in `GITHUB_TOKEN`, actions pinned by commit SHA, build provenance
   attested for every archive (`gh attestation verify`). `SHA256SUMS` shows a file is whole; the attestation shows this repository's
   workflow built it. Neither is a signature by a person, and nothing in the archives is code-signed.
@@ -166,6 +188,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
 - A long host name no longer pushes the problem status off the header (`✖ 4 PROBLEMS` was cut to `✖ 4 PROBLE`).
+- Docker installed but not running (Docker Desktop closed, the daemon stopped) is shown as such in DATABASE, not as a collector
+  error on every cycle.
 
 ## [1.4.0] - 2026-10-01
 

@@ -85,6 +85,19 @@ admin-console = 9443
 
 `name = port[, port…]`. Listed apps appear in **WEB APPS** as active (with how far they are reachable: local, tailnet, LAN, Internet) or as **DOWN (expected)** when nothing listens. The ports are an *intended exposure*: they stop counting as "Docker port bypassing ufw" (database ports are never masked). Other web listeners found on the machine are listed as "not declared".
 
+## `[expose]` — how far each service may reach
+
+```ini
+[expose]
+shop-db = local      # a container, compose service or project, process, systemd unit, database name or kind, or a [webapps] name
+n8n     = tailnet
+8080    = lan        # or a port: 8080, 8080/udp
+```
+
+`name or port = local | tailnet | lan | internet` (any case; `tailscale` = `tailnet`, `localhost` and `loopback` = `local`, `public` = `internet`): the **widest** reach you intend. When the real reach, as the EXPOSURE section computes it, goes beyond that, ATTENTION raises **over-exposed** (an error that lists each service, its port and `LAN > local`), the matrix and the compact overview show a red `beyond config.ini: local` on that row (a grey `expected: LAN` when it is within), and the map port carries a "declared reach" fact and an error. A name matches a container (`shop-db` also matches `shop-db-1`, its compose service and its compose project), a process or systemd unit, a database name or kind (`postgres`), or a `[webapps]` name; for a Funnel or Serve entry it is whatever listens on the backend, so `n8n = tailnet` catches an n8n that is published on the Internet. A port key (`8080`, or `8080/udp`; tcp otherwise) matches what listens on it. When several keys match one service the most restrictive wins; an unknown firewall verdict counts as open. A name that matches nothing this machine knows (a typo) raises **expose-unmatched**, a warning; ports are never checked.
+
+`[expose]` only adds alarms: `db-open-lan`, `docker-bypass` and the port baseline are never silenced by it. `over-exposed` can be accepted like any ATTENTION item (`nuc-console-accept --problem over-exposed --reason "…"`); a new service going beyond makes it reappear. A bad value or a port that cannot exist is reported on stderr and only that line is skipped. Never write a port as `:8080`: configparser refuses a key that starts with `:` and the **whole file** falls back to the defaults. Containers with `network_mode: host` listen as plain host processes, so declare them by process, unit or port; a broken `config.ini` (such a key, or any file that cannot be read) now raises the **config-unreadable** error in ATTENTION instead of silently dropping `[expose]`.
+
 ## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
 | Key | Default | Meaning |
@@ -96,6 +109,27 @@ admin-console = 9443
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
+
+## `[telegram]` — alerts on your phone (off by default)
+
+```ini
+[telegram]
+enabled = no
+username = your_telegram_name
+detail = titles
+resolved = yes
+```
+
+New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you create yourself (free). It only sends: no listener, no webhook, it never reads messages, no commands. Set-up in three steps, what leaves the machine and the threat model: [TELEGRAM.md](TELEGRAM.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `no` | Switch it on or off with `sudo nuc-console-telegram --on` / `--off` (they edit this line and start or stop the service). Nothing is sent until the chat is paired (`--setup`) |
+| `username` | empty | Your Telegram `@username` (5–32 letters, digits, `_`; the `@` is optional): the only person who gets the messages. `sudo nuc-console-telegram --setup` asks for it and writes it here |
+| `detail` | `titles` | `titles`: only the title of each problem and the host name leave the machine ("Container unhealthy"). `full`: the text too, with container names and ports; it is then stored by Telegram |
+| `resolved` | `yes` | Also send a message when a problem goes away |
+
+The bot **token** is never in `config.ini` (it is world-readable): it lives in the notifier's own folder (`/var/lib/nuc-console-notify`, Windows `%ProgramData%\nuc-console\notify\private`), readable only by the notifier's own account (Linux `nuc-console-notify`, macOS `_nuc-console`, Windows NETWORK SERVICE), never by the web view's.
 
 ## `[ai]` — optional local model for the HEALTH screen (off by default)
 
@@ -126,6 +160,10 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
+| `sudo nuc-console-telegram --setup` | pair the Telegram notifier: asks the bot token (from @BotFather) and your @username, prints a `t.me/…` link to open on the phone (Windows: `nuc-console-telegram.cmd`, administrator prompt) |
+| `sudo nuc-console-telegram --on` / `--off` | switch the notifications on or off (`[telegram] enabled`) |
+| `nuc-console-telegram --status [--json]` | on or off, paired or not, last message sent, last error (no root on Linux and macOS; Windows: administrator prompt) |
+| `sudo nuc-console-telegram --test` / `--forget` | send a test message / forget the token and the paired chat |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
 | `render.py --once --view map` / `--view cpu` / `--view health` / `--view ai` | the MAP, the CPU, the HEALTH or the AI screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`; HEALTH: `--period 1\|7\|30`, `--select TEXT`, `--details`; AI: `--select TEXT`, `--details`, `--demo-os windows\|darwin`) |
 | `nuc-console-ai models` | what this machine can run: hardware and a verdict per model (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big), no root; `status` (is it installed, does it answer) also needs none. `/usr/local/sbin/nuc-console-ai` if your PATH lacks the folder |

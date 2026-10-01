@@ -507,6 +507,11 @@ def os_release():
     return platform.release()
 
 
+# docker's own words when the CLI is there but its engine is not (Docker Desktop closed, the daemon stopped): not a fault
+DOCKER_DOWN = re.compile(r"cannot connect to the docker daemon|failed to connect to the docker api|is the docker daemon running|"
+                         r"docker daemon is not running|error during connect", re.I)
+
+
 class NotRecorded(Exception):
     """The OS keeps no record of it this time (e.g. Windows boot time without its diagnostics event): info, not an error."""
 
@@ -1036,6 +1041,9 @@ def collect_net():
             d[key] = fn()
         except Absent:
             d["absent"].append(key)  # tool not installed: the renderer says so, but it is neither an error nor an alarm
+        except NotRecorded as e:  # e.g. Docker installed but not running: said on screen, not an error
+            d["absent"].append(key)
+            d.setdefault("notes", {})[key] = str(e)
         except Exception as e:  # noqa: BLE001 - any unexpected output ends up in errors, not in a crash
             d["errors"][key] = repr(e)[:120]
 
@@ -1121,6 +1129,10 @@ def collect_net():
         container listed. Exited (0) = a finished one-shot job: not inspected (dropped like in collect()) but named, so
         the map forgets its connections only once it is removed. The map shows both, the databases only the running ones."""
         rc, out, err = run("docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Status}}\t{{.Names}}")
+        if rc != 0 and DOCKER_DOWN.search(err or ""):
+            raise NotRecorded("Docker is installed but its engine is not running")
+        if rc is None and "TimeoutExpired" in (err or ""):  # an engine still starting (Docker Desktop) answers late: next cycle
+            raise NotRecorded("Docker did not answer in time (its engine may be starting)")
         if rc != 0:
             raise RuntimeError(err or "docker ps failed")
         rows = [ln.split("\t", 2) + ["", ""] for ln in out.splitlines()]

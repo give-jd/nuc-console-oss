@@ -33,6 +33,23 @@ DISPLAY_MODES = {"browser": "browser", "fullscreen": "fullscreen", "kiosk": "ful
 # then resources, workloads, history, then detail panels). Overridable with [dashboard] sections.
 SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
             "tailscale", "docker_disk", "disks")
+# notify.py (Telegram): its own folder, owned by the unprivileged service user: bot token, paired chat (0600), status.json (0644)
+NOTIFY_DIR = os.environ.get("NUC_CONSOLE_NOTIFY_DIR") or (os.path.join(BASE_DIR, "notify") if WINDOWS or PORTABLE else "/var/lib/nuc-console-notify")  # portable: under data/
+TELEGRAM_DETAILS = ("titles", "full")  # titles: only the problem's title leaves the machine; full: its text too (names, ports)
+
+# [expose]: the words for a reach, and the group names render.py uses for it (render.GROUPS); synonyms are accepted
+EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
+                "lan": "LAN", "internet": "INTERNET", "public": "INTERNET"}
+
+
+def expose_port(key):
+    """(port, proto) of an [expose] key that is a port (8080, 8080/udp); None when it is a name. ValueError: a port that cannot exist."""
+    head, _, proto = key.partition("/")
+    if not (head.isascii() and head.isdigit()):
+        return None
+    if not 0 < int(head) < 65536 or proto not in ("", "tcp", "udp"):
+        raise ValueError(key)
+    return int(head), proto or "tcp"
 
 
 def load(path=None):
@@ -44,12 +61,18 @@ def load(path=None):
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True}}
-    cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
+    cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
+    cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of render.GROUPS); here so the early returns have it
+    cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
+    cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True}  # notify.py; the bot token is never here
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
+            if os.path.exists(path):  # read() ignores a file it cannot open: that is not "no config.ini"
+                cfg["config_error"] = "cannot open " + path[-150:]
             return cfg
     except (configparser.Error, OSError, UnicodeDecodeError) as e:
         print(f"nuc-console: cannot read {path}: {e}", file=sys.stderr)
+        cfg["config_error"] = str(e)[:200]
         return cfg
     for key in cp["features"] if cp.has_section("features") else ():
         if key not in FEATURES:
@@ -102,6 +125,18 @@ def load(path=None):
                 cfg["webapps"][name] = ports
             else:
                 print(f"nuc-console: {path}: [webapps] {name}: invalid port list", file=sys.stderr)
+    if cp.has_section("expose"):  # name or port = local|tailnet|lan|internet: the widest reach you intend (more is an ATTENTION problem)
+        for key in [k for k in cp.options("expose") if k not in cp.defaults()]:  # a [DEFAULT] key belongs to every section: not a service
+            word = cp.get("expose", key).strip().lower()
+            try:
+                expose_port(key)
+            except ValueError:
+                print(f"nuc-console: {path}: [expose] {key}: not a valid port (use 8080 or 8080/udp)", file=sys.stderr)
+                continue
+            if word in EXPOSE_WORDS:
+                cfg["expose"][key] = EXPOSE_WORDS[word]
+            else:
+                print(f"nuc-console: {path}: [expose] {key}: '{word}' is not local, tailnet, lan or internet", file=sys.stderr)
     if cp.has_section("web"):
         w = cfg["web"]
         try:
@@ -123,6 +158,23 @@ def load(path=None):
                 print(f"nuc-console: {path}: [web] refresh_seconds must be an integer (1-10)", file=sys.stderr)
     # one refresh for every screen and page; [web] refresh_seconds (older config files) only for the web pages, as before
     cfg["web"]["refresh_seconds"] = cfg["refresh_seconds"] if dash_refresh or web_refresh is None else web_refresh
+    if cp.has_section("telegram"):  # notify.py: ATTENTION changes sent to one Telegram user (docs/TELEGRAM.md)
+        t = cfg["telegram"]
+        for key in ("enabled", "resolved"):
+            try:
+                t[key] = cp.getboolean("telegram", key, fallback=t[key])
+            except ValueError:
+                print(f"nuc-console: {path}: [telegram] {key} is not a boolean: kept {'on' if t[key] else 'off'}", file=sys.stderr)
+        user = cp.get("telegram", "username", fallback="").strip().lstrip("@").lower()
+        if user and not (5 <= len(user) <= 32 and user.isascii() and all(ch.isalnum() or ch == "_" for ch in user)):
+            print(f"nuc-console: {path}: [telegram] username must be a Telegram @username (5-32 letters, digits, _)", file=sys.stderr)
+        else:
+            t["username"] = user
+        detail = cp.get("telegram", "detail", fallback=t["detail"]).strip().lower()
+        if detail in TELEGRAM_DETAILS:
+            t["detail"] = detail
+        else:
+            print(f"nuc-console: {path}: [telegram] detail must be titles or full: kept {t['detail']}", file=sys.stderr)
     if cp.has_section("display"):  # Windows/macOS: the dashboard in a browser tab or a full-screen window
         b = cp.get("display", "browser", fallback="auto").strip()
         cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")

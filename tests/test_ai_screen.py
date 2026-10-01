@@ -98,7 +98,7 @@ class AiCase(unittest.TestCase):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
         self.saved_time = demo.time
         cfg = render.CFG
-        self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], dict(cfg["ai"]))
+        self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], dict(cfg["ai"]), cfg["expose"])
         self.saved_cache, self.saved_probe, self.saved_health = dict(render._AI), dict(render._AIPROBE), dict(render._HEALTH)
         render._AI.clear()
         render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
@@ -121,7 +121,7 @@ class AiCase(unittest.TestCase):
         for k, v in self.saved.items():
             setattr(render, k, v)
         demo.time = self.saved_time
-        features, render.CFG["webapps"], ai = self.saved_cfg
+        features, render.CFG["webapps"], ai, render.CFG["expose"] = self.saved_cfg
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render.CFG["ai"].clear()

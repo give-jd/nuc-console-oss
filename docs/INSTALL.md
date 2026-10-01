@@ -168,6 +168,7 @@ thermal = no
 ## 5. Port alarms and problems
 
 `nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
+Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, user `nuc-console-notify`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
 
 ### Port baseline
 
@@ -218,9 +219,9 @@ sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
 Uninstall removes the commands and, if you installed it, the AI model service. It leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline,
-accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`), the `nuc-console` user and the `nuc-console-ai` account with its
+accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`), the `nuc-console` and `nuc-console-notify` users and the `nuc-console-ai` account with its
 state `/var/lib/nuc-console-ai` and, if you used `nuc-console-update`, its download cache
-`/var/cache/nuc-console`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`.
+`/var/cache/nuc-console`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -278,6 +279,8 @@ What it does (idempotent):
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
 4. Starts the web view as the hidden user `_nuc-console`: on 127.0.0.1, or as configured in `[web]` if you enabled it there.
+   The optional Telegram notifier (`com.nuc-console.notify`, the same user, outbound only) is loaded too and idles until you run
+   `sudo nuc-console-telegram --setup` ([TELEGRAM.md](TELEGRAM.md)); its token lives in `/var/lib/nuc-console-notify` (0711).
 5. Adds `/Applications/nuc-console.webloc` and a **LaunchAgent** that opens the dashboard at every login, as the user: a normal
    window of the default browser (`browser`), or full screen (`fullscreen`: Chrome, Edge, Brave or Chromium if installed, else
    Safari: press Ctrl+Cmd+F once). It opens it right away for the user at the screen.
@@ -305,7 +308,7 @@ git pull && sudo ./install.sh          # update a clone; or run install.sh from 
 sudo ./install.sh --uninstall          # removes /opt/nuc-console, the launchd jobs and the three commands
 ```
 
-It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the download cache `/Library/Caches/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place.
+It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the download cache `/Library/Caches/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
 
 ## What is different from Linux
 
@@ -362,7 +365,9 @@ What it does (idempotent):
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
    `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
-   logon: opens the dashboard as that user, in the browser or full screen; not with `none`).
+   logon: opens the dashboard as that user, in the browser or full screen; not with `none`). The optional Telegram notifier is a
+   task too, `notify` (NETWORK SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
+   its token lives in `%ProgramData%\nuc-console\notify\private`, which only SYSTEM, Administrators and NETWORK SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt), `nuc-console-update` and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
    prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them or
@@ -391,7 +396,7 @@ so the next install or update finds it. An already installed, unchanged Python i
 `nuc-console-update` updates to the latest release (see [Update](#update); it keeps `config.ini`, the baseline and the display mode). Running
 `install-windows.cmd` again, from a newer ZIP, does the same by hand. `install-windows.cmd -Uninstall` removes the tasks (the AI model's too, if you installed it), `%ProgramFiles%\nuc-console`
 (with the commands) and the PATH entry; `%ProgramData%\nuc-console` (with `config.ini`, the baseline, the logs, the HEALTH history
-`lib\history.db`, the download cache `cache\` and the AI runtime and models in `ai\`) is left in place. An update keeps the AI model's task.
+`lib\history.db`, the download cache `cache\` and the AI runtime and models in `ai\`) is left in place, except its `notify` folder (the Telegram token), which is deleted. An update keeps the AI model's task.
 
 ## What is different from Linux
 

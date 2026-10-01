@@ -337,15 +337,21 @@ def _local(host, own):
     return a.is_loopback or a.is_unspecified
 
 
-def _ports(G, R, net, cont, baseline, peers):
-    if net is None or net.get("listeners") is None:
-        return
-    rows = R.exposure_rows(net, cont)
-    new = R.new_ports(net, cont, baseline) if isinstance(baseline, dict) else {}
-    serve = {}  # a Serve/Funnel port can have several handlers (paths), each with a backend of its own
+def _serve(net):
+    """{port: [handler]} of Tailscale Serve/Funnel: a port can have several handlers (paths), each with a backend of its own."""
+    serve = {}
     for x in net.get("serve") or []:
         if isinstance(x, dict):
             serve.setdefault(x.get("port"), []).append(x)
+    return serve
+
+
+def row_owners(R, net, cont, rows):
+    """[(owners, ports)] of each exposure row. Owners: the nodes ('ct:<container>', 'proc:<process>', 'ext:<host>') that answer
+    behind it: the container that publishes the port, else the processes listening on it, else (Serve/Funnel) what listens on
+    the backend. Ports: the local ports it stands for (its own, and the backend's behind a Serve/Funnel).
+    The map draws the owners; render.py's [expose] check names a service by them (the one behind a Funnel is the one declared)."""
+    serve = _serve(net)
     taken = {}  # (port, proto) -> the bind scopes of its rows that are not 'this machine only'
     for r in rows:
         if R.group_of(r) != "LOCALE":
@@ -353,20 +359,35 @@ def _ports(G, R, net, cont, baseline, peers):
     me = (net.get("ts_peers") or {}).get("self")
     own = {str(ln.get("addr")) for ln in net.get("listeners") or []}  # this machine: where it listens, its tailnet addresses
     own.update((me.get("ips") or []) if isinstance(me, dict) else [])
+    out = []
     for r in rows:
-        group = R.group_of(r)
-        nid = f"port:{r['port']}/{r['proto']}@{group.lower()}"
         svs = serve.get(r["port"], []) if r["name"].startswith(("funnel ", "serve ")) else []
         scopes = _scopes(R, r, taken.get((r["port"], r["proto"]), ()))
-        owners = [] if svs else _owners(G, R, net, cont, r["port"], r["proto"], scopes)
+        owners = [] if svs else _owners(None, R, net, cont, r["port"], r["proto"], scopes)
+        ports = {r["port"]}
         for sv in svs:  # what listens on a local target; another host is a remote address, not what listens on its port here
             t = _target(sv.get("target"))
             if t and _local(t[0], own):
-                found = _owners(G, R, net, cont, t[1], "tcp", {"wild", "lo" if t[0] == "localhost" else R.bind_scope(t[0])})
+                found = _owners(None, R, net, cont, t[1], "tcp", {"wild", "lo" if t[0] == "localhost" else R.bind_scope(t[0])})
+                ports.add(t[1])
             else:
                 found = ["ext:" + t[0]] if t else []
             owners += [o for o in found if o not in owners]
-        state = "err" if r["warn"] else "warn" if (r["bad_note"] or r["net"] == 1 or r["lan"] == 3) else "info"
+        out.append((owners, ports))
+    return out
+
+
+def _ports(G, R, net, cont, baseline, peers, expose=None, webapps=None):
+    if net is None or net.get("listeners") is None:
+        return
+    rows = R.expose_apply(R.exposure_rows(net, cont), net, cont, expose or {}, webapps or {})  # [expose]: r["want"] where a key matches
+    new = R.new_ports(net, cont, baseline) if isinstance(baseline, dict) else {}
+    serve = _serve(net)
+    for r, (owners, _) in zip(rows, row_owners(R, net, cont, rows)):
+        group = R.group_of(r)
+        nid = f"port:{r['port']}/{r['proto']}@{group.lower()}"
+        svs = serve.get(r["port"], []) if r["name"].startswith(("funnel ", "serve ")) else []
+        state ="err" if r["warn"] else "warn" if (r["bad_note"] or r["net"] == 1 or r["lan"] == 3) else "info"
         n = _node(G, nid, "port", f":{r['port']}/{r['proto']}", r["note"], state)
         n.update(zone=group, owners=owners, port=r["port"], proto=r["proto"])
         _fact(n, "reachable from", REACH_TEXT[group])
@@ -377,6 +398,11 @@ def _ports(G, R, net, cont, baseline, peers):
         _fact(n, "tailnet", CELL_TEXT.get(r["ts"], "?"))
         _fact(n, "Internet", {0: "no", 1: "PUBLIC (Funnel)", 3: "unknown"}.get(r["net"], "?"))
         _fact(n, "firewall", r["note"])
+        if r.get("want"):
+            _fact(n, "declared reach", f"{R.EXPOSE_LABEL[r['want']]} (config.ini [expose])")
+            if R.expose_over(r):
+                _find(n, "err", f"declared {R.EXPOSE_LABEL[r['want']]} in config.ini, reachable from {REACH_TEXT[group]}")
+                _worse(n, "err")
         if r["warn"]:
             _find(n, "err", "database/broker open on the LAN")
         if r["net"] == 1:
@@ -637,7 +663,7 @@ def _notes(G, R, net, links, cont):
         G["notes"].append("container collector not running")
 
 
-def build(cont, net, boot=None, webapps=None, now=None, baseline=None):
+def build(cont, net, boot=None, webapps=None, now=None, baseline=None, expose=None):
     """The graph of one snapshot. Never raises on missing or partial data: what is missing goes to G["notes"]."""
     R = _render()
     G = {"nodes": {}, "edges": [], "out": {}, "inc": {}, "notes": [], "roots": [], "_pair": {}, "_kids": {}, "_bad": {},
@@ -650,7 +676,7 @@ def build(cont, net, boot=None, webapps=None, now=None, baseline=None):
              for ip in p.get("ips") or []}
     _containers(G, cont, net, links)
     _hosts(G, R, net)
-    _ports(G, R, net, cont, baseline, peers)
+    _ports(G, R, net, cont, baseline, peers, expose, webapps)
     _conns(G, links, peers)
     _declared(G, links)
     _dbs(G, net, peers)

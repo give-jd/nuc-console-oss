@@ -60,10 +60,12 @@ class MapPage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.srv = serve()
+        cls.expose = render.CFG["expose"]  # the demo declares [expose]: put back after
 
     @classmethod
     def tearDownClass(cls):
         render.DEMO = False
+        render.CFG["expose"] = cls.expose
         cls.srv.shutdown()
         cls.srv.server_close()
 

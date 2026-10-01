@@ -69,6 +69,7 @@ class CpuPageCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.webapps, cls.hostname = render.CFG["webapps"], render.socket.gethostname  # the demo declares [webapps] and renames the host
+        cls.expose = render.CFG["expose"]  # and [expose]
         cls.srv = serve()
         cls.features = dict(render.CFG["features"])
         cls.cfg = (render.CFG["cpu_in_rotation"], render.CFG["map_in_rotation"])
@@ -77,6 +78,7 @@ class CpuPageCase(unittest.TestCase):
     def tearDownClass(cls):
         render.DEMO, render.DEMO_OS = False, None
         render.CFG["webapps"], render.socket.gethostname = cls.webapps, cls.hostname
+        render.CFG["expose"] = cls.expose
         cls.srv.shutdown()
         cls.srv.server_close()
 
