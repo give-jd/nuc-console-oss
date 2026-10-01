@@ -2199,16 +2199,18 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True, hint=""):
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False):
+    """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1)."""
     name, part, parts, body = slide
     left = (" " * (int(time.time() // 600) % 3) + f" {socket.gethostname()} │ {name}"  # every 10 min shift the header
             + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}")
     text, code = status_pill(pb or [])
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
-    foot = c(90, (f" single screen   console {w + 1}x{h}" if n == 1 else
+    size = f"{w}x{h}" if page else f"{w + 1}x{h}"
+    foot = c(90, (f" single screen   console {size}" if n == 1 else
                   f" screen {idx + 1}/{n}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {w + 1}x{h}") + (f"   {hint}" if hint else ""))
+                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
     foot = clip(foot, w)
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
@@ -2232,7 +2234,7 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
-def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True):
+def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
     st, sm = snapshot(w), smp.sample()
@@ -2245,10 +2247,10 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True):
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     n = pick_slide(sl, at) if at is not None else n
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys), len(sl)
+                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)
 
 
-def render_screens(smp, w, h, mode=None, keys=True):
+def render_screens(smp, w, h, mode=None, keys=True, page=False):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
@@ -2259,7 +2261,7 @@ def render_screens(smp, w, h, mode=None, keys=True):
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-    return [frame(x, i, len(sl), w, h, pb, keys=keys) for i, x in enumerate(sl)]
+    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
 
 
 def utf8_stdout():
@@ -2438,7 +2440,7 @@ def kiosk_file(argv, base, cols, rows):
     zoom = CFG["display"]["zoom"]
     cols, rows = max(60, round(cols * 100 / zoom)), max(16, round(rows * 100 / zoom))  # bigger text = a smaller grid
     path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
-    w, h = cols - 1, rows
+    w, h = cols, rows  # a browser page: every column is usable (no Linux console last-column quirk)
     print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
     smp, t0, browser, started, cmd = Sampler(), time.time(), None, 0.0, None
     while True:
@@ -2448,7 +2450,7 @@ def kiosk_file(argv, base, cols, rows):
             idx = pick_slide(sl, time.time() - t0)
             screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
                            safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
-                           keys=False, hint=KIOSK_HINT)
+                           keys=False, hint=KIOSK_HINT, page=True)
             write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
         except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
