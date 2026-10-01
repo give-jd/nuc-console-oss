@@ -86,9 +86,12 @@ Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pus
    checks each against its pin (`tools/python-pins.json`, `install-windows.ps1`); it stops there while a pin is missing: there is no archive without a pinned Python;
 4. builds the six archives with `tools/build_release.py` (which checks every Python again, size and SHA-256), builds them a second time and compares the two byte for
    byte, checks `SHA256SUMS`, and runs the Linux x86-64 archive's own Python once;
-5. signs a build provenance for every archive and for `SHA256SUMS` (a GitHub artifact attestation, SLSA build provenance minted by the workflow
+5. runs every archive, in read-only jobs, on a runner of its own system and processor (Linux and macOS: x86-64 and ARM, Windows: x64 and ARM64) with no Python set up
+   for it: it is checked against `SHA256SUMS`, unpacked, and its `run.sh --which-python` (`run.cmd -WhichPython`) must name the Python inside it, `--problems` must
+   exit 0 and a `--once --demo` render must work. Nothing below runs unless all six passed;
+6. signs a build provenance for every archive and for `SHA256SUMS` (a GitHub artifact attestation, SLSA build provenance minted by the workflow
    itself: no signing key is stored anywhere);
-6. creates the GitHub release with the archives and `SHA256SUMS`.
+7. creates the GitHub release with the archives and `SHA256SUMS`.
 
 What it is allowed to do: the only secret it uses is the built-in `GITHUB_TOKEN` (no personal token, no signing key, no upload credential). The
 token is read-only (`contents: read`) except for the one job, which also gets `contents: write` (to create the release), `id-token: write` and

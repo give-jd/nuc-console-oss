@@ -137,7 +137,9 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   (`install_only_stripped`), already unpacked in `python/`, pinned by version, release, file, SHA-256 and size in `tools/python-pins.json` and
   checked by the release workflow and by the build, which refuses to build while a pin is missing. The updater picks the archive by system and
   processor, and says clearly when there is none (32-bit, RISC-V). The version is `VERSION` in `src/nuc_config.py`; the workflow refuses a tag
-  that does not match.
+  that does not match. Before it publishes anything, the workflow unpacks every archive on a runner of its own system and processor (Linux
+  x86-64 and ARM, macOS Apple silicon and Intel, Windows x64 and ARM64) with no Python set up, and runs it (`run.sh --which-python` /
+  `run.cmd -WhichPython` must name the Python inside the archive, `--problems`, a `--once --demo` render): a broken archive is never released.
 - Nothing is downloaded twice: what the installer of a clone fetches (the python.org package on macOS, the Python zip on Windows) is kept and
   checked again before use. An installer run from a release archive downloads nothing.
 - **Portable run**: `run.sh [--console|--web] [--port N]` (Linux: the terminal screen; macOS: the browser) and `run.cmd` / `run.ps1`

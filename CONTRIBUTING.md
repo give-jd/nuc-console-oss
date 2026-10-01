@@ -53,7 +53,8 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
    the number lives: the workflow, `tools/build_release.py` and `nuc-console-update` (which compares it with the latest release) read it from there.
    **The Pythons** the archives carry must be pinned (see *Pinning the Pythons of the archives* below): the workflow stops while `tools/python-pins.json` holds `null`.
 2. **Dry run (optional).** *Actions › release › Run workflow*: choose the branch (or tag) to build and type the tag you are about to create (`vX.Y.Z`).
-   It runs the same checks and builds the same archives, which you can download from the run for seven days; it signs no provenance and creates no release.
+   It runs the same checks, builds the same archives and smoke-tests them (see below), and you can download the archives from the run for seven days; it signs no provenance
+   and creates no release.
 3. **Tag.** `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. Only tags of the form `vX.Y.Z` work (no `-rc1`). The workflow then:
    - **refuses a tag that is not `VERSION`** (and one that is not `vX.Y.Z`);
    - runs the unit tests;
@@ -62,6 +63,14 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
    - builds the six archives (`linux-x86_64`, `linux-arm64`, `macos-arm64`, `macos-x86_64`, `windows-x64`, `windows-arm64`) and `SHA256SUMS` with
      `tools/build_release.py`, builds them again and checks that the second build is byte-identical and that `SHA256SUMS` matches, and runs the Linux x86-64 archive
      with its own Python;
+   - **smoke-tests every archive** (jobs `smoke-unix` and `smoke-windows`, read-only) on a runner of its own system and processor, with no `setup-python` and no checkout, so the only
+     Python it can use is the one it carries: `ubuntu-latest` (`linux-x86_64`), `ubuntu-24.04-arm` (`linux-arm64`), `macos-latest` (`macos-arm64`), `macos-15-intel`
+     (`macos-x86_64`), `windows-latest` (`windows-x64`) and `windows-11-arm` (`windows-arm64`). Each job takes the archive from the build, checks it against `SHA256SUMS`
+     (the file the release publishes), unpacks it and runs it: `./run.sh --which-python` (`run.cmd -WhichPython`) must print the Python inside the archive (`python/`), that
+     Python must run and sit in the archive, `./run.sh --problems` (`run.cmd -Problems`) must exit 0, and `render.py --once --demo`, run by that Python, must draw the demo screen.
+     The release job needs all six: **a broken archive is never published**. On Windows the archive is unpacked under Program Files, because the runner is an administrator and
+     `run.ps1` refuses, as one, a folder that ordinary users can write to. `macos-15-intel` is the last Intel image GitHub hosts (announced until August 2027): when it goes,
+     remove its entry from the matrix and say here that `macos-x86_64` is not run in CI (`tests/test_release.py` names the six entries);
    - attests every archive and `SHA256SUMS` (build provenance), and creates the release `nuc-console X.Y.Z` with them, with generated notes.
    The release is public as soon as the workflow ends, and from then on it is the *latest* one that `nuc-console-update` offers.
 4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist --python-dir DIR`. `--list-python` prints the file, SHA-256 and URL
@@ -93,7 +102,8 @@ move to a newer Python:
 2. Paste the JSON over `tools/python-pins.json`, read the diff (the file names must carry the Python version and the release tag you expect) and commit it. A pull request that changes the
    file runs the same job, which then compares the pinned values with the release that holds them and reports any difference.
 3. `python3 -m unittest discover -s tests`, then a dry run of *Actions › release* on the branch: it downloads the six Pythons, checks them against the pins, builds the archives
-   twice and compares them, and runs the Linux one. Download the artifact `dist` for a look, and try `./run.sh` on the other systems if you can.
+   twice and compares them, runs the Linux one, and smoke-tests all six archives on their own runners. Download the artifact `dist` for a look, and try `./run.sh` on a real
+   machine if you can: the smoke test does not start the dashboard.
 
 A new Python is a new pin in a new release: nothing updates by itself, and nothing in the archives downloads a Python.
 

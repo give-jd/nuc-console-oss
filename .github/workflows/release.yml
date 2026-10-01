@@ -10,9 +10,13 @@ name: release
 # Dry run: Actions > release > Run workflow, choose the branch or tag to build and type the tag it is for (v1.4.0). The same
 # checks and the same archives, uploaded as a workflow artifact: no provenance is signed and no release is created.
 #
-# Two jobs, so that nothing but the publishing step can write: "build" (tests, downloads, archives) can only read the repository
-# and has no OIDC token; "release" runs no code of this repository, it only signs the archives that "build" made (checked
-# against SHA256SUMS again) and publishes them, and is the only one with contents: write, id-token: write, attestations: write.
+# Four jobs, so that nothing but the publishing step can write: "build" (tests, downloads, archives) can only read the repository
+# and has no OIDC token; "smoke-unix" and "smoke-windows" take the six archives that "build" made, each on a runner of its own
+# system and processor with NO setup-python and no checkout (the archive alone: the Python it carries is the only one it may use),
+# check it against SHA256SUMS, unpack it and run it (run.sh / run.cmd --which-python, --problems, a --once --demo render); they can
+# only read; "release" runs no code of this repository, it needs all of them (a broken archive is never published), only signs the
+# archives that "build" made (checked against SHA256SUMS again) and publishes them, and is the only one with contents: write,
+# id-token: write, attestations: write. A dry run runs the smoke jobs too.
 # Actions are pinned by commit SHA (the comment says which release it is); the only secret is the built-in GITHUB_TOKEN.
 
 on:
@@ -119,8 +123,213 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
+  # Linux and macOS: every archive, on a runner of its own processor. No setup-python and no checkout on purpose: what runs is what
+  # a user gets, an archive and whatever the machine has (the runners do have a Python: run.sh must still pick the one in python/).
+  smoke-unix:
+    name: smoke · ${{ matrix.archive }}
     needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { archive: linux-x86_64, runner: ubuntu-latest }
+          - { archive: linux-arm64, runner: ubuntu-24.04-arm }   # free for public repositories
+          - { archive: macos-arm64, runner: macos-latest }        # Apple silicon
+          # The last Intel image GitHub hosts (macos-13 is gone), announced until August 2027. When it goes there is no hosted Intel Mac:
+          # remove this entry, and test/CONTRIBUTING say then that macos-x86_64 is not run here (tests/test_release.py names the entry).
+          - { archive: macos-x86_64, runner: macos-15-intel }
+    env:
+      ARCHIVE: ${{ matrix.archive }}
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+
+      - name: It is the archive that SHA256SUMS lists (the release job publishes that file), for this runner's processor, unpacked
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$ARCHIVE:$(uname -m)" in
+            linux-x86_64:x86_64 | linux-arm64:aarch64 | macos-arm64:arm64 | macos-x86_64:x86_64) ;;
+            *) echo "error: the archive $ARCHIVE is not for this runner ($(uname -s) $(uname -m))" >&2; exit 1 ;;
+          esac
+          cd dist
+          set -- nuc-console-*-"$ARCHIVE".tar.gz
+          if [ $# -ne 1 ] || [ ! -f "$1" ]; then echo "error: expected one nuc-console-*-$ARCHIVE.tar.gz in dist" >&2; exit 1; fi
+          file=$1
+          version=${file#nuc-console-}
+          version=${version%-"$ARCHIVE".tar.gz}
+          if [ "$version" != "${TAG#v}" ]; then echo "error: $file is not the archive of $TAG" >&2; exit 1; fi
+          grep -F -- "  $file" SHA256SUMS > "$RUNNER_TEMP/smoke-sum.txt" || { echo "error: $file is not in SHA256SUMS" >&2; exit 1; }
+          if command -v sha256sum > /dev/null 2>&1; then sha256sum --check "$RUNNER_TEMP/smoke-sum.txt"; else shasum -a 256 --check "$RUNNER_TEMP/smoke-sum.txt"; fi
+          rm -rf "$RUNNER_TEMP/smoke"
+          mkdir "$RUNNER_TEMP/smoke"
+          tar xzf "$file" -C "$RUNNER_TEMP/smoke"
+          cd "$RUNNER_TEMP/smoke/nuc-console-$version"
+          echo "SMOKE=$(pwd -P)" >> "$GITHUB_ENV"
+          ls -l
+
+      - name: run.sh --which-python names the Python of the archive, and that Python runs from the archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHON PYTHONHOME PYTHONPATH   # nothing may steer run.sh away from python/
+          cd "$SMOKE"
+          py="$(./run.sh --which-python)"
+          echo "$py"
+          if [ "$py" != "$SMOKE/python/bin/python3" ]; then
+            echo "error: run.sh would run $py, not the Python of the archive ($SMOKE/python/bin/python3)" >&2
+            exit 1
+          fi
+          "$py" -I -c '
+          import os, sys, ssl, sqlite3, json, ctypes, http.server, zlib, hashlib
+          root, prefix = os.path.realpath(sys.argv[1]), os.path.realpath(sys.prefix)
+          print(sys.version)
+          print("prefix", prefix)
+          print("openssl", ssl.OPENSSL_VERSION, "sqlite", sqlite3.sqlite_version)
+          assert sys.version_info >= (3, 8), sys.version_info
+          assert prefix == root, "this Python runs from %s, not from the archive (%s)" % (prefix, root)
+          ' "$SMOKE/python"
+
+      - name: run.sh --problems exits 0 and reports (no collector runs here, so it lists that), as text and as JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHON PYTHONHOME PYTHONPATH
+          cd "$SMOKE"
+          ./run.sh --problems | tee "$RUNNER_TEMP/problems.txt"
+          grep -Eq '^(no problems|[0-9]+ problems)' "$RUNNER_TEMP/problems.txt"
+          ./run.sh --problems --json | ./python/bin/python3 -I -c 'import json, sys; json.load(sys.stdin)'
+          test -f data/config.ini   # what it writes is in the folder of the archive
+
+      - name: A --once --demo render with the Python of the archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SMOKE"
+          NUC_CONSOLE_HOME="$SMOKE/data" ./python/bin/python3 -B src/render.py --once --demo --cols 120 --rows 33 > "$RUNNER_TEMP/demo.txt"
+          cat "$RUNNER_TEMP/demo.txt"
+          grep -q 'demo-host' "$RUNNER_TEMP/demo.txt"
+          grep -q 'ATTENTION' "$RUNNER_TEMP/demo.txt"
+          test "$(grep -c '' "$RUNNER_TEMP/demo.txt")" -ge 20
+
+  # Windows: the same, with run.cmd. The embeddable Python is unpacked by the first run (and reused by the next).
+  smoke-windows:
+    name: smoke · ${{ matrix.archive }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { archive: windows-x64, runner: windows-latest }
+          - { archive: windows-arm64, runner: windows-11-arm }   # free for public repositories
+    env:
+      ARCHIVE: ${{ matrix.archive }}
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+
+      - name: It is the archive that SHA256SUMS lists (the release job publishes that file), for this runner's processor, unpacked
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }   # as run.ps1 reads it
+          $expected = @{ 'windows-x64' = 'AMD64'; 'windows-arm64' = 'ARM64' }[$env:ARCHIVE]
+          if ($arch -ne $expected) { throw "the archive $($env:ARCHIVE) is not for this runner ($arch)" }
+          $suffix = "-$($env:ARCHIVE).zip"
+          $files = @(Get-ChildItem -LiteralPath dist -Filter "nuc-console-*$suffix")
+          if ($files.Count -ne 1) { throw "expected one nuc-console-*$suffix in dist, found $($files.Count)" }
+          $file = $files[0]
+          $version = $file.Name.Substring('nuc-console-'.Length)
+          $version = $version.Substring(0, $version.Length - $suffix.Length)
+          if ($version -ne ($env:TAG -replace '^v', '')) { throw "$($file.Name) is not the archive of $($env:TAG)" }
+          $lines = @(Get-Content -LiteralPath 'dist\SHA256SUMS' | Where-Object { $_.EndsWith("  $($file.Name)") })
+          if ($lines.Count -ne 1) { throw "$($file.Name) is not listed once in SHA256SUMS" }
+          $want = $lines[0].Split(' ')[0]
+          $have = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLower()
+          if ($have -ne $want) { throw "$($file.Name) has SHA-256 $have, SHA256SUMS says $want" }
+          Write-Host "$($file.Name): SHA-256 $have, as in SHA256SUMS"
+          # Under Program Files: the runner is an administrator, and run.ps1 refuses, as one, a folder that ordinary users can write to
+          # (a folder of the runner's work drive may be one); Program Files is where its message sends you.
+          $dest = Join-Path $env:ProgramFiles 'nuc-console-smoke'
+          if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+          New-Item -ItemType Directory -Path $dest | Out-Null
+          Expand-Archive -LiteralPath $file.FullName -DestinationPath $dest
+          $smoke = Join-Path $dest "nuc-console-$version"
+          if (-not (Test-Path -LiteralPath (Join-Path $smoke 'run.cmd'))) { throw "run.cmd is not in $smoke" }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SMOKE=$smoke" -Encoding Ascii
+          Get-ChildItem -LiteralPath $smoke | ForEach-Object { Write-Host $_.Name }
+
+      - name: run.cmd -WhichPython names the Python of the archive (unpacked once, then reused), and that Python runs from the archive
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'   # a native command's stderr must not stop the script: its exit code is checked
+          Set-Location -LiteralPath $env:SMOKE
+          $want = Join-Path $env:SMOKE 'python\python.exe'
+          $out = @(cmd /c ".\run.cmd -WhichPython < NUL")   # the first run unpacks the zip and says so before it prints the path
+          $rc = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($rc -ne 0) { throw "run.cmd -WhichPython exited $rc" }
+          $last = $out | Where-Object { "$_".Trim() } | Select-Object -Last 1
+          $python = "$last".Trim()
+          if ($python -ne $want) { throw "run.cmd would run '$python', not the Python of the archive ($want)" }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:SMOKE 'python\nuc-console-python.txt'))) { throw "the Python was not unpacked (no stamp file)" }
+          $again = @(cmd /c ".\run.cmd -WhichPython < NUL")   # the second run reuses it: the path and nothing else
+          if ($LASTEXITCODE -ne 0 -or $again.Count -ne 1 -or "$($again[0])".Trim() -ne $want) { throw "the second run said: $($again -join ' / ')" }
+          $check = Join-Path $env:RUNNER_TEMP 'check.py'
+          Set-Content -LiteralPath $check -Encoding Ascii -Value @'
+          import os, sys, ssl, sqlite3, json, ctypes, http.server, zlib, hashlib
+          root, prefix = os.path.realpath(sys.argv[1]), os.path.realpath(sys.prefix)
+          print(sys.version)
+          print("prefix", prefix)
+          print("openssl", ssl.OPENSSL_VERSION, "sqlite", sqlite3.sqlite_version)
+          assert sys.version_info >= (3, 8), sys.version_info
+          assert os.path.normcase(prefix) == os.path.normcase(root), "this Python runs from %s, not from the archive (%s)" % (prefix, root)
+          '@
+          & $python -I $check (Join-Path $env:SMOKE 'python')
+          if ($LASTEXITCODE -ne 0) { throw "the Python of the archive does not run from the archive (exit $LASTEXITCODE)" }
+
+      - name: run.cmd -Problems exits 0 and reports (no collector runs here, so it lists that)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location -LiteralPath $env:SMOKE
+          $out = @(cmd /c ".\run.cmd -Problems < NUL")
+          $rc = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($rc -ne 0) { throw "run.cmd -Problems exited $rc" }
+          if ("$($out | Select-Object -First 1)" -notmatch '^(no problems|\d+ problems)') { throw "run.cmd -Problems did not report" }
+          if (-not (Test-Path -LiteralPath 'data\config.ini')) { throw "nothing was written to the data folder of the archive" }
+
+      - name: A --once --demo render with the Python of the archive
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location -LiteralPath $env:SMOKE
+          try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+          $env:NUC_CONSOLE_HOME = Join-Path $env:SMOKE 'data'
+          $out = @(& (Join-Path $env:SMOKE 'python\python.exe') -B 'src\render.py' --once --demo --cols 120 --rows 33)
+          $rc = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($rc -ne 0) { throw "render.py --once --demo exited $rc" }
+          $text = $out -join "`n"
+          if ($text -notmatch 'demo-host' -or $text -notmatch 'ATTENTION' -or $out.Count -lt 20) { throw "the demo screen is not the one expected" }
+
+  release:
+    needs: [build, smoke-unix, smoke-windows]   # a broken archive is never published
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -1103,7 +1103,7 @@ class Workflow(unittest.TestCase):
 
     def test_only_the_publishing_job_can_write(self):
         self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
-        self.assertEqual(sorted(self.jobs), ["build", "release"])
+        self.assertEqual(sorted(self.jobs), ["build", "release", "smoke-unix", "smoke-windows"])
         build, release = self.jobs["build"], self.jobs["release"]
         self.assertRegex(build, r"permissions:\n      contents: read\n")
         for word in ("write", "id-token", "attestations"):
@@ -1115,8 +1115,12 @@ class Workflow(unittest.TestCase):
         # the job that can write runs nothing of this repository: no checkout, no tests, no script of tools/
         for word in ("actions/checkout", "unittest", "tools/", "python", "setup-python"):
             self.assertNotIn(word, release)
-        self.assertIn("needs: build", release)
         self.assertIn("github.event_name == 'push'", release)  # a dry run publishes nothing
+        for job in ("smoke-unix", "smoke-windows"):  # the smoke jobs read only: they run the archives, they publish and sign nothing
+            self.assertRegex(self.jobs[job], r"permissions:\n      contents: read\n")
+            self.assertNotRegex(self.jobs[job], r"\w: write\b")
+            for word in ("id-token", "attestations", "gh release", "attest-build-provenance"):
+                self.assertNotIn(word, self.jobs[job])
 
     def test_what_is_published_is_what_was_built_and_attested(self):
         release = self.jobs["release"]
@@ -1144,6 +1148,58 @@ class Workflow(unittest.TestCase):
         self.assertLess(build.index("--list-python"), build.index("tools/build_release.py --version"))
         self.assertNotIn("linux.tar.gz", self.text)  # the old names are gone
         self.assertNotIn("macos.tar.gz", self.text)
+
+    def smoke_matrix(self, job):
+        return re.findall(r"\{ archive: ([\w-]+), runner: ([\w.-]+) \}", self.jobs[job])
+
+    def test_every_archive_is_run_on_a_runner_of_its_own_before_anything_is_published(self):
+        # build_release.archive_names is what is published: each of those archives has exactly one entry in a smoke matrix
+        published = sorted(n[len("nuc-console-9.9.9-"):].replace(".tar.gz", "").replace(".zip", "") for n in br.archive_names("9.9.9"))
+        unix, windows = self.smoke_matrix("smoke-unix"), self.smoke_matrix("smoke-windows")
+        self.assertEqual(sorted(a for a, _ in unix + windows), published)
+        self.assertEqual(sorted(a for a, _ in unix), [a for a in published if not a.startswith("windows-")])
+        self.assertEqual(sorted(a for a, _ in windows), [a for a in published if a.startswith("windows-")])
+        # the system AND the processor of the archive: a runner of the other processor would not run its Python at all
+        self.assertEqual(dict(unix + windows), {
+            "linux-x86_64": "ubuntu-latest", "linux-arm64": "ubuntu-24.04-arm",  # free for public repositories
+            "macos-arm64": "macos-latest",  # Apple silicon
+            "macos-x86_64": "macos-15-intel",  # the last hosted Intel Mac: when GitHub retires it, drop the entry and say so in CONTRIBUTING.md
+            "windows-x64": "windows-latest", "windows-arm64": "windows-11-arm"})
+        for job in ("smoke-unix", "smoke-windows"):
+            text = self.jobs[job]
+            self.assertIn("needs: build", text)
+            self.assertIn("fail-fast: false", text)  # one broken archive does not hide the state of the others
+            self.assertIn("runs-on: ${{ matrix.runner }}", text)
+            self.assertRegex(text, r"actions/download-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+\n\s+with:\n\s+name: dist\n")
+            # the archive alone: no checkout of the repository and no Python set up, or the Python of the archive would prove nothing
+            for word in ("actions/checkout", "setup-python", "python-version", "actions/cache"):
+                self.assertNotIn(word, text)
+            self.assertEqual(re.findall(r"uses: (\S+)@", text), ["actions/download-artifact"])
+            self.assertIn("SHA256SUMS", text)  # what is run is what is listed, which is what the release job publishes
+            self.assertIn("ARCHIVE: ${{ matrix.archive }}", text)
+            self.assertIn("TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}", text)  # the archive of this tag
+            self.assertIn("--once --demo", text)
+        # unix: run.sh names the Python of the archive, --problems exits 0, then the demo with that Python; nothing steers it
+        unix = self.jobs["smoke-unix"]
+        for word in ("./run.sh --which-python", "$SMOKE/python/bin/python3", "unset PYTHON PYTHONHOME PYTHONPATH", "./run.sh --problems",
+                     "--problems --json", "-B src/render.py --once --demo", "tar xzf", "sys.prefix"):
+            self.assertIn(word, unix, word)
+        self.assertLess(unix.index("--which-python"), unix.index("./run.sh --problems"))
+        self.assertLess(unix.index("./run.sh --problems"), unix.index("--once --demo"))
+        # windows: the same through run.cmd; as an administrator (the runners are) run.ps1 only runs from a folder users cannot write
+        windows = self.jobs["smoke-windows"]
+        for word in ("run.cmd -WhichPython", "python\\python.exe", "run.cmd -Problems", "src\\render.py", "Expand-Archive", "$env:ProgramFiles",
+                     "nuc-console-python.txt", "sys.prefix"):
+            self.assertIn(word, windows, word)
+        self.assertLess(windows.index("run.cmd -WhichPython"), windows.index("run.cmd -Problems"))
+        self.assertLess(windows.index("run.cmd -Problems"), windows.index("--once --demo"))
+        # nothing is published unless every smoke job passed: the release job needs every other job (a new job cannot be forgotten)
+        needs = re.search(r"(?m)^    needs: \[([^\]]*)\]", self.jobs["release"])
+        self.assertTrue(needs)
+        self.assertEqual(sorted(n.strip() for n in needs.group(1).split(",")), sorted(set(self.jobs) - {"release"}))
+        self.assertNotRegex(self.jobs["release"], r"continue-on-error|always\(\)|failure\(\)|cancelled\(\)")
+        for job in self.jobs.values():
+            self.assertNotIn("continue-on-error", job)  # a failing smoke test must fail the run
 
     def test_no_expression_is_pasted_into_a_script(self):
         # ${{ }} in a run: block is shell injection (a tag name, an input): values go through env: and are quoted there
