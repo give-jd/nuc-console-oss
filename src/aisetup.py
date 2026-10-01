@@ -246,11 +246,55 @@ def ensure_dirs(d):
             missing.append(q)
             q = os.path.dirname(q)
         os.makedirs(p, exist_ok=True)
-        for q in missing:
+        for q in reversed(missing):  # top down: a folder is adopted from the one it is in
             try:
                 os.chmod(q, 0o755)
             except OSError:
                 pass
+            adopt(q, os.path.dirname(q))
+
+
+def adopt(path, like):
+    """Root on Linux/macOS: the folder `path`, just created, takes the owner of the folder `like` it is in when that one is not root's. The
+    installers give the AI folder to the account of the web view, and that account must still be able to write into the folders
+    `sudo nuc-console-ai setup` makes in it (models/, runtime/). Anyone else, and Windows (the ACL is inherited): nothing."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        st = os.stat(like)
+        if st.st_uid != 0:
+            os.chown(path, st.st_uid, st.st_gid)
+    except OSError:
+        pass
+
+
+def dir_space(d):
+    """{"used": bytes taken by the downloaded files (runtime/ and models/, partial downloads too), "free": bytes free on the disk the folder is
+    on (None when unknown)}: what the screens say about the folder. Never raises."""
+    used = 0
+    for sub in ("runtime", "models"):
+        try:
+            with os.scandir(os.path.join(d, sub)) as entries:
+                for e in entries:
+                    try:
+                        if e.is_file(follow_symlinks=False):
+                            used += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    try:
+        free = free_bytes(d)
+    except OSError:
+        free = None
+    return {"used": used, "free": free}
+
+
+def space_text(space):
+    """'5.0 GB downloaded, 120.0 GB free on that disk' (plain words for the screens and the commands)."""
+    sp = space if isinstance(space, dict) else {}
+    used, free = sp.get("used"), sp.get("free")
+    return "%s downloaded, %s" % (fmt_size(used) if used else "nothing", "%s free on that disk" % fmt_size(free) if free else "free space unknown on that disk")
 
 
 def safe(s, n=80):
@@ -624,6 +668,16 @@ def find_dir(plat=None):
     return own
 
 
+def work_dir(plat=None):
+    """The folder the web page and the console screen download into: find_dir()'s, except that the system-wide folder comes before an own folder
+    with nothing installed in it yet when this account can write there (the installers hand it to the account of the web view and the console: a
+    service account has no home to download into). Same files as the commands, same place: `sudo nuc-console-ai setup` and a button meet there."""
+    d, system = find_dir(plat), default_dir(plat, euid=0)
+    if d != system and not os.path.isfile(stamp_path(d)) and os.path.isdir(system) and os.access(system, os.W_OK | os.X_OK):
+        return system
+    return d
+
+
 def commands_for(model_id, plat=None):
     """The commands to show next to a model (they change the system: an administrator runs them; Windows has no sudo)."""
     pre, post = ("", " (in an administrator prompt)") if _is_win(plat) else ("sudo ", "")
@@ -632,14 +686,14 @@ def commands_for(model_id, plat=None):
 
 
 def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
-    """Everything a screen shows about the models: {"hw", "dir", "runtime": {"installed", "version"}, "recommended": id|None,
+    """Everything a screen shows about the models: {"hw", "dir", "space": {"used", "free"}, "runtime": {"installed", "version"}, "recommended": id|None,
     "active": [ai] model|None, "models": [model + assess, installed, pinned, commands]} in rank order, best first.
     Never downloads, never hashes (the stamp file says what was verified), never raises: an unprivileged process can call it.
     `hw` (default aihw.cached()) can be given: the demo screens pass invented machines. models/runtime/cfg/plat are for tests.
     "assess" is aihw's answer, or verdict "unknown" with a sentence when the machine cannot be assessed."""
     models = list(MODELS if models is None else models)
     runtime = RUNTIME if runtime is None else runtime
-    d = d or find_dir(plat)
+    d = d or work_dir(plat)
     hw = hw if hw is not None else _hardware()
     if cfg is None:
         cfg = nuc_config.load(config_path())
@@ -651,7 +705,7 @@ def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
             a = {"verdict": "unknown", "where": "", "need_mb": m.get("ram_mb") or 0, "gpu_layers": 0, "tok_s": None, "why": NO_ADVICE}
         out.append(dict(m, assess=a, installed=is_verified(d, model_path(d, m, plat), m), pinned=not missing_pins(m, True),
                         commands=commands_for(m["id"], plat)))
-    return {"hw": hw, "dir": d, "runtime": {"installed": is_verified(d, rp, runtime), "version": runtime["version"]},
+    return {"hw": hw, "dir": d, "space": dir_space(d), "runtime": {"installed": is_verified(d, rp, runtime), "version": runtime["version"]},
             "recommended": recommend_id(models, hw), "active": (cfg.get("ai") or {}).get("model") or None, "models": out}
 
 
@@ -839,6 +893,7 @@ def cmd_models(args, runtime=None, models=None, hw=None):
     print("This machine (the advice below is based on it):")
     for ln in hw_lines(hw):
         print("  " + ln)
+    print("  Models   : %s (%s)" % (safe(d, 200), space_text(cat["space"])))
     print("\n  %-15s %-27s %8s %8s  %-8s %9s  %s" % ("ID", "MODEL", "SIZE", "NEEDS", "FITS", "TOK/S", "STATE"))
     for m in cat["models"]:
         print(model_row(m, "*" if m["id"] == cat["recommended"] else " ", state_text(m, cat["active"])))
@@ -1279,7 +1334,7 @@ def cmd_status(args, runtime=None, models=None):
     cfg_file = config_path(args.config)
     ai = nuc_config.load(cfg_file)["ai"]
     print("nuc-console-ai status")
-    print("  directory : %s" % d)
+    print("  directory : %s  (%s)" % (d, space_text(dir_space(d))))
     rp = runtime_path(d, runtime)
 
     def state(path, entry, is_model):

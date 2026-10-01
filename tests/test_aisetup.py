@@ -406,6 +406,110 @@ class PlacesTests(unittest.TestCase):
         self.assertEqual(m["MemAvailable"], 15000000 * 1024)
 
 
+class FolderTests(unittest.TestCase):
+    """The folder the files go to, said clearly: what it holds, what is free, who owns the folders `setup` makes in it, and which folder the
+    screens work in."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.d = os.path.join(self.tmp.name, "ai")
+
+    def test_dir_space_counts_the_runtime_and_the_models_partial_downloads_too(self):
+        os.makedirs(os.path.join(self.d, "runtime"))
+        os.makedirs(os.path.join(self.d, "models", "sub"))
+        put(os.path.join(self.d, "runtime", "llamafile-0.0"), b"r" * 1000)
+        put(os.path.join(self.d, "models", "a.gguf"), b"m" * 4000)
+        put(os.path.join(self.d, "models", "b.gguf.part"), b"p" * 500)
+        put(os.path.join(self.d, "models", "sub", "deep.bin"), b"d" * 9000)   # not a file of the folder: not counted
+        put(os.path.join(self.d, "verified.json"), "{}")                      # not a download either
+        sp = aisetup.dir_space(self.d)
+        self.assertEqual(sp["used"], 5500)
+        self.assertIsInstance(sp["free"], int)
+        self.assertGreater(sp["free"], 0)
+
+    def test_dir_space_of_a_folder_that_does_not_exist_yet(self):
+        sp = aisetup.dir_space(os.path.join(self.d, "not", "there"))
+        self.assertEqual(sp["used"], 0)
+        self.assertGreater(sp["free"], 0, "the free space is that of the disk the folder will be on")
+        self.assertFalse(os.path.exists(self.d), "looking creates nothing")
+
+    def test_dir_space_never_raises(self):
+        with mock.patch.object(aisetup, "free_bytes", side_effect=OSError("gone")), mock.patch.object(aisetup.os, "scandir", side_effect=OSError("gone")):
+            self.assertEqual(aisetup.dir_space(self.d), {"used": 0, "free": None})
+
+    def test_space_text_in_plain_words(self):
+        self.assertEqual(aisetup.space_text({"used": 5 * 10 ** 9, "free": 120 * 10 ** 9}), "5.0 GB downloaded, 120.0 GB free on that disk")
+        self.assertEqual(aisetup.space_text({"used": 0, "free": 800 * 10 ** 6}), "nothing downloaded, 800 MB free on that disk")
+        self.assertEqual(aisetup.space_text({"used": 1, "free": None}), "1 KB downloaded, free space unknown on that disk")
+        self.assertEqual(aisetup.space_text(None), "nothing downloaded, free space unknown on that disk")
+
+    def test_the_catalog_carries_the_folder_and_its_space(self):
+        install_files(self.d, *fake_catalog()[:1], fake_catalog()[1], fake_catalog()[2], only=("small",))
+        c = aisetup.catalog({}, self.d, cfg={"ai": {"model": ""}})
+        self.assertEqual(c["dir"], self.d)
+        self.assertEqual(c["space"]["used"], 100 + 5004)
+
+    @unittest.skipUnless(hasattr(os, "geteuid"), "Unix ownership")
+    def test_root_hands_a_new_folder_to_the_owner_of_the_folder_it_is_in(self):
+        like, new, calls = os.path.join(self.tmp.name, "like"), os.path.join(self.tmp.name, "new"), []
+        owner = lambda uid: type("St", (), {"st_uid": uid, "st_gid": uid + 1})()  # noqa: E731
+        with mock.patch.object(aisetup.os, "geteuid", return_value=0), mock.patch.object(aisetup.os, "chown", side_effect=lambda *a: calls.append(a)):
+            with mock.patch.object(aisetup.os, "stat", return_value=owner(4242)):
+                aisetup.adopt(new, like)
+            self.assertEqual(calls, [(new, 4242, 4243)])
+            calls.clear()
+            with mock.patch.object(aisetup.os, "stat", return_value=owner(0)):
+                aisetup.adopt(new, like)
+            self.assertEqual(calls, [], "a folder root owns: nothing to hand over")
+            with mock.patch.object(aisetup.os, "stat", side_effect=OSError("gone")):
+                aisetup.adopt(new, like)
+            self.assertEqual(calls, [], "no error either")
+        with mock.patch.object(aisetup.os, "geteuid", return_value=1000), mock.patch.object(aisetup.os, "chown", side_effect=lambda *a: calls.append(a)), \
+                mock.patch.object(aisetup.os, "stat", return_value=owner(4242)):
+            aisetup.adopt(new, like)
+        self.assertEqual(calls, [], "anyone but root: nothing")
+
+    @unittest.skipUnless(hasattr(os, "geteuid"), "Unix ownership")
+    def test_ensure_dirs_adopts_top_down_so_that_the_new_folders_belong_to_the_web_account(self):
+        base, calls = os.path.join(self.tmp.name, "lib"), []
+        os.makedirs(base)
+        with mock.patch.object(aisetup, "adopt", side_effect=lambda path, like: calls.append((path, like))):
+            aisetup.ensure_dirs(os.path.join(base, "ai"))
+        ai = os.path.join(base, "ai")
+        self.assertEqual(calls, [(ai, base), (os.path.join(ai, "runtime"), ai), (os.path.join(ai, "models"), ai)],
+                         "each one from the one it is in, outermost first (only the folders that were created)")
+        calls.clear()
+        with mock.patch.object(aisetup, "adopt", side_effect=lambda path, like: calls.append((path, like))):
+            aisetup.ensure_dirs(ai)
+        self.assertEqual(calls, [], "folders that exist are never touched")
+
+    def test_work_dir_is_the_system_wide_folder_when_this_account_can_write_there(self):
+        system, own = os.path.join(self.tmp.name, "sys"), os.path.join(self.tmp.name, "own")
+
+        def fake_default(plat=None, env=None, euid=None, home=None):
+            return system if euid == 0 else own
+        with mock.patch.object(aisetup, "default_dir", side_effect=fake_default):
+            self.assertEqual(aisetup.work_dir(), own, "no system-wide folder: the account's own")
+            os.makedirs(own)
+            os.makedirs(system)
+            os.chmod(system, 0o755)
+            writable = hasattr(os, "geteuid") and (os.geteuid() == 0 or os.access(system, os.W_OK | os.X_OK))
+            self.assertEqual(aisetup.work_dir(), system if writable else own)
+            with mock.patch.object(aisetup.os, "access", return_value=False):
+                self.assertEqual(aisetup.work_dir(), own, "a folder this account cannot write to is not one to download into")
+            put(aisetup.stamp_path(own), "{}")
+            self.assertEqual(aisetup.work_dir(), own, "models installed in the account's own folder are not hidden by an empty system-wide one")
+            put(aisetup.stamp_path(system), "{}")
+            with mock.patch.object(aisetup.os, "access", return_value=False):
+                self.assertEqual(aisetup.work_dir(), system, "what the administrator installed is shown, writable or not")
+
+    def test_work_dir_is_find_dir_with_nuc_console_home(self):
+        with mock.patch.dict(os.environ, {"NUC_CONSOLE_HOME": self.tmp.name}):
+            self.assertEqual(aisetup.work_dir(), os.path.join(self.tmp.name, "ai"))
+            self.assertEqual(aisetup.work_dir(), aisetup.find_dir())
+
+
 class ServeCommandTests(unittest.TestCase):
     def check_common(self, argv):
         self.assertTrue(all(isinstance(a, str) for a in argv), "an argument list of strings: no shell involved")
@@ -919,6 +1023,21 @@ class ConfigTests(unittest.TestCase):
         put(self.cfg, "[web]\nenabled = no\n")
         self.assertEqual(nuc_config.load(self.cfg)["ai"]["gpu"], "auto", "no [ai] section")
 
+    def test_web_actions_key(self):
+        self.assertIs(nuc_config.load("/nonexistent")["ai"]["web_actions"], True, "the default: the AI page and screen may act")
+        err = io.StringIO()
+        for text, want in (("", True), ("web_actions = yes\n", True), ("web_actions = no\n", False), ("web_actions = off\n", False), ("web_actions = 0\n", False),
+                           ("web_actions = True\n", True)):
+            with self.subTest(text), contextlib.redirect_stderr(err):
+                put(self.cfg, "[ai]\nenabled = no\n" + text)
+                self.assertIs(nuc_config.load(self.cfg)["ai"]["web_actions"], want)
+        self.assertEqual(err.getvalue(), "")
+        put(self.cfg, "[ai]\nweb_actions = maybe\nmodel = m\n")
+        with contextlib.redirect_stderr(err):
+            ai = nuc_config.load(self.cfg)["ai"]
+        self.assertEqual((ai["web_actions"], ai["model"]), (True, "m"), "a bad value keeps the default and does not touch the other keys")
+        self.assertIn("[ai] web_actions is not a boolean", err.getvalue())
+
     def test_set_key_writes_gpu_like_the_other_keys(self):
         put(self.cfg, "[ai]\n# comment\ngpu = auto\nmodel =\n")
         nuc_config.set_key(self.cfg, "ai", "gpu", "no")
@@ -1014,6 +1133,15 @@ class StatusTests(unittest.TestCase):
         self.assertIn("installed, SHA-256 verified", out)
         self.assertIn("answering, /v1/models lists: tiny", out)
         self.assertIn("model = tiny", out)
+
+    def test_the_directory_line_says_what_is_in_it_and_what_is_free(self):
+        self.install()
+        rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port())
+        line = next(ln for ln in out.splitlines() if ln.startswith("  directory :"))
+        self.assertIn(self.d, line)
+        self.assertRegex(line, r"\(6 KB downloaded, [\d.]+ (GB|MB) free on that disk\)$")
+        rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port(), "--dir", os.path.join(self.tmp.name, "empty"))
+        self.assertRegex(next(ln for ln in out.splitlines() if ln.startswith("  directory :")), r"\(nothing downloaded, ")
 
     def test_installed_but_server_down(self):
         self.install()
@@ -1338,6 +1466,14 @@ class ModelsCommandTests(unittest.TestCase):
         self.assertRegex(self.row(out, "mid"), "installed")
         self.assertRegex(self.row(out, "small"), "not installed")
 
+    def test_the_folder_the_files_go_to_is_said_with_what_it_holds_and_what_is_free(self):
+        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
+        rc, out, err = self.models_cmd(HW_CPU8)
+        line = next(ln for ln in out.splitlines() if ln.startswith("  Models   :"))
+        self.assertIn(self.d, line)
+        self.assertRegex(line, r"\(\d+ KB downloaded, [\d.]+ (GB|MB) free on that disk\)$")
+        self.assertLess(out.index(line), out.index("ID  "), "before the table: it is part of the machine")
+
     def test_commands_are_shown_and_output_is_ascii(self):
         rc, out, err = self.models_cmd(HW_BIG)
         how = (lambda c: "nuc-console-ai %s ID (in an administrator prompt)" % c) if sys.platform == "win32" else "sudo nuc-console-ai {} ID".format
@@ -1459,7 +1595,7 @@ class CatalogTests(unittest.TestCase):
     def test_shape(self):
         install_files(self.d, self.runtime, self.models, self.data, only=("mid", "small"))
         c = self.cat(HW_CPU8)
-        self.assertEqual(set(c), {"hw", "dir", "runtime", "recommended", "active", "models"})
+        self.assertEqual(set(c), {"hw", "dir", "space", "runtime", "recommended", "active", "models"})
         self.assertEqual((c["hw"], c["dir"]), (HW_CPU8, self.d))
         self.assertEqual(c["runtime"], {"installed": True, "version": "0.0"})
         self.assertEqual((c["recommended"], c["active"]), ("mid", "mid"))
