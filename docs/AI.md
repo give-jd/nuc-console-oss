@@ -2,20 +2,28 @@
 
 Everything here is optional and off by default. There are two parts:
 
-- the **AI screen** (console key `a`, web **ai** link): reads this machine's memory and GPU and says, for each model
-  in a short list, whether it fits and how fast it would be. It only reads; it downloads and starts nothing;
+- the **AI page** of the web view and the **AI screen** of the console (key `a`, web **ai** link): they read this machine's memory and GPU
+  and say, for each model in a short list, whether it fits and how fast it would be, and they are where you **set a model up**: choose one and it
+  is downloaded, started and turned on, with its progress on the screen; **AI on / off** is one button (console: `e`); delete what you downloaded;
+  and, on the web page, a **chat** with the model ([From the browser and the console](#from-the-browser-and-the-console)). The commands
+  (`nuc-console-ai`, `nuc-console-ask`) do the same and stay as they are;
 - the **advisor**: a small model that runs on this machine turns the [HEALTH](HEALTH.md) findings into plain-language advice
-  and answers questions about the machine's history (`nuc-console-ask`).
+  and answers questions about the machine's history (`nuc-console-ask`, or the chat).
 
-**What it is not.** It analyses and never acts: no command is run, no file or setting is changed, whatever the model
-says. It does not send anything to a cloud service (the endpoint must be on this machine unless you say otherwise). It
-is not a chat window and it does not see raw logs. The web view stays read-only: the screen *shows* the command to run
-(`sudo nuc-console-ai setup qwen3-8b`), you run it. The model can be wrong: every answer is marked "AI, check before acting".
+**What it is not.** It analyses and never acts on the machine: no command is run, no setting is changed, whatever the model says. The
+page and the screen act on one thing only, the model itself: they download its pinned files into the AI folder, start the model server on
+127.0.0.1 and stop it, and delete those files; they never write `config.ini` and never run what the model suggests. It does not send
+anything to a cloud service (the endpoint must be on this machine unless you say otherwise). It does not see raw logs. The model can be wrong:
+every answer is marked "AI, check before acting". `[ai] web_actions = no` is the lock for an admin who wants the page and the screen read-only
+(then they *show* the command to run, `sudo nuc-console-ai setup qwen3-8b`, and you run it).
 
 It works the same on Linux, macOS and Windows. On Windows, run the commands that install, switch or serve from an
 **administrator** prompt (no `sudo`).
 
 ## In short
+
+In the browser or on the console: open the **AI** page (`/?view=ai`) or press `a`, choose a model (**use this model**, or `u`): it is downloaded
+(SHA-256 checked), started on 127.0.0.1, and the AI is on. **Turn AI off** (or `e`) stops it. The same, from a terminal:
 
 ```bash
 nuc-console-ai models                         # what this machine can run, model by model; no root (or: key a on the console)
@@ -26,25 +34,27 @@ nuc-console-ask status                        # does the server answer?
 nuc-console-ask advise                        # advice on the last 7 days of HEALTH findings
 ```
 
-`setup` downloads only what the build you run pins (see [The pins](#the-pins)): the twelve models are pinned; the runtime's
-SHA-256 and size are still to be confirmed, and until they are `setup` stops before it downloads anything and names the runtime.
-`models` and the screen work meanwhile. Preview the screen without any of this: `python3 src/render.py --once --demo --view ai`.
+`setup` (and the buttons) download only what the build you run pins (see [The pins](#the-pins)): the twelve models and the runtime are pinned; a value that
+is not stops the download before it starts and names it. `models` and the screen work meanwhile. Preview the screen without any of this:
+`python3 src/render.py --once --demo --view ai`, or the page with its buttons, simulated (nothing is downloaded or started):
+`python3 src/web.py --demo --port 8796`.
 
 ## The AI screen
 
-Console key `a` (back: `a`, `Esc` or `q`; also after 10 minutes without a key), the **ai** link in the web view's bottom
-bar (`/?view=ai`), or once, for a look over SSH: `render.py --once --view ai`. It is not one of the rotating pages (nobody
+Console key `a` (back: `a`, `Esc` or `q`; also after 10 minutes without a key: a download goes on without the screen), the **ai** link in the web
+view's bottom bar (`/?view=ai`), or once, for a look over SSH: `render.py --once --view ai`. It is not one of the rotating pages (nobody
 chooses a model from a monitor). It shows even with `[ai] enabled = no`: it is where you choose. `[features] ai = no` removes it
 (and the hardware is never probed).
 
 | Section | Shows |
 |---|---|
+| the AI switch (under the title) | `OFF`, `WORKING` (a download with its bar, the server starting or loading the model), `ON` (which model answers where) or `ERROR`; the folder the models go to; the answer to the last key or click; on the web page the buttons and the chat ([below](#from-the-browser-and-the-console)) |
 | HARDWARE | the CPU (model, cores and threads, AVX2 / AVX-512 / NEON), the RAM (total, free), every GPU (name, memory total and free, backend: CUDA, ROCm, Metal, Vulkan; "unified memory" on Apple silicon), and the notes: what could not be read and why |
-| MODELS | one row per model, best first: name, parameters, size, memory needed, a verdict, estimated tokens per second, installed (✓), the one the advisor uses (●), the recommended one (★) |
+| MODELS | one row per model, best first: name, parameters, size, memory needed, a verdict, estimated tokens per second, installed (✓), the one the advisor uses (●), the recommended one (★); on the web page a **use this model** button |
 | Details | of the selected model (`Enter`, or a link): why this verdict, licence, notes, the exact commands to install, use and remove it, and "not pinned yet" when this build cannot download it |
-| STATUS | `[ai] enabled`, the endpoint, whether it answers (checked at most once a minute, one second at most, never while a page is drawn), the active model |
+| STATUS | the advisor (on, and who turned it on), the endpoint, whether it answers (checked at most once a minute, one second at most, never while a page is drawn), the active model |
 
-Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter`. `render.py --once --view ai` takes `--select TEXT`, `--details`,
+Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter` (details), and the ones that act, see [below](#from-the-browser-and-the-console). `render.py --once --view ai` takes `--select TEXT`, `--details`,
 `--demo` and `--demo-os windows|darwin`: the demo has three invented machines, a Linux box with a 12 GB NVIDIA card
 (`--demo`), a Windows laptop with 4 GB of GPU memory and 16 GB of RAM (`--demo-os windows`) and an M2 with 16 GB of unified
 memory (`--demo-os darwin`).
@@ -57,6 +67,7 @@ This machine (the advice below is based on it):
   CPU      : Intel(R) Xeon(R) Processor @ 2.10GHz (4 cores, 4 threads) avx2 avx512
   RAM      : 15.7 GB, 14.5 GB free
   GPU      : none found: the CPU does the work
+  Models   : /var/lib/nuc-console/ai (nothing downloaded, 120.3 GB free on that disk)
 
   ID              MODEL                           SIZE    NEEDS  FITS         TOK/S  STATE
   qwen3-30b-a3b   Qwen3 30B-A3B (MoE)          18.6 GB ~19.2 GB  TOO BIG          ?  not installed
@@ -81,6 +92,105 @@ Remove : sudo nuc-console-ai remove ID
 size of the file (the pinned size, or `~` the approximate one while a model is not pinned); NEEDS is memory, counted like the RAM
 line above it. Below 10 tokens per second the speed keeps one decimal (`0.5-3.2`), from 10 on it is a whole number. When the hardware
 cannot be read at all, every row shows `?` for the verdict and the speed, and nothing is recommended.
+
+## From the browser and the console
+
+Nothing here needs a terminal. The **AI page** of the web view and the **AI screen** of the console do all of it, the same way, and the commands
+(`nuc-console-ai`, `nuc-console-ask`) stay as they are, for scripts and for what the page cannot do (a service, `--force`).
+
+**One choice does everything.** Press **use this model** next to a model (console: move to it, `u`). If the runtime and the model are not here yet
+they are downloaded, with a progress bar (the pinned size and SHA-256, resumed if interrupted, never fetched twice: a file that is there and verified
+is left alone); then the model server is started on 127.0.0.1 and the page waits until it answers; then the advisor is turned on with that model. Choosing
+another model stops the first server and starts the second: there is only ever one. A model that will not work on this machine ("too big") has no button;
+one that fits but slows the PC is set up with a warning.
+
+**AI on / off.** The switch at the top of the page, a key on the screen (`e`). *Turn AI on* uses the model chosen before (the page's, else `[ai] model`
+of `config.ini` if the catalog has it); if none was chosen it **asks first**, naming the recommended model and the size to download, and does nothing before
+you say yes (web: a small second form, *Yes* / *No*; console: `y` / `n`). *Turn AI off* stops the model server that was started from here and turns
+the advisor off. What it is doing is always on the screen:
+
+| State | Means |
+|---|---|
+| `OFF` | the advisor is off |
+| `WORKING` | `downloading the runtime, 39%, 303 MB of 765 MB, 130.6 MB/s, about 3 s left`, `checking the SHA-256 of the model`, `starting the model server`, `loading the model: it answers in a minute or two` (the page reloads every 2 s; **Cancel** / `c` stops it and keeps what was fetched) |
+| `ON` | the advisor is on and the model answers (`tiny runs here and answers at http://127.0.0.1:8080/v1`), or it is on and asks a server that was not started here (`config.ini`'s, Ollama...) |
+| `ERROR` | the model server stopped by itself: the exit status and its last lines are shown |
+
+**Chat** (web page, right under the switch; on the console `questions: web page or nuc-console-ask`). A question box (500 characters at most) and the last ten
+questions and answers of this web process, newest last; they are kept in memory only. The model answers in the background, never while a page is
+being built, and the box wakes up when the server answers. **advice now** (last 24 hours, 7 days, 30 days) writes a fresh advice on the HEALTH findings of
+that period (`nuc-console-ask advise` does the same); it is also kept in the shared advice the screens show when this account may write it (always with a
+portable run, never for the unprivileged web account of an installation: only root writes `advice.json`). Every answer is marked "AI, check before acting"
+and is cleaned (console) or escaped (web) before anyone sees it.
+
+**Delete.** In the details of a model (click its name): *delete its files*; at the bottom of the page: *delete everything* (the runtime and every model,
+and the loader the runtime unpacked). Both ask first (web: a question with *Yes* / *No*; console: `y` / `n`). A file this account cannot delete (installed
+with `sudo nuc-console-ai setup` into a folder that is root's) is named, with the command to run instead (`sudo nuc-console-ai remove tiny`). Deleting the
+model the server runs stops the server first and turns the advisor off.
+
+| On the page | Console key | Does |
+|---|---|---|
+| **Turn AI on** / **Turn AI off** | `e` | the switch (above); while a job runs `e` cancels it |
+| **use this model** (each row, and in its details) | `u` | the one action (above) |
+| **Cancel** | `c` | stops the download or the start that runs |
+| **delete its files** (details) | `x` | deletes one model's files, after the question |
+| **delete everything** (bottom) | `X` | deletes the runtime and every model, after the question |
+| the question box, **advice now** | | chat (web only) |
+| | `Enter`, `↑` `↓`... | details, moving |
+
+`[ai] web_actions = no` removes all of it: the page and the screen say "locked by config.ini", show no button and take no key, and a post is refused.
+
+### The models folder
+
+The directory the models are downloaded to is on the page (`models are downloaded to <path> · 5.0 GB downloaded · 412.0 GB free on that disk`), on the
+console screen (`folder ...`), and in `nuc-console-ai models` and `status`. It is the one `nuc-console-ai` uses, so `sudo nuc-console-ai setup` and a button meet there:
+
+| | Folder | Owner |
+|---|---|---|
+| Linux, installed | `/var/lib/nuc-console/ai` | the user `nuc-console` (the installer makes it, `runtime/` and `models/`; both units may write there and nowhere else) |
+| macOS, installed | `/Library/Application Support/nuc-console/ai` | the user `_nuc-console` |
+| Windows, installed | `%ProgramData%\nuc-console\ai` | Administrators; LOCAL SERVICE may modify it |
+| Portable run | `data/ai` next to `run.sh` / `run.cmd` (`$NUC_CONSOLE_HOME/ai`) | you |
+| Run by hand as a user | `~/.local/share/nuc-console/ai` (`$XDG_DATA_HOME`), macOS `~/Library/Application Support/nuc-console/ai`, unless the system-wide folder exists, is writable by you and your own has nothing in it | you |
+
+Models are 0.4 to 19 GB: the page says what is free on that disk, a download that would not leave 300 MB free is refused before it starts, and the folder stays
+when you uninstall (delete everything, or `sudo nuc-console-ai remove`, gives the disk back). An installation that already had files there from
+`sudo nuc-console-ai setup` keeps them (root's, readable, usable); to let the page delete them too, `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS:
+`_nuc-console`).
+
+### What the page keeps: web.json
+
+`config.ini` is root's: the page and the screen never write it. What you choose there is kept in `<AI folder>/web.json` (written atomically, mode 0644):
+
+```json
+{"v": 1, "enabled": true, "model": "qwen3-8b", "endpoint": "http://127.0.0.1:8080/v1"}
+```
+
+`advisor.effective_cfg()` lays it over `[ai]` for the web view, the console screens and the advisor: the advisor is on when `config.ini` says `enabled = yes` **or**
+the page turned it on (config's yes cannot be turned off from the page: it says "on by config.ini"); the model and the endpoint of the server started from the page
+replace `config.ini`'s. The `endpoint` is only ever this machine (a number of the loopback), whatever `allow_remote` says, and is removed when that server stops.
+`web.json` is read only from a file that root or the reading account owns and nobody else may write, and **never by root**: the daily digest
+(`[ai] daily`) and `sudo nuc-console-ask` use `config.ini` alone, so the web account cannot choose where root sends the findings. `[ai] web_actions = no`: the
+file counts for nothing. The other files the page makes in the folder: `job.lock` (a download or a delete is running, in the web view or in the console: the other
+one waits; a lock nobody has touched for 90 s is a dead process's), `home/` (the loader the runtime unpacks at its first start).
+
+### The model server it starts
+
+It is a **child** of the web view (or of the console): the command line is `serve`'s (`aisetup.serve_argv`: `--host 127.0.0.1`, the port from 8080 up that is free,
+`-ngl` from the hardware advice and `[ai] gpu`), at low priority (`nice -n 10`; Windows: below normal), in its own process group (a job object on Windows), with a
+small environment of its own (a fixed `PATH`, a home inside the AI folder) and the output kept for its last lines. It ends when the web view or the console ends
+(a stop, Ctrl+C, a crash on Windows: the job object), and there is only one per process. Two limits to know: on Linux the web view's unit has no access to the GPU
+devices (`PrivateDevices=yes`), so a server started from the page runs on the CPU, and its cgroup caps the memory at 85% of the RAM; for a GPU use the console's
+unit (the account needs the `render`/`video` groups) or `sudo nuc-console-ai serve --install-service`, which is made for it. A server you run yourself
+(Ollama...) is never started or stopped from here; with the AI on by `config.ini` the page just asks it.
+
+### Security of the buttons
+
+The rules are in [WEB.md](WEB.md#the-ai-pages-buttons) (the same access as viewing, a CSRF token, Origin/Referer/Fetch-Metadata checks, 4 KB, ids from the catalog, the CSP
+difference) and [SECURITY.md](../SECURITY.md). In short: nothing from a request reaches a path, a command line or a shell except a model id the catalog has; the only
+files downloaded are the pinned ones; the only program started is the pinned runtime, on 127.0.0.1; everyone who can open the page can use the buttons (that is "viewing"
+for a tailnet), so `web_actions = no` is the switch for a page that must only show. The web account that owns the AI folder can replace the files in it: the runtime of
+a service installed with `serve --install-service` is checked again (SHA-256) when that command runs, not when the service restarts.
 
 ## Choosing a model
 
@@ -215,12 +325,12 @@ variable cannot redirect a write done as root.
 
 | Command | Does |
 |---|---|
-| `nuc-console-ai models` | the hardware summary and the table of models with a verdict, the estimated speed, whether each is installed and which one is active. Only reads, no root |
+| `nuc-console-ai models` | the hardware summary, the folder the files go to (what it holds, what is free on that disk) and the table of models with a verdict, the estimated speed, whether each is installed and which one is active. Only reads, no root |
 | `nuc-console-ai setup [MODEL ...]` | downloads the runtime and the models you name (none: the recommended one), once; a file that is already there with the right hash is not downloaded again, a partial one is resumed. Asks before downloading (`--yes` agrees); a SLOW model is installed with a warning, a TOO BIG one is refused unless `--force`. Then offers to write `[ai] endpoint = http://127.0.0.1:PORT/v1` and `model` (the first one named) in `config.ini`: `--yes` does that only for a first setup and never replaces an endpoint or model you set, and `[ai] enabled` is never switched on for you. Also `--no-config`, `--port N` (the port for that endpoint, default 8080) |
 | `nuc-console-ai use MODEL` | makes an installed, verified model the one the advisor asks (`[ai] model`, nothing else in `config.ini` changes); refuses a TOO BIG one unless `--force`, warns about SLOW; tells you how to restart the server so that it serves that one (`serve --install-service` again) |
 | `nuc-console-ai serve` | runs the server in the foreground on 127.0.0.1 at low priority; Ctrl+C stops it. `--model ID`, `--port N` (8080), `--threads N` (default: cores minus two, at least 1), `--ctx N` (default 4096, at most the model's context), `--gpu-layers N` (0 = CPU only, 999 = all; default: decided from the hardware and `[ai] gpu`), `--dry-run` (print the command), `--log FILE` (for the Windows task) |
-| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account, with the values of that moment written into it. Run it again after `use` or a change of `[ai] gpu`. `--remove-service` removes it |
-| `nuc-console-ai status` | what is installed and verified, whether the endpoint answers. Exit status: 0 it answers and lists the configured model; 3 it answers without that model, or does not answer (or is not on this machine and `allow_remote = no`) while a model is installed: run `serve`; 1 it does not answer and nothing is installed: run `setup`. `--verify` hashes the files again, `--endpoint URL` probes another server. Only reads, no root |
+| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account, with the values of that moment written into it. It hashes the runtime and the model again first (the web account may write the folder), and refuses a file that is not the pinned one. Run it again after `use` or a change of `[ai] gpu`. `--remove-service` removes it |
+| `nuc-console-ai status` | the folder (what it holds, what is free), what is installed and verified, whether the endpoint answers. Exit status: 0 it answers and lists the configured model; 3 it answers without that model, or does not answer (or is not on this machine and `allow_remote = no`) while a model is installed: run `serve`; 1 it does not answer and nothing is installed: run `setup`. `--verify` hashes the files again, `--endpoint URL` probes another server. Only reads, no root |
 | `nuc-console-ai remove [MODEL]` | deletes the downloaded files of that model (none named: every model and the runtime), after asking (`--yes`). `config.ini` is not changed |
 | `nuc-console-ai pins` | for maintainers: prints the values to paste in `RUNTIME` and `MODELS` (needs the network) |
 | `nuc-console-ask QUESTION...` | an answer from the history, through read-only queries (also `ask QUESTION...`) |
@@ -250,10 +360,16 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
   `disk_forecast`, `thermal`, `logs`). The arguments are checked against whitelists and ranges; the queries are constants
   with bound parameters on a read-only database connection; at most three per question, each aborted after two seconds.
   The model never sees SQL and never writes any.
-- **No command is ever run** and nothing is changed by the advisor or by the screen. The commands the screen shows are for you.
-- **Rate limits.** One generation at a time, at most one waiting, ten seconds between two. A page never starts one: the
-  web and console views use a stored answer.
-- **The server is not privileged.** It runs as its own account (Linux `nuc-console-ai`, macOS `_nuc-console-ai`, Windows
+- **No command is ever run** by the advisor: it has no tool that does, and what it suggests is for you to check and run. The page and the screen change
+  one thing, the model's own files and server ([From the browser and the console](#from-the-browser-and-the-console)); they never write `config.ini`.
+- **The buttons.** The web page's forms are guarded as [WEB.md](WEB.md#the-ai-pages-buttons) says: the same access as viewing (everyone who can open the page can press
+  them: `[ai] web_actions = no` locks them), a CSRF token, Origin / Referer / Fetch-Metadata, 4 KB, model ids from the catalog, `form-action 'self'` on that page only. A
+  question reaches the model through `advisor.ask` like `nuc-console-ask`'s.
+- **web.json** is read only from a trusted file (root's or the reader's, nobody else may write it), never by root, and its endpoint is only ever this machine.
+- **Rate limits.** One generation at a time, at most one waiting, ten seconds between two. A page never starts one by itself: only a click on *Ask* or *advice now* does
+  (they show the "busy" answer when asked too soon); the stored answer is what the screens draw.
+- **The server is not privileged.** The one a button starts is a child of the web view (or the console): the same unprivileged account, the unit's sandbox, 127.0.0.1
+  only. The one `serve --install-service` installs runs as its own account (Linux `nuc-console-ai`, macOS `_nuc-console-ai`, Windows
   LOCAL SERVICE) at low priority; the systemd unit adds a sandbox (no new privileges, read-only system, no home, private
   `/tmp`, kernel and control groups protected, no capabilities, only IP and Unix sockets) and a memory cap of 1.5 times the model's
   expected memory. With a GPU the unit has to let the service see the device nodes (`PrivateDevices=no`, the `render` and `video`
@@ -262,23 +378,23 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
   server relies on the account and the unit alone: `[ai] gpu = no` keeps it on the CPU.
 - **Downloads are pinned.** HTTPS only (a redirect to `http://` is refused), size and SHA-256 written in the code, a model
   from a Hugging Face *commit* and never from a branch, written to `<name>.part` and renamed only after the check; a mismatch
-  deletes the file. No automatic update: a new runtime or model is a new pin in a new release. `setup` (and `pins`, for
-  maintainers) is the only code in the project that connects outward (huggingface.co and github.com), and only when you run it.
+  deletes the file. No automatic update: a new runtime or model is a new pin in a new release. `setup`, the buttons that do the same (and `pins`, for
+  maintainers) are the only code in the project that connects outward (huggingface.co and github.com), and only when you ask: a click, or the command.
 
 ## Files and disk
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Runtime and models | `/var/lib/nuc-console/ai` (run as root); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (root); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` |
+| Runtime and models | `/var/lib/nuc-console/ai` (installed: owned by `nuc-console`, which the web view and the console run as; also what `sudo nuc-console-ai` uses); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (installed: owned by `_nuc-console`; root's too); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it) |
 | Service | unit `nuc-console-ai.service`, user `nuc-console-ai`, state `/var/lib/nuc-console-ai`; log: `journalctl -u nuc-console-ai` | `/Library/LaunchDaemons/com.nuc-console.ai.plist`, user `_nuc-console-ai`; log `/var/log/nuc-console/ai.log` | scheduled task `\nuc-console\ai` (LOCAL SERVICE); log `%ProgramData%\nuc-console\logs\ai.log` |
 | Shared advice (what the screens show) | `/var/lib/nuc-console/advice.json` | same | `%ProgramData%\nuc-console\lib\advice.json` |
 | Advice cache | `advisor-cache.json` in `~/.cache/nuc-console` (`$XDG_CACHE_HOME`) of whoever asked | `~/Library/Caches/nuc-console` | `%LOCALAPPDATA%\nuc-console` |
 
 The screens and `models` and `status` read the system-wide folder when it holds `verified.json` (what `sudo setup` leaves there),
 else your own. `NUC_CONSOLE_HOME=<dir>` moves the first row to `<dir>/ai` (and the advice cache to `<dir>`) for the screens and for
-`python3 aisetup.py`; the `nuc-console-ai` command ignores it, use `--dir DIR` there (the folder itself, not `DIR/ai`). Inside it:
-`runtime/` (llamafile, tens to a few hundred MB depending on the version), `models/` (the sizes of the table), `verified.json` (what
-was checked, so that `status` does not hash 2 GB each time). `setup` needs the missing files plus 300 MB free and stops, naming the
+`python3 aisetup.py`; the `nuc-console-ai` command ignores it, use `--dir DIR` there (the folder itself, not `DIR/ai`); a portable run sets it to `data`, so the
+folder is `data/ai`. Inside it: `runtime/` (llamafile, tens to a few hundred MB depending on the version), `models/` (the sizes of the table), `verified.json` (what
+was checked, so that `status` does not hash 2 GB each time), and what the page and the screen add: `web.json`, `job.lock`, `home/` ([above](#from-the-browser-and-the-console)). `setup` needs the missing files plus 300 MB free and stops, naming the
 folder, if there is not enough. At its first start llamafile unpacks a small loader into the service account's home.
 
 The advice cache keeps up to 20 answers for 7 days and belongs to the account that asked. What the screens show is the shared
@@ -323,3 +439,9 @@ when its file has the pinned size and hash.
 | A new `[ai] model`, or `[ai] gpu`, changed nothing in the running server | an installed service keeps what it was installed with: `sudo nuc-console-ai serve --install-service` again |
 | HEALTH shows "no advice yet" | the screens show the shared answer of the last 36 hours: `sudo nuc-console-ask advise`, or `[ai] daily = yes`: [HEALTH.md](HEALTH.md#advice-optional) |
 | macOS: the server does not start the first time | `xcode-select --install` (Apple silicon needs the Command Line Tools once) |
+| The page or the screen says `locked by config.ini` | `[ai] web_actions = no`: set it to `yes` and restart the web view and the console (config is read when they start) |
+| A job says `another nuc-console process is downloading ...` | one job at a time, and the web view and the console share the folder: they wait for each other (`job.lock`, which clears itself 90 s after a process died) |
+| A job says `this account may not write to ...` | the folder is root's (made by an older `sudo nuc-console-ai setup`): `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS: `_nuc-console`), or run the command it names |
+| `ERROR`, or `the model server stopped at once` | the exit status and the server's last lines are shown: usually not enough memory, a port, or (macOS) the Command Line Tools; `nuc-console-ai serve` in a terminal shows more |
+| `ON`, but it runs on the CPU although the machine has a GPU (Linux) | the web view's unit cannot open the GPU devices (`PrivateDevices=yes`); use `sudo nuc-console-ai serve --install-service` for a GPU ([GPU support](#gpu-support)) |
+| The download stops at `Tunnel connection failed` or HTTP 403 | this network blocks `huggingface.co` or `github.com` (a proxy, a firewall): the partial file is kept and resumed when the network lets it through |

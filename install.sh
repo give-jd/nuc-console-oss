@@ -100,6 +100,9 @@ install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
 install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
 install -d /var/lib/nuc-console
+# the AI folder (docs/AI.md): the AI page of the web view and the AI screen of the console download the local model into it, as the user nuc-console
+# (the units' ReadWritePaths). Empty until you choose a model there; what an earlier `sudo nuc-console-ai setup` put in it stays root's, and stays usable.
+install -d -o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai /var/lib/nuc-console/ai/runtime /var/lib/nuc-console/ai/models
 install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service
@@ -114,7 +117,7 @@ systemctl mask --now "getty@tty$VT.service"
 # wait for a net.json written AFTER the collector restart: an older one would be stale
 for _ in $(seq 1 60); do [ "$(stat -c %Y /run/nuc-console/net.json 2>/dev/null || echo 0)" -ge "$t0" ] && break; sleep 1; done
 "$PY" "$DEST/render.py" --accept --if-missing || echo "warning: baseline not created (collector not ready yet): run sudo nuc-console-accept"
-# optional read-only web view: only if [web] enabled = yes in config.ini (never opens a port otherwise)
+# optional web view (read-only; only the AI page has buttons): only if [web] enabled = yes in config.ini (never opens a port otherwise)
 if "$PY" "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
 else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
 # optional Telegram notifier (outbound HTTPS only): always installed, it idles (exit 0) until [telegram] enabled = yes and paired

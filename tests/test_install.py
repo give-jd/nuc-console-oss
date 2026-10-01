@@ -90,10 +90,91 @@ class DownloadsAreKept(unittest.TestCase):
 
     def test_windows_cache_has_the_acl_of_the_data_folder(self):
         src = read_text(INSTALL_WINDOWS)
-        create = src.index('foreach ($d in @($Data, "$Data\\run", "$Data\\lib", "$Data\\logs", $Cache))')
+        create = src.index('foreach ($d in @($Data, "$Data\\run", "$Data\\lib", "$Data\\logs", "$Data\\ai", $Cache))')
         acl = src.index("& icacls.exe $Data /inheritance:r")
         self.assertLess(create, acl)  # created inside $Data before the ACL: it inherits "only SYSTEM and Administrators write"
         self.assertLess(acl, src.index("Get-PythonZip  #"))  # and the ACL is set before anything is downloaded into it
+
+
+SYSTEMD = os.path.join(os.path.dirname(__file__), "..", "systemd")
+
+
+def unit_lines(name):
+    with open(os.path.join(SYSTEMD, name), encoding="utf-8") as f:
+        return [ln.strip() for ln in f.read().splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+
+class AiFolderIsTheWebAccounts(unittest.TestCase):
+    """The AI page and the AI screen download the local model into the AI folder as the account of the web view and of the console: the
+    installers give them that folder (and no other place), on each system, and loosen nothing else (docs/AI.md, docs/INSTALL.md)."""
+
+    def test_linux_the_folder_and_its_two_subfolders_belong_to_the_user_of_the_units(self):
+        src = read_text(INSTALL)
+        self.assertIn("install -d -o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai /var/lib/nuc-console/ai/runtime /var/lib/nuc-console/ai/models", src)
+        self.assertLess(src.index("useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console"), src.index("-o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai"),
+                        "the user exists before the folder is given to it")
+        at = src.index("-o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai")
+        self.assertLess(at, src.index("systemctl daemon-reload", at), "before the units are read again and the services restarted")
+        self.assertNotRegex(src, r"chown -R .*/var/lib/nuc-console\b(?!/ai)", "nothing else of the state folder is handed over")
+        self.assertNotIn("chmod -R", src)
+
+    def test_linux_both_units_may_write_the_ai_folder_and_the_web_unit_keeps_its_sandbox(self):
+        web, tty = unit_lines("nuc-console-web.service"), unit_lines("nuc-console.service")
+        for name, lines in (("web", web), ("tty", tty)):
+            self.assertEqual([x for x in lines if x.startswith("ReadWritePaths=")], ["ReadWritePaths=-/var/lib/nuc-console/ai"], name)
+            for kept in ("NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "User=nuc-console"):
+                self.assertIn(kept, lines, "%s: %s stays" % (name, kept))
+        for kept in ("ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes", "CapabilityBoundingSet=", "PrivateDevices=yes",
+                     "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK", "LockPersonality=yes", "ProtectClock=yes", "ProtectHostname=yes",
+                     "RestrictNamespaces=yes", "RestrictSUIDSGID=yes"):
+            self.assertIn(kept, web, "the web unit keeps %s" % kept)
+
+    def test_linux_the_web_unit_has_room_for_the_model_server_it_starts_and_still_a_cap(self):
+        web = unit_lines("nuc-console-web.service")
+        self.assertIn("MemoryMax=85%", web, "the model server is a child, in this unit's cgroup: a share of the machine, the same as the page's own 'too big'")
+        self.assertIn("TasksMax=512", web)
+        self.assertFalse([x for x in web if x.startswith("MemoryMax=") and x.endswith("M")], "no fixed 256M any more: a model does not fit in it")
+        import re as _re
+        self.assertEqual(_re.search(r"RAM_MAX_FRAC = ([0-9.]+)", read_text(os.path.join(os.path.dirname(INSTALL), "src", "aihw.py"))).group(1), "0.85",
+                         "85% is aihw's line between slow and too big")
+
+    @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze is not installed")
+    def test_linux_systemd_accepts_the_units(self):
+        for name in ("nuc-console-web.service", "nuc-console.service"):
+            text = read_text(os.path.join(SYSTEMD, name))
+            text = re.sub(r"^ExecStart=.*$", "ExecStart=/bin/true", text, flags=re.M)
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, name)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                r = subprocess.run(["systemd-analyze", "verify", "--man=no", path], capture_output=True, text=True)
+            bad = [ln for ln in (r.stdout + r.stderr).splitlines()  # only about this unit: the runner's own units have their warnings (snapd.service: RestartMode)
+                   if name in ln and any(k in ln for k in ("ReadWritePaths", "MemoryMax", "TasksMax", "Unknown key", "Unknown section", "Unknown lvalue",
+                                                            "Invalid", "Failed to parse"))]
+            self.assertEqual(bad, [], name)
+
+    def test_macos_the_web_users_folder_is_made_after_the_user_and_owned_by_it(self):
+        src = read_text(INSTALL_MACOS)
+        self.assertIn('AI_PARENT="/Library/Application Support/nuc-console"', src)
+        self.assertIn('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI" "$AI/runtime" "$AI/models"', src)
+        self.assertGreater(src.index('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI"'), src.index('dscl . -create "/Users/$SVC_USER" Password'))
+        self.assertLess(src.index('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI"'), src.index('fill launchd/com.nuc-console.web.plist'))
+        self.assertLess(src.index('install -d -m 0755 "$AI_PARENT"'), src.index('install -d -m 0755 -o "$SVC_USER"'), "the folder above it is root's")
+        self.assertNotIn('chown -R', src.split("# ---- 3. collector and web view")[1].split("# ---- 4.")[0].replace('chown "$SVC_USER:$SVC_USER" "$LOG/web.log"', ""))
+
+    def test_windows_local_service_may_write_the_ai_folder_and_nothing_else_new(self):
+        src = read_text(INSTALL_WINDOWS)
+        self.assertIn("& icacls.exe \"$Data\\ai\" /grant '*S-1-5-19:(OI)(CI)M'", src)
+        grants = [ln for ln in src.splitlines() if "icacls.exe" in ln and "$Data" in ln and "'*S-1-5-19:(OI)(CI)M'" in ln]
+        self.assertEqual(len(grants), 2, "logs and ai are the only folders LOCAL SERVICE may modify (the others it only reads)")
+        self.assertTrue(all(("$Data\\logs" in ln) or ("$Data\\ai" in ln) for ln in grants), grants)
+        self.assertIn("& icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX'", src,
+                      "the data folder's own ACL is as it was: users read, LOCAL SERVICE reads")
+        self.assertLess(src.index("& icacls.exe $Data /inheritance:r"), src.index("& icacls.exe \"$Data\\ai\" /grant"))
+
+    def test_every_installer_says_the_web_view_has_buttons_now(self):
+        for path in (INSTALL, INSTALL_MACOS, INSTALL_WINDOWS):
+            self.assertNotIn("read-only web view", read_text(path), path)
 
 
 def powershell():

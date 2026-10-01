@@ -20,7 +20,14 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
     `systemctl show` for what depends on a failed unit.
   - `health`: it keeps a history database, see below.
   - `cpu`, macOS and Windows only: it reads the CPU temperature sensors (every 10 s on macOS, every 30 s on Windows).
-  - `ai` is read-only: the unprivileged screen reads the RAM and the GPU, and downloads or starts nothing.
+  - `ai`: the unprivileged screen reads the RAM and the GPU. Nothing is downloaded or started until *you* choose a model on the AI page or
+    the AI screen (or run `nuc-console-ai setup`).
+- **The AI page of the web view and the AI screen can act** (choose a model, AI on / off, delete, chat), unless `[ai] web_actions = no`
+  (default `yes`): see the AI folder below, Security, and [docs/AI.md](docs/AI.md#from-the-browser-and-the-console). The Linux units change:
+  `/var/lib/nuc-console/ai` is `nuc-console`'s and both units may write there (`ReadWritePaths=-`); the web unit's limits go from
+  256M / 64 tasks to `MemoryMax=85%` / `TasksMax=512`, because the model server it starts is a child in its cgroup (the rest of its
+  sandbox is unchanged). Re-run the installer; an AI folder that `sudo nuc-console-ai setup` filled earlier stays root's and usable
+  (`sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` lets the page delete it too).
 - New files and permissions:
   - `history.db` (SQLite, with `-wal` and `-shm` beside it while the collector runs) in `/var/lib/nuc-console` (Windows:
     `%ProgramData%\nuc-console\lib`). Written only by the collector; **mode 0644, readable by every local user, like the other state
@@ -31,6 +38,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   - Downloads are kept for the next time: the installers' Python (Windows `%ProgramData%\nuc-console\cache`, macOS
     `/Library/Caches/nuc-console`) and the updater's archive. The AI runtime and models, if you download any, are large and are kept when
     you uninstall (`nuc-console-ai remove` deletes them).
+  - The AI folder (the runtime and the models, 0.4 to 19 GB) is the one the page shows: Linux `/var/lib/nuc-console/ai` (owner `nuc-console`),
+    macOS `/Library/Application Support/nuc-console/ai` (`_nuc-console`), Windows `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it,
+    nothing else of the data), a portable run `data/ai`. It holds `web.json` (the page's choices: on/off, model, endpoint; 0644) and
+    `job.lock`. It stays when you uninstall.
   - A portable run writes only to the `data/` folder next to `run.sh` / `run.cmd`.
 - `[web] refresh_seconds` is still read while `[dashboard] refresh_seconds` is absent; use the latter.
 - `install.sh` now clears `/opt/nuc-console/*.py` before it copies every module: do not keep files of your own there.
@@ -101,8 +112,21 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   cannot read is listed, never guessed. Each model of a short list of open models (permissive licences) gets a verdict and an estimated
   speed (tokens per second, labelled as an estimate): **fits on the GPU**, **GPU+CPU** (some layers on the GPU, the rest in RAM),
   **fits in RAM**, **slows the PC** (it fits, but leaves little room) or **too big**. One model is recommended. The screen shows the exact
-  commands to install, use or remove a model; the web page stays read-only and runs none of them. It shows with `[ai] enabled = no`,
+  commands to install, use or remove a model. It shows with `[ai] enabled = no`,
   because that is where you choose; `[features] ai = no` removes it and the hardware is never probed.
+- **From the browser and the console, with no terminal.** You only choose a model: **use this model** (console `Enter`, `u`) downloads the
+  runtime and the model with a progress bar (pinned size and SHA-256, resumed, never fetched twice, disk space checked first), starts the
+  model server on `127.0.0.1` and turns the advisor on. A clear **AI on / off** switch at the top of the page (console `e`) starts the
+  server with the chosen model (none chosen: the recommended one, after a confirmation that names it and its size) or stops it and turns
+  the advisor off; the state is always visible (off, downloading 39%, starting, loading, on, error) and a **Cancel** stops a job. A **chat**
+  sits right below it, usable as soon as the server answers, with **advice now** for the last day, week or month. Deleting a model, or
+  everything, is secondary and asks first. The models folder, what is downloaded and what is free on that disk are shown on the page, on
+  the screen and by `nuc-console-ai models` / `status`. The page needs no script: forms and a 2 s refresh while a job runs. `render.py`
+  and `web.py --demo` simulate every action, so you can try it with nothing downloaded or started.
+- `[ai] web_actions` (`yes`; `no` makes the page and the screen show the command to run instead). What the page chooses lives in
+  `<AI folder>/web.json` and is laid over `[ai]` for the web view, the screens and the advisor; `config.ini` is never written, and root
+  (the daily digest, `sudo nuc-console-ask`) never reads `web.json`. `serve --install-service` checks the runtime's and the model's SHA-256
+  again before installing a service that runs them.
 - `nuc-console-ai`: `models` (hardware and a verdict per model), `setup [MODEL ...]` (downloads the runtime and the models you name, or
   the recommended one, once; size and SHA-256 checked; refuses a *too big* model unless `--force`, warns on *slows the PC*), `use MODEL`,
   `serve` (on `127.0.0.1`, GPU layers chosen from the verdict), `status`, `remove`. Windows: from an administrator prompt.
@@ -158,6 +182,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
 - The root collector looks inside every running container for the MAP (see the upgrade notes); the state files carry an `os` field.
 - `install.sh` copies every module of `src/` and removes the ones no longer shipped.
+- The Linux web unit (`nuc-console-web.service`) and the console unit may write `/var/lib/nuc-console/ai` and nothing else new; the web unit's
+  `MemoryMax` and `TasksMax` are 85% and 512 (see the upgrade notes).
 - `install.sh` (Linux) uses the system's `/usr/bin/python3` when it is 3.8 or newer, else the Python of the release archive, which it copies to
   `/opt/nuc-console/python` (root-owned) and points the units and the commands at; from a clone with no usable `python3` it now stops with a
   message instead of installing units that cannot start. `install-macos.sh` uses the archive's Python (copied to `/opt/nuc-console/python`)
@@ -170,6 +196,14 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - **The web view has one script now.** Every page is still GET only, with no JavaScript and `default-src 'none'`, except the MAP's graph
   view: one inline script whose SHA-256 is in that page's Content-Security-Policy. It builds no markup, opens no connection and loads
   nothing; `tests/test_graphjs.py` rejects changes that would let it. The MAP pages are bounded (unknown keys dropped, a capped page cache).
+- **The web view is no longer purely read-only: the AI page has buttons.** What they can do, and nothing else: download the pinned runtime and
+  models into the AI folder, start the pinned runtime on `127.0.0.1` as a child of the web view and stop it, write `web.json`, delete those
+  files, and relay a question to the local model. They need the same access as viewing (with `tailscale serve` that is your tailnet, with a
+  token its holders, on macOS and Windows every local user: `[ai] web_actions = no` is the lock). Protections: a per-process CSRF token
+  (constant-time compare), `Origin`/`Referer`/`Sec-Fetch-Site` same-origin checks, form-encoded bodies of 4 KB at most, a model id must be in
+  the catalog (nothing from a request reaches a path, a command line or a shell), Post/Redirect/Get, `form-action 'self'` in the CSP of
+  that one page and `'none'` everywhere else, still no JavaScript there. The web account can replace what is in the AI folder, which is why
+  `serve --install-service` hashes it again. Details: [SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md#the-ai-pages-buttons).
 - macOS and Windows run the web view by default, bound to `127.0.0.1` with no token: not reachable from the network, but readable by any
   local user or program, like the state files. `[display] mode = none` with `[web] enabled = no` runs none.
 - macOS and Windows collector: Apple's tools run as root only from protected system folders; third-party tools (`docker`, `tailscale`,

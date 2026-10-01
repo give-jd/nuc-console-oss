@@ -13,10 +13,11 @@
        never downloaded twice: it is taken from python\ next to this script (the release ZIP ships it there), or from
        the cache %ProgramData%\nuc-console\cache; only if neither has it (with the pinned SHA-256) it is downloaded
        from python.org into that cache, where the next install or update finds it;
-    2. creates %ProgramData%\nuc-console (config.ini only if missing, run\, lib\, logs\), writable only by SYSTEM and
-       Administrators, readable by users;
+    2. creates %ProgramData%\nuc-console (config.ini only if missing, run\, lib\, logs\, ai\), writable only by SYSTEM and
+       Administrators, readable by users; the web view's account (LOCAL SERVICE) may also write in logs\ and in ai\ (where the AI page
+       downloads the optional local model);
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
-       and the read-only web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser;
+       and the web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser (read-only; only the AI page has buttons);
        at every logon the dashboard opens: in a normal browser window ([display] mode = browser, the default) or full screen
        (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen); and the optional Telegram notifier (LOCAL SERVICE,
        outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md);
@@ -151,12 +152,15 @@ if ($Uninstall) {
 }
 
 # ---- 1. data folder: config, state, logs, download cache -----------------------------------------------------------------
-foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs", $Cache)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs", "$Data\ai", $Cache)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 # writable only by SYSTEM and Administrators (a user must not be able to fake the state, edit what SYSTEM reads or swap
 # a cached download); readable by everyone who runs the dashboard; LOCAL SERVICE (web view) may write its log
 & icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
 & icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+# the AI folder (docs/AI.md): the AI page downloads the local model into it as LOCAL SERVICE, which may write there and nowhere else under $Data
+# (the rest of $Data keeps what it gives everyone). What `nuc-console-ai setup` put in it earlier stays the administrators' and stays usable.
+& icacls.exe "$Data\ai" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
 # the Telegram notifier runs as NETWORK SERVICE, not as the web view's LOCAL SERVICE (the web view may be reachable on the LAN):
 # notify\ holds status.json only (no secret: readable by the dashboard and its users); notify\private\ holds the bot token
 # and the paired chat: SYSTEM, Administrators and NETWORK SERVICE only
@@ -230,7 +234,7 @@ Start-ScheduledTask -TaskPath $TaskPath -TaskName 'collector'
 & $python -B (Join-Path $App 'web.py') --enabled
 $web = ($LASTEXITCODE -eq 0) -or ($mode -ne 'none')
 if ($web) {
-    Register-Service 'web' 'web.py' 'S-1-5-19' 'web.log' 'nuc-console read-only web view (LOCAL SERVICE)' '--local'
+    Register-Service 'web' 'web.py' 'S-1-5-19' 'web.log' 'nuc-console web view (LOCAL SERVICE): a read-only dashboard, and the AI page has buttons' '--local'
     Start-ScheduledTask -TaskPath $TaskPath -TaskName 'web'
     Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
 } elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }

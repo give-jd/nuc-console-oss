@@ -22,6 +22,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import advisor  # noqa: E402
+import aiweb  # noqa: E402
 import demo  # noqa: E402
 import render  # noqa: E402
 
@@ -101,6 +102,7 @@ class AiCase(unittest.TestCase):
         self.saved_cache, self.saved_probe, self.saved_health = dict(render._AI), dict(render._AIPROBE), dict(render._HEALTH)
         render._AI.clear()
         render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
+        self.saved_engine = aiweb.set_engine(None)                              # the demo's engine (in memory) is made when a screen needs it, fresh for each test
         self.tmp = tempfile.TemporaryDirectory()
         self.now = NOW
         self.on_sleep = self.pass_time
@@ -130,6 +132,7 @@ class AiCase(unittest.TestCase):
         render._HEALTH.clear()
         render._HEALTH.update(self.saved_health)
         render._ADVICE.clear()
+        aiweb.set_engine(self.saved_engine)
         self.tmp.cleanup()
 
     def pass_time(self, sec):
@@ -289,12 +292,34 @@ class Navigation(AiCase):
             self.assertEqual(render.ai_key(av, key, rows), "back")
         self.assertEqual((av.idx, av.details), before)
 
+    def test_the_keys_that_act_are_named_for_ai_do_and_move_nothing(self):
+        av, rows = self.view()
+        self.press(av, rows, ["down"])
+        before = (av.idx, av.cur, av.details)
+        self.assertEqual(self.press(av, rows, ["e", "u", "x", "X", "c"]), ["toggle", "use", "delete", "delete-all", "cancel"])
+        self.assertEqual((av.idx, av.cur, av.details), before)
+        self.assertEqual(render.AI_ACTION_KEYS, {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"})
+
+    def test_a_question_that_waits_takes_y_and_any_other_key_is_no(self):
+        av, rows = self.view()
+        av.confirm = ("delete", "m-gpu", "Delete the files of Qwen3? ")
+        self.assertEqual(render.ai_key(av, "y", rows), "yes")
+        self.assertEqual(av.confirm, ("delete", "m-gpu", "Delete the files of Qwen3? "), "ai_do answers it")
+        for key in ("n", "esc", "q", "a", "x", "enter", "down", "z"):
+            av.confirm = ("delete", "m-gpu", "?")
+            before = (av.idx, av.details)
+            self.assertEqual(render.ai_key(av, key, rows), "", key)
+            self.assertIsNone(av.confirm, key)
+            self.assertEqual((av.idx, av.details), before, "the question is not a key press for the list")
+        av.confirm = ("on", "m-ram", "?")
+        self.assertEqual(render.ai_key(av, "Y", rows), "yes")
+
     def test_other_keys_do_nothing(self):
         av, rows = self.view()
         self.press(av, rows, ["down"])
         before = (av.idx, av.cur, av.details)
-        self.assertEqual(self.press(av, rows, ["x", "tab", "btab", "left", "right", "1", "7", "c", "h", "m", "d", "w", "z"]), [""] * 13)
-        self.assertEqual((av.idx, av.cur, av.details), before)                                         # h, c, m, d, w: other screens' keys
+        self.assertEqual(self.press(av, rows, ["tab", "btab", "left", "right", "1", "7", "h", "m", "d", "w", "z"]), [""] * 11)
+        self.assertEqual((av.idx, av.cur, av.details), before)                                         # h, m, d, w: other screens' keys
         av2, none = self.view({})
         self.assertEqual(self.press(av2, none, ["up", "down", "pgdn", "pgup", "home", "end", "enter", "enter"]), [""] * 8)
         self.assertEqual((av2.idx, av2.cur), (0, None))
@@ -518,7 +543,7 @@ class Once(AiCase):
                      "licence", "Apache-2.0", "state", "✓ installed · ● active: [ai] model", "remove", "sudo nuc-console-ai remove qwen3-4b"):
             self.assertIn(word, pane)
         self.assertNotIn(" install ", pane)                                                              # installed: nothing to install
-        self.assertNotIn(" use ", pane)                                                                  # and active: nothing to switch to
+        self.assertNotIn("sudo nuc-console-ai use", pane)                                                # and active: nothing to switch to
         s, lines = self.screen(["--select", "gpt-oss", "--details"], 200, 50)                            # wide: beside the list
         row = next(x for x in lines if "── DETAILS" in x)
         self.assertGreater(row.index("── DETAILS"), 100)
@@ -541,8 +566,8 @@ class Once(AiCase):
             return "\n".join(self.screen(["--select", mid, "--details"], cols, 50)[1])
         txt = pane(None, "m-gpu")                                                                        # not installed, pinned: install
         self.assertIn("install  sudo nuc-console-ai setup m-gpu", txt)
-        self.assertNotIn(" use ", txt)
-        self.assertNotIn(" remove ", txt)
+        self.assertNotIn("sudo nuc-console-ai use", txt)
+        self.assertNotIn("sudo nuc-console-ai remove", txt)
         self.assertIn("state    ★ recommended for this machine", txt)
         txt = pane(lambda c: c["models"][0].update(installed=True), "m-gpu")                             # installed, not active: use and remove
         self.assertNotIn("install  ", txt)
@@ -640,15 +665,15 @@ class Once(AiCase):
     def test_the_status_of_each_demo_machine(self):
         s, lines = self.screen([], 200, 50)
         txt = "\n".join(lines)
-        self.assertIn("advisor   ✔ on  ([ai] enabled = yes)", txt)
-        self.assertIn("endpoint  http://127.0.0.1:11434/v1", txt)
+        self.assertIn("advisor   ✔ on  (turned on from the AI page or screen)", txt)
+        self.assertIn("endpoint  http://127.0.0.1:8080/v1", txt, "the server this machine runs: where the advisor asks")
         self.assertIn("server    ✔ answering · 1 model: qwen3-4b", txt)
         self.assertIn("model     ● qwen3-4b  in the catalog", txt)
         self.assertIn("runtime   ✔ installed (0.10.6)", txt)
-        self.assertIn("files     /var/lib/nuc-console-ai", txt)
+        self.assertIn("files     /var/lib/nuc-console/ai", txt)
         render.DEMO_OS = "windows"
         txt = "\n".join(self.screen([], 200, 50)[1])
-        self.assertIn("advisor   · off  ([ai] enabled = no in config.ini)", txt)
+        self.assertIn("advisor   · off  (off: the AI switch turns it on)", txt)
         self.assertIn("server    · not asked while the advisor is off", txt)
         self.assertIn("model     · none chosen ([ai] model is empty)", txt)
         self.assertIn("runtime   ! not installed: setup downloads it", txt)
@@ -970,6 +995,9 @@ class MainLoop(AiCase):
             if not todo:
                 raise Stop()
             x = todo.pop(0)
+            if callable(x):          # something done between two keys: let the engine's job end, say
+                x()
+                return []
             if isinstance(x, tuple):
                 self.now += x[0]
                 x = x[1]
@@ -1019,6 +1047,90 @@ class MainLoop(AiCase):
         self.assertIn("Granite 3.3 8B", "\n".join(frames[4]))
         self.assertEqual(self.at(frames[6]), (1, 12))                                    # Home
         self.assertEqual(restored, [["attrs", 5]])                                       # the terminal's settings are put back
+
+    # ---- the keys that act ------------------------------------------------------------------------------------------------------------
+
+    def engine(self):
+        eng = aiweb.configure(demo=True)
+        eng.demo_step = 0.0
+        return eng
+
+    def test_e_turns_the_ai_off_and_on_again_with_the_same_model_and_the_screen_says_what_it_is_doing(self):
+        eng = self.engine()
+        frames, _ = self.run_main([b"a", b"e", b"e", lambda: eng.wait(30), b"\x1b[B", b"\x1b"])
+        ai = [f for f in frames if self.is_ai(f)]
+        text = lambda f: "\n".join(f)  # noqa: E731
+        self.assertIn("● ON", text(ai[0]))
+        self.assertIn("on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1", text(ai[0]))
+        self.assertIn("e: on/off  u: use  x: del", ai[0][-1])                         # the keys are in the footer (in short words: it is 80 columns wide)
+        self.assertIn("○ OFF", text(ai[1]), "e: off")
+        self.assertIn("AI is off", text(ai[1]))
+        self.assertTrue("◐ WORKING" in text(ai[2]) or "● ON" in text(ai[2]), "e again: it is on its way (or there already)")
+        self.assertIn("● ON", text(ai[3]))
+        self.assertIn("qwen3-4b is in use", text(ai[3]))
+        self.assertTrue(eng.snapshot()["server"]["running"])
+
+    def test_u_uses_the_selected_model_downloads_it_first_and_the_screen_shows_the_progress(self):
+        eng = self.engine()
+        seen = []
+        eng.progress_hook = lambda job: seen.append(job["pct"] if "pct" in job else job["done"] * 100 // job["total"])
+        frames, _ = self.run_main([b"a", b"\x1b[B", b"u", lambda: eng.wait(30), b"\x1b[B", b"\x1b"])
+        ai = [f for f in frames if self.is_ai(f)]
+        self.assertEqual(self.at(ai[1]), (4, 12))
+        self.assertTrue(seen and seen[-1] == 100, "it was downloaded, with progress")
+        self.assertIn("● ON", "\n".join(ai[3]))
+        self.assertIn("is in use", "\n".join(ai[3]))
+        self.assertEqual(eng.snapshot()["server"]["model"], next(m["id"] for m in render.ai_rows(eng.demo_catalog(None)) if "Qwen3 14B" in m["name"]))
+
+    def test_x_asks_first_and_y_deletes_any_other_key_does_not(self):
+        eng = self.engine()
+        frames, _ = self.run_main([b"a", b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B", b"x", b"n", b"x", b"y", lambda: eng.wait(30), b"\x1b[B", b"\x1b"])
+        ai = [f for f in frames if self.is_ai(f)]
+        ask = next(f for f in ai if "Delete the files of" in f[-1])
+        self.assertRegex(ask[-1], r"Delete the files of Qwen3 4B \(2\.4 GB\)\?  y: yes   any other key: no")
+        self.assertIn("m-", "".join(["m-"]), "")
+        after_n = ai[ai.index(ask) + 1]
+        self.assertNotIn("Delete the files of", after_n[-1], "n: not asked any more")
+        self.assertIn("qwen3-4b", eng.demo_catalog(None)["active"] or "qwen3-4b")
+        self.assertNotIn("qwen3-4b", [m["id"] for m in eng.demo_catalog(None)["models"] if m["installed"]], "y: deleted (in the demo's memory)")
+        self.assertIn("deleted", "\n".join(ai[-1]) + "\n".join(ai[-2]))
+
+    def test_X_asks_about_everything_and_names_the_size(self):
+        self.engine()
+        frames, _ = self.run_main([b"a", b"X", b"\x1b[B", b"\x1b"])
+        ai = [f for f in frames if self.is_ai(f)]
+        self.assertRegex(ai[1][-1], r"Delete the runtime and every downloaded model \(\d+\.\d GB\)\?  \[y/n\]", "80 columns: short")
+        self.assertNotIn("Delete the runtime", ai[2][-1])
+        wide, _ = self.run_main([b"a", b"X", b"\x1b"], cols=120)
+        self.assertRegex([f for f in wide if self.is_ai(f)][1][-1], r"every downloaded model \(4\.0 GB\)\?  y: yes   any other key: no")
+
+    def test_c_cancels_and_says_when_there_is_nothing_to_cancel(self):
+        self.engine()
+        frames, _ = self.run_main([b"a", b"c", b"\x1b"])
+        ai = [f for f in frames if self.is_ai(f)]
+        self.assertIn("nothing to cancel", "\n".join(ai[1]))
+
+    def test_locked_by_config_ini_the_keys_do_nothing_say_so_and_leave_the_footer(self):
+        eng = self.engine()
+        render.CFG["ai"]["web_actions"] = False
+        frames, _ = self.run_main([b"a", b"e", b"u", b"x", b"\x1b"], rows=40)
+        ai = [f for f in frames if self.is_ai(f)]
+        self.assertIn("locked by config.ini ([ai] web_actions = no): this screen only shows", "\n".join(ai[0]))
+        for f in ai:
+            self.assertNotIn("e: ", f[-1].replace("Enter: ", ""), "no action keys offered")
+        self.assertIn("locked by config.ini ([ai] web_actions = no)", "\n".join(ai[1]), "and a key says so")
+        small, _ = self.run_main([b"a", b"\x1b"])
+        self.assertIn("locked by config.ini", "\n".join([f for f in small if self.is_ai(f)][0]), "a small screen says it too")
+        tiny, _ = self.run_main([b"a", b"\x1b"], rows=14)
+        self.assertIn("[locked by config.ini]", [f for f in tiny if self.is_ai(f)][0][2], "and the smallest keeps it on the state line")
+        self.assertTrue(eng.snapshot()["switch"]["on"], "nothing changed")
+        self.assertIsNone(eng.snapshot()["job"])
+
+    def test_the_model_server_the_screen_started_ends_with_it(self):
+        calls = []
+        with mock.patch.object(aiweb, "shutdown", side_effect=lambda: calls.append(1)):
+            self.run_main([b"a", b"\x1b"])
+        self.assertEqual(calls, [1], "main() ends, on any exit, with the engine told to stop its child")
 
     def test_the_catalog_is_not_read_again_within_its_ttl_but_is_after(self):
         self.run_main([b"a", b"\x1b[B", (render.REFRESH_S, b"\x1b[B"), 5, b"\x1b[B", b"\x1b"])

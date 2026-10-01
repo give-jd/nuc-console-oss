@@ -15,6 +15,10 @@ Design rules (SECURITY.md has the threat model):
   latest "shared advice": one small file in the collector's state directory that root/Administrator writes (the daily digest of
   [ai] daily = yes, or `advise` run as root) and everyone reads; it is checked like any text from outside (see "the shared advice").
 
+- what is chosen on the AI page of the web view or on the AI screen of the console (on/off, the model, the endpoint of the server started
+  there) lives in <ai folder>/web.json, written by the unprivileged account of those two and read back only by a process that account runs
+  (or by one whose file root owns): effective_cfg() lays it over config.ini, and root never reads it ("the choices of the AI page").
+
 Command line (python advisor.py ...; bin/nuc-console-ask):  advise [--days N] [--store] | ask QUESTION... | status.
 Exit codes: 0 ok, 1 the model/server failed, 2 usage, 3 off or refused by config, 4 no history yet, 5 busy / rate limited.
 """
@@ -771,6 +775,114 @@ def shared_advice(report, now=None, path=None):
             "period": days, "stale_s": max(0, int(age))}
 
 
+# ------------------------------------------------------------------------------------------------ the choices of the AI page
+# The AI page of the web view and the AI screen of the console can turn the advisor on, choose the model and start a server. config.ini is
+# root's: those programs never write it. What they choose goes in web.json in the AI folder, written by their account (0644, atomically)
+# and read back by effective_cfg() only when the file is trusted: a regular file of at most WEB_MAX_BYTES that root or the reading account
+# owns, that nobody else may write. Root reads nothing the web account wrote: the daily digest and `nuc-console-ask` run as root keep
+# using config.ini alone. The endpoint can only be this machine (a number of the loopback), whatever [ai] allow_remote says.
+
+WEB_FILE = "web.json"
+WEB_MAX_BYTES = 4096
+WEB_ENDPOINT = re.compile(r"http://(?:127\.0\.0\.1|localhost|\[::1\]):[0-9]{1,5}(?:/[A-Za-z0-9._/-]{0,60})?")
+WEB_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
+_WEB_LOCK = threading.Lock()
+
+
+def web_state_path():
+    """<ai folder>/web.json, the folder the web page and the console screen work in (aisetup.work_dir())."""
+    import aisetup
+    return os.path.join(aisetup.work_dir(), WEB_FILE)
+
+
+def read_web_state(path=None):
+    """The valid keys of web.json: {"enabled": bool, "model": str, "endpoint": str}. {} when there is no file, it is too big, not a regular
+    file, not owned by root or by the reader, writable by others, not an object of version 1: nothing in it is trusted then. Never raises."""
+    try:
+        data = _read_json(path or web_state_path(), WEB_MAX_BYTES)
+    except Exception:  # noqa: BLE001 - a broken folder is an empty state
+        return {}
+    if not isinstance(data, dict) or not _is_int(data.get("v")) or data["v"] != 1:
+        return {}
+    out = {}
+    if isinstance(data.get("enabled"), bool):
+        out["enabled"] = data["enabled"]
+    if isinstance(data.get("model"), str) and WEB_MODEL.fullmatch(data["model"]):
+        out["model"] = data["model"]
+    if isinstance(data.get("endpoint"), str) and WEB_ENDPOINT.fullmatch(data["endpoint"]):
+        out["endpoint"] = data["endpoint"]
+    return out
+
+
+def write_web_state(change, path=None):
+    """Read, change(state), write web.json: tmp file in the same folder and os.replace, mode 0644 (the console and the web view are two
+    processes of one account, and whoever looks may read it). `change` edits the dict of read_web_state()'s keys; a value of None, or "",
+    removes a key. Raises OSError when the folder cannot be written."""
+    path = path or web_state_path()
+    with _WEB_LOCK:
+        cur = read_web_state(path)
+        change(cur)
+        out = {"v": 1}
+        for k in ("enabled", "model", "endpoint"):
+            if cur.get(k) not in (None, ""):
+                out[k] = cur[k]
+        folder = os.path.dirname(path)
+        os.makedirs(folder, mode=0o755, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=".web-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(out, f, separators=(",", ":"))
+            os.chmod(tmp, 0o644)
+            for attempt in range(20):
+                try:
+                    os.replace(tmp, path)
+                    return out
+                except PermissionError:  # Windows: a reader has the file open this very moment
+                    if not nuc_config.WINDOWS or attempt == 19:
+                        raise
+                    time.sleep(0.05)
+        except Exception:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+
+
+def web_actions_on(cfg):
+    """[ai] web_actions (default yes): no = the admin lock: the AI page and screen only show, and web.json counts for nothing."""
+    return bool(((cfg or {}).get("ai") or {}).get("web_actions", True))
+
+
+def effective_cfg(cfg, path=None):
+    """`cfg` (nuc_config.load()) with what was chosen on the AI page or screen laid over its [ai]: enabled when config.ini says yes OR the
+    page turned it on, and the model and the endpoint the page chose in place of config.ini's. [ai] web_actions = no: cfg as it is.
+    A copy; the web view, the console screens and the advisor's command all read the advisor's settings through it. Never raises."""
+    try:
+        if not web_actions_on(cfg):
+            return cfg
+        st = read_web_state(path)
+        if not st:
+            return cfg
+        ai = dict(cfg["ai"])
+        if st.get("enabled"):
+            ai["enabled"] = True
+        for k in ("model", "endpoint"):
+            if st.get(k):
+                ai[k] = st[k]
+        return dict(cfg, ai=ai)
+    except Exception:  # noqa: BLE001
+        return cfg
+
+
+def web_switch(cfg, path=None):
+    """What the on/off switch of the AI page and screen says: {"on": bool, "by": "config" (config.ini says yes: the page cannot turn it off) |
+    "web" (turned on there) | "", "locked": [ai] web_actions = no}."""
+    locked = not web_actions_on(cfg)
+    if ((cfg or {}).get("ai") or {}).get("enabled"):
+        return {"on": True, "by": "config", "locked": locked}
+    on = bool(not locked and read_web_state(path).get("enabled"))
+    return {"on": on, "by": "web" if on else "", "locked": locked}
+
+
 # --------------------------------------------------------------------------------------------------------------- advise
 
 def advise(report, cfg, cached_only=False, fresh=False):
@@ -1374,7 +1486,7 @@ def main(argv=None):
         cmd, argv = "ask", rest
     else:
         cmd = "ask"  # nuc-console-ask why is the disk filling up
-    cfg = nuc_config.load()
+    cfg = effective_cfg(nuc_config.load())  # what the AI page chose counts for the account that wrote it; root's run reads config.ini alone
     try:
         if cmd == "status":
             return _cmd_status(cfg)

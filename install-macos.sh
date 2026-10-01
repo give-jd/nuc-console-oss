@@ -11,7 +11,7 @@
 #      the collector runs as root. The package is kept in /Library/Caches/nuc-console and never downloaded twice;
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
-#   3. starts the collector as a LaunchDaemon (root) and the read-only web view as user _nuc-console, on 127.0.0.1 only
+#   3. starts the collector as a LaunchDaemon (root) and the web view (read-only; only the AI page has buttons) as user _nuc-console, on 127.0.0.1 only
 #      (as configured in [web] if enabled there): it shows the dashboard to this Mac's browser; and the optional Telegram
 #      notifier (outbound HTTPS to api.telegram.org only, idle until switched on: docs/TELEGRAM.md) as the same user;
 #   4. a LaunchAgent opens the dashboard at every desktop login, and now: [display] mode = browser (default) in a normal
@@ -31,6 +31,8 @@ LOG=/var/log/nuc-console
 LD=/Library/LaunchDaemons
 LA=/Library/LaunchAgents
 SVC_USER=_nuc-console
+AI_PARENT="/Library/Application Support/nuc-console"  # the AI runtime and models: nuc-console-ai's folder when root runs it
+AI="$AI_PARENT/ai"
 PY_VERSION=3.14.8
 PY_PKG_SHA256=507fc086c5c006ff875d344a75b4e67b8fb3c401f1bc4908c6250adb673d4907  # verified against python.org's Sigstore signature
 PY_FRAMEWORK=/Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14
@@ -208,6 +210,10 @@ WEB=no
 if "$PY" -B "$DEST/web.py" --enabled || [ "$MODE" != none ]; then WEB=yes; fi
 if [ "$WEB" = yes ]; then
     ensure_service_user
+    # the AI folder (docs/AI.md): the AI page downloads the local model into it, as this user. Empty until you choose a model there; what an earlier
+    # `sudo nuc-console-ai setup` put in it stays root's, and stays usable. Nothing else of the data folders is the web view's to write.
+    install -d -m 0755 "$AI_PARENT"
+    install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI" "$AI/runtime" "$AI/models"
     touch "$LOG/web.log" && chown "$SVC_USER:$SVC_USER" "$LOG/web.log"
     echo "$LOG/web.log  $SVC_USER:$SVC_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
     fill launchd/com.nuc-console.web.plist > "$LD/com.nuc-console.web.plist"

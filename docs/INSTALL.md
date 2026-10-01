@@ -146,7 +146,7 @@ What it does (all idempotent, re-run it to upgrade):
 1. creates the system user `nuc-console` (no shell, no home);
 2. picks the Python: `/usr/bin/python3` if it is 3.8 or newer, else the one in `python/` of the release archive (a clone has none: it then stops and
    says to install `python3`), which is copied to `/opt/nuc-console/python` (root-owned) and which the units and the commands then run;
-3. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept`, `nuc-console-update` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started);
+3. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept`, `nuc-console-update` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started) and gives the folder `/var/lib/nuc-console/ai` to the `nuc-console` account, so that the AI page and the AI screen can set a model up (step 7);
 4. writes `/etc/nuc-console/config.ini` **only if it does not exist**;
 5. starts the root collector, **masks `getty@tty<N>`** and starts the dashboard on that terminal;
 6. waits for the first fresh collector snapshot and stores the **port baseline** (only if none exists).
@@ -202,8 +202,14 @@ or `setfont Lat15-TerminusBold32x16` for a one-off test. To let the monitor slee
 
 ## 7. Optional: a local AI model
 
-The AI screen (console key `a`) already tells you which local models this machine can run: RAM, GPU and GPU memory, one verdict per
-model. To install one and let it explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules):
+The AI screen (console key `a`) and the **AI** page of the web view (`http://127.0.0.1:8787/?view=ai`, the **ai** link at the bottom) already tell
+you which local models this machine can run: RAM, GPU and GPU memory, one verdict per model. They are also where you set one up and let it
+explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules). **You only choose a model**:
+press **use this model** on the page (or `Enter` then `u` on the screen); the runtime and the model are downloaded (with a progress bar, SHA-256 checked),
+the model server is started on 127.0.0.1 and the AI is turned on. The **AI on / off** button at the top (console key `e`) starts and stops it, and
+the chat below it answers as soon as the server does. The files go to the folder the page shows (`/var/lib/nuc-console/ai`, a model is 0.4 to 19 GB).
+
+The same from a terminal (as before; `nuc-console-ai` and `nuc-console-ask` are unchanged):
 
 ```bash
 nuc-console-ai models                         # the same table in a terminal; no root (/usr/local/sbin/nuc-console-ai if your PATH lacks sbin)
@@ -213,11 +219,16 @@ sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only, on 
 nuc-console-ask advise
 ```
 
-`install.sh` itself downloads nothing and starts no model server. `setup` needs the network once and downloads only what this release
-pins: the models are pinned; the runtime's SHA-256 is still to be confirmed, and until it is `setup` stops and names it. The files go
-to `/var/lib/nuc-console/ai` (a model is 0.4 to 19 GB). To switch the installed service to another model (`sudo nuc-console-ai use
+`install.sh` itself downloads nothing and starts no model server; the buttons and `setup` need the network once and download only what this release
+pins: the models are pinned; the runtime's SHA-256 is still to be confirmed, and until it is they stop and name it. To switch the installed service to another model (`sudo nuc-console-ai use
 qwen3-4b`) or after changing `[ai] gpu`, run `sudo nuc-console-ai serve --install-service` again: the service keeps what it was installed
 with. On a machine with a GPU the unit it writes lets the service see the GPU (`PrivateDevices=no`, the `render` and `video` groups).
+
+What the installer changes for the buttons: `/var/lib/nuc-console/ai` belongs to `nuc-console` (the account of the web view and of the console), both units may
+write there (`ReadWritePaths=-/var/lib/nuc-console/ai`), and the web unit has `TasksMax=512` and `MemoryMax=85%` because the model server it starts lives in its
+cgroup and stops with it (it runs on the CPU: the web unit has no GPU access; for the GPU use `serve --install-service`). Nothing else of the web view becomes writable. To make the page and the screen read-only again, set `[ai] web_actions = no`
+in `/etc/nuc-console/config.ini` (then they show the command to run instead). A model server the buttons started stops when the web view
+or the console stops; the one `serve --install-service` installs is a separate service and stays.
 
 ## 8. Update, uninstall
 
@@ -246,8 +257,8 @@ state `/var/lib/nuc-console-ai` and, if you used `nuc-console-update`, its downl
 
 # macOS
 
-macOS has no text console to take over, so the same screen is shown in a browser, from the read-only web view that the
-installer runs on **127.0.0.1 only** (not reachable from the network). You choose how ([display] `mode`):
+macOS has no text console to take over, so the same screen is shown in a browser, from the web view that the
+installer runs on **127.0.0.1 only** (not reachable from the network; read-only, except the buttons of the AI page, see [AI.md](AI.md)). You choose how ([display] `mode`):
 
 | `NUC_CONSOLE_DISPLAY=` | |
 |---|---|
@@ -300,6 +311,8 @@ What it does (idempotent):
 The commands `nuc-console-problems`, `nuc-console-accept`, `nuc-console-ask` and `nuc-console-ai` are linked into `/usr/local/bin` and `/usr/local/sbin`
 (only when root owns that folder; otherwise run them from `/opt/nuc-console/bin`). The last two are for the optional local AI model
 ([AI.md](AI.md): Metal uses the GPU of Apple silicon; `nuc-console-ai models` (no root), `sudo nuc-console-ai setup`, `serve --install-service`); nothing is downloaded or started.
+The AI page of the web view and the AI screen set a model up with one choice (**use this model**; AI on / off; a chat): the installer makes
+`/Library/Application Support/nuc-console/ai` the property of `_nuc-console` for them, and `[ai] web_actions = no` makes them read-only again.
 
 Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is written to `config.ini`; without it the file decides).
 
@@ -341,8 +354,8 @@ It also removes the AI model service, if you installed it. `/etc/nuc-console`, `
 
 # Windows
 
-Windows has no text console to take over, so the same screen is shown in a browser, from the read-only web view that the
-installer runs on **127.0.0.1 only** (not reachable from the network). You choose how ([display] `mode`):
+Windows has no text console to take over, so the same screen is shown in a browser, from the web view that the
+installer runs on **127.0.0.1 only** (not reachable from the network; read-only, except the buttons of the AI page, see [AI.md](AI.md)). You choose how ([display] `mode`):
 
 | `install-windows.cmd -Display` | |
 |---|---|
@@ -379,7 +392,9 @@ What it does (idempotent):
    its token lives in `%ProgramData%\nuc-console\notify\private`, which only SYSTEM, Administrators and NETWORK SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt), `nuc-console-update` and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
-   prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them.
+   prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them or
+   choose a model on the AI page of the web view (**use this model**; LOCAL SERVICE may modify `ai\` (and its log folder), nothing else of the data;
+   `[ai] web_actions = no` makes the page read-only).
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),
