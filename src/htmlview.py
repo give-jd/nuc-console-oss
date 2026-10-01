@@ -67,6 +67,10 @@ GRAPH_CSS = (".gv{overflow:auto;max-height:calc(100vh - 140px);border:1px solid 
              ".e.hv{stroke-width:2.2}.n.pin circle{stroke:#f0f6fc;stroke-dasharray:2 2}")
 
 
+# the web CPU page (web.py): a process row is a link that looks like the text around it
+CPU_CSS = "a.pr{color:inherit;text-decoration:none}a.pr:hover{background:#161b22}"
+
+
 def to_html(text):
     """ANSI text -> HTML spans (colour, background, reverse, bold)."""
     out, fg, bg, rev, bold, pos = [], "", "", False, False, 0

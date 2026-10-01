@@ -27,7 +27,7 @@ import graphjs
 import graphlayout
 import nuc_config
 import render
-from htmlview import CSS, GRAPH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
+from htmlview import CPU_CSS, CSS, GRAPH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
@@ -38,6 +38,8 @@ ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), l
 CACHE_MAX = 64       # rendered pages kept: map URLs have unbounded combinations, the least recently used goes first
 CACHE_CHARS = 32 * 2 ** 20  # and at most this much HTML: a map page that repeats many real row keys weighs megabytes
 KEY = re.compile(r"[0-9a-f]{10}")  # a map row (graph.path_key): the only thing a map URL names
+PID = re.compile(r"[0-9]{1,10}")   # a process (cpu view): ASCII digits only, at most MAX_PID
+MAX_PID = 2 ** 32 - 1              # a Windows pid is 32 bits
 NUM = re.compile(r"[0-9]{1,6}")    # a number in a URL: '²'.isdigit() is true but int('²') raises, so does int() of 5000 digits
 MAX_KEYS = 300       # open= / shut= keys taken from a URL, each
 MAP_ROWS = 1000      # rows on one map page: a bigger tree is unreadable in a browser anyway (close branches, problems only)
@@ -195,21 +197,27 @@ def view_params(q):
     view=map: the MAP, whose state is all in the URL: open=/shut= the branches opened/closed by hand (row keys joined by '.'),
     all=1 everything open, sel= the row whose details are shown, only=1 problems only, pause=1 no reload.
     as=graph: the MAP drawn as a graph (anything else: the tree), with stacks=1 the compose projects, ext=0 no remote
-    addresses, local=1|2 only the selected node and its neighbours within 1 or 2 hops, z= the drawing's size in % (GZOOMS)."""
+    addresses, local=1|2 only the selected node and its neighbours within 1 or 2 hops, z= the drawing's size in % (GZOOMS).
+    view=cpu: the CPU screen: sort=mem|time|pid|user (default cpu), sel= the pid whose details are shown (only digits; dropped when
+    no such process)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
+    view = one("view") if one("view") in ("map", "cpu") else ""
+    sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
+        str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
     return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
             "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
             "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
             "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
             "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0,  # 0 = config
-            "view": "map" if one("view") == "map" else "", "open": map_keys(one("open")), "shut": map_keys(one("shut")),
-            "all": one("all") == "1", "sel": one("sel") if KEY.fullmatch(one("sel")) else "", "only": one("only") == "1",
-            "pause": one("pause") == "1", "as": "graph" if one("as") == "graph" else "", "stacks": one("stacks") == "1",
+            "view": view, "open": map_keys(one("open")), "shut": map_keys(one("shut")),
+            "all": one("all") == "1", "sel": sel, "only": one("only") == "1", "pause": one("pause") == "1",
+            "as": "graph" if one("as") == "graph" else "", "stacks": one("stacks") == "1",
             "ext": "0" if one("ext") == "0" else "",  # remote addresses are shown unless ext=0 (the only value written)
             "local": int(one("local")) if one("local") in ("1", "2") else 0,
-            "z": gzoom(num("z"))}
+            "z": gzoom(num("z")),
+            "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else ""}
 
 
 def gzoom(z):
@@ -247,6 +255,7 @@ class Server(http.server.ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         render.DEMO = demo
         self.smp = render.Sampler()
+        self.cpu_feed = render.CpuFeed(settle=0.4)  # the CPU page's samplers (processes cost CPU): made at the first request, one for all viewers
         self.smp.sample()  # starts the background reads (sessions, disks): the first page must not say "unavailable"
         self.lock = threading.RLock()  # reentrant: a map page, built under it, takes the map's graph from the same cache
         self.cache = OrderedDict()  # view -> (time, page): a burst of requests renders once; at most CACHE_MAX views
@@ -289,37 +298,46 @@ class Server(http.server.ThreadingHTTPServer):
         r = refresh or self.cfg["refresh_seconds"]
         here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh}
         zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
+        self.cpu_feed.max_age = r  # processes are read at most once per refresh interval, however many viewers and pages ask
+        if view == "cpu":
+            key = ("cpu", zoom, r) + tuple(here.items()) + (state.get("sort", ""), state.get("sel", ""))
+            return self.cached(key, r / 2, lambda: self.cpu_page(here, zoom, r, state.get("sort", "") or "cpu", state.get("sel", "")))
         if view == "map":
             state = map_mode(state)
             key = ("map", zoom, r) + tuple(here.items()) + tuple(sorted(state.items()))
             return self.cached(key, r / 2, lambda: self.map_page(here, state, zoom, r))
         return self.cached((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda: self.dashboard(here, zoom, r))
 
-    def dashboard(self, here, zoom, r):
-        cols, rows, fit, full, rotate, kiosk = (here[k] for k in ("cols", "rows", "fit", "full", "rotate", "kiosk"))
+    def grid(self, here, zoom):
+        """(columns, rows, CSS) of a screen page: the text fills the window (fit) or is a fixed grid whose font grows with the zoom."""
+        cols, rows, fit = (here[k] for k in ("cols", "rows", "fit"))
         base_cols, base_rows = cols or self.cfg["columns"], rows or self.cfg["rows"]
         if fit:  # the text fills the window: a bigger zoom = fewer columns and rows, re-laid out like a smaller console
             gcols, grows = max(60, round(base_cols * 100 / zoom)), max(16, round(base_rows * 100 / zoom))
-            style = fit_css(gcols, grows if rows else 0)
-        else:    # a fixed grid whose font grows, like the browser's own zoom (Ctrl +/-)
-            gcols, grows = base_cols, base_rows
-            style = "body{font-size:%.1fpx}" % (14 * zoom / 100)
+            return gcols, grows, fit_css(gcols, grows if rows else 0)
+        return base_cols, base_rows, "body{font-size:%.1fpx}" % (14 * zoom / 100)  # like the browser's own zoom (Ctrl +/-)
+
+    def dashboard(self, here, zoom, r):
+        rows, fit, full, rotate, kiosk = (here[k] for k in ("rows", "fit", "full", "rotate", "kiosk"))
+        gcols, grows, style = self.grid(here, zoom)
         try:
             if full:  # overview + every detail page: nothing hidden behind "… +N more"
-                body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True))
+                body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True,
+                                                                                      cpu_feed=self.cpu_feed))
             else:
                 # all the columns ("wide" 200 = the 2-column layout); fit without rows = a normal browser window: the page
                 # scrolls, so it shows every section in full at any text size (full screen fits instead, and rotates)
                 screen, _ = render.render_screen(self.smp, gcols, grows, mode="overview", at=time.time() if rotate else None,
-                                                 keys=False, page=True, scroll=fit and not rows)
+                                                 keys=False, page=True, scroll=fit and not rows, cpu_feed=self.cpu_feed)
                 body = to_html(screen)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
             body = "render error (see the service log)"
         link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
         views = [link("compact", cols=100), link("wide", cols=200), link("overview", full=False) if full else link("full details", full=True)]
-        if render.CFG["features"].get("map", True):
-            views.append(f'<a href="{html.escape(page_url(dict({"view": "map"}, **here)))}">map</a>')
+        for name in ("map", "cpu"):
+            if render.CFG["features"].get(name, True):
+                views.append(f'<a href="{html.escape(page_url(dict({"view": name}, **here)))}">{name}</a>')
         page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                 f'<meta http-equiv="refresh" content="{r}"><title>{html.escape(socket.gethostname())} · nuc-console</title>'
                 f'<style>{CSS}{style}</style><pre>{body}</pre><footer>text {self.sizes(link, zoom)} · refresh every {self.every(link, r)} · '
@@ -336,6 +354,44 @@ class Server(http.server.ThreadingHTTPServer):
     def every(link, r):
         lo, hi = nuc_config.REFRESH_MIN, nuc_config.REFRESH_MAX  # − = more often, + = less often
         return (link("−", refresh=r - 1) if r > lo else "−") + f" {r}s " + (link("+", refresh=r + 1) if r < hi else "+")
+
+    def cpu_page(self, here, zoom, r, sort, sel):
+        """The CPU screen as a page: the console's own screen through the ANSI path, its process rows links (sel= shows that process's
+        details), the sort as links in the bottom bar. The processes are read once per refresh interval, whoever asks (cpu_feed)."""
+        esc = html.escape
+
+        def doc(body, foot, style="", refresh=True):  # the host name after cpu_problems(): --demo names the host there
+            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
+                    + f'<title>{esc(socket.gethostname())} · cpu · nuc-console</title><style>{CSS}{CPU_CSS}{style}</style>{body}'
+                    f'<footer>{" · ".join(foot)}</footer></html>')
+        dash = f'<a href="{esc(page_url(here))}">dashboard</a>'  # back to the normal view, same size and refresh
+        if not render.CFG["features"].get("cpu", True):
+            return doc("<p>CPU screen disabled in config.ini (<b>[features] cpu = no</b>)</p>", [dash, "read-only"], refresh=False)
+        gcols, grows, style = self.grid(here, zoom)
+        chere = {"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}
+        chere.update(here)
+        try:
+            d = self.cpu_feed.read()
+            sel = sel if sel and int(sel) in {p["pid"] for p in d["procs"]["procs"]} else ""  # no such process (any more): dropped
+            chere["sel"] = sel
+            screen, rows = render.cpu_web(d, render.cpu_problems(self.smp), gcols, grows, sort, int(sel) if sel else None, here["fit"] and not here["rows"])
+            lines = [to_html(x) for x in screen.split("\x1b[K\r\n")]
+            for i, pid in rows:  # a process row is a link: its details, or (the one open) back to the table
+                lines[i] = f'<a class="pr" title="details" href="{esc(page_url(chere, sel="" if str(pid) == sel else str(pid)))}">{lines[i]}</a>'
+            body = f"<pre>{chr(10).join(lines)}</pre>"
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+            print("nuc-console web: cpu render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+            body = "<pre>render error (see the service log)</pre>"
+        link = lambda text, **kw: f'<a href="{esc(page_url(chere, **kw))}">{text}</a>'  # noqa: E731
+        sorts = " ".join(f"<b>{name}</b>" if key == sort else link(name, sort="" if key == "cpu" else key)
+                         for key, name in (("cpu", "cpu"), ("mem", "mem"), ("time", "time"), ("pid", "pid"), ("user", "user")))
+        bar = [dash] + ([f'<a href="{esc(page_url(dict({"view": "map"}, **here)))}">map</a>'] if render.CFG["features"].get("map", True) else [])
+        bar += ["sort " + sorts, link("close details", sel="") if sel else "a process: its details", "text " + self.sizes(link, zoom),
+                "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
+        if here["kiosk"]:
+            bar.append(esc(render.KIOSK_HINT))
+        return doc(body, bar, style)
 
     def map_graph(self, r):
         """render.map_graph() for as long as a page lives (r/2), shared by every map view: a new sel/open/shut walks the
@@ -875,6 +931,8 @@ def main(argv):
         check_bind(cfg["bind"], token)
         port = int(argv[argv.index("--port") + 1]) if "--port" in argv else cfg["port"]
         srv = Server((cfg["bind"], port), cfg, token, demo, zoom=full_cfg["display"]["zoom"])
+        if demo and "--demo-os" in argv[:-1]:  # --demo as the macOS/Windows collector writes it (windows|darwin)
+            render.DEMO_OS = argv[argv.index("--demo-os") + 1]
     except (OSError, ValueError, IndexError) as e:
         print("nuc-console web:", e, file=sys.stderr)
         return 2

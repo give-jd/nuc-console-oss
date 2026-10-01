@@ -8,6 +8,7 @@ import collections
 import glob
 import ipaddress
 import json
+import math
 import os
 import re
 import select
@@ -20,8 +21,10 @@ import textwrap
 import threading
 import time
 
+import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
+import procs
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -2183,8 +2186,9 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             return lines  # the last level has a 10**6 limit: we always return here
 
 
-def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll=False):
-    """Each page is split into chunks body_h tall: (page name, index, total, lines). scroll: one page, any height, nothing cut."""
+def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll=False, cpu_feed=None, cpu_lazy=False):
+    """Each page is split into chunks body_h tall: (page name, index, total, lines). scroll: one page, any height, nothing cut.
+    cpu_feed: where the CPU slide ([dashboard] cpu_in_rotation) reads; cpu_lazy: leave it empty (see fill_cpu)."""
     det = []
     if scroll:
         return [("Overview", 1, 1, page_overview(s, cont, net, boot, w, body_h, baseline=baseline, scroll=True))]
@@ -2210,6 +2214,12 @@ def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll
         except Exception as e:  # noqa: BLE001 - same rule as the pages above
             lines = [c(31, f" error on page Map: {safe(repr(e))[:w - 20]}")]
         out.append(("Map", 1, 1, lines))
+    if CFG.get("cpu_in_rotation") and on("cpu"):  # and the CPU: the processor and the top processes, for a monitor without a keyboard
+        try:
+            lines = [c(90, " CPU: shown when its turn comes")] if cpu_lazy else cpu_slide(cpu_feed or CpuFeed(), w, body_h)
+        except Exception as e:  # noqa: BLE001 - same rule as the pages above
+            lines = [c(31, f" error on page CPU: {safe(repr(e))[:w - 20]}")]
+        out.append(("CPU", 1, 1, lines))
     return out
 
 
@@ -2229,9 +2239,9 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None):
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None):
     """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1).
-    mapkey: say that `m` opens the Map (default: when keys are); foot: a footer of its own (the Map's key help)."""
+    mapkey / cpukey: say that `m` opens the Map, `c` the CPU screen (default: when keys are); foot: a footer of its own."""
     name, part, parts, body = slide
     text, code = status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
@@ -2243,7 +2253,8 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=N
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
-    mk = "   m: map" if (keys if mapkey is None else mapkey) and on("map") else ""
+    mk = ("   m: map" if (keys if mapkey is None else mapkey) and on("map") else "") \
+        + ("   c: cpu" if (keys if cpukey is None else cpukey) and on("cpu") else "")
     if foot is None:
         foot = c(90, (f" single screen{mk}   console {size}" if n == 1 else
                       f" screen {idx + 1}/{n}{mk}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
@@ -2538,7 +2549,757 @@ def map_once(argv, w, h):
     return map_screen(G, pb, mv, w, h)[0]
 
 
-def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False):
+# ---- CPU screen: the processor, every logical CPU, the temperatures and the processes (htop, plus temperatures) ------------
+# Data: cpuinfo.CpuSampler and procs.ProcSampler (the contract is in docs/DESIGN.md), plus sensors.json on macOS/Windows.
+# Everything a producer hands over is data: numbers go through num(), text through safe(), a missing value is drawn as "?".
+
+SENSORS = os.environ.get("NUC_CONSOLE_SENSORS", os.path.join(nuc_config.RUN_DIR, "sensors.json"))  # written by the macOS/Windows collector
+SENSORS_STALE_S = 60  # an older sensors.json is not "now": it is ignored, and the screen says so
+CPU_SORTS = ("cpu", "mem", "time", "pid", "user")
+CPU_SORT_KEYS = {"p": "cpu", "m": "mem", "t": "time", "n": "pid", "u": "user"}  # htop's letters
+CPU_SORT_NAME = {"cpu": "CPU%", "mem": "memory", "time": "CPU time", "pid": "PID", "user": "user"}
+CPU_SORT_SHORT = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}  # what the footer calls them
+CPU_PANE_W = 140  # from this width up the process details sit beside the table, below it otherwise
+CPU_IDLE_S = MAP_IDLE_S  # left alone this long, the CPU screen gives the monitor back to the rotation
+CPU_STATES = {"R": "running", "S": "sleeping", "D": "uninterruptible (disk) wait", "Z": "zombie: exited, not yet collected",
+              "T": "stopped", "I": "idle", "U": "uninterruptible wait", "X": "dead"}
+CPU_PRESSURE = {"nominal": "32", "moderate": "33", "heavy": "31", "trapping": "31", "sleeping": "90"}  # macOS thermal pressure
+CPU_CELL_MIN_BAR, CPU_CELL_MAX_BAR = 10, 32
+
+
+def num(x):
+    """x as a float when it is a finite number (a bool is not one), else None: what a producer hands over is data, not a promise."""
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
+
+
+def idict(d):
+    """{int: value} of a dict whose keys may be digits or strings (JSON keys are always strings); other keys are dropped."""
+    out = {}
+    for k, v in (d.items() if isinstance(d, dict) else ()):
+        try:
+            out[int(k)] = v
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def dget(d, *keys):
+    """d[k1][k2]... or None when any step is missing or not a dict."""
+    for k in keys:
+        d = d.get(k) if isinstance(d, dict) else None
+    return d
+
+
+def dd(x):
+    """x when it is a dict, else an empty one: a producer's section that is not what the contract says is a section with nothing in it."""
+    return x if isinstance(x, dict) else {}
+
+
+def qf(x, spec=".0f", unit=""):
+    """A number formatted, or '?' when it is not one."""
+    x = num(x)
+    return "?" if x is None else format(x, spec) + unit
+
+
+def fmt_size(b):
+    b = num(b)
+    if b is None:
+        return "?"
+    for unit, div in (("G", 2 ** 30), ("M", 2 ** 20), ("K", 2 ** 10)):
+        if b >= div:
+            v = b / div
+            return (f"{v:.0f}" if v >= 10 or v == int(v) else f"{v:.1f}") + unit
+    return f"{b:.0f}B"
+
+
+def fmt_k(x):
+    """Events per second: 842, 18.3k, 1.2M."""
+    x = num(x)
+    return "?" if x is None else f"{x:.0f}" if x < 1000 else f"{x / 1e3:.1f}k" if x < 1e6 else f"{x / 1e6:.1f}M"
+
+
+def fmt_cputime(sec):
+    """CPU seconds as htop writes them: 6:52.3, 5:03:53, 123h05m."""
+    sec = num(sec)
+    if sec is None:
+        return "?"
+    sec = max(sec, 0.0)
+    if sec < 3600:
+        return f"{int(sec // 60)}:{sec % 60:04.1f}"
+    h, r = divmod(int(sec), 3600)
+    return f"{h}:{r // 60:02d}:{r % 60:02d}" if h < 100 else f"{h}h{r // 60:02d}m"
+
+
+def cpu_os():
+    """Whose machine the CPU screen describes: the demo's OS under --demo, else this one."""
+    if DEMO:
+        return DEMO_OS if DEMO_OS in ("windows", "darwin") else "linux"
+    return "windows" if WINDOWS else "darwin" if MACOS else "linux"
+
+
+def cpu_merge(cpu, sens, now):
+    """(cpu, extra): the sampler's data with the collector's temperatures filled in where the sampler had none (macOS/Windows; on
+    Linux the sampler reads sysfs itself), and extra = {pressure, clusters, notes: [(level, text)]} from sensors.json. A sensors.json
+    older than SENSORS_STALE_S is ignored with a note: its numbers are not the temperatures of now."""
+    cpu = dict(cpu)
+    temps = dict(dd(cpu.get("temps")))
+    temps["cores"] = {k: v for k, v in idict(temps.get("cores")).items() if num(v) is not None}
+    extra = {"pressure": None, "clusters": [], "notes": []}
+    if cpu_os() != "linux":
+        ts = num(dget(sens, "ts"))
+        if not isinstance(sens, dict):
+            extra["notes"].append(("warn", "temperatures: ? (no sensors.json: the collector is not running, or [features] cpu = no)"))
+        elif ts is None or now - ts > SENSORS_STALE_S:
+            age = "" if ts is None else f" ({fmt_ago(now - ts)} old)"
+            extra["notes"].append(("warn", f"temperatures: ? (sensors.json is stale{age}: the collector stopped writing it)"))
+        else:
+            sc = dd(sens.get("cpu"))
+            if num(temps.get("package")) is None and num(sc.get("package")) is not None:
+                temps["package"] = float(sc["package"])
+            for k, v in idict(sc.get("cores")).items():
+                if num(v) is not None and k not in temps["cores"]:
+                    temps["cores"][k] = float(v)
+            if not temps.get("sensors"):
+                temps["sensors"] = [{"label": x.get("label"), "c": num(x.get("c")), "high": None, "crit": None}
+                                    for x in sc.get("sensors") or [] if isinstance(x, dict) and num(x.get("c")) is not None]
+            if not temps.get("source") and isinstance(sc.get("source"), str):
+                temps["source"] = sc["source"]
+            if isinstance(sc.get("pressure"), str):
+                extra["pressure"] = sc["pressure"]
+            extra["clusters"] = [x for x in sc.get("clusters") or [] if isinstance(x, dict)]
+            errors = dd(sens.get("errors"))
+            extra["notes"] += [("info", f"{k}: {v}") for k, v in list(errors.items())[:2]]
+    cpu["temps"] = temps
+    return cpu, extra
+
+
+def cpu_data(feed, settle=0.0):
+    """One reading of everything the screen shows: {cpu, procs, extra, at}. A sampler that raises leaves its part empty and a note."""
+    now, notes = time.time(), []
+    if DEMO:
+        import demo
+        raw_cpu, raw_pr, sens = demo.cpu_sample(DEMO_OS, now), demo.proc_sample(DEMO_OS, now), demo.sensors(DEMO_OS, now)
+    else:
+        if feed.cs is None:  # created on the first read: process sampling costs CPU, only a screen that is shown pays for it
+            for attr, what, make in (("cs", "cpu", lambda: cpuinfo.CpuSampler()), ("ps", "process", lambda: procs.ProcSampler())):
+                try:
+                    setattr(feed, attr, make())
+                except Exception as e:  # noqa: BLE001 - a broken producer leaves its half of the screen empty
+                    setattr(feed, attr, False)
+                    notes.append(safe(f"{what} sampler: {type(e).__name__}"))
+            if settle and feed.ps:  # a first reading, so that the next one has a CPU% to show
+                try:
+                    feed.ps.sample()
+                    time.sleep(settle)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        def read(src, what):
+            try:
+                r = src.sample() if src else None
+            except Exception as e:  # noqa: BLE001
+                notes.append(safe(f"{what} sampler failed: {type(e).__name__}"))
+                r = None
+            return r if isinstance(r, dict) else {}
+        raw_cpu, raw_pr = read(feed.cs, "cpu"), read(feed.ps, "process")
+        sens = load_json(SENSORS) if cpu_os() != "linux" else None
+    cpu, extra = cpu_merge(raw_cpu, sens, now)
+    pl = [p for p in (raw_pr.get("procs") if isinstance(raw_pr.get("procs"), list) else []) if isinstance(p, dict) and isinstance(p.get("pid"), int) and not isinstance(p["pid"], bool)]
+    total = dd(raw_pr.get("total"))
+    for x in notes + list(cpu.get("notes") or []) + list(raw_pr.get("notes") or []):  # what the producers could not read, once each
+        if isinstance(x, str) and ("info", safe(x)) not in extra["notes"]:
+            extra["notes"].append(("info", safe(x)))
+    return {"cpu": cpu, "procs": {"procs": pl, "total": total}, "extra": extra, "at": now}
+
+
+class CpuFeed(object):
+    """The CPU screen's data source: one CpuSampler and one ProcSampler, created at the first read (process sampling costs CPU: only a
+    screen that is shown owns one). read() hands the last reading back while it is younger than max_age (the web page: one sampling
+    per refresh interval, whoever asks). settle: seconds between a first process reading and the one shown, so that a one-off
+    screen or a page already has a CPU% (the console instead shows "measuring" for a second)."""
+
+    def __init__(self, settle=0.0, max_age=0.0):
+        self.cs = self.ps = None
+        self.at, self.data, self.demo, self.settle, self.max_age = 0.0, None, None, settle, max_age
+
+    def read(self):
+        now = time.time()
+        if self.data is None or self.demo != (DEMO, DEMO_OS) or not 0 <= now - self.at < self.max_age:
+            self.demo = (DEMO, DEMO_OS)
+            self.data, self.at = cpu_data(self, self.settle), now
+        return self.data
+
+
+class CpuView(object):
+    """The interactive CPU screen: the sort, the process under the cursor (its pid survives refreshes; its index is where the
+    cursor stays when that process vanishes), the scroll position, the details pane, when it was opened and last touched."""
+
+    def __init__(self, now=None):
+        self.sort, self.cur, self.idx, self.top, self.details, self.page = "cpu", None, 0, 0, False, 10
+        self.feed = CpuFeed()
+        self.opened = self.touched = now or time.time()
+
+
+def cpu_rows(pl, sort="cpu"):
+    """The processes in the order of `sort`: CPU%, memory, CPU time (largest first), PID, user (smallest first). A process whose value
+    is unknown goes last, by PID."""
+    field = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}.get(sort, "cpu")
+    val = lambda p: (str(p["user"]).lower() if isinstance(p.get("user"), str) else None) if field == "user" else num(p.get(field))  # noqa: E731
+    known = [p for p in pl if val(p) is not None]
+    rest = sorted((p for p in pl if val(p) is None), key=lambda p: p["pid"])
+    if field in ("pid", "user"):
+        known.sort(key=lambda p: (val(p), p["pid"]))
+    else:
+        known.sort(key=lambda p: (-val(p), p["pid"]))
+    return known + rest
+
+
+def cpu_sync(cv, rows):
+    """The cursor back on its process: by pid, else the same index (clamped). Returns the index."""
+    i = next((j for j, p in enumerate(rows) if p["pid"] == cv.cur), None) if cv.cur is not None else None
+    cv.idx = i if i is not None else max(0, min(cv.idx, len(rows) - 1))
+    cv.cur = rows[cv.idx]["pid"] if rows else None
+    return cv.idx
+
+
+def cpu_key(cv, key, rows, page=10):
+    """One key on the CPU screen. Returns 'back' (leave it), 'rows' (the sort changed: sort again, then cpu_sync) or ''."""
+    k = key.lower() if len(key) == 1 else key  # P and p are the same key
+    if k in ("c", "q", "esc"):
+        return "back"
+    if k in CPU_SORT_KEYS:
+        cv.sort = CPU_SORT_KEYS[k]
+        return "rows"
+    if k in ("enter", "space"):
+        cv.details = not cv.details
+        return ""
+    if not rows:
+        return ""
+    i = cpu_sync(cv, rows)
+    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(k, i)
+    cv.idx = max(0, min(i, len(rows) - 1))
+    cv.cur = rows[cv.idx]["pid"]
+    return ""
+
+
+def cpu_select(rows, cv, text):
+    """The cursor on the process whose pid is text, else on the first one whose name contains it (any case). False: none."""
+    t = text.strip().lower()
+    for hit in (lambda p: t == str(p["pid"]), lambda p: t in str(p.get("name")).lower()):
+        for p in rows:
+            if t and hit(p):
+                cv.cur = p["pid"]
+                return True
+    return False
+
+
+# -- what is known about each logical CPU
+
+_TOPO = {}
+
+
+def cpu_topology(ids):
+    """{logical CPU: physical core id} from sysfs (Linux): the key the sampler's per-core temperatures are filed under."""
+    if DEMO or cpu_os() != "linux" or not LINUX:
+        return {}
+    key = tuple(ids)
+    if key not in _TOPO:
+        got = {i: read_file(f"/sys/devices/system/cpu/cpu{i}/topology/core_id") for i in ids}
+        _TOPO[key] = {i: int(v) for i, v in got.items() if v and v.lstrip("-").isdigit()}
+    return _TOPO[key]
+
+
+def cpu_core_of(d, ids):
+    """{logical CPU: physical core id} among the cores that have a temperature. The sampler's own `core_of` map when it gives one, else
+    sysfs' topology (Linux); without either, the logical CPUs of a core are taken to be next to each other (how Windows numbers
+    them) and the cores to be in the order of their sensors, which only holds when every core has one sensor and the same number
+    of threads. Otherwise unknown: nothing is invented."""
+    cpu = d["cpu"]
+    by_core = {k for k, v in idict(dget(cpu, "temps", "cores")).items() if num(v) is not None}
+    core_of = idict(cpu.get("core_of")) or cpu_topology(ids)
+    if core_of:
+        return {i: core_of[i] for i in ids if core_of.get(i) in by_core}
+    n = int(num(cpu.get("cores")) or 0)
+    if n and len(by_core) == n and len(ids) % n == 0 and ids == sorted(ids):
+        per, order = len(ids) // n, sorted(by_core)
+        return {i: order[j // per] for j, i in enumerate(ids)}
+    return {}
+
+
+def cpu_core_temps(d, ids):
+    """{logical CPU: C}: the temperature of the physical core each one runs on."""
+    by_core = {k: float(v) for k, v in idict(dget(d["cpu"], "temps", "cores")).items() if num(v) is not None}
+    return {i: by_core[k] for i, k in cpu_core_of(d, ids).items()}
+
+
+def cpu_tags(d, ids):
+    """{logical CPU: 'P' or 'E'}: from the sampler's kinds (ids), else from the cluster names of the Apple Silicon sensors."""
+    out = {}
+    kinds = dget(d["cpu"], "kinds")
+    for tag in ("P", "E"):
+        for i in (kinds.get(tag) if isinstance(kinds, dict) and isinstance(kinds.get(tag), (list, tuple)) else []):
+            if isinstance(i, int):
+                out[i] = tag
+    for cl in d["extra"]["clusters"]:
+        tag = str(cl.get("name") or "")[:1].upper()
+        out.update({i: tag for i in idict(cl.get("cpus")) if tag in ("P", "E")})
+    return {i: t for i, t in out.items() if i in ids}
+
+
+def cpu_mhz(d):
+    """{logical CPU: MHz}: the sampler's per-CPU clocks (an id of -1 is a whole-machine value, not a CPU), else the Apple clusters'."""
+    out = {i: float(v) for i, v in idict(dget(d["cpu"], "freq", "cur")).items() if i >= 0 and num(v) is not None}
+    for cl in d["extra"]["clusters"]:
+        for i, v in idict(cl.get("cpus")).items():
+            if num(v) is not None:
+                out.setdefault(i, float(v))
+    return out
+
+
+def cpu_usage_rows(d):
+    rows = dget(d["cpu"], "usage", "cores")
+    return sorted((r for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("id"), int)
+                   and not isinstance(r["id"], bool)), key=lambda r: r["id"])
+
+
+# -- drawing
+
+def cpu_bar(parts, w):
+    """A w-wide bar of consecutive segments [(percent, colour, glyph)], the rest idle: htop's CPU meter (user green, system red,
+    other busy blue, I/O wait grey; a different glyph for the wait, so that colour is not all that tells it)."""
+    out, done, acc = "", 0, 0.0
+    for pct, col, ch in parts:
+        acc += max(num(pct) or 0.0, 0.0)
+        end = min(w, int(round(acc * w / 100.0)))
+        if end > done:
+            out += c(col, ch * (end - done))
+            done = end
+    return out + c(90, "░" * (w - done))
+
+
+def cpu_parts(user, system, iowait, busy):
+    """The segments of one CPU's bar. Without the user/system split the whole busy part is one plain segment."""
+    user, system, iowait, busy = num(user), num(system), num(iowait), num(busy)
+    if busy is None:
+        return []
+    split = [(user, "32", "█"), (system, "31", "█"), (max(busy - (user or 0) - (system or 0), 0.0), "34", "█")] \
+        if user is not None and system is not None else [(busy, "36", "█")]
+    return split + ([(iowait, "90", "▒")] if iowait else [])
+
+
+def pct_col(p, warn=70, err=90):
+    p = num(p)
+    return "" if p is None else "31" if p >= err else "33" if p >= warn else ""
+
+
+def cpu_head(d, w, h):
+    """The title and the machine in a few lines: what it is, then what it is doing."""
+    cpu, pr = d["cpu"], d["procs"]
+    lab = lambda name, value: c(90, name + " ") + value  # noqa: E731
+    qi = lambda x: "?" if num(x) is None else str(int(num(x)))  # noqa: E731
+    model = safe(cpu.get("model") or "?")
+    ident = [lab("sockets", qi(cpu.get("sockets"))), lab("cores", qi(cpu.get("cores"))), lab("threads", qi(cpu.get("threads")))]
+    kinds = dd(cpu.get("kinds"))
+    if kinds:
+        cnt = lambda x: len(x) if isinstance(x, (list, tuple)) else qi(x)  # noqa: E731
+        ident.append(f"P {cnt(kinds.get('P'))} + E {cnt(kinds.get('E'))} " + ("threads" if isinstance(kinds.get("P"), (list, tuple)) else "cores"))
+    ident.append(lab("arch", safe(cpu.get("arch") or "?")))
+    cache = dd(cpu.get("cache"))
+    sizes = [f"{k} {fmt_size(cache[k])}" for k in ("L1d", "L1i", "L2", "L3") if k in cache]
+    ident.append(lab("cache", "  ".join(sizes) if sizes else "?"))
+    fr = dd(cpu.get("freq"))
+    gov = [safe(x) for x in (fr.get("governor"), fr.get("driver")) if isinstance(x, str) and x]
+    ident.append(lab("governor", "/".join(gov) if gov else "?"))
+    lo, hi, base = num(fr.get("min")), num(fr.get("max")), num(fr.get("base"))
+    clock = [x for x in idict(fr.get("cur")).items() if x[0] < 0 and num(x[1]) is not None]
+    ident.append(lab("clock", (f"{qf(lo)}-{qf(hi)} MHz" if lo is not None or hi is not None else "?") + (f" (base {qf(base)})" if base is not None else "")
+                     + (f" now {qf(clock[0][1])}" if clock else "")))
+    rates, load = dd(cpu.get("rates")), cpu.get("load")
+    tot = pr["total"]
+    run = rates.get("running") if num(rates.get("running")) is not None else tot.get("running")
+    up = num(cpu.get("uptime"))
+    act = [lab("up", fmt_dur(up) if up is not None else "?"),
+           lab("load", " ".join(qf(x, ".2f") for x in load[:3]) if isinstance(load, (list, tuple)) and len(load) >= 3 else "?"),
+           lab("ctxt", fmt_k(rates.get("ctxt")) + "/s"), lab("intr", fmt_k(rates.get("intr")) + "/s"),
+           lab("running", qf(run)), lab("blocked", qf(rates.get("blocked")))]
+    lines = [section("CPU", w, model)]
+    lines += wrap_items(ident, w, indent=1, sep="  ·  ", max_lines=1 if h < 28 else 2)
+    lines += wrap_items(act, w, indent=1, sep="  ·  ", max_lines=1)
+    return lines
+
+
+def cpu_cells(d):
+    """One dict per logical CPU: id, tag, busy/user/system/iowait, mhz, temp. None for what is not known."""
+    rows = cpu_usage_rows(d)
+    ids = [r["id"] for r in rows]
+    tags, mhz, temps = cpu_tags(d, ids), cpu_mhz(d), cpu_core_temps(d, ids)
+    return [{"id": r["id"], "tag": tags.get(r["id"], ""), "busy": num(r.get("busy")), "user": r.get("user"), "system": r.get("system"),
+             "iowait": r.get("iowait"), "mhz": mhz.get(r["id"]), "temp": temps.get(r["id"])} for r in rows]
+
+
+def cpu_limit(d):
+    """The package sensor's own limit (crit, else high): what the temperatures are measured against. None = not known."""
+    t = dd(d["cpu"].get("temps"))
+    return num(t.get("crit")) or num(t.get("high"))
+
+
+def temp_col(t, mx):
+    t = num(t)
+    return "" if t is None or not mx else "31" if t >= THERMAL_ERR * mx else "33" if t >= THERMAL_WARN * mx else ""
+
+
+def cpu_grid(d, w):
+    """(top lines, cell rows, cells per row, cells): the whole CPU as one bar with its split, then one cell per logical CPU in 2-4
+    columns, htop style: id, P/E, bar (user green, system red, I/O wait grey), busy %, GHz and °C where known."""
+    tot = dget(d["cpu"], "usage", "total")
+    cells = cpu_cells(d)
+    show_f, show_t = any(x["mhz"] is not None for x in cells), any(x["temp"] is not None for x in cells)
+    show_tag = any(x["tag"] for x in cells)
+    idw = max([len(str(x["id"])) for x in cells] + [2])
+    fixed = idw + (1 if show_tag else 0) + 1 + 1 + 4 + (6 if show_f else 0) + (6 if show_t else 0)  # id tag _ bar _ busy _GHz _temp
+    gap, room = 2, w - 1  # one column of margin
+    ncol = 1
+    for n in (4, 3, 2):
+        if n <= max(1, len(cells)) and (room - (n - 1) * gap) // n - fixed >= CPU_CELL_MIN_BAR:
+            ncol = n
+            break
+    cw = (room - (ncol - 1) * gap) // ncol
+    bw = max(4, min(CPU_CELL_MAX_BAR, cw - fixed))
+    top = []
+    if isinstance(tot, dict):
+        busy, user, system, iow = (num(tot.get(k)) for k in ("busy", "user", "system", "iowait"))
+        items = [c(32, "user") + " " + qf(user, ".1f"), c(31, "sys") + " " + qf(system, ".1f"), "nice " + qf(tot.get("nice"), ".1f"),
+                 c(90, "iowait") + " " + qf(iow, ".1f"), "irq " + qf(tot.get("irq"), ".1f"), "steal " + qf(tot.get("steal"), ".1f"),
+                 "idle " + qf(tot.get("idle"), ".1f")]
+        shown = cc(pct_col(busy), f"{busy:5.1f}%") if busy is not None else "    ?%"
+        top.append(fit_join(items, "  ", w, f" {c(1, 'ALL')} {cpu_bar(cpu_parts(user, system, iow, busy), bw)} {shown}  "))
+    if not cells:
+        return top + [msg("warn", "per-CPU usage: ? (the sampler gave none)")], [], 1, 0
+    mx = cpu_limit(d)
+    out = []
+    for x in cells:
+        busy = x["busy"]
+        s = f"{x['id']:>{idw}}"
+        if show_tag:
+            s += c("1;36", x["tag"]) if x["tag"] == "P" else c(90, x["tag"]) if x["tag"] else " "
+        s += " " + cpu_bar(cpu_parts(x["user"], x["system"], x["iowait"], busy), bw)
+        s += " " + (cc(pct_col(busy), f"{busy:3.0f}%") if busy is not None else "   ?")
+        if show_f:
+            s += " " + (f"{x['mhz'] / 1000:4.2f}G" if x["mhz"] is not None else "    ?")
+        if show_t:
+            s += " " + (cc(temp_col(x["temp"], mx), f"{x['temp']:3.0f}°C") if x["temp"] is not None else "    ?")
+        out.append(s)
+    rows = [" " + (" " * gap).join(pad(clip(x, cw), cw) for x in out[i:i + ncol]).rstrip() for i in range(0, len(out), ncol)]
+    return top, rows, ncol, len(cells)
+
+
+def cpu_grid_lines(grid, n):
+    """The grid in at most n lines: the whole-CPU bar first, then rows of cells; when some are left out the last line counts them."""
+    top, rows, ncol, ncells = grid
+    if len(top) + len(rows) <= n:
+        return top + rows
+    keep = max(n - len(top) - 1, 0)
+    return (top + rows[:keep] + [c(90, f" … +{max(ncells - keep * ncol, 0)} more CPUs")])[:n]
+
+
+def deg(x):
+    return "?" if num(x) is None else f"{num(x):.0f}°C"
+
+
+def cpu_temps(d, w):
+    """The temperatures block, most important line first: package with its limits, hottest core and throttling, then macOS pressure and
+    clusters, every sensor, and what is missing."""
+    cpu, extra = d["cpu"], d["extra"]
+    t = dd(cpu.get("temps"))
+    pkg, high, crit, mx = num(t.get("package")), num(t.get("high")), num(t.get("crit")), cpu_limit(d)
+    bw = max(10, min(40, w - 60))
+    lines = [section("TEMPERATURES", w, "source " + safe(t.get("source") or "?"))]
+    if pkg is None:
+        lines.append(f" {c(90, 'PKG')}   ?   {c(90, 'no package temperature')}")
+    elif mx:
+        lines.append(f" {c(90, 'PKG')}   {bar(pkg / mx, bw, THERMAL_WARN, THERMAL_ERR)} {pkg:.0f}°C/{mx:.0f}°C   "
+                     f"{c(90, 'high')} {deg(high)}  {c(90, 'crit')} {deg(crit)}")
+    else:
+        lines.append(f" {c(90, 'PKG')}   {pkg:.0f}°C   {c(90, 'high ?  crit ?')}")
+    ids = [r["id"] for r in cpu_usage_rows(d)]
+    by_core = {k: float(v) for k, v in idict(t.get("cores")).items() if num(v) is not None}
+    on_core = cpu_core_of(d, ids)
+    summary = []
+    if by_core:
+        core, hot = max(by_core.items(), key=lambda kv: (kv[1], -kv[0]))
+        cpus = [str(i) for i, k in on_core.items() if k == core]
+        summary.append(c(90, "hottest core ") + f"{core} " + cc(temp_col(hot, mx), f"{hot:.0f}°C")
+                       + (c(90, " (cpu " + ",".join(cpus[:4]) + ")") if cpus and len(cpus) <= 4 else ""))
+    else:
+        summary.append(c(90, "hottest core ") + "?")
+    th = dd(cpu.get("throttle"))
+    n, secs, cores = num(th.get("package")), num(th.get("package_s")), idict(th.get("cores"))
+    per = sorted(((k, num(v)) for k, v in cores.items() if num(v) is not None), key=lambda kv: (-kv[1], kv[0]))
+    if n is None and not per:
+        summary.append(c(90, "throttled ") + "?")
+    else:
+        txt = f"{n:.0f} events" if n is not None else "? events"
+        if secs is not None:
+            txt += f", {fmt_min(secs)} in all"
+        if per:
+            txt += "; cores " + ", ".join(f"{k}: {v:.0f}" for k, v in per[:3]) + (f" … +{len(per) - 3}" if len(per) > 3 else "")
+        hit = bool(n) or any(v for _, v in per)
+        summary.append(c(90, "throttled ") + c(33 if hit else 32, ("! " if hit else "✔ ") + txt))
+    lines.append(" " + "   ·   ".join(summary))
+    if cpu_os() == "darwin" or extra["pressure"] or extra["clusters"]:
+        pr = extra["pressure"]
+        parts = [c(90, "thermal pressure ") + (c(CPU_PRESSURE.get(pr.lower(), "33"), safe(pr)) if isinstance(pr, str) else "?")]
+        parts += [safe(cl.get("name") or "?") + " " + qf(cl.get("mhz")) + " MHz " + qf(cl.get("active")) + "% active" for cl in extra["clusters"]]
+        lines.append(" " + "   ·   ".join(parts))
+    sensors = [s for s in (t.get("sensors") or []) if isinstance(s, dict) and num(s.get("c")) is not None]
+    if sensors:
+        items = [safe(s.get("label") or "?") + " " + cc(temp_col(s["c"], num(s.get("crit")) or mx), f"{s['c']:.0f}°C") for s in sensors]
+        rows = wrap_items(items, w, indent=9, sep="  ·  ", max_lines=2)
+        rows[0] = " " + c(90, "sensors") + " " + rows[0][9:]
+        lines += rows
+    lines += [msg(lv, safe(text)) for lv, text in extra["notes"]]
+    return lines
+
+
+def cut_lines(lines, n, what="lines"):
+    """The first n lines; when some are left out the last one says how many ('… +3 more lines')."""
+    if len(lines) <= n:
+        return lines
+    return lines[:max(n - 1, 0)] + ([c(90, f" … +{len(lines) - n + 1} more {what}")] if n else [])
+
+
+# -- the processes
+
+CPU_COLS = (("pid", "PID", ">"), ("user", "USER", "<"), ("state", "S", "<"), ("nice", "NI", ">"), ("threads", "THR", ">"), ("cpu", "CPU%", ">"),
+            ("mem_pct", "MEM%", ">"), ("mem", "RSS", ">"), ("time", "TIME", ">"))
+CPU_COL_W = {"user": 9, "state": 1, "nice": 3, "cpu": 5, "mem_pct": 5, "mem": 6, "time": 8}
+CPU_SORT_COLS = {"cpu": ("cpu",), "mem": ("mem_pct", "mem"), "time": ("time",), "pid": ("pid",), "user": ("user",)}
+CPU_DROPPABLE = ("state", "nice", "threads")  # a column unknown for every process on this OS (Windows has no state or nice) is left out
+CPU_STATE_COL = {"R": "32", "D": "33", "Z": "31", "T": "33"}
+
+
+def cpu_cell_text(p, key):
+    v = p.get(key)
+    if key == "user":
+        s = safe(v) if isinstance(v, str) and v else "?"
+        return s if len(s) <= 9 else s[:8] + "+"
+    if key == "state":
+        return safe(v)[:1] if isinstance(v, str) and v else "?"
+    if key == "cpu":
+        return "?" if num(v) is None else f"{num(v):.1f}" if num(v) < 1000 else f"{num(v):.0f}"
+    if key == "mem_pct":
+        return qf(v, ".1f")
+    if key == "mem":
+        return fmt_size(v)
+    if key == "time":
+        return fmt_cputime(v)
+    return qf(v)  # pid, nice, threads
+
+
+def cpu_columns(rows, w, minname=12):
+    """[(key, title, align, width)] that fit in w columns beside a name of at least minname: dropped from the right, the name stays."""
+    wid = dict(CPU_COL_W)
+    wid["pid"] = max([len(str(p["pid"])) for p in rows] + [5])
+    wid["threads"] = max([len(cpu_cell_text(p, "threads")) for p in rows] + [3])
+    unknown = lambda p, k: num(p.get(k)) is None and not isinstance(p.get(k), str)  # noqa: E731
+    cols = [(k, t, a, wid[k]) for k, t, a in CPU_COLS if not (k in CPU_DROPPABLE and rows and all(unknown(p, k) for p in rows))]
+    while cols and 1 + sum(x[3] + 1 for x in cols) + minname > w:
+        cols.pop()
+    return cols
+
+
+def cpu_proc_line(p, cols, nw):
+    s = " "
+    for key, _, align, width in cols:
+        txt = cpu_cell_text(p, key)
+        cell = f"{txt:>{width}}" if align == ">" else f"{txt:<{width}}"
+        if key == "state":
+            cell = cc(CPU_STATE_COL.get(txt, ""), cell)
+        elif key == "cpu":
+            cell = cc(pct_col(p.get("cpu"), 50, 100), cell)
+        s += cell + " "
+    return s + safe(p.get("name") or "?")[:nw]
+
+
+def cpu_pane(p, rows, w, h, now, two=False):
+    """Everything known about one process in at most h lines of w columns: the contract's fields, the parent's name, '?' for what is
+    unknown. two: the fields in two columns (a pane under the table, which has few lines to spare)."""
+    ppid = p.get("ppid") if isinstance(p.get("ppid"), int) else None
+    parent = next((q for q in rows if q["pid"] == ppid), None) if ppid is not None else None
+    st = p.get("state") if isinstance(p.get("state"), str) and p.get("state") else None
+    start, mem = num(p.get("start")), num(p.get("mem"))
+    when = "?" if start is None else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start)) + (f" ({fmt_ago(now - start)} ago)" if now >= start else "")
+    items = [("parent", "?" if ppid is None else f"{ppid}  " + (safe(parent.get("name") or "?") if parent else "? (not in the list)")),
+             ("user", safe(p.get("user") or "?")), ("state", "?" if st is None else safe(st[:1]) + "  " + CPU_STATES.get(st[:1], "")),
+             ("threads", qf(p.get("threads"))), ("nice", qf(p.get("nice"))), ("priority", qf(p.get("prio"))),
+             ("CPU", qf(p.get("cpu"), ".1f", " %") + ("  (100 % = one core)" if num(p.get("cpu")) is not None else "")),
+             ("memory", qf(p.get("mem_pct"), ".1f", " %") + ("" if mem is None else f"  {fmt_size(mem)} resident")),
+             ("CPU time", fmt_cputime(p.get("time"))), ("started", when),
+             ("children", str(sum(1 for q in rows if q.get("ppid") == p["pid"])))]
+    out = [section(f"PROCESS {p['pid']}", w, safe(p.get("name") or "?"))]
+    if two:
+        half = (len(items) + 1) // 2
+        cw = (w - 2) // 2
+        for a, b in zip(items[:half], items[half:] + [None] * half):
+            out.append(" " + "".join(pad(clip(c(90, pad(x[0], 9)) + x[1], cw), cw + 1) if x else "" for x in (a, b)).rstrip())
+    else:
+        lw = 10
+        for label, value in items:
+            chunks = textwrap.wrap(value, max(8, w - lw - 1), break_on_hyphens=False) or [""]
+            out += [" " + (c(90, pad(label, lw)) if j == 0 else " " * lw) + x for j, x in enumerate(chunks)]
+    return cut_lines(out, h, "details")
+
+
+def cpu_procs(d, rows, w, avail, cur, top, sort):
+    """The process table in `avail` lines (title, column heads, rows). With a cursor it scrolls to keep it in sight; without one
+    (the rotation slide, a web page) what does not fit is counted on the last line.
+    -> (lines, first row shown, rows visible, [(line, pid)] of the rows drawn)."""
+    tot = d["procs"]["total"]
+    cnt = int(num(tot.get("count")) or len(rows))
+    run, thr, unread = num(tot.get("running")), num(tot.get("threads")), num(tot.get("unreadable"))
+    note = f"{cnt} total" + (f" · {run:.0f} running" if run is not None else "") + (f" · {thr:.0f} threads" if thr is not None else "") \
+        + (f" · {unread:.0f} unreadable" if unread else "") + f" · by {CPU_SORT_NAME.get(sort, sort)}"
+    if rows and all(num(p.get("cpu")) is None for p in rows):
+        note += " · CPU% ?: measuring"
+    lines = [section("PROCESSES", w, note)]
+    if not rows:
+        return (lines + [msg("warn", "processes: ? (the sampler gave none)")])[:avail], 0, 0, []
+    cols = cpu_columns(rows, w)
+    nw = max(4, w - 1 - sum(x[3] + 1 for x in cols))
+    head = " "
+    for key, title, align, width in cols:
+        mark = key in CPU_SORT_COLS.get(sort, ())  # the column the rows are in the order of: yellow, with an arrow for the direction
+        title = title + ("▼" if sort in ("cpu", "mem", "time") else "▲") if mark and key != "mem" else title
+        cell = f"{title:>{width}}" if align == ">" else f"{title:<{width}}"
+        head += c("1;33" if mark else "1;36", cell) + " "
+    lines.append(head + c("1;36", "NAME"))
+    vis = max(0, avail - 2)
+    i = next((j for j, p in enumerate(rows) if p["pid"] == cur), None) if cur is not None else None
+    rest = 0
+    if i is None:
+        top = 0
+        if len(rows) > vis:
+            vis = max(0, vis - 1)  # the last line says what is left out
+            rest = len(rows) - vis
+    else:
+        top = map_scroll(top, i, len(rows), vis) if vis else 0
+    shown = rows[top:top + vis]
+    pids = []
+    for j, p in enumerate(shown):
+        line = cpu_proc_line(p, cols, nw)
+        lines.append(c(7, pad(ANSI.sub("", clip(line, w)), w)) if i is not None and top + j == i else line)
+        pids.append((len(lines) - 1, p["pid"]))
+    if rest:
+        lines.append(c(90, f" … +{rest} more processes"))
+    return lines[:avail], top, len(shown), pids
+
+
+def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
+    """(the CPU screen's body: at most h lines, none wider than w; the first process shown; the processes in order; how many are
+    visible; [(line, pid)] of the process rows). cur: the pid under the cursor (None: no cursor, the table is cut at the bottom);
+    details: the cursor's process in a pane (beside the table from CPU_PANE_W columns on, below it otherwise)."""
+    rows = cpu_rows(d["procs"]["procs"], sort)
+    head = cpu_head(d, w, h)
+    grid = cpu_grid(d, w)
+    n_grid = len(grid[0]) + len(grid[1])
+    temps = cpu_temps(d, w)
+    sel = next((p for p in rows if p["pid"] == cur), None) if details else None
+    side = sel is not None and w >= CPU_PANE_W
+    tw = w - (max(46, int(w * 0.42)) + 3 if side else 0)
+    pane = cpu_pane(sel, rows, w, 40, d["at"], two=w >= 70) if sel is not None and not side else []
+    free = h - len(head)
+    p_min = 2 + (5 if cur is not None else 3)
+    pane_h = min(len(pane), max(0, free // 2))
+    free -= pane_h
+    g_len = min(n_grid, max(min(n_grid, 3), free - p_min - min(len(temps), 3)))
+    free -= g_len
+    t_len = min(len(temps), max(0, free - p_min))
+    if t_len < min(len(temps), 3):  # not even the title and two lines: the processes get the room instead of a "… +N more"
+        t_len = 0
+    free -= t_len
+    lines = head + cpu_grid_lines(grid, g_len) + cut_lines(temps[1:] if t_len < len(temps) else temps, t_len)  # cut: no title, the lines say it
+    table, top, vis, pids = cpu_procs(d, rows, tw, max(free, 0), cur, top, sort)
+    pids = [(len(lines) + k, pid) for k, pid in pids]
+    if side:  # the pane may be taller than a short table: it has all the room the table could have had
+        beside = cpu_pane(sel, rows, w - tw - 3, max(free, 0), d["at"])
+        table = [pad(table[k] if k < len(table) else "", tw) + c(90, " │ ") + (beside[k] if k < len(beside) else "")
+                 for k in range(max(len(table), len(beside)))]
+    lines += table + (cut_lines(pane, pane_h, "details") if pane_h < len(pane) else pane)
+    return [clip(x, w) for x in lines[:h]], top, rows, vis, pids
+
+
+def cpu_footer(cv, n, w):
+    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    sorts = "  ".join(f"{k.upper()} {CPU_SORT_SHORT[v]}" for k, v in CPU_SORT_KEYS.items())
+    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (3, "Enter: " + ("hide details" if cv.details else "details"), "Enter: details"),
+            (2, "sort: " + sorts, sorts), (0, "c/Esc: back", "c: back")]
+    pos = f"{cv.idx + 1}/{n}" if n else "0/0"
+    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
+    keys = [k for k in keys if k[2]]
+    while len(text) > w and keys:
+        text = f" {pos}  " + "  ".join(k[2] for k in keys)
+        keys.remove(max(keys))
+    here = f"{next(k for k, v in CPU_SORT_KEYS.items() if v == cv.sort).upper()} {CPU_SORT_SHORT[cv.sort]}"
+    return clip(c(90, text.replace(here, "\x1b[0m" + c("1;7", here) + "\x1b[90m", 1)), w)  # the sort in use, reversed
+
+
+def cpu_screen(d, pb, cv, w, h):
+    """(the interactive CPU screen as one frame: header, body, key help; the processes in order): the live loop and --once."""
+    rows = cpu_rows(d["procs"]["procs"], cv.sort)
+    cpu_sync(cv, rows)
+    body, cv.top, _, vis, _ = cpu_view(d, w, h - 2, cv.sort, cv.cur, cv.details, cv.top)
+    cv.page = max(1, vis - 1)
+    return frame(("CPU", 1, 1, body), 0, 1, w, h, pb, foot=cpu_footer(cv, len(rows), w)), rows
+
+
+def cpu_slide(feed, w, body_h):
+    """The CPU among the rotating pages ([dashboard] cpu_in_rotation): header, CPUs, temperatures, the top processes that fit."""
+    return cpu_view(feed.read(), w, body_h)[0]
+
+
+def fill_cpu(sl, idx, w, body_h, feed):
+    """The CPU slide is built empty by slides(lazy): its samplers cost CPU, so only the slide on screen gets its data."""
+    if sl[idx][0] == "CPU":
+        try:
+            lines = cpu_slide(feed, w, body_h)
+        except Exception as e:  # noqa: BLE001 - same rule as the other pages
+            lines = [c(31, f" error on page CPU: {safe(repr(e))[:w - 20]}")]
+        sl[idx] = ("CPU", 1, 1, lines)
+
+
+def cpu_problems(smp=None):
+    """The header's problems of the current state: the CPU screen has no graph of its own to take them from."""
+    st = snapshot(0)
+    sm = smp.sample() if smp else {"thermal": {}}
+    if DEMO:
+        demo_defaults()
+    return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+
+
+def cpu_once(argv, w, h):
+    """`--once --view cpu`: the CPU screen as the console draws it (tests, screenshots). --sort cpu|mem|time|pid|user (anything else:
+    cpu); --select NAME: the cursor on the first process whose name contains NAME (any case) or whose pid it is; --details: the
+    details pane of the process under the cursor (Enter)."""
+    opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
+    d = CpuFeed(settle=0.5).read()
+    cv = CpuView()
+    cv.sort = opt("--sort") if opt("--sort") in CPU_SORTS else "cpu"
+    cv.details = "--details" in argv
+    if opt("--select"):
+        cpu_select(cpu_rows(d["procs"]["procs"], cv.sort), cv, opt("--select"))
+    return cpu_screen(d, cpu_problems(None if DEMO else Sampler()), cv, w, h)[0]
+
+
+def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
+    """(the CPU screen for a browser page: one frame; [(line of the frame, pid)] of the process rows, which the page makes links).
+    sel: the pid whose details are shown, if it is one of this reading's processes. scroll: as tall as its content."""
+    sel = sel if any(p["pid"] == sel for p in d["procs"]["procs"]) else None
+    body, _, rows, _, pids = cpu_view(d, w, 10 ** 4 if scroll else h - 2, sort, sel, sel is not None)
+    tail = c(90, f" by {CPU_SORT_NAME.get(sort, sort)} · {len(rows)} processes listed" + (" · details of the highlighted row" if sel is not None else ""))
+    return frame(("CPU", 1, 1, body), 0, 1, w, len(body) + 2 if scroll else h, pb, foot=tail, page=True), [(i + 1, pid) for i, pid in pids]
+
+
+def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False, cpu_feed=None):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
     st, sm = snapshot(w), smp.sample()
@@ -2546,22 +3307,23 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
         import demo
         sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll)
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
         h = len(sl[0][3]) + 2
     n = pick_slide(sl, at) if at is not None else n
+    fill_cpu(sl, n % len(sl), w, h - 2, cpu_feed or CpuFeed(settle=0.5))  # only the slide shown reads the processes
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
                  safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)
 
 
-def render_screens(smp, w, h, mode=None, keys=True, page=False):
+def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
         import demo
         sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
     return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
 
@@ -2579,11 +3341,17 @@ def once(argv):
     DEMO_OS = argv[argv.index("--demo-os") + 1] if "--demo-os" in argv[:-1] else None
     arg = lambda k, d: int(argv[argv.index(k) + 1]) if k in argv else d
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
-    if "--view" in argv[:-1] and argv[argv.index("--view") + 1] == "map":  # the Map screen (see map_once for its options)
+    view = argv[argv.index("--view") + 1] if "--view" in argv[:-1] else ""
+    if view == "map":  # the Map screen (see map_once for its options)
         if not on("map"):
             print("the map is off: [features] map = no in config.ini", file=sys.stderr)
             return 2
         out = map_once(argv, w, h)
+    elif view == "cpu":  # the CPU screen (see cpu_once)
+        if not on("cpu"):
+            print("the CPU screen is off: [features] cpu = no in config.ini", file=sys.stderr)
+            return 2
+        out = cpu_once(argv, w, h)
     else:
         smp = Sampler()
         smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
@@ -2755,13 +3523,18 @@ def kiosk_file(argv, base, cols, rows):
     path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
     w, h = cols, rows  # a browser page: every column is usable (no Linux console last-column quirk)
     print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
-    smp, t0, browser, started, cmd = Sampler(), time.time(), None, 0.0, None
+    smp, t0, browser, started, cmd, cpu_feed = Sampler(), time.time(), None, 0.0, None, None
     while True:
         try:
             st, sm = snapshot(w), smp.sample()
-            sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
-            idx = pick_slide(sl, time.time() - t0)
-            screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
+            sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
+            idx = pick_slide(sl, time.time() - t0) % len(sl)
+            if sl[idx][0] == "CPU":  # its samplers run only while it is on screen (see main)
+                cpu_feed = cpu_feed or CpuFeed()
+                fill_cpu(sl, idx, w, h - 2, cpu_feed)
+            else:
+                cpu_feed = None
+            screen = frame(sl[idx], idx, len(sl), w, h,
                            safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
                            keys=False, hint=KIOSK_HINT, page=True)
             write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
@@ -2889,8 +3662,10 @@ def main(argv):
         out.write("\x1b[?25l\x1b[2J")
         t0, hold_until, held, size = time.time(), 0, 0, None
         map_ok = on("map") and bool(old or win_keys)  # the Map needs a keyboard: without one only map_in_rotation shows it
+        cpu_ok = on("cpu") and bool(old or win_keys)  # so does the CPU screen (cpu_in_rotation is for a monitor without one)
         mv, G, pb, fresh, rs = None, None, [], 0.0, []  # the Map while it is shown, its graph and problems, next data refresh
         err, last_pb = None, []  # why the Map could not be drawn (until the next refresh); the rotation's last problems
+        cv, cpu_d, cpu_fresh, cpu_rows_, rot_feed = None, None, 0.0, [], None  # the CPU screen, its data and rows; the rotation slide's feed
         while True:
             w, h = shutil.get_terminal_size((120, 33))
             # config.ini [dashboard] columns/rows: layout size forced smaller than the real console (never larger: it would run off-screen)
@@ -2903,6 +3678,9 @@ def main(argv):
             now = time.time()
             if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
                 t0, mv = t0 + now - mv.opened, None
+                out.write("\x1b[2J")
+            if cv is not None and now - cv.touched > CPU_IDLE_S:  # same for the CPU screen
+                t0, cv = t0 + now - cv.opened, None
                 out.write("\x1b[2J")
             if mv is not None:  # the Map: new data every REFRESH_S, a new frame at every key
                 try:
@@ -2918,12 +3696,30 @@ def main(argv):
                     screen = frame(("Map", 1, 1, [c(31, f" error on the map: {safe(repr(err))[:w - 20]}")]), 0, 1, w, h, pb,
                                    foot=c(90, " m/Esc back"))
                 wait = fresh - time.time()
+            elif cv is not None:  # the CPU screen: new data every REFRESH_S (the first one after a second: a CPU% needs two readings)
+                try:
+                    if now >= cpu_fresh:
+                        cpu_fresh = now + (min(1.0, REFRESH_S) if cpu_d is None else REFRESH_S)
+                        st, sm = snapshot(w), smp.sample()  # the header's status pill stays true while the screen is open
+                        last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                        cpu_d = cv.feed.read()
+                    screen, cpu_rows_ = cpu_screen(cpu_d, last_pb, cv, w, h)
+                except Exception as e:  # noqa: BLE001 - a broken screen must not take the console down; c/Esc still go back
+                    cpu_rows_ = []
+                    screen = frame(("CPU", 1, 1, [c(31, f" error on the CPU screen: {safe(repr(e))[:w - 26]}")]), 0, 1, w, h,
+                                   last_pb + [(2, "the CPU screen could not be drawn")], foot=c(90, " c/Esc back"))
+                wait = cpu_fresh - time.time()
             else:
                 st, sm = snapshot(w), smp.sample()
-                sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
-                idx = held if now < hold_until else pick_slide(sl, now - t0)
+                sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
+                idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
+                if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
+                    rot_feed = rot_feed or CpuFeed()
+                    fill_cpu(sl, idx, w, h - 2, rot_feed)
+                else:
+                    rot_feed = None
                 last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-                screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h, last_pb, mapkey=map_ok)
+                screen = frame(sl[idx], idx, len(sl), w, h, last_pb, mapkey=map_ok, cpukey=cpu_ok)
                 wait = REFRESH_S
             out.write("\x1b[H" + screen)
             out.flush()
@@ -2938,7 +3734,17 @@ def main(argv):
             else:
                 time.sleep(max(0.0, wait))
             for k in keys:
-                if mv is not None:
+                if cv is not None:
+                    cv.touched = time.time()
+                    act = cpu_key(cv, k, cpu_rows_, cv.page)
+                    if act == "back":
+                        t0, cv, cpu_d = t0 + time.time() - cv.opened, None, None  # the rotation was paused: it goes on where it was
+                        out.write("\x1b[2J")
+                        break
+                    if act == "rows" and cpu_d is not None:  # the next key of the same read moves on the new order
+                        cpu_rows_ = cpu_rows(cpu_d["procs"]["procs"], cv.sort)
+                        cpu_sync(cv, cpu_rows_)
+                elif mv is not None:
                     mv.touched = time.time()
                     act = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
                     if act == "back":
@@ -2950,6 +3756,10 @@ def main(argv):
                         map_sync(mv, rs)
                 elif k in ("m", "tab") and map_ok:
                     mv, fresh = MapView(), 0.0
+                    out.write("\x1b[2J")
+                    break
+                elif k == "c" and cpu_ok:
+                    cv, cpu_d, cpu_fresh, rot_feed = CpuView(), None, 0.0, None
                     out.write("\x1b[2J")
                     break
                 elif len(k) == 1 and k in "123456789" and int(k) <= len(PAGES):

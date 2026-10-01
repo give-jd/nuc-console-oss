@@ -88,6 +88,25 @@ stays the default because it is the one that reads the same everywhere and state
 - Edges keep the tree's evidence styles: seen solid, declared dashed, same network dotted; zone → port and port → owner
   links are thin and grey (structure, not traffic).
 
+## CPU
+
+The overview keeps one line of bars per core; the **CPU** screen (key `c`, web `cpu`) is the htop-like view for when
+something is busy: what the processor is, what each core does, how hot it is, and which processes cost what.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Model, cores, threads, caches | `/proc/cpuinfo`, sysfs topology and caches | `sysctl` (no subprocess) | registry, `GetLogicalProcessorInformationEx` |
+| P/E cores | `/sys/devices/cpu_core` and `cpu_atom` (Intel), capacity classes (ARM) | `hw.perflevel0/1` (counts) | `EfficiencyClass` |
+| Per-core load | `/proc/stat` (user, system, iowait, irq, steal) | `host_processor_info` | `NtQuerySystemInformation` |
+| Frequency | cpufreq per core, governor, driver | Intel: one value; Apple Silicon: per cluster from `powermetrics` (collector) | per core (`CallNtPowerInformation` / PDH) |
+| Temperature | hwmon: coretemp per core, k10temp, zenpower, ARM SoC, thermal zones | collector: `powermetrics`, `smctemp`, `osx-cpu-temp` | collector: LibreHardwareMonitor, OpenHardwareMonitor, ACPI |
+| Processes | `/proc/<pid>` | `ps` (fixed argv) | Toolhelp, `GetProcessTimes`, working set |
+
+The rules are the dashboard's: what cannot be read is `?`, never a guess or a zero; one source failing leaves the others
+on screen with a note; processes are sampled only while the screen is shown (it costs a little CPU), and only their names
+are read. Temperatures on macOS and Windows need root/SYSTEM, so the collector writes them to `sensors.json` every 10 s
+(30 s on Windows, where each reading starts PowerShell) and the screen merges them.
+
 ## macOS and Windows
 
 There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every
