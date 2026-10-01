@@ -1423,7 +1423,9 @@ class CatalogTests(unittest.TestCase):
                 c = aisetup.catalog(hw, self.d, cfg={"ai": {"model": ""}})
                 self.assertEqual([m["id"] for m in c["models"]], [m["id"] for m in aisetup.MODELS])
                 self.assertIn(c["recommended"], [None] + [m["id"] for m in aisetup.MODELS])
-                self.assertFalse(any(m["installed"] or m["pinned"] for m in c["models"]), "nothing is pinned in this build, so nothing can be installed")
+                self.assertFalse(any(m["installed"] for m in c["models"]), "an empty directory: nothing installed")
+                for m in c["models"]:  # pinned exactly when the manifest has every value a download needs
+                    self.assertEqual(m["pinned"], not aisetup.missing_pins(aisetup.find_model(m["id"]), True), m["id"])
 
     def test_find_dir_prefers_the_system_wide_directory(self):
         system, own = os.path.join(self.tmp.name, "sys"), os.path.join(self.tmp.name, "own")

@@ -60,20 +60,21 @@ UNIX_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 # ---------------------------------------------------------------------------------------------------------------------------
 # llamafile (Mozilla, Apache-2.0): ONE executable for Linux, macOS, Windows, x86_64 and arm64; it runs a GGUF model given with -m
 # and serves an OpenAI-compatible API under /v1. The tag in the URL pins the release; the SHA-256 pins the bytes.
-# STATUS: UNPINNED. The version and the asset name below are the maintainer's best knowledge and must be confirmed with `pins`;
+# 0.10.x: the llama.cpp it is built on knows Qwen3, SmolLM3 and gpt-oss (0.9.x does not). The asset name and its SHA-256 come
+# from the ai-pins workflow (`pins`, which lists the release's assets when the name is not there);
 # the GPU flags serve_argv adds (--gpu auto -ngl N, or --gpu disable) must be confirmed against `llamafile --help` of the pinned
 # version, and the newer models (SmolLM3, gpt-oss) against the llama.cpp that version is built on: an older runtime may not know them.
 # "args" are extra arguments for every start; the GPU ones are not here because they depend on the machine (gpu_plan).
 RUNTIME = {
-    "name": "llamafile", "version": "0.9.3", "license": "Apache-2.0",
-    "url": "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.3/llamafile-0.9.3",
+    "name": "llamafile", "version": "0.10.6", "license": "Apache-2.0",
+    "url": "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.10.6/llamafile-0.10.6",
     "sha256": None, "size": None,
     "args": [],
 }
 
 # Instruct models, GGUF Q4_K_M, permissive licences, ordered best first (rank 1 = best for the advisor's job: short, grounded advice).
 # "revision" is a Hugging Face COMMIT (never "main"), "sha256" and "size" are those of the file at that commit (the Hub's tree API:
-# lfs.oid, lfs.size). repo/file: best knowledge, UNVERIFIED until `pins` finds them; revision, sha256, size: NOT PINNED.
+# lfs.oid, lfs.size), read by `aisetup.py pins` (the ai-pins workflow runs it on GitHub) on 2026-10-01; a commit never changes.
 # The rest is for ADVICE only (what fits, how fast), before and after pinning; a download never uses it: params_b (billions; MoE:
 # active_b = parameters read per token), layers (transformer blocks: how many fit on a GPU becomes -ngl), ctx_max (tokens the model
 # was trained for), approx_mb (approximate Q4_K_M file in MB of 10^6 bytes: the maintainer's estimate, not a measurement), ram_mb
@@ -83,44 +84,56 @@ MODELS = [
     {"id": "qwen3-30b-a3b", "name": "Qwen3 30B-A3B (MoE)", "license": "Apache-2.0", "rank": 1, "params_b": 30.5, "active_b": 3.3,
      "quant": "Q4_K_M", "layers": 48, "ctx_max": 32768, "approx_mb": 18600, "ram_mb": 19300,
      "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think",
-     "repo": "Qwen/Qwen3-30B-A3B-GGUF", "file": "Qwen3-30B-A3B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "Qwen/Qwen3-30B-A3B-GGUF", "file": "Qwen3-30B-A3B-Q4_K_M.gguf", "revision": "e4d4bafdfb96a411a163846265362aceb0b9c63a",
+     "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5", "size": 18556685824},
     {"id": "gpt-oss-20b", "name": "OpenAI gpt-oss 20B (MoE)", "license": "Apache-2.0", "rank": 2, "params_b": 21.0, "active_b": 3.6,
      "quant": "Q4_K_M", "layers": 24, "ctx_max": 131072, "approx_mb": 11600, "ram_mb": 12100,
      "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)",
-     "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "revision": "d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4",
+     "sha256": "c27536640e410032865dc68781d80a08b98f8db5e93575919af8ccc0568aeb4f", "size": 11624759488},
     {"id": "phi-4", "name": "Phi-4 14B", "license": "MIT", "rank": 3, "params_b": 14.7, "quant": "Q4_K_M", "layers": 40,
      "ctx_max": 16384, "approx_mb": 9100, "ram_mb": 10300, "notes": "dense 14B: strong reasoning, slow without a GPU",
-     "repo": "bartowski/phi-4-GGUF", "file": "phi-4-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "bartowski/phi-4-GGUF", "file": "phi-4-Q4_K_M.gguf", "revision": "19cd65f97c2f1712a81c506611d3f9c94b16a1e1",
+     "sha256": "009aba717c09d4a35890c7d35eb59d54e1dba884c7c526e7197d9c13ab5911d9", "size": 9053114816},
     {"id": "qwen3-14b", "name": "Qwen3 14B", "license": "Apache-2.0", "rank": 4, "params_b": 14.8, "quant": "Q4_K_M", "layers": 40,
      "ctx_max": 32768, "approx_mb": 9000, "ram_mb": 10000, "notes": "dense 14B: slow without a GPU; /no_think",
-     "repo": "Qwen/Qwen3-14B-GGUF", "file": "Qwen3-14B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "Qwen/Qwen3-14B-GGUF", "file": "Qwen3-14B-Q4_K_M.gguf", "revision": "530227a7d994db8eca5ab5ced2fb692b614357fd",
+     "sha256": "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0", "size": 9001752960},
     {"id": "qwen3-8b", "name": "Qwen3 8B", "license": "Apache-2.0", "rank": 5, "params_b": 8.2, "quant": "Q4_K_M", "layers": 36,
      "ctx_max": 32768, "approx_mb": 5000, "ram_mb": 6000, "notes": "a good balance on 16 GB; /no_think",
-     "repo": "Qwen/Qwen3-8B-GGUF", "file": "Qwen3-8B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "Qwen/Qwen3-8B-GGUF", "file": "Qwen3-8B-Q4_K_M.gguf", "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
+     "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785", "size": 5027783488},
     {"id": "granite-3.3-8b", "name": "IBM Granite 3.3 8B instruct", "license": "Apache-2.0", "rank": 6, "params_b": 8.2,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 4900, "ram_mb": 5900, "notes": "enterprise-tuned, 128k context",
      "repo": "ibm-granite/granite-3.3-8b-instruct-GGUF", "file": "granite-3.3-8b-instruct-Q4_K_M.gguf",
-     "revision": None, "sha256": None, "size": None},
+     "revision": "e40e9dd739c7be00fa965c16ce167088190ce114",
+     "sha256": "77bcee066a76dcdd10d0d123c87e32c8ec2c74e31b6ffd87ebee49c9ac215dca", "size": 4942873344},
     {"id": "qwen3-4b", "name": "Qwen3 4B", "license": "Apache-2.0", "rank": 7, "params_b": 4.0, "quant": "Q4_K_M", "layers": 36,
      "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think",
-     "repo": "Qwen/Qwen3-4B-GGUF", "file": "Qwen3-4B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "Qwen/Qwen3-4B-GGUF", "file": "Qwen3-4B-Q4_K_M.gguf", "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+     "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5", "size": 2497280256},
     {"id": "phi-4-mini", "name": "Phi-4-mini instruct 3.8B", "license": "MIT", "rank": 8, "params_b": 3.8, "quant": "Q4_K_M", "layers": 32,
      "ctx_max": 131072, "approx_mb": 2500, "ram_mb": 3600, "notes": "good at reasoning for its size, 128k context",
      "repo": "bartowski/microsoft_Phi-4-mini-instruct-GGUF", "file": "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf",
-     "revision": None, "sha256": None, "size": None},
+     "revision": "7ff82c2aaa4dde30121698a973765f39be5288c0",
+     "sha256": "01999f17c39cc3074afae5e9c539bc82d45f2dd7faa3917c66cbef76fce8c0c2", "size": 2491874688},
     {"id": "smollm3-3b", "name": "SmolLM3 3B", "license": "Apache-2.0", "rank": 9, "params_b": 3.1, "quant": "Q4_K_M", "layers": 36,
      "ctx_max": 65536, "approx_mb": 1900, "ram_mb": 2500, "notes": "3B with a thinking mode; /no_think",
-     "repo": "unsloth/SmolLM3-3B-GGUF", "file": "SmolLM3-3B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "unsloth/SmolLM3-3B-GGUF", "file": "SmolLM3-3B-Q4_K_M.gguf", "revision": "a7bc17204c8a326d6bd6e466e076959eddae2025",
+     "sha256": "4de907d2d388a5508fb7cb443a06effe14cce3518b0a78d3bdd9e74d9edce989", "size": 1915306528},
     {"id": "granite-3.3-2b", "name": "IBM Granite 3.3 2B instruct", "license": "Apache-2.0", "rank": 10, "params_b": 2.5,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 1550, "ram_mb": 2400, "notes": "small and quick, 128k context",
      "repo": "ibm-granite/granite-3.3-2b-instruct-GGUF", "file": "granite-3.3-2b-instruct-Q4_K_M.gguf",
-     "revision": None, "sha256": None, "size": None},
+     "revision": "7cdf86ccd1f1bb3491c9b7017b033f2e51367397",
+     "sha256": "ac71e9e32c0bea919b409c5918f69ca74339854b0319c5065e4e9fb6d95c4852", "size": 1545303328},
     {"id": "qwen3-1.7b", "name": "Qwen3 1.7B", "license": "Apache-2.0", "rank": 11, "params_b": 1.7, "quant": "Q4_K_M", "layers": 28,
      "ctx_max": 32768, "approx_mb": 1100, "ram_mb": 2000, "notes": "for old or small machines; /no_think",
-     "repo": "unsloth/Qwen3-1.7B-GGUF", "file": "Qwen3-1.7B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "unsloth/Qwen3-1.7B-GGUF", "file": "Qwen3-1.7B-Q4_K_M.gguf", "revision": "d7f544eead698dbd1f15126ef60b45a1e1933222",
+     "sha256": "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897", "size": 1107409472},
     {"id": "qwen3-0.6b", "name": "Qwen3 0.6B", "license": "Apache-2.0", "rank": 12, "params_b": 0.6, "quant": "Q4_K_M", "layers": 28,
      "ctx_max": 32768, "approx_mb": 400, "ram_mb": 1200, "notes": "the smallest: simple summaries only; /no_think",
-     "repo": "unsloth/Qwen3-0.6B-GGUF", "file": "Qwen3-0.6B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+     "repo": "unsloth/Qwen3-0.6B-GGUF", "file": "Qwen3-0.6B-Q4_K_M.gguf", "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+     "sha256": "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a", "size": 396705472},
 ]
 DEFAULT_MODEL = "qwen3-4b"  # without a reading of the machine: the best that fits an 8 GB one; MODELS is ordered best first (pick_default)
 
@@ -1348,7 +1361,9 @@ def pin_from_release(release, url):
             if not digest.startswith("sha256:") or not HEX64.match(digest[7:]):
                 raise SetupError("the release publishes no SHA-256 for this asset: download it over a trusted link and run sha256sum")
             return {"sha256": digest[7:], "size": a["size"]}
-    raise SetupError("no asset %s in release %s" % (url, release.get("tag_name") if isinstance(release, dict) else "?"))
+    names = [str(a.get("name")) for a in release.get("assets", []) if isinstance(a, dict)] if isinstance(release, dict) else []
+    raise SetupError("no asset %s in release %s (assets: %s)" % (url, release.get("tag_name") if isinstance(release, dict) else "?",
+                                                                  ", ".join(names[:12]) or "none"))
 
 
 def cmd_pins(args, runtime=None, models=None):
