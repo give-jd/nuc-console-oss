@@ -8,10 +8,12 @@
 #      profile changes. Homebrew's Python is never used: its files belong to a user, and the collector runs as root;
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
-#   3. starts the collector as a LaunchDaemon (root) and, if [web] enabled = yes, the web view as user _nuc-console;
-#   4. installs a LaunchAgent that opens the dashboard full screen at every desktop login (a Chrome/Edge/Brave window if
-#      installed, else Safari: press Ctrl+Cmd+F once), and opens it now for the user at the console.
-# Options (environment): NUC_CONSOLE_DISPLAY=no   no dashboard at login (a Mac without a monitor)
+#   3. starts the collector as a LaunchDaemon (root) and the read-only web view as user _nuc-console, on 127.0.0.1 only
+#      (as configured in [web] if enabled there): it shows the dashboard to this Mac's browser;
+#   4. [display] mode = browser (default): /Applications/nuc-console.webloc opens it in your browser (and it opens now);
+#      fullscreen: a LaunchAgent opens it full screen at every desktop login (a Chrome/Edge/Brave window if installed, else
+#      Safari: press Ctrl+Cmd+F once; Cmd+Q closes it); none: nothing.
+# Options (environment): NUC_CONSOLE_DISPLAY=browser|fullscreen|none   written to [display] mode in config.ini
 set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "this installer is for macOS; on Linux use install.sh" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || { echo "root required: sudo $0" >&2; exit 1; }
@@ -32,7 +34,7 @@ CONSOLE_UID="$(stat -f %u /dev/console)"  # the user at the screen (0 at the log
 if [ "${1:-}" = "--uninstall" ]; then
     for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout "system/$label" 2>/dev/null || true; done
     [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
-    rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf
+    rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /Applications/nuc-console.webloc
     for link in /usr/local/bin/nuc-console-problems /usr/local/sbin/nuc-console-accept; do
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
@@ -101,6 +103,14 @@ for pair in "bin:nuc-console-problems" "sbin:nuc-console-accept"; do
 done
 [ -e "$ETC/config.ini" ] || install -m 0644 config/config.ini "$ETC/config.ini"  # never overwrite the admin's edits
 install -m 0644 config/config.ini "$ETC/config.ini.dist"  # always refreshed: diff it with config.ini to see new options
+case "${NUC_CONSOLE_DISPLAY:-}" in
+    "") ;;
+    browser|fullscreen|kiosk|none|no) "$PY" -B "$DEST/nuc_config.py" --set "$ETC/config.ini" display mode "$NUC_CONSOLE_DISPLAY" ;;
+    *) echo "invalid NUC_CONSOLE_DISPLAY: $NUC_CONSOLE_DISPLAY (browser, fullscreen or none)" >&2; exit 1 ;;
+esac
+MODE="$("$PY" -B "$DEST/nuc_config.py" --get display mode)"
+PORT="$("$PY" -B "$DEST/nuc_config.py" --get web port)"
+URL="http://127.0.0.1:$PORT/?fit=1"
 echo "$LOG/collector.log  root:wheel  644  5  1024  *  NJ" > /etc/newsyslog.d/nuc-console.conf  # rotate at 1 MB, keep 5
 
 # ---- 3. collector and web view --------------------------------------------------------------------------------------------
@@ -108,7 +118,10 @@ fill launchd/com.nuc-console.collector.plist > "$LD/com.nuc-console.collector.pl
 chown root:wheel "$LD/com.nuc-console.collector.plist" && chmod 0644 "$LD/com.nuc-console.collector.plist"
 t0=$(date +%s)
 load system "$LD/com.nuc-console.collector.plist"
-if "$PY" -B "$DEST/web.py" --enabled; then
+# the web view: as configured in [web] if enabled there; else, for this Mac's own browser, on 127.0.0.1 only (--local)
+WEB=no
+if "$PY" -B "$DEST/web.py" --enabled || [ "$MODE" != none ]; then WEB=yes; fi
+if [ "$WEB" = yes ]; then
     if ! dscl . -read "/Users/$SVC_USER" >/dev/null 2>&1; then  # a hidden service account, like Apple's _www
         id=""
         for i in $(seq 400 499); do
@@ -130,25 +143,37 @@ if "$PY" -B "$DEST/web.py" --enabled; then
     fill launchd/com.nuc-console.web.plist > "$LD/com.nuc-console.web.plist"
     chown root:wheel "$LD/com.nuc-console.web.plist" && chmod 0644 "$LD/com.nuc-console.web.plist"
     load system "$LD/com.nuc-console.web.plist"
+    # /Applications/nuc-console.webloc: Spotlight, Launchpad or a double-click open the dashboard in the default browser
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+        "<plist version=\"1.0\"><dict><key>URL</key><string>$URL</string></dict></plist>" > /Applications/nuc-console.webloc
 else
-    rm -f "$LD/com.nuc-console.web.plist"
+    rm -f "$LD/com.nuc-console.web.plist" /Applications/nuc-console.webloc
 fi
 
 # ---- 4. first snapshot, baseline, dashboard ---------------------------------------------------------------------------
 # wait for a net.json written AFTER the collector start: an older one would be stale
 for _ in $(seq 1 90); do [ "$(stat -f %m /var/run/nuc-console/net.json 2>/dev/null || echo 0)" -ge "$t0" ] && break; sleep 1; done
 "$PY" -B "$DEST/render.py" --accept --if-missing || echo "warning: baseline not created (collector not ready yet): run sudo nuc-console-accept"
-if [ "${NUC_CONSOLE_DISPLAY:-yes}" = no ]; then
-    [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
-    rm -f "$LA/com.nuc-console.display.plist"
-    where="not opened (NUC_CONSOLE_DISPLAY=no)"
-else
+if [ "$WEB" = yes ]; then  # the web view starts in a moment: wait for it before opening anything
+    for _ in $(seq 1 20); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/healthz" 2>/dev/null && break; sleep 1; done
+fi
+[ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
+if [ "$MODE" = fullscreen ]; then
     fill launchd/com.nuc-console.display.plist > "$LA/com.nuc-console.display.plist"
     chown root:wheel "$LA/com.nuc-console.display.plist" && chmod 0644 "$LA/com.nuc-console.display.plist"
     if [ "$CONSOLE_UID" != 0 ]; then  # open it now for the user at the screen; everyone else gets it at login
-        launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
         load "gui/$CONSOLE_UID" "$LA/com.nuc-console.display.plist" || echo "nuc-console: the dashboard opens at the next login"
     fi
-    where="opens full screen at every login (Cmd+Q closes it)"
+    where="full screen at every login (Cmd+Q closes it, Ctrl+Cmd+F leaves full screen); also Applications > nuc-console"
+else
+    rm -f "$LA/com.nuc-console.display.plist"
+    if [ "$MODE" = browser ]; then
+        # as the user at the screen, in their session: the browser must not run as root
+        [ "$CONSOLE_UID" = 0 ] || launchctl asuser "$CONSOLE_UID" sudo -u "#$CONSOLE_UID" /usr/bin/open "$URL" || true
+        where="in your browser: Applications > nuc-console, or $URL"
+    else
+        where="not shown ([display] mode = none)"
+    fi
 fi
-echo "ok: collector running; dashboard $where. Config: $ETC/config.ini  Logs: $LOG"
+echo "ok: collector running; dashboard $where. Text size: A- / A+ at the bottom of the page. Config: $ETC/config.ini  Logs: $LOG"

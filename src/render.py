@@ -597,7 +597,7 @@ NET_STALE_S = 120
 EXPOSURE_SECTIONS = frozenset(("listeners", "ufw", "docker_user", "serve", "firewall"))
 # processes that listen on behalf of containers: docker-proxy (Linux), the Docker Desktop / OrbStack / Rancher backends
 DOCKER_PROXIES = {"docker-proxy", "com.docker.backend", "com.docker.vpnkit", "vpnkit", "vpnkit-bridge", "com.docker.proxy",
-                  "wslrelay", "OrbStack Helper", "limactl", "rancher-desktop"}
+                  "OrbStack Helper", "limactl", "rancher-desktop"}  # not wslrelay: it forwards any WSL port, not only containers
 
 
 def os_of(d):
@@ -727,6 +727,9 @@ def docker_verdict(du):
 
 
 CELL = {"open": 1, "nofw": 1, "filtered": 2, "blocked": 0, "unknown": 3}
+# UDP discovery ports that every browser or OS component binds at the same time (macOS/Windows): one stable name, or the
+# "service" of the port would flip between chrome and msedge at every pass and raise CHANGED alarms
+SHARED_UDP = {5353: "mDNS", 5355: "LLMNR", 1900: "SSDP", 3702: "WS-Discovery", 137: "NetBIOS", 138: "NetBIOS"}
 EXPOSED_RANK = {"open": 4, "nofw": 4, "unknown": 3, "filtered": 2, "blocked": 1}
 
 
@@ -754,8 +757,10 @@ def exposure_rows(net, cont):
     rows = {}
     for l in ls:
         sc = bind_scope(l["addr"])
-        r = rows.setdefault((l["port"], l["proto"], sc), {"proc": "", "fw": None})
+        r = rows.setdefault((l["port"], l["proto"], sc), {"proc": "", "fw": None, "procs": set()})
         r["proc"] = r["proc"] or l["proc"]
+        if l["proc"]:
+            r["procs"].add(l["proc"])
         v = l.get("fw")
         if v and v[0] in CELL and (r["fw"] is None or EXPOSED_RANK[v[0]] > EXPOSED_RANK[r["fw"][0]]):
             r["fw"] = v  # IPv4 and IPv6 sockets of one port: the most exposed verdict counts
@@ -767,11 +772,15 @@ def exposure_rows(net, cont):
         for p in ct["ports"]:
             if isinstance(p["p"], int) and (p["p"], "tcp") not in have:
                 sc = "lo" if p["s"] == "lo" else "wild" if p["s"] == "*" else bind_scope(p["s"])
-                rows.setdefault((p["p"], "tcp", sc), {"proc": "docker-proxy", "fw": None})
+                rows.setdefault((p["p"], "tcp", sc), {"proc": "docker-proxy", "fw": None, "procs": set()})
     out = []
     for (port, proto, sc), r in rows.items():
         via_docker = r["proc"] in DOCKER_PROXIES or (not r["proc"] and port in published)
         name = published.get(port, "container?") if via_docker else (r["proc"] or "?")
+        if native and not via_docker and proto == "udp" and port in SHARED_UDP:
+            name = f"{SHARED_UDP[port]} ({', '.join(sorted(r['procs'])) or '?'})"
+        elif native and not via_docker and len(r["procs"]) > 1:  # several programs on one port: the same name whatever the order
+            name = ", ".join(sorted(r["procs"]))
         sv = serve.get(port) if sc == "ts" else None
         if sv:
             name = f"{'funnel' if sv['funnel'] else 'serve'} {sv['path']} → " + sv["target"].replace("http://", "")
@@ -972,7 +981,9 @@ def exposure_keys(net, cont):
     """
     if net is None or net.get("listeners") is None:
         return None
-    return {f"{r['port']}/{r['proto'][0]}:{group_of(r)}": {"name": r["name"], "lan": r["lan"]}
+    # macOS/Windows: a shared discovery port is that protocol, whichever browser happens to hold it now
+    stable = lambda r: SHARED_UDP[r["port"]] if os_of(net) != "linux" and r["proto"] == "udp" and r["port"] in SHARED_UDP else r["name"]  # noqa: E731
+    return {f"{r['port']}/{r['proto'][0]}:{group_of(r)}": {"name": stable(r), "lan": r["lan"]}
             for r in exposure_rows(net, cont)
             if group_of(r) != "LOCALE" and not (r["name"] == "tailscaled" and r["port"] >= 32768 and r["port"] != 41641)}
 
@@ -1005,10 +1016,12 @@ def baseline_diff(cur, base):
     new = {k: v for k, v in cur.items() if k not in old}
     gone = {k: val(v) for k, v in old.items() if k not in cur}
     changed = {}
+    # a shared discovery port now named by its protocol (macOS/Windows): whatever program a baseline recorded there is the same
+    renamed = lambda k, new: new in SHARED_UDP.values() and "/u:" in k  # noqa: E731
     for k, v in cur.items():
         if k in old:
             o = val(old[k])
-            if o["name"] != v["name"] and on("containers"):  # containers off: container names can't be resolved
+            if o["name"] != v["name"] and on("containers") and not renamed(k, v["name"]):  # containers off: names can't be resolved
                 changed[k] = "service " + name_change(o["name"], v["name"])
             elif o["lan"] == 2 and v["lan"] in (1, 3) and on("firewall"):  # firewall off: verdict unknown, not a rule change
                 changed[k] = "was filtered by source, now open to the whole LAN"
@@ -1925,7 +1938,10 @@ def webapp_rows(net, cont):
         out.append({"name": name, "ports": list(ports), "state": "up" if hit else "down", "reach": widest(hit), "expected": True})
         used |= set(ports)
     found = {}
+    desktop = os_of(net) != "linux"  # macOS/Windows desktops: dozens of apps listen on 127.0.0.1, list only what is reachable
     for r in rows:
+        if desktop and group_of(r) == "LOCALE":
+            continue
         if (r["port"] in used or r["port"] in SENSITIVE or r["port"] == 22 or r["proto"] != "tcp" or r["name"] in INFRA_PROCS
                 or r["name"].startswith("svchost/") or r["name"] in db_names or r["name"] == "?"):
             continue
@@ -2216,8 +2232,9 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
-def render_screen(smp, w, h, mode=None, n=0):
-    """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py)."""
+def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True):
+    """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
+    at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
         import demo
@@ -2226,11 +2243,12 @@ def render_screen(smp, w, h, mode=None, n=0):
         if not CFG["webapps"]:
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}  # one up, one expected-but-down
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    n = pick_slide(sl, at) if at is not None else n
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])), len(sl)
+                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys), len(sl)
 
 
-def render_screens(smp, w, h, mode=None):
+def render_screens(smp, w, h, mode=None, keys=True):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
     st, sm = snapshot(w), smp.sample()
     if DEMO:
@@ -2241,7 +2259,7 @@ def render_screens(smp, w, h, mode=None):
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-    return [frame(x, i, len(sl), w, h, pb) for i, x in enumerate(sl)]
+    return [frame(x, i, len(sl), w, h, pb, keys=keys) for i, x in enumerate(sl)]
 
 
 def utf8_stdout():
@@ -2345,20 +2363,56 @@ def write_text_atomic(path, text):
     return False
 
 
-def kiosk(argv):
-    """`render.py --kiosk [--html FILE] [--no-browser]`: the dashboard as an HTML page rewritten every 2 s, shown full screen.
+def web_up(port, wait):
+    """True once the local web view answers; at login it may still be starting (it starts at boot)."""
+    end = time.time() + wait
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
+                conn.sendall(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                if b" 200 " in conn.recv(64):
+                    return True
+        except OSError:
+            pass
+        if time.time() >= end:
+            return False
+        time.sleep(2)
 
-    No network listener: the browser reads a local file (meta refresh). Ends when the viewer closes the browser."""
-    import htmlview
+
+def kiosk(argv):
+    """`render.py --kiosk`: the dashboard full screen, for the monitor of a Mac or a Windows PC (the display at login).
+
+    It opens the local web view (127.0.0.1, started by the installer) in a full-screen browser window: overview and Details
+    pages take turns, A- / A+ change the text size. Without the web view (a Linux desktop, or a token in [web]) it falls
+    back on a page written to a file every 2 s (`--file` forces it; `--html FILE`, `--no-browser`)."""
     base = user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
     cols, rows = kiosk_grid()
+    web = CFG["web"]
+    if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
+        from urllib.parse import urlencode
+        url = f"http://127.0.0.1:{web['port']}/?" + urlencode({"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1})
+        cmd = browser_command(find_browser(), url, os.path.join(base, "browser"))
+        print(f"kiosk -> {url}", file=sys.stderr, flush=True)
+        if not cmd or "--no-browser" in argv:
+            print("no browser started: open " + url, file=sys.stderr, flush=True)
+            return 0 if "--no-browser" in argv else 1
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return 0
+    return kiosk_file(argv, base, cols, rows)
+
+
+def kiosk_file(argv, base, cols, rows):
+    """The fallback: the dashboard as an HTML file rewritten every 2 s (no network at all). Ends when the browser closes."""
+    import htmlview
+    zoom = CFG["display"]["zoom"]
+    cols, rows = max(60, round(cols * 100 / zoom)), max(16, round(rows * 100 / zoom))  # bigger text = a smaller grid
+    path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
     w, h = cols - 1, rows
     print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
-    smp, t0, browser, started = Sampler(), time.time(), None, 0.0
+    smp, t0, browser, started, cmd = Sampler(), time.time(), None, 0.0, None
     while True:
         try:
             st, sm = snapshot(w), smp.sample()
@@ -2378,7 +2432,7 @@ def kiosk(argv):
             else:
                 browser = False
                 print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
-        # the viewer closed the kiosk (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
+        # the viewer closed the window (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
         if browser and cmd[0] != "/usr/bin/open" and browser.poll() is not None and time.time() - started > 10:
             return 0
         time.sleep(REFRESH_S)

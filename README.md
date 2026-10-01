@@ -32,8 +32,8 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
-| 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, no network listener |
-| 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the monitor shows the same screen full screen in a browser at login, and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
+| 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
+| 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
@@ -58,7 +58,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 - **Port alarms.** A baseline of the exposed ports is stored on install; a new, changed or vanished port raises a red banner until you accept it (`sudo nuc-console-accept`).
 - **Honest about missing data.** Unreadable or missing sections show `?` and are treated as open, never as "OK". A tool that isn't installed is reported as such, not as an error.
 - **Databases.** Finds postgres/redis/mysql/mongo/… containers, shows their *real* published ports and which containers/hosts actually connect (seen inside the container's network namespace, so Docker's DNAT can't hide external clients).
-- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view.
+- **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view (macOS/Windows show the dashboard through it, on 127.0.0.1 only).
 - **Adaptive layout.** One screen from 79×24 up to 4K consoles: 1 column → 2 (≥200 cols) → 3 (≥225 cols), dropping detail before dropping sections.
 
 ## Requirements
@@ -69,7 +69,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
 | Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
-| Display | Linux: a virtual terminal. macOS: a full-screen Chrome/Edge/Brave/Chromium window, else Safari. Windows: a full-screen Microsoft Edge window (Alt+F4 closes it, F11 leaves full screen) |
+| Display | Linux: a virtual terminal. macOS/Windows: your choice — your normal browser (a *nuc-console* shortcut), or a full-screen window at login (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
 
 ## Quick start
 
@@ -144,8 +144,8 @@ For web apps you expose on purpose, declare them under `[webapps]` instead: they
 - `nuc-console.service` owns the VT (`TTYPath=/dev/tty1`), `Restart=always`. `install.sh` masks `getty@tty1` so nothing draws over it; login stays on **tty2** (Ctrl+Alt+F2) and SSH.
 - **macOS / Windows**: the collector is a LaunchDaemon (root) / a scheduled task (SYSTEM) that reads sockets, the OS firewall and services
   with native tools (`lsof`, `socketfilterfw`, `launchctl` / the IP helper API and PowerShell) and judges every listening port against the
-  firewall *per program*. At login `render.py --kiosk` (the user, unprivileged) rewrites a local HTML page every 2 s and opens it in a
-  full-screen browser with a profile of its own: same layout, same alarms, no network listener.
+  firewall *per program*. The read-only web view (unprivileged) serves the same screen on **127.0.0.1 only**: a *nuc-console* shortcut
+  opens it in your browser, or (`[display] mode = fullscreen`) a full-screen window opens at every login. Same layout, same alarms.
 - Exposure rules and the design principles behind the layout: [docs/DESIGN.md](docs/DESIGN.md). Hardening the things it reports: [docs/HARDENING.md](docs/HARDENING.md).
 
 ### Cost

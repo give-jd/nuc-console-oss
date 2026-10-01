@@ -20,14 +20,14 @@ On **macOS** and **Windows** the split is the same:
 | Part | Runs as | Notes |
 |---|---|---|
 | `collector.py` | macOS: root (LaunchDaemon) · Windows: SYSTEM (scheduled task) | Apple's tools run as root only from SIP-protected folders; third-party tools (`docker`, `tailscale`) run **as the user who owns them** or the user at the console, never as root (a user-writable binary must not become root code). On Windows only `%SystemRoot%` and `%ProgramFiles%` are searched, never the working directory |
-| `render.py --kiosk` | the logged-in user | writes a local HTML page and opens it in a browser with a profile of its own; no network listener |
-| `web.py` (opt-in) | macOS: `_nuc-console` · Windows: LOCAL SERVICE | as on Linux |
+| `web.py` | macOS: `_nuc-console` · Windows: LOCAL SERVICE | **on by default there, on 127.0.0.1 only** (`--local`): it is how the dashboard is shown. Not reachable from the network; any local user or program can read it, like the state files. `[display] mode = none` and `[web] enabled = no` turn it off. With `[web] enabled = yes` it runs as configured there, as on Linux |
+| `render.py --kiosk` | the logged-in user | `fullscreen` mode: opens that page in a full-screen browser window with a profile of its own |
 | Python | macOS: a root-owned python.org or Command Line Tools Python (never Homebrew's) · Windows: a private embeddable Python in `%ProgramFiles%` | the installers pin the python.org files by SHA-256 and check their signature; the Windows `._pth` file makes it ignore `PYTHONPATH` and see only its own library and the code |
 | State | macOS: `/var/run/nuc-console` · Windows: `%ProgramData%\nuc-console` | Windows: the installer replaces the inherited ACL so only SYSTEM and Administrators can write (a user could otherwise fake the state or edit what SYSTEM reads) |
 
 Design rules you can audit in the code:
 
-- **No network exposure by default.** The collector and the tty renderer open no socket. The optional read-only web view (`web.py`, off by default) is the only listener: GET only, no JavaScript, strict CSP, loopback unless a token is configured (it refuses to start otherwise), token compared in constant time and read from a 0600 file; see [docs/WEB.md](docs/WEB.md).
+- **No network exposure by default.** The collector and the tty renderer open no socket. The read-only web view (`web.py`; Linux: off by default; macOS/Windows: on, bound to 127.0.0.1 only, as the dashboard) is the only listener: GET only, no JavaScript, strict CSP, loopback unless a token is configured (it refuses to start otherwise), token compared in constant time and read from a 0600 file; see [docs/WEB.md](docs/WEB.md).
 - **No shell, no user-controlled command lines.** Commands are fixed argument lists run with `subprocess.run([...])` (no `shell=True`) and a fixed `PATH`; the only variable arguments are container IDs/PIDs obtained from Docker itself. Windows PowerShell receives fixed scripts as `-EncodedCommand` (no quoting, no user input).
 - **Untrusted text is sanitised.** Container names, process names, journal lines etc. can contain terminal escape sequences; everything shown passes through `safe()` which strips control characters.
 - **Secrets are never stored or displayed.** To find which containers use a database, the collector checks whether container environment variable *names/values reference the DB's hostname*; it keeps only the match result, never the values (`env_uses`). Tests assert this.

@@ -45,6 +45,14 @@ def to_html(text):
     return "".join(out)
 
 
+def fit_css(cols, rows=0):
+    """The text fills the window width (and the height when rows is given): the same grid as a console on any screen."""
+    width = f"calc(98vw / {cols * 0.61:.1f})"
+    size = f"min({width}, calc(93vh / {rows * 1.2:.1f}))" if rows else width
+    return (f"body{{padding:1vh 1vw}}pre{{font-size:{size};line-height:1.2;overflow:hidden}}"
+            + ("html,body{height:100%;overflow:hidden}" if rows else ""))
+
+
 def kiosk_page(screen, cols, rows, refresh, title):
     """A self-refreshing page whose font is sized so that exactly `cols` x `rows` characters fill the window
     (monospace advance ~0.6 em, line height 1.2 em): the same grid as a text console, on any monitor."""

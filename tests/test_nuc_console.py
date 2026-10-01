@@ -1062,7 +1062,7 @@ class Config(unittest.TestCase):
             doc = f.read()
         keys = list(nuc_config.FEATURES) + ["mode", "sections", "columns", "rows", "spacing", "details", "overview_seconds",
                                             "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds",
-                                            "browser"]
+                                            "browser", "zoom"]
         self.assertEqual([k for k in keys if "`%s`" % k not in doc], [])
         for name in nuc_config.SECTIONS:
             self.assertIn(name, doc)

@@ -60,6 +60,9 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 |---|---|
 | `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` |
 | `/?full=1` | the overview **plus every Details page**: everything the overview cuts ("… +N more"), stacked |
+| `/?zoom=150` | text size in % (50–200, the **A− / A+** links); default `[display] zoom` |
+| `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out. With `rows=` it fills the height too |
+| `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
 | `/healthz` | `ok` (no data) |
 
 Everything else is 404; any method but GET is 405. Security headers: strict CSP (`default-src 'none'`), `no-store`, `nosniff`,
@@ -77,8 +80,10 @@ With a token, anyone holding the token can. It cannot change anything on the mac
 
 ## macOS and Windows
 
-The web view is the same program. Set `[web] enabled = yes` in `config.ini` and run the installer again: it starts it as the
-hidden user `_nuc-console` (macOS LaunchDaemon) or as LOCAL SERVICE (Windows scheduled task `\nuc-console\web`). The full-screen
-dashboard on those systems does **not** use it: it reads a local file, so no port is opened unless you enable the web view.
+There the web view **is** the dashboard: the installers run it as the hidden user `_nuc-console` (macOS LaunchDaemon) or as
+LOCAL SERVICE (Windows scheduled task `\nuc-console\web`), with `--local`: while `[web] enabled = no` it listens on **127.0.0.1
+only**, without a token (nothing on the network can reach it), whatever `bind` says. Set `[web] enabled = yes` (and a token for a
+non-loopback `bind`) to reach it from other devices as described above, then run the installer again. `[display] mode = none`
+with `[web] enabled = no` runs no web view at all.
 Windows has no mode bits: keep `token_file` inside `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write
 (and limit who can read the file with an ACL if other people use the machine).

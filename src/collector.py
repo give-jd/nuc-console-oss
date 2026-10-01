@@ -55,7 +55,7 @@ else:
 APPLE_SYSTEM = ("/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/usr/libexec/", "/System/")  # SIP-protected: safe to run as root
 # processes that listen on behalf of containers: docker-proxy (Linux), the Docker Desktop / OrbStack / Rancher backends
 DOCKER_PROXIES = {"docker-proxy", "com.docker.backend", "com.docker.vpnkit", "vpnkit", "vpnkit-bridge", "com.docker.proxy",
-                  "wslrelay", "OrbStack Helper", "limactl", "rancher-desktop"}
+                  "OrbStack Helper", "limactl", "rancher-desktop"}  # not wslrelay: it forwards any WSL port, not only containers
 PROJECT = re.compile(r"(?:^|,)com\.docker\.compose\.project=([^,]+)")
 PORT = re.compile(r"^(?:(\[[^\]]+\]|[\d.]+):)?(\d+(?:-\d+)?)->")
 DUR = re.compile(r"(\d+(?:\.\d+)?)(us|ms|min|s|h)")
