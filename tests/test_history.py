@@ -986,7 +986,7 @@ class JobSampling(JobCase):
 
     def test_empty_samplers_leave_no_rows_and_no_errors(self):
         with mock.patch.object(collector, "hist_meminfo", side_effect=OSError("no meminfo")), \
-                mock.patch.object(os, "getloadavg", side_effect=OSError("no load")):
+                mock.patch.object(os, "getloadavg", side_effect=OSError("no load"), create=True):
             job, clock, store = self.job()  # like the stubs: nothing to report
             job.sample()
             job.flush()
