@@ -77,7 +77,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | | |
 |---|---|
 | OS | **Linux** with systemd (Debian/Ubuntu/Fedora/Arch… anything with `systemd`, `/proc`, `/sys`) · **macOS** 11 or newer · **Windows** 10/11 or Server 2019+ (64-bit x86 or ARM) |
-| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
+| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, shipped in the release ZIP (or downloaded once, hash-checked, and kept for the next update) |
 | Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
 | Display | Linux: a virtual terminal. macOS/Windows: it opens at every login, your choice how — a normal browser window (default) or full screen (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
@@ -92,7 +92,10 @@ sudo ./install.sh                                            # Linux: install + 
 sudo ./install.sh                                            # macOS: the same command (launchd, full-screen browser at login)
 ```
 
-Windows: download the ZIP, extract it, double-click **`install-windows.cmd`** (it asks for administrator rights).
+Without git: every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has `nuc-console-X.Y.Z-linux.tar.gz`, `-macos.tar.gz`,
+`-windows-x64.zip` and `-windows-arm64.zip`, built and attested by CI, with a `SHA256SUMS` file. Linux/macOS: extract, `sudo ./install.sh`.
+Windows: extract the ZIP, double-click **`install-windows.cmd`** (it asks for administrator rights); the ZIP carries the Python it needs,
+so it installs offline. Nothing is ever downloaded twice: the installers keep what they fetched and reuse it on the next install or update.
 Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `--demo-os windows`.
 
 Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.

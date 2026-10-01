@@ -5,7 +5,8 @@
 # What it does:
 #   1. finds a Python 3.8+ owned by the system (python.org framework, or Apple's Command Line Tools); if there is none it
 #      installs the official python.org package (SHA-256 pinned, signature checked), framework only: no PATH or shell
-#      profile changes. Homebrew's Python is never used: its files belong to a user, and the collector runs as root;
+#      profile changes. Homebrew's Python is never used: its files belong to a user, and the collector runs as root.
+#      The package is kept in /Library/Caches/nuc-console and never downloaded twice;
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
 #   3. starts the collector as a LaunchDaemon (root) and the read-only web view as user _nuc-console, on 127.0.0.1 only
@@ -29,6 +30,7 @@ SVC_USER=_nuc-console
 PY_VERSION=3.14.8
 PY_PKG_SHA256=507fc086c5c006ff875d344a75b4e67b8fb3c401f1bc4908c6250adb673d4907  # verified against python.org's Sigstore signature
 PY_FRAMEWORK=/Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14
+CACHE=/Library/Caches/nuc-console  # downloads kept for the next install or update (root:wheel 0755, files 0644)
 CONSOLE_UID="$(stat -f %u /dev/console)"  # the user at the screen (0 at the login window)
 
 if [ "${1:-}" = "--uninstall" ]; then
@@ -39,7 +41,7 @@ if [ "${1:-}" = "--uninstall" ]; then
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
     rm -rf "$DEST"
-    echo "removed ($ETC, $LIB, $LOG and the user $SVC_USER are left in place)"
+    echo "removed ($ETC, $LIB, $LOG, the download cache $CACHE and the user $SVC_USER are left in place)"
     exit 0
 fi
 
@@ -48,6 +50,41 @@ py_ok() {  # Python 3.8+, owned by root (the collector runs it as root)
     [ -x "$1" ] && [ "$(stat -f %u "$(python_real "$1")")" = 0 ] && "$1" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null
 }
 python_real() { "$1" -c 'import os, sys; print(os.path.realpath(sys.executable))' 2>/dev/null || echo "$1"; }
+pkg_ok() {  # $1: the pinned SHA-256 and the Python Software Foundation's signature
+    echo "$PY_PKG_SHA256  $1" | shasum -a 256 -c - >/dev/null 2>&1 \
+        && pkgutil --check-signature "$1" | grep -q "Developer ID Installer: Python Software Foundation"
+}
+# Sets PKG to the python.org package in $CACHE, downloaded only if no good copy is there. A copy is reused when it is
+# root's (0644, in a root-owned 0755 folder: an admin can create folders in /Library/Caches, so anything else in its
+# place is replaced) and passes the hash and signature checks. A download goes to a temporary folder in $CACHE and gets
+# the name that is reused only after both checks: an interrupted or altered download is never picked up again.
+fetch_python_pkg() {
+    if [ -L "$CACHE" ] || { [ -e "$CACHE" ] && [ "$(stat -f '%u %Lp' "$CACHE")" != "0 755" ]; }; then rm -rf "$CACHE"; fi
+    [ -e "$CACHE" ] || { mkdir -m 0755 "$CACHE" && chown root:wheel "$CACHE"; }
+    if [ -L "$CACHE" ] || [ ! -d "$CACHE" ] || [ "$(stat -f '%u %Lp' "$CACHE")" != "0 755" ]; then
+        echo "$CACHE is not a root-owned 0755 folder: not installed" >&2; exit 1
+    fi
+    PKG="$CACHE/python-$PY_VERSION-macos11.pkg"
+    if [ -f "$PKG" ] && [ ! -L "$PKG" ] && [ "$(stat -f '%u %Lp' "$PKG")" = "0 644" ] && pkg_ok "$PKG"; then
+        echo "nuc-console: Python $PY_VERSION already downloaded: $PKG"
+        return 0
+    fi
+    rm -rf "$PKG" "$CACHE"/.download.*  # a copy that failed the checks, what an interrupted download left
+    DL="$(mktemp -d "$CACHE/.download.XXXXXX")"
+    echo "nuc-console: downloading Python $PY_VERSION from python.org to $CACHE"
+    curl -fsSL -o "$DL/python.pkg" "https://www.python.org/ftp/python/$PY_VERSION/python-$PY_VERSION-macos11.pkg" \
+        || { rm -rf "$DL"; echo "python.pkg: download failed, not installed" >&2; exit 1; }
+    echo "$PY_PKG_SHA256  $DL/python.pkg" | shasum -a 256 -c - >/dev/null \
+        || { rm -rf "$DL"; echo "python.pkg: wrong SHA-256, not installed" >&2; exit 1; }
+    pkgutil --check-signature "$DL/python.pkg" | grep -q "Developer ID Installer: Python Software Foundation" \
+        || { rm -rf "$DL"; echo "python.pkg is not signed by the Python Software Foundation: not installed" >&2; exit 1; }
+    chmod 0644 "$DL/python.pkg"
+    mv -f "$DL/python.pkg" "$PKG"  # same folder: atomic
+    rm -rf "$DL"
+    for old in "$CACHE"/python-*-macos11.pkg; do  # the package of an older pin is never used again
+        if [ "$old" != "$PKG" ] && [ -f "$old" ]; then rm -f "$old"; fi
+    done
+}
 PY="" best=0
 for cand in /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do  # python.org installs: the newest one
     if py_ok "$cand"; then
@@ -58,13 +95,9 @@ done
 # Apple's python3 only with the Command Line Tools present: without them /usr/bin/python3 opens an install dialog
 if [ -z "$PY" ] && xcode-select -p >/dev/null 2>&1 && py_ok /usr/bin/python3; then PY=/usr/bin/python3; fi
 if [ -z "$PY" ]; then
+    fetch_python_pkg
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    echo "nuc-console: downloading Python $PY_VERSION from python.org"
-    curl -fsSL -o "$tmp/python.pkg" "https://www.python.org/ftp/python/$PY_VERSION/python-$PY_VERSION-macos11.pkg"
-    echo "$PY_PKG_SHA256  $tmp/python.pkg" | shasum -a 256 -c - >/dev/null || { echo "python.pkg: wrong SHA-256, not installed" >&2; exit 1; }
-    pkgutil --check-signature "$tmp/python.pkg" | grep -q "Developer ID Installer: Python Software Foundation" \
-        || { echo "python.pkg is not signed by the Python Software Foundation: not installed" >&2; exit 1; }
     # framework only: no IDLE/apps, no /usr/local/bin links, no shell profile changes, no pip
     {
         echo '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array>'
@@ -73,7 +106,7 @@ if [ -z "$PY" ]; then
         done
         echo '</array></plist>'
     } > "$tmp/choices.xml"
-    installer -pkg "$tmp/python.pkg" -target / -applyChoiceChangesXML "$tmp/choices.xml" >/dev/null
+    installer -pkg "$PKG" -target / -applyChoiceChangesXML "$tmp/choices.xml" >/dev/null
     py_ok "$PY_FRAMEWORK" || { echo "Python installation failed" >&2; exit 1; }
     PY="$PY_FRAMEWORK"
 fi

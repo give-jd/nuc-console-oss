@@ -9,7 +9,10 @@
 
   What it does:
     1. puts a private Python (the official python.org "embeddable" build, SHA-256 pinned and Authenticode-checked) and
-       the code in %ProgramFiles%\nuc-console; nothing else on the system uses or changes it;
+       the code in %ProgramFiles%\nuc-console; nothing else on the system uses or changes it. The embeddable zip is
+       never downloaded twice: it is taken from python\ next to this script (the release ZIP ships it there), or from
+       the cache %ProgramData%\nuc-console\cache; only if neither has it (with the pinned SHA-256) it is downloaded
+       from python.org into that cache, where the next install or update finds it;
     2. creates %ProgramData%\nuc-console (config.ini only if missing, run\, lib\, logs\), writable only by SYSTEM and
        Administrators, readable by users;
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
@@ -32,7 +35,9 @@
   Same as -Display none.
 
 .PARAMETER PythonZip
-  Path of an already downloaded python-3.14.8-embed-<arch>.zip (offline install); it is checked against the same hash.
+  Path of an already downloaded python-3.14.8-embed-<arch>.zip (offline install); it is checked against the same hash
+  and wins over python\ and the cache. Without it, a file with that name and hash in python\ next to this script, next
+  to this script, or in %ProgramData%\nuc-console\cache is used before anything is downloaded.
 #>
 param([switch]$Uninstall, [ValidateSet('browser', 'fullscreen', 'kiosk', 'none')][string]$Display, [switch]$NoDisplay,
       [string]$PythonZip = '')
@@ -48,6 +53,7 @@ $PyBuilds = @{  # SHA-256 of the python.org files (verified against their Sigsto
 $Dest = Join-Path $env:ProgramFiles 'nuc-console'
 $App, $Py, $Bin = (Join-Path $Dest 'app'), (Join-Path $Dest 'python'), (Join-Path $Dest 'bin')
 $Data = Join-Path $env:ProgramData 'nuc-console'
+$Cache = Join-Path $Data 'cache'  # downloads kept for the next install or update: the embeddable Python zip
 $TaskPath = '\nuc-console\'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\nuc-console.url'
@@ -80,6 +86,41 @@ function Set-MachinePath([bool]$add) {
     [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'Machine')
 }
 
+function Get-Sha256($path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLower() }
+
+# The embeddable Python zip, never downloaded twice. -PythonZip wins (it must have the pinned SHA-256); else the first
+# file with the pinned SHA-256 among python\<file> next to this script (where the release ZIP ships it), <file> next to
+# this script, and the cache; else it is downloaded from python.org to a temporary name in the cache and gets its real
+# name there only after the SHA-256 check, so an interrupted or altered download is never picked up again.
+function Get-PythonZip {
+    if ($PythonZip) {
+        $hash = Get-Sha256 $PythonZip
+        if ($hash -ne $build.sha256) { throw "$PythonZip has SHA-256 $hash, expected $($build.sha256): not installed" }
+        return $PythonZip
+    }
+    $cached = Join-Path $Cache $build.file
+    foreach ($zip in @((Join-Path (Join-Path $Here 'python') $build.file), (Join-Path $Here $build.file), $cached)) {
+        if ((Test-Path -LiteralPath $zip -PathType Leaf) -and ((Get-Sha256 $zip) -eq $build.sha256)) {
+            Say "Python $PyVersion ($arch): $zip"
+            return $zip
+        }
+    }
+    $part = "$cached.download"
+    if (Test-Path -LiteralPath $part) { Remove-Item -Force -LiteralPath $part }  # what an interrupted download left
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Say "downloading Python $PyVersion ($arch) from python.org to $Cache"
+    $ProgressPreference = 'SilentlyContinue'  # the progress bar makes Invoke-WebRequest 10x slower on PowerShell 5.1
+    Invoke-WebRequest -UseBasicParsing -Uri "https://www.python.org/ftp/python/$PyVersion/$($build.file)" -OutFile $part
+    $hash = Get-Sha256 $part
+    if ($hash -ne $build.sha256) {
+        Remove-Item -Force -LiteralPath $part
+        throw "$($build.file) from python.org has SHA-256 $hash, expected $($build.sha256): not installed"
+    }
+    if (Test-Path -LiteralPath $cached) { Remove-Item -Force -LiteralPath $cached }  # a damaged copy
+    Move-Item -LiteralPath $part -Destination $cached
+    return $cached
+}
+
 if (-not (Test-Admin)) { throw 'administrator rights required: right-click install-windows.cmd > Run as administrator' }
 
 if ($Uninstall) {
@@ -88,54 +129,50 @@ if ($Uninstall) {
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-    Say "removed ($Data with config.ini and the baseline is left in place)"
+    Say "removed ($Data with config.ini, the baseline and the download cache is left in place)"
     exit 0
 }
 
-# ---- 1. private Python ---------------------------------------------------------------------------------------------------
+# ---- 1. data folder: config, state, logs, download cache -----------------------------------------------------------------
+foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs", $Cache)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+# writable only by SYSTEM and Administrators (a user must not be able to fake the state, edit what SYSTEM reads or swap
+# a cached download); readable by everyone who runs the dashboard; LOCAL SERVICE (web view) may write its log
+& icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
+& icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+
+# ---- 2. private Python ---------------------------------------------------------------------------------------------------
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if (-not $PyBuilds.ContainsKey($arch)) { throw "unsupported processor architecture: $arch (64-bit x86 or ARM only)" }
 $build = $PyBuilds[$arch]
 $stamp = Join-Path $Py 'nuc-console-python.txt'
 if (-not ((Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq "$($build.file) $($build.sha256)"))) {
-    $zip = $PythonZip
-    if (-not $zip) {
-        $zip = Join-Path ([IO.Path]::GetTempPath()) $build.file
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Say "downloading Python $PyVersion ($arch) from python.org"
-        $ProgressPreference = 'SilentlyContinue'  # the progress bar makes Invoke-WebRequest 10x slower on PowerShell 5.1
-        Invoke-WebRequest -UseBasicParsing -Uri "https://www.python.org/ftp/python/$PyVersion/$($build.file)" -OutFile $zip
-    }
-    $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-    if ($hash -ne $build.sha256) { throw "$zip has SHA-256 $hash, expected $($build.sha256): not installed" }
+    $zip = Get-PythonZip  # SHA-256 checked
     if (Test-Path $Py) { Remove-Tasks; Remove-Item -Recurse -Force $Py }
-    Expand-Archive -Path $zip -DestinationPath $Py
+    Expand-Archive -LiteralPath $zip -DestinationPath $Py
     $sig = Get-AuthenticodeSignature (Join-Path $Py 'python.exe')
     if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
         Remove-Item -Recurse -Force $Py
         throw "python.exe is not signed by the Python Software Foundation ($($sig.Status)): not installed"
     }
     Set-Content -Path $stamp -Value "$($build.file) $($build.sha256)" -Encoding ASCII
-    if (-not $PythonZip) { Remove-Item -Force $zip }
 }
+# the cache keeps the Python zips pinned now (those of an older version are never used again); nothing else is touched
+$pinned = @($PyBuilds.Values | ForEach-Object { $_.file })
+Get-ChildItem -LiteralPath $Cache -File | Where-Object { $_.Name -like 'python-*-embed-*.zip*' -and $pinned -notcontains $_.Name } |
+    Remove-Item -Force
 # the ._pth file makes this Python ignore PYTHONPATH & co. and see only its own library and our code
 $pth = Get-ChildItem -Path $Py -Filter 'python3*._pth' | Select-Object -First 1
 $zipName = (Get-ChildItem -Path $Py -Filter 'python3*.zip' | Select-Object -First 1).Name
 Set-Content -Path $pth.FullName -Value "$zipName`r`n.`r`n..\app" -Encoding ASCII
 $python, $pythonw = (Join-Path $Py 'python.exe'), (Join-Path $Py 'pythonw.exe')
 
-# ---- 2. code, commands, data folder ------------------------------------------------------------------------------------
+# ---- 3. code, commands, config -----------------------------------------------------------------------------------------
 Remove-Tasks  # an upgrade must not keep running the old code
 New-Item -ItemType Directory -Force -Path $App, $Bin | Out-Null
 Get-ChildItem -Path $App -Filter '*.py' | Remove-Item -Force
 Copy-Item -Path (Join-Path $Here 'src\*.py') -Destination $App -Force
 Copy-Item -Path (Join-Path $Here 'bin\*.cmd') -Destination $Bin -Force
-foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs")) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
-# writable only by SYSTEM and Administrators (a user must not be able to fake the state or edit what SYSTEM reads);
-# readable by everyone who runs the dashboard; LOCAL SERVICE (web view) may write its log
-& icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
-& icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
 $cfg = Join-Path $Data 'config.ini'
 if (-not (Test-Path $cfg)) { Copy-Item (Join-Path $Here 'config\config.ini') $cfg }  # never overwrite the admin's edits
 Copy-Item (Join-Path $Here 'config\config.ini') (Join-Path $Data 'config.ini.dist') -Force  # diff it to see new options
@@ -145,7 +182,7 @@ $port = (& $python -B (Join-Path $App 'nuc_config.py') --get web port).Trim()
 $url = "http://127.0.0.1:$port/?fit=1"
 Set-MachinePath $true
 
-# ---- 3. scheduled tasks ------------------------------------------------------------------------------------------------
+# ---- 4. scheduled tasks ------------------------------------------------------------------------------------------------
 function Register-Service($name, $script, $sid, $log, $description, $extra = '') {
     $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\$script`" --log `"$Data\logs\$log`" $extra".TrimEnd() -WorkingDirectory $App
     # at startup, and every 5 minutes: if it stopped, it starts again (IgnoreNew: never two at once)
@@ -178,7 +215,7 @@ if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a
         -Settings $settings -Principal $principal -Description "nuc-console dashboard at logon ($mode)" -Force | Out-Null
 }
 
-# ---- 4. first snapshot, baseline, dashboard ----------------------------------------------------------------------------
+# ---- 5. first snapshot, baseline, dashboard ----------------------------------------------------------------------------
 $net = Join-Path $Data 'run\net.json'
 for ($i = 0; $i -lt 90; $i++) {
     if ((Test-Path $net) -and ((Get-Item $net).LastWriteTime -ge $t0)) { break }

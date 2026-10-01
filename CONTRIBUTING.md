@@ -34,6 +34,21 @@ shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
 
 Small, focused, with tests. Describe the *why*. Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
 
+## Releasing
+
+1. Set `VERSION` in `src/nuc_config.py` (X.Y.Z), commit, push.
+2. Optional dry run: *Actions › release › Run workflow* on that branch with the tag you are about to create. It runs the checks and builds
+   the archives, which you can download from the run; it signs and publishes nothing.
+3. `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. The `release` workflow refuses a tag that is not `VERSION`, runs the
+   tests, downloads the two embeddable Pythons (checked against the SHA-256 pinned in `install-windows.ps1`), builds the four archives and
+   `SHA256SUMS` with `tools/build_release.py`, checks that a second build is byte-identical, attests every archive and creates the release.
+4. Locally: `python3 tools/build_release.py --version X.Y.Z --out dist [--python-zips DIR]` (`--list-python` prints what to download).
+   What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script; the rules (what is for
+   development only, what belongs to one OS) are in the docstring of `tools/build_release.py` and tested in `tests/test_release.py`.
+
+The Python the Windows installer uses is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, the build
+script and the workflow all read it from there.
+
 ## Regenerating the README screenshots
 
 ```bash

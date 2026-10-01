@@ -44,4 +44,22 @@ Things to be aware of (by design):
 
 ## Verifying a release
 
+Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed: it checks that the tag is `VERSION` in
+`src/nuc_config.py`, runs the tests, builds the archives with `tools/build_release.py` and signs a build provenance for each one
+(GitHub artifact attestation, minted by the workflow itself: no signing key is stored anywhere). The only secret it uses is the
+built-in `GITHUB_TOKEN`. The Windows archives carry the python.org embeddable Python, checked against the same SHA-256 the installer pins.
+
+```bash
+sha256sum -c SHA256SUMS                                                  # the archives are the ones listed (macOS: shasum -a 256 -c)
+gh attestation verify nuc-console-X.Y.Z-linux.tar.gz --repo give-jd/nuc-console-oss   # built by that workflow, from that repository
+```
+
+The Linux and macOS archives are reproducible: `python3 tools/build_release.py --version X.Y.Z --out dist` on the tag gives the same
+bytes (sorted entries, the commit time as modification time, no user names; the compressed stream also depends on the zlib of the Python
+that builds it, 3.12 in CI). The Windows archives need the two Python zips: `--python-zips DIR`, see `--list-python`.
+
+The installers keep what they download and trust it only after checking it again: Windows `%ProgramData%\nuc-console\cache` (write access
+only for SYSTEM and Administrators, like the rest of that folder), macOS `/Library/Caches/nuc-console` (root-owned: a copy that is not root's
+0644 file in a root-owned 0755 folder is replaced, never used). Both compare the SHA-256 pinned in the script; macOS also checks the signature.
+
 The repository is scanned with `gitleaks` (history + tree), `trufflehog` and `semgrep`; the test-suite includes checks that secrets in container environments are never emitted. Run the same tools yourself before trusting any build.

@@ -8,6 +8,22 @@ One command on each system; re-run it to upgrade, add `--uninstall` / `-Uninstal
 | **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | your browser, or a full-screen window at login: [macOS](#macos) |
 | **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | your browser, or a full-screen window at login: [Windows](#windows) |
 
+## Getting the files
+
+Every release on GitHub has one archive per system and a `SHA256SUMS` file. They are built by the release workflow from the tag
+(not on anyone's machine) and each one carries a signed build provenance:
+
+| System | Archive | Then |
+|---|---|---|
+| Linux | `nuc-console-X.Y.Z-linux.tar.gz` | extract, `cd nuc-console-X.Y.Z`, `sudo ./install.sh` |
+| macOS | `nuc-console-X.Y.Z-macos.tar.gz` | the same |
+| Windows (Intel/AMD) · Windows on ARM | `nuc-console-X.Y.Z-windows-x64.zip` · `-windows-arm64.zip` | extract, double-click `install-windows.cmd`. The ZIP carries the official embeddable Python (in `python\`), so the install needs no download |
+
+`git clone` works as well (the Windows installer then downloads Python once, see [Windows](#windows)). The archives hold what is needed
+to install and run (`src`, `bin`, `config`, the service files of that system, `scripts`, `docs`, README, LICENSE, SECURITY), not the tests.
+Check a download with `sha256sum -c SHA256SUMS` (macOS: `shasum -a 256 -c SHA256SUMS`; Windows: `Get-FileHash`) and its provenance with
+`gh attestation verify <archive> --repo give-jd/nuc-console-oss` (see [SECURITY.md](../SECURITY.md#verifying-a-release)).
+
 # Linux
 
 ## 1. Check the prerequisites
@@ -157,7 +173,9 @@ What it does (idempotent):
 1. **Python**: uses a Python 3.8+ owned by the system (a python.org install, or Apple's with the Command Line Tools). If
    there is none it downloads the official python.org package (SHA-256 pinned, signature checked) and installs **only the
    framework**: no apps, no `/usr/local/bin` links, no shell profile changes. Homebrew's Python is never used: its files
-   belong to a user, and the collector runs as root.
+   belong to a user, and the collector runs as root. The package is kept in `/Library/Caches/nuc-console` (root-owned) and reused
+   by the next install if its hash and signature still check: it is never downloaded twice. It is downloaded to a temporary name
+   there and gets its real name only after both checks.
 2. Copies the code to `/opt/nuc-console`, `config.ini` to `/etc/nuc-console` (only if missing), and creates
    `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog).
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
@@ -179,11 +197,12 @@ Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is writt
 ## Update, uninstall
 
 ```bash
-git pull && sudo ./install.sh          # update (keeps config.ini and the baseline)
+git pull && sudo ./install.sh          # update (keeps config.ini and the baseline); or run it from the new release archive
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place.
+`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console`, the download cache `/Library/Caches/nuc-console` and the
+`_nuc-console` user are left in place.
 
 ## What is different from Linux
 
@@ -223,7 +242,9 @@ content: in a browser window every section stays and the page scrolls; full scre
 
 ## Install
 
-1. Download the repository (*Code › Download ZIP*) and extract it, or `git clone` it.
+1. Download `nuc-console-X.Y.Z-windows-x64.zip` (`-windows-arm64.zip` on a Windows on ARM PC) from the
+   [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest) and extract it. (Or *Code › Download ZIP* / `git clone`: the
+   installer then downloads Python once.)
 2. Double-click **`install-windows.cmd`** and accept the administrator prompt.
    From an administrator prompt: `powershell -ExecutionPolicy Bypass -File install-windows.ps1`.
 
@@ -231,7 +252,9 @@ What it does (idempotent):
 
 1. Puts a **private Python** (the official python.org *embeddable* build, SHA-256 pinned and checked for the Python
    Software Foundation's signature) and the code in `%ProgramFiles%\nuc-console`. Nothing else on the system uses it or is changed by it.
-2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`): writable only by SYSTEM and
+   The Python zip is taken from `python\` next to the installer (the release ZIP ships it there), else from the cache
+   `%ProgramData%\nuc-console\cache`, else downloaded from python.org into that cache: see the options below.
+2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`, `cache`): writable only by SYSTEM and
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
    `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
@@ -241,8 +264,13 @@ What it does (idempotent):
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),
-`-PythonZip <file>` (offline: the `python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash).
-Python is downloaded only the first time: a re-install reuses it.
+`-PythonZip <file>` (the `python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash; it wins over everything below).
+
+Python is never downloaded twice. The installer looks for the embeddable zip, with the SHA-256 it pins, in this order, and takes
+the first one that matches: `python\` next to `install-windows.ps1`, then the folder of the script itself, then the cache
+`%ProgramData%\nuc-console\cache` (same access rules as `%ProgramData%\nuc-console`: only SYSTEM and Administrators write there).
+Only if none has it, it downloads it from python.org to a temporary name in the cache and gives it its real name after the hash check,
+so the next install or update finds it. An already installed, unchanged Python is not touched at all.
 
 ## A PC used as a wall screen
 
@@ -254,7 +282,7 @@ Python is downloaded only the first time: a re-install reuses it.
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place.
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (with `config.ini`, the baseline and the download cache) is left in place.
 
 ## What is different from Linux
 
