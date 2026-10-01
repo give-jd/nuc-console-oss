@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import ssl
 import sys
@@ -20,6 +21,12 @@ from collections import Counter
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+def entries(d):
+    """What is in the notifier's folder, without notify\\private (Windows: made by the installer, it stays)."""
+    return sorted(x for x in os.listdir(d) if x != "private")
+
+
 _TMP = tempfile.mkdtemp(prefix="nuc-notify-test-")
 os.environ["NUC_CONSOLE_CONFIG"] = os.path.join(_TMP, "config.ini")  # hermetic: never the host's config.ini or notifier folder
 os.environ["NUC_CONSOLE_NOTIFY_DIR"] = os.path.join(_TMP, "notify")
@@ -112,6 +119,7 @@ class Base(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dir, self.cfg_path = os.path.join(tmp.name, "notify"), os.path.join(tmp.name, "config.ini")
         os.mkdir(self.dir, 0o700)
+        os.makedirs(notify.secret_dir(self.dir), exist_ok=True)  # Windows: the token and the chat are in notify\\private
         self.config(enabled="yes", username="@alice")
         env = mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.cfg_path, "NUC_CONSOLE_NOTIFY_DIR": self.dir})
         env.start()
@@ -125,8 +133,8 @@ class Base(unittest.TestCase):
             f.write("[telegram]\n" + "".join(f"{k} = {v}\n" for k, v in kw.items()))
 
     def pair_files(self, user="alice"):
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
-        notify.put(self.dir, "chat.json", json.dumps({"chat_id": CHAT_ID, "username": user, "bot": "my_bot", "paired_ts": 1}), 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "chat.json", json.dumps({"chat_id": CHAT_ID, "username": user, "bot": "my_bot", "paired_ts": 1}), 0o600)
 
     def notifier(self, script=(), clock=None):
         clock, fake = clock or Clock(), Fake(script)
@@ -376,9 +384,9 @@ class Cycles(Base):
         self.assertEqual(fake3.texts, ["nuc-console · myhost\nOK   Docker ports bypass ufw"])
 
     def test_a_missing_or_broken_sent_file_means_a_first_run(self):
-        with open(os.path.join(self.dir, "sent.json"), "w") as f:
+        with open(os.path.join(notify.secret_dir(self.dir), "sent.json"), "w") as f:
             f.write("{not json")
-        os.chmod(os.path.join(self.dir, "sent.json"), 0o600)
+        os.chmod(os.path.join(notify.secret_dir(self.dir), "sent.json"), 0o600)
         self.assertIsNone(notify.load_sent(self.dir)["keys"])
         nt, fake, clock = self.notifier()
         self.run_cycles(nt, clock, [], [])
@@ -389,7 +397,7 @@ class Cycles(Base):
         nt, fake, clock = self.notifier()
         self.run_cycles(nt, clock, [], [])
         if POSIX:
-            self.assertEqual(os.stat(os.path.join(self.dir, "sent.json")).st_mode & 0o777, 0o600)
+            self.assertEqual(os.stat(os.path.join(notify.secret_dir(self.dir), "sent.json")).st_mode & 0o777, 0o600)
 
     def test_at_most_20_messages_an_hour_the_rest_goes_out_together(self):
         nt, fake, clock = self.notifier()
@@ -532,7 +540,7 @@ class Service(Base):
         self.assertIn("off", out.getvalue())
 
     def test_not_paired_means_exit_0_and_says_why_in_the_status(self):
-        for setup in (lambda: None, lambda: notify.put(self.dir, "token", TOKEN + "\n", 0o600)):
+        for setup in (lambda: None, lambda: notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)):
             setup()
             with mock.patch.object(notify, "HttpsTransport", side_effect=AssertionError("no network without a pairing")):
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -753,19 +761,19 @@ class Token(Base):
             self.assertFalse(notify.USER_RE.fullmatch(bad), repr(bad))
 
     def test_reads_a_good_token_file(self):
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
         self.assertEqual(notify.read_token(self.dir), TOKEN)
 
     def test_a_file_that_is_not_a_token_is_refused_without_quoting_it(self):
-        notify.put(self.dir, "token", "hunter2-" + SECRET + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", "hunter2-" + SECRET + "\n", 0o600)
         with self.assertRaises(ValueError) as ctx:
             notify.read_token(self.dir)
         self.assertNotIn(SECRET, str(ctx.exception))
 
     @unittest.skipUnless(POSIX, "permission bits")
     def test_group_and_other_permissions_are_refused(self):
-        path = os.path.join(self.dir, "token")
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
+        path = os.path.join(notify.secret_dir(self.dir), "token")
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
         for mode in (0o640, 0o604, 0o644, 0o660, 0o666, 0o601):
             os.chmod(path, mode)
             with self.assertRaises(ValueError, msg=oct(mode)):
@@ -775,18 +783,18 @@ class Token(Base):
 
     @unittest.skipUnless(POSIX, "permission bits")
     def test_a_folder_others_can_write_in_is_refused(self):
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
-        os.chmod(self.dir, 0o777)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
+        os.chmod(notify.secret_dir(self.dir), 0o777)
         with self.assertRaises(ValueError):
             notify.read_token(self.dir)
-        os.chmod(self.dir, 0o711)
+        os.chmod(notify.secret_dir(self.dir), 0o711)
         self.assertEqual(notify.read_token(self.dir), TOKEN)
 
     @unittest.skipUnless(POSIX, "owners")
     def test_a_file_of_a_stranger_is_refused(self):
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
         try:
-            os.chown(os.path.join(self.dir, "token"), os.geteuid() + 4242, -1)
+            os.chown(os.path.join(notify.secret_dir(self.dir), "token"), os.geteuid() + 4242, -1)
         except PermissionError:
             self.skipTest("cannot give a file to another user (not root)")
         with self.assertRaises(ValueError):
@@ -796,7 +804,7 @@ class Token(Base):
     def test_a_link_is_not_followed(self):
         real = os.path.join(self.dir, "elsewhere")
         notify.put(self.dir, "elsewhere", TOKEN + "\n", 0o600)
-        os.symlink(real, os.path.join(self.dir, "token"))
+        os.symlink(real, os.path.join(notify.secret_dir(self.dir), "token"))
         with self.assertRaises(OSError):
             notify.read_token(self.dir)
 
@@ -806,26 +814,26 @@ class Token(Base):
         with open(victim, "w") as f:
             f.write("keep")
         os.symlink(victim, os.path.join(self.dir, "token.tmp"))
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
         self.assertEqual(slurp(victim), "keep")
         self.assertEqual(notify.read_token(self.dir), TOKEN)
 
     def test_credentials_problems_are_sentences_without_secrets(self):
         self.assertIn("--setup", notify.load_credentials(self.dir, "alice")[2])
-        notify.put(self.dir, "token", TOKEN + "\n", 0o600)
+        notify.put(notify.secret_dir(self.dir), "token", TOKEN + "\n", 0o600)
         self.assertIn("not paired", notify.load_credentials(self.dir, "alice")[2])
         self.pair_files()
         token, chat, problem = notify.load_credentials(self.dir, "alice")
         self.assertEqual((token, chat["chat_id"], problem), (TOKEN, CHAT_ID, None))
         self.assertIn("not the paired one", notify.load_credentials(self.dir, "bob")[2])
         self.assertIn("empty", notify.load_credentials(self.dir, "")[2])
-        notify.put(self.dir, "chat.json", json.dumps({"chat_id": "1", "username": "alice"}), 0o600)
+        notify.put(notify.secret_dir(self.dir), "chat.json", json.dumps({"chat_id": "1", "username": "alice"}), 0o600)
         self.assertIn("not valid", notify.load_credentials(self.dir, "alice")[2])
 
     def test_atomic_writes_leave_no_temporary_file_and_replace(self):
         notify.put(self.dir, "x.json", "one", 0o600)
         notify.put(self.dir, "x.json", "two", 0o600)
-        self.assertEqual(sorted(os.listdir(self.dir)), ["x.json"])
+        self.assertEqual(entries(self.dir), ["x.json"])
         self.assertEqual(slurp(self.dir, "x.json"), "two")
         if POSIX:
             self.assertEqual(os.stat(os.path.join(self.dir, "x.json")).st_mode & 0o777, 0o600)
@@ -953,7 +961,7 @@ class Setup(Base):
         self.assertIn("/setjoingroups", term.text)
         if POSIX:
             for name in ("token", "chat.json"):
-                self.assertEqual(os.stat(os.path.join(self.dir, name)).st_mode & 0o777, 0o600)
+                self.assertEqual(os.stat(os.path.join(notify.secret_dir(self.dir), name)).st_mode & 0o777, 0o600)
 
     def test_the_token_is_never_printed_and_the_code_is_url_safe(self):
         rc, fake, term = self.run_setup()
@@ -974,7 +982,7 @@ class Setup(Base):
         rc, fake, term = self.run_setup(user="mallory", wait=60)
         self.assertEqual(rc, 1)
         self.assertIn("nothing was paired", term.text)
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "chat.json")))
+        self.assertFalse(os.path.exists(os.path.join(notify.secret_dir(self.dir), "chat.json")))
         self.assertNotIn("sendMessage", fake.methods)
         self.assertIn("enabled = yes", slurp(self.cfg_path))  # untouched: it was already yes
         self.assertIn("username = @alice", slurp(self.cfg_path))
@@ -984,13 +992,13 @@ class Setup(Base):
         rc, fake, term = self.run_setup(press=False, wait=60)
         self.assertEqual(rc, 1)
         self.assertEqual(slurp(self.cfg_path), "[telegram]\nenabled = no\n")
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))
+        self.assertTrue(os.path.exists(os.path.join(notify.secret_dir(self.dir), "token")))
         notify.service_control.assert_not_called()
 
     def test_a_new_pairing_forgets_the_old_chat_first(self):
         self.pair_files(user="old_user")
         rc, fake, term = self.run_setup(press=False, wait=30)
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "chat.json")))
+        self.assertFalse(os.path.exists(os.path.join(notify.secret_dir(self.dir), "chat.json")))
 
     def test_a_wrong_token_is_stopped_before_anything_is_written(self):
         rc, fake, term = self.run_setup(FakeTerm(secret="not a token"))
@@ -998,19 +1006,19 @@ class Setup(Base):
         rc, fake, term = self.run_setup(script=[{"ok": False, "error_code": 401, "description": "Unauthorized"}])
         self.assertEqual((rc, fake.methods), (1, ["getMe"]))
         self.assertIn("Unauthorized", term.text)
-        self.assertEqual(os.listdir(self.dir), [])
+        self.assertEqual(entries(self.dir), [])
 
     def test_a_username_that_cannot_be_one_is_refused(self):
         for bad in ("abc", "no spaces here", "a" * 40, "ali-ce"):
             rc, fake, term = self.run_setup(FakeTerm(answers=[bad]))
             self.assertEqual((rc, fake.methods), (2, ["getMe"]))
-            self.assertEqual(os.listdir(self.dir), [])
+            self.assertEqual(entries(self.dir), [])
 
     def test_it_needs_root_or_an_administrator(self):
         env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_NOTIFY_DIR"}
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(notify, "is_admin", return_value=False):
             rc, fake, term = self.run_setup()
-        self.assertEqual((rc, fake.calls, os.listdir(self.dir)), (2, [], []))
+        self.assertEqual((rc, fake.calls, entries(self.dir)), (2, [], []))
         self.assertIn("root" if POSIX else "administrator", term.text)
 
     def test_a_config_that_cannot_be_written_is_said_not_hidden(self):
@@ -1018,7 +1026,7 @@ class Setup(Base):
             rc, fake, term = self.run_setup()
         self.assertEqual(rc, 1)
         self.assertIn("Set it by hand: [telegram] enabled = yes", term.text)
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "chat.json")))
+        self.assertTrue(os.path.exists(os.path.join(notify.secret_dir(self.dir), "chat.json")))
 
     def test_a_service_that_cannot_be_started_is_reported_not_fatal(self):
         notify.service_control.return_value = (False, "Unit nuc-console-notify.service not found")
@@ -1070,7 +1078,7 @@ class Commands(Base):
         self.assertEqual(self.run_main("--off")[0], 0)
         self.assertFalse(nuc_config.load()["telegram"]["enabled"])
         notify.service_control.assert_called_with("stop")
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))  # --off keeps the pairing
+        self.assertTrue(os.path.exists(os.path.join(notify.secret_dir(self.dir), "token")))  # --off keeps the pairing
 
     def test_on_without_a_pairing_says_so(self):
         rc, out, _ = self.run_main("--on")
@@ -1079,10 +1087,10 @@ class Commands(Base):
 
     def test_forget_deletes_the_token_and_the_pairing_and_turns_it_off(self):
         self.pair_files()
-        notify.put(self.dir, "sent.json", '{"keys": {}}', 0o600)
+        notify.put(notify.secret_dir(self.dir), "sent.json", '{"keys": {}}', 0o600)
         rc, out, _ = self.run_main("--forget")
         self.assertEqual(rc, 0)
-        self.assertEqual(os.listdir(self.dir), ["status.json"])
+        self.assertEqual(entries(self.dir), ["status.json"])
         self.assertFalse(nuc_config.load()["telegram"]["enabled"])
         notify.service_control.assert_called_with("stop")
         st = self.status()
@@ -1095,7 +1103,7 @@ class Commands(Base):
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(notify, "is_admin", return_value=False):
             for flag in ("--on", "--off", "--forget", "--setup"):
                 self.assertEqual(self.run_main(flag)[0], 2, flag)
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))
+        self.assertTrue(os.path.exists(os.path.join(notify.secret_dir(self.dir), "token")))
         self.assertTrue(nuc_config.load()["telegram"]["enabled"])
         notify.service_control.assert_not_called()
 
@@ -1156,7 +1164,7 @@ class Commands(Base):
         self.assertIn("@alice", out)
 
     def test_status_with_nothing_there_does_not_fail(self):
-        os.rmdir(self.dir)
+        shutil.rmtree(self.dir)
         rc, out, _ = self.run_main("--status")
         self.assertEqual(rc, 0)
         self.assertIn("not running", out)
@@ -1240,14 +1248,17 @@ class Wrappers(unittest.TestCase):
         self.assertIn("*.cmd text eol=crlf", attrs)
 
 
+REAL_SECRET_DIR = notify.secret_dir
+
+
 class SecretsFolder(unittest.TestCase):
     """The token and the chat are where the web view's account cannot read them (docs/TELEGRAM.md, SECURITY.md)."""
 
     def test_windows_keeps_the_secrets_in_private_and_status_beside_it(self):
         with mock.patch.object(nuc_config, "WINDOWS", True):
-            self.assertEqual(notify.secret_dir(os.path.join("X", "notify")), os.path.join("X", "notify", "private"))
+            self.assertEqual(REAL_SECRET_DIR(os.path.join("X", "notify")), os.path.join("X", "notify", "private"))
         with mock.patch.object(nuc_config, "WINDOWS", False):
-            self.assertEqual(notify.secret_dir(os.path.join("X", "notify")), os.path.join("X", "notify"))
+            self.assertEqual(REAL_SECRET_DIR(os.path.join("X", "notify")), os.path.join("X", "notify"))
 
     def test_linux_service_user_is_its_own(self):
         src = open(notify.__file__, encoding="utf-8").read()
