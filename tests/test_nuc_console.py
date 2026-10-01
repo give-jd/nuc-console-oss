@@ -1057,6 +1057,51 @@ class Config(unittest.TestCase):
     def test_garbage_file_does_not_crash(self):
         self.assertTrue(all(self._load("this is not ini\n\x00")["features"].values()))
 
+    def _load_err(self, text):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            cfg = self._load(text)
+        return cfg, err.getvalue()
+
+    def test_expose_defaults_to_nothing(self):
+        self.assertEqual(nuc_config.load("/nonexistent/config.ini")["expose"], {})   # missing file: the early return has it too
+        self.assertEqual(self._load("[features]\nmap = no\n")["expose"], {})
+
+    def test_expose_values_synonyms_and_case(self):
+        cfg, err = self._load_err("[expose]\nShop-DB = LOCAL\nn8n = Tailnet\nts = tailscale\nlo = localhost\nlo2 = loopback\n"
+                                  "web = lan\nopen = Internet\npub = public\n8080 = lan\n53/udp = LAN\n")
+        self.assertEqual(cfg["expose"], {"shop-db": "LOCALE", "n8n": "TAILNET", "ts": "TAILNET", "lo": "LOCALE", "lo2": "LOCALE",
+                                         "web": "LAN", "open": "INTERNET", "pub": "INTERNET", "8080": "LAN", "53/udp": "LAN"})
+        self.assertEqual(err, "")
+        self.assertTrue(set(cfg["expose"].values()) <= {g for g, _ in render.GROUPS})      # render's group names
+
+    def test_expose_bad_value_or_port_skips_only_that_key(self):
+        cfg, err = self._load_err("[expose]\nok = local\nbad = everywhere\nempty =\n0 = lan\n70000 = lan\n8080/sctp = lan\n"
+                                  "99999/udp = lan\n443 = tailnet\n2fauth = lan\n")
+        self.assertEqual(cfg["expose"], {"ok": "LOCALE", "443": "TAILNET", "2fauth": "LAN"})   # '2fauth' is a name, not a port
+        for key in ("bad", "empty", "0", "70000", "8080/sctp", "99999/udp"):
+            self.assertIn(f"[expose] {key}:", err)
+        self.assertEqual(err.count("nuc-console: "), 6)
+        self.assertNotIn("[expose] ok:", err)
+
+    def test_expose_key_starting_with_colon_makes_the_whole_file_fall_back(self):
+        cfg, err = self._load_err("[features]\nmap = no\n[expose]\n:8080 = lan\n")   # configparser refuses it: defaults, said on stderr
+        self.assertEqual(cfg["expose"], {})
+        self.assertTrue(cfg["features"]["map"])
+        self.assertIn("cannot read", err)
+
+    def test_expose_port_keys(self):
+        self.assertEqual(nuc_config.expose_port("8080"), (8080, "tcp"))
+        self.assertEqual(nuc_config.expose_port("8080/udp"), (8080, "udp"))
+        self.assertEqual(nuc_config.expose_port("8080/tcp"), (8080, "tcp"))
+        self.assertIsNone(nuc_config.expose_port("shop-db"))
+        self.assertIsNone(nuc_config.expose_port("3proxy"))
+        self.assertIsNone(nuc_config.expose_port("n8n"))
+        for bad in ("0", "65536", "8080/x", "8080/udp/x"):
+            self.assertRaises(ValueError, nuc_config.expose_port, bad)
+
     def test_configuration_reference_documents_every_key(self):
         with open(os.path.join(os.path.dirname(__file__), "..", "docs", "CONFIGURATION.md"), encoding="utf-8") as f:
             doc = f.read()
