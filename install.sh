@@ -42,7 +42,8 @@ fi
 
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
 install -d "$DEST"
-install -m 0644 src/render.py src/collector.py src/nuc_config.py src/demo.py src/web.py "$DEST"/
+rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
+install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
 install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept /usr/local/sbin/
 install -m 0755 bin/nuc-console-problems /usr/local/bin/
