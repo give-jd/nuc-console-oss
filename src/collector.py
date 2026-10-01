@@ -45,7 +45,7 @@ OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
-SENSORS_INTERVAL_S = 10
+SENSORS_INTERVAL_S = 30 if WINDOWS else 10  # Windows starts PowerShell for each reading: not more often than that
 TEMP_RANGE_C = (-20, 150)  # a CPU sensor outside it is broken, not hot or cold
 if WINDOWS:  # only directories that need Administrator rights to write to
     _root, _pf = os.environ.get("SystemRoot") or r"C:\Windows", os.environ.get("ProgramFiles") or r"C:\Program Files"

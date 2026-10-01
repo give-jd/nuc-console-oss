@@ -552,7 +552,7 @@ class Collect(unittest.TestCase):
 
     def test_state_file_and_interval(self):
         self.assertEqual(collector.OUT_SENSORS, os.path.join(nuc_config.RUN_DIR, "sensors.json"))
-        self.assertLessEqual(collector.SENSORS_INTERVAL_S, 15)
+        self.assertEqual(collector.SENSORS_INTERVAL_S, 30 if collector.WINDOWS else 10)  # PowerShell per reading on Windows
         self.assertIn("cpu", nuc_config.FEATURES)
 
 
