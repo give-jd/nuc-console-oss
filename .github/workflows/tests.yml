@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems
+      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-telegram
 
   # The real installers on fresh machines: install, collect, problems, uninstall.
   install-linux:
@@ -45,7 +45,18 @@ jobs:
       - run: sudo NUC_CONSOLE_VT=3 ./install.sh
       - run: python3 -c "import json; d = json.load(open('/run/nuc-console/net.json')); assert d['os'] == 'linux' and d['listeners'], d"
       - run: nuc-console-problems
+      # the Telegram notifier is installed idle (disabled by default); its folder holds the bot token: nobody else may list it
+      - run: |
+          test -f /etc/systemd/system/nuc-console-notify.service
+          [ "$(stat -c '%a %U' /var/lib/nuc-console-notify)" = "711 nuc-console" ]
+          rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
+          nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
+          state=$(systemctl is-failed nuc-console-notify || true); echo "nuc-console-notify: $state"; [ "$state" != failed ]
       - run: sudo ./install.sh --uninstall
+      - run: |
+          for p in /var/lib/nuc-console-notify /etc/systemd/system/nuc-console-notify.service /usr/local/bin/nuc-console-telegram; do
+            [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "left behind by the uninstall: $p"; exit 1; }
+          done
 
   install-macos:
     runs-on: macos-latest
@@ -64,7 +75,19 @@ jobs:
           assert not b["errors"], b["errors"]
           PY
       - run: curl -fsS http://127.0.0.1:8787/healthz && curl -fsS "http://127.0.0.1:8787/?fit=1&zoom=150" | grep -q "A+"
+      # the Telegram notifier is installed idle (disabled by default); its folder holds the bot token: nobody else may list it
+      - run: |
+          test -f /Library/LaunchDaemons/com.nuc-console.notify.plist
+          sudo launchctl print system/com.nuc-console.notify > /dev/null
+          [ "$(stat -f '%Lp %Su' /var/lib/nuc-console-notify)" = "711 _nuc-console" ]
+          rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
+          /opt/nuc-console/bin/nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
       - run: sudo ./install.sh --uninstall
+      - run: |
+          for p in /var/lib/nuc-console-notify /Library/LaunchDaemons/com.nuc-console.notify.plist /usr/local/bin/nuc-console-telegram; do
+            [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "left behind by the uninstall: $p"; exit 1; }
+          done
+          if sudo launchctl print system/com.nuc-console.notify > /dev/null 2>&1; then echo "com.nuc-console.notify still loaded"; exit 1; fi
 
   install-windows:
     runs-on: windows-latest
@@ -83,5 +106,23 @@ jobs:
           $page = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/?fit=1&zoom=150"
           if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'A\+') { throw "local web view not serving the dashboard" }
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\nuc-console.url")) { throw "no Start menu shortcut" }
+      # the Telegram notifier is registered idle (disabled by default); its folder holds the bot token: ordinary users must not be in its ACL
+      - shell: powershell
+        run: |
+          if (-not (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify' -ErrorAction SilentlyContinue)) { throw "no notify task" }
+          $notify = "$env:ProgramData\nuc-console\notify"
+          if (-not (Test-Path $notify)) { throw "no notify folder" }
+          $acl = (& icacls.exe $notify) -join "`n"
+          if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users') { throw "the notify folder is open to ordinary users: $acl" }
+          & "$env:ProgramFiles\nuc-console\python\python.exe" -B "$env:ProgramFiles\nuc-console\app\notify.py" --enabled
+          if ($LASTEXITCODE -ne 1) { throw "notify.py --enabled exited $LASTEXITCODE (expected 1: disabled by default)" }
+          $out = (& "$env:ProgramFiles\nuc-console\bin\nuc-console-telegram.cmd" --status --json) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw "nuc-console-telegram --status failed: $out" }
+          if (($out | ConvertFrom-Json).enabled -ne $false) { throw "the notifier is not disabled by default: $out" }
+          $global:LASTEXITCODE = 0  # the step's exit code is the last native command's: the expected 1 above must not fail it
       - shell: powershell
         run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Uninstall
+      - shell: powershell
+        run: |
+          if (Test-Path "$env:ProgramData\nuc-console\notify") { throw "the notifier's folder (bot token) survived the uninstall" }
+          if (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify' -ErrorAction SilentlyContinue) { throw "the notify task survived the uninstall" }
