@@ -32,7 +32,7 @@ jobs:
         run: |
           v=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['version'])")
           url=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['url'])")
-          curl -fsSL "https://api.github.com/repos/Mozilla-Ocho/llamafile/releases/tags/$v" \
+          curl -fsSL "https://api.github.com/repos/mozilla-ai/llamafile/releases/tags/$v" \
             | python3 -c "import json, sys; [print('asset', a['name'], a['size'], a.get('digest')) for a in json.load(sys.stdin)['assets']]" | tee -a pins.txt
           curl -fsSL -o "$RUNNER_TEMP/llamafile" "$url"
           echo "runtime $url sha256 $(sha256sum "$RUNNER_TEMP/llamafile" | cut -d' ' -f1) size $(stat -c %s "$RUNNER_TEMP/llamafile")" | tee -a pins.txt

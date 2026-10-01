@@ -102,7 +102,7 @@ order, is part of each release (a new model is a new entry with new pins); there
 
 ## GPU support
 
-The runtime is [llamafile](https://github.com/Mozilla-Ocho/llamafile) (Mozilla, Apache-2.0): one program for the three
+The runtime is [llamafile](https://github.com/mozilla-ai/llamafile) (Mozilla, Apache-2.0): one program for the three
 systems that serves a GGUF model on an OpenAI-compatible API. `serve` gives it the number of layers to put on the GPU
 (`--gpu auto -ngl N`) when the verdict is FITS GPU or GPU+CPU, and `--gpu disable` otherwise. If the GPU cannot be set up,
 llamafile falls back to the CPU without failing: the model then runs at CPU speed, whatever the verdict said.

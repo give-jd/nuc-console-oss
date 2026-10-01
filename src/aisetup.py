@@ -60,15 +60,16 @@ UNIX_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 # ---------------------------------------------------------------------------------------------------------------------------
 # llamafile (Mozilla, Apache-2.0): ONE executable for Linux, macOS, Windows, x86_64 and arm64; it runs a GGUF model given with -m
 # and serves an OpenAI-compatible API under /v1. The tag in the URL pins the release; the SHA-256 pins the bytes.
-# 0.10.x: the llama.cpp it is built on knows Qwen3, SmolLM3 and gpt-oss (0.9.x does not). The asset name and its SHA-256 come
-# from the ai-pins workflow (`pins`, which lists the release's assets when the name is not there);
+# 0.10.x: the llama.cpp it is built on knows Qwen3, SmolLM3 and gpt-oss (0.9.x does not). The asset and its SHA-256 (the release's
+# own digest, and the hash of the downloaded file: the same) were read by the ai-pins workflow on 2026-10-01. The project moved
+# from Mozilla-Ocho to mozilla-ai: the URL is the new one (the old one redirects);
 # the GPU flags serve_argv adds (--gpu auto -ngl N, or --gpu disable) must be confirmed against `llamafile --help` of the pinned
 # version, and the newer models (SmolLM3, gpt-oss) against the llama.cpp that version is built on: an older runtime may not know them.
 # "args" are extra arguments for every start; the GPU ones are not here because they depend on the machine (gpu_plan).
 RUNTIME = {
     "name": "llamafile", "version": "0.10.6", "license": "Apache-2.0",
-    "url": "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.10.6/llamafile-0.10.6",
-    "sha256": None, "size": None,
+    "url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.6/llamafile-0.10.6",
+    "sha256": "d579f61dcd3a306f518e6d90e599d77793ed5f09543023d09c96ad35fcfa63f0", "size": 368094430,
     "args": [],
 }
 
@@ -1373,11 +1374,11 @@ def cmd_pins(args, runtime=None, models=None):
     bad = 0
     print("# paste into RUNTIME / MODELS of aisetup.py, check the licence, run the tests, try `setup` and `serve` for real\n")
     try:  # the newest runtime knows the newest model families: say which one it is
-        print("RUNTIME latest release: %s" % fetch_json("https://api.github.com/repos/Mozilla-Ocho/llamafile/releases/latest").get("tag_name"))
+        print("RUNTIME latest release: %s" % fetch_json("https://api.github.com/repos/mozilla-ai/llamafile/releases/latest").get("tag_name"))
     except (OSError, ValueError, http.client.HTTPException) as e:
         print("RUNTIME latest release: ERROR %s" % safe(e, 200))
     try:
-        rel = fetch_json("https://api.github.com/repos/Mozilla-Ocho/llamafile/releases/tags/" + runtime["version"])
+        rel = fetch_json("https://api.github.com/repos/mozilla-ai/llamafile/releases/tags/" + runtime["version"])
         print("RUNTIME %s: %s" % (runtime["version"], json.dumps(pin_from_release(rel, runtime["url"]))))
     except (SetupError, OSError, ValueError, KeyError, http.client.HTTPException) as e:
         bad += 1

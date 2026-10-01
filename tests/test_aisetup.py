@@ -288,7 +288,7 @@ class ManifestTests(unittest.TestCase):
     def test_runtime(self):
         r = aisetup.RUNTIME
         self.assertIn(r["license"], aisetup.ALLOWED_LICENSES)
-        self.assertEqual(r["url"], "https://github.com/Mozilla-Ocho/llamafile/releases/download/%s/llamafile-%s" % (r["version"], r["version"]))
+        self.assertEqual(r["url"], "https://github.com/mozilla-ai/llamafile/releases/download/%s/llamafile-%s" % (r["version"], r["version"]))
         bad = aisetup.missing_pins(r, False)
         self.assertTrue(bad == [] or set(bad) == {"sha256", "size"}, bad)
         self.assertTrue(all(isinstance(a, str) for a in r["args"]))
