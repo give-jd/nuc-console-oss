@@ -33,7 +33,38 @@ MAP_CSS = (".hd{display:flex;justify-content:space-between;gap:2ch;white-space:p
            ".dl{display:none}"
            "@media(min-width:1000px){.mp.two{grid-template-columns:minmax(0,1fr) minmax(340px,40%)}"
            ".dp{position:sticky;top:8px;max-height:calc(100vh - 80px);overflow:auto}}"
-           "@media(max-width:999px){.mp.two .dl{display:inline}}")
+           "@media(max-width:999px){.mp.two .dl{display:inline}}"
+           # 'tree | graph' and the other switches: the current option highlighted, the others links
+           ".mv{display:inline-flex;vertical-align:middle;border:1px solid #30363d;border-radius:4px;overflow:hidden}"
+           ".mv>*{padding:0 7px;line-height:18px}.mv>*+*{border-left:1px solid #30363d}.mv>b{background:#1f6feb40;color:#f0f6fc;"
+           "font-weight:600}.mv>a{text-decoration:none}.mv>a:hover{background:#161b22}")
+# the MAP's graph view (web.py, ?view=map&as=graph): an SVG of circles and lines, the colours of PALETTE by state, the
+# evidence of an edge in its stroke (seen solid, declared dashed, same network dotted, structure thin); no inline style
+GRAPH_CSS = (".gv{overflow:auto;max-height:calc(100vh - 140px);border:1px solid #21262d;border-radius:6px;min-width:0}"
+             "#gsvg{display:block;height:auto;margin:0 auto}"
+             ".ge line,.ll{fill:none;stroke:#484f58;stroke-width:1}"
+             ".e.seen,.ll.seen{stroke:#c9d1d9;stroke-width:1.6}.e.declared,.ll.declared{stroke:#8b949e;stroke-width:1.4;stroke-dasharray:6 4}"
+             ".e.possible,.ll.possible{stroke:#6e7681;stroke-width:1.5;stroke-dasharray:1 4;stroke-linecap:round}"
+             ".e.bind,.ll.bind{stroke:#30363d}.e.reach,.ll.reach{stroke:#3d444d;stroke-width:1.2}.e.bad,.ll.bad{stroke:#da3633}"
+             ".e.nb{stroke-width:2.2}.gv:has(.n.sel) .e:not(.nb){opacity:.2}"
+             ".mk.seen{fill:#c9d1d9}.mk.declared{fill:#8b949e}.mk.possible{fill:#6e7681}"   # an arrowhead: its line's colour where known
+             "@supports (fill:context-stroke){.mk path{fill:context-stroke}}.dh{flex-wrap:wrap}"
+             ".n circle,.ln circle{stroke:#0d1117;stroke-width:1.5}"
+             ".n.ok circle,.ln.ok circle{fill:#3fb950}.n.warn circle,.ln.warn circle{fill:#d29922}"
+             ".n.err circle,.ln.err circle{fill:#ff7b72}.n.info circle,.ln.info circle{fill:#8b949e}"
+             ".n.down circle,.ln.down circle{fill:#0d1117;stroke:#ff7b72;stroke-width:2.5}"     # down, unknown: a ring (nothing there)
+             ".n.unknown circle,.ln.unknown circle{fill:#0d1117;stroke:#d29922;stroke-width:2.5}"
+             ".n.k-ext.info circle,.ln.ext circle{fill:#0d1117;stroke:#8b949e}"                  # a remote address: hollow
+             ".n.k-root circle{stroke:#c9d1d9;stroke-width:2}.n.k-stack circle{stroke:#8b949e;stroke-dasharray:3 2}"
+             ".n text.ls{text-anchor:start}.n text.le{text-anchor:end}"
+             ".n text{font:11px sans-serif;fill:#c9d1d9;text-anchor:middle;paint-order:stroke;stroke:#0d1117;stroke-width:3px;"
+             "stroke-linejoin:round}.n.k-root text{font-weight:700;font-size:12px}"
+             ".n:hover circle{stroke:#58a6ff;stroke-width:2.5}.n:hover text{fill:#f0f6fc}"
+             ".n.sel circle{stroke:#58a6ff;stroke-width:3.5}.n.sel text{fill:#f0f6fc;font-weight:700}.n.dim{opacity:.35}"
+             ".lk{vertical-align:middle;overflow:visible}@media(max-width:999px){.lg .dl{display:inline}}"
+             # set by graphjs.SCRIPT: .js it runs, .drag a drag or pan, .hov/.hv a hovered node and its neighbours, .pin moved by hand
+             ".gv.js #gsvg{cursor:grab}#gsvg.drag{cursor:grabbing}#gsvg.hov .n:not(.hv){opacity:.3}#gsvg.hov .e:not(.hv){opacity:.12}"
+             ".e.hv{stroke-width:2.2}.n.pin circle{stroke:#f0f6fc;stroke-dasharray:2 2}")
 
 
 def to_html(text):
