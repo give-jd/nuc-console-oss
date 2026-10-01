@@ -283,6 +283,9 @@ _CACHE = {}
 _THREADS = {}
 
 
+_SLEEP = time.sleep  # the background threads' own: a test that swaps render.time for a fake clock must not have them move it
+
+
 def cached(key, ttl, fn):
     """Last value of fn(), recomputed in a background thread every ttl seconds (None until the first one exists).
 
@@ -295,7 +298,7 @@ def cached(key, ttl, fn):
                     _CACHE[key] = fn()
                 except Exception:  # noqa: BLE001 - data unavailable: the block will say so, the thread does not die
                     _CACHE[key] = None
-                time.sleep(ttl)
+                _SLEEP(ttl)
         _THREADS[key] = threading.Thread(target=loop, daemon=True, name=f"cache-{key}")
         _THREADS[key].start()
     return _CACHE.get(key)
