@@ -51,28 +51,51 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
 
 1. **Version.** Set `VERSION` in `src/nuc_config.py` to `X.Y.Z` (the number the tag will have, without the `v`), commit and push. It is the only place
    the number lives: the workflow, `tools/build_release.py` and `nuc-console-update` (which compares it with the latest release) read it from there.
+   **The Pythons** the archives carry must be pinned (see *Pinning the Pythons of the archives* below): the workflow stops while `tools/python-pins.json` holds `null`.
 2. **Dry run (optional).** *Actions › release › Run workflow*: choose the branch (or tag) to build and type the tag you are about to create (`vX.Y.Z`).
    It runs the same checks and builds the same archives, which you can download from the run for seven days; it signs no provenance and creates no release.
 3. **Tag.** `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. Only tags of the form `vX.Y.Z` work (no `-rc1`). The workflow then:
    - **refuses a tag that is not `VERSION`** (and one that is not `vX.Y.Z`);
    - runs the unit tests;
-   - downloads the two embeddable Pythons for the Windows archives and checks them against the SHA-256 pinned in `install-windows.ps1`;
-   - builds the four archives and `SHA256SUMS` with `tools/build_release.py`, builds them again and checks that the second build is byte-identical and
-     that `SHA256SUMS` matches;
+   - downloads the six Pythons the archives carry (four python-build-standalone tarballs for Linux and macOS, two embeddable zips for Windows) and checks each
+     against its pin (`tools/python-pins.json`, `install-windows.ps1`);
+   - builds the six archives (`linux-x86_64`, `linux-arm64`, `macos-arm64`, `macos-x86_64`, `windows-x64`, `windows-arm64`) and `SHA256SUMS` with
+     `tools/build_release.py`, builds them again and checks that the second build is byte-identical and that `SHA256SUMS` matches, and runs the Linux x86-64 archive
+     with its own Python;
    - attests every archive and `SHA256SUMS` (build provenance), and creates the release `nuc-console X.Y.Z` with them, with generated notes.
    The release is public as soon as the workflow ends, and from then on it is the *latest* one that `nuc-console-update` offers.
-4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist [--python-zips DIR]`. Without `--python-zips` only
-   the Linux and macOS archives are built (it says so); `--list-python` prints the file, SHA-256 and URL of the Pythons to download for the Windows ones.
-   The version must be `VERSION`, and the build warns when the tree has uncommitted changes (the archives are of the files git tracks).
+4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist --python-dir DIR`. `--list-python` prints the file, SHA-256 and URL
+   of the six Pythons to download into `DIR` (it refuses while the pins are `null`); there is no build without them, because every archive carries its Python, and a
+   file in `DIR` with another size or SHA-256 than its pin is refused. The version must be `VERSION`, and the build warns when the tree has uncommitted changes
+   (the archives are of the files git tracks).
 
 What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script: everything except `tests/`, `tools/`,
 `CONTRIBUTING.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
 `*.ps1` only in the Windows ones, shell scripts and `scripts/` not in the Windows ones. Name and place a new file accordingly. The rules are in the docstring of
 `tools/build_release.py` and tested in `tests/test_release.py`.
 
-The Python the Windows installer uses is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, `run.ps1`, the build script and the
+The Python of the Windows archives is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, `run.ps1`, the build script and the
 workflow all read it from there. Changing it is a normal commit; the next release carries the new Python. The actions of the workflow are pinned by commit SHA: to
 update one, change the SHA and the version in the comment together.
+
+### Pinning the Pythons of the archives (Linux and macOS)
+
+The Linux and macOS archives carry a [python-build-standalone](https://github.com/astral-sh/python-build-standalone) CPython (`install_only_stripped`, one tarball
+per target). Its version, release tag, file names, SHA-256 and sizes are pinned in `tools/python-pins.json`, the one source of truth: the build script, the release workflow and the
+tests read it. While a value in it is `null` (a fresh repository, or after you reset it) `tools/build_release.py` and the release workflow **refuse** to build. To pin, or to
+move to a newer Python:
+
+1. On GitHub: *Actions › ai-pins › Run workflow* (a branch is fine). The job `python-pins` runs `tools/python_pins.py` on a runner with network access. It reads the latest
+   python-build-standalone release and takes the newest stable **3.13.x** that has all four targets (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+   `aarch64-apple-darwin`, `x86_64-apple-darwin`; 3.12.x if there is no complete 3.13), and prints in its log and in the job summary, for each: file name, size, SHA-256 (the
+   release's `SHA256SUMS`, which must agree with the asset digest) and the ready-to-paste JSON. It also downloads the four files, checks bytes against numbers, reads them the way the build does
+   (`python/` folder, links, exec bits) and runs the Linux x86-64 one. Locally the same: `python3 tools/python_pins.py` (needs network access; `--series 3.12`, `--release TAG`, `--download DIR`).
+2. Paste the JSON over `tools/python-pins.json`, read the diff (the file names must carry the Python version and the release tag you expect) and commit it. A pull request that changes the
+   file runs the same job, which then compares the pinned values with the release that holds them and reports any difference.
+3. `python3 -m unittest discover -s tests`, then a dry run of *Actions › release* on the branch: it downloads the six Pythons, checks them against the pins, builds the archives
+   twice and compares them, and runs the Linux one. Download the artifact `dist` for a look, and try `./run.sh` on the other systems if you can.
+
+A new Python is a new pin in a new release: nothing updates by itself, and nothing in the archives downloads a Python.
 
 ## Pinning the AI manifest
 

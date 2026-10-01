@@ -130,12 +130,19 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 **Releases**
 
-- Archives per system, built by CI on a version tag and attested: `nuc-console-X.Y.Z-linux.tar.gz`, `-macos.tar.gz`,
-  `-windows-x64.zip`, `-windows-arm64.zip`, and `SHA256SUMS`. The Windows archives carry the official embeddable Python (SHA-256
-  pinned), so that install works offline. The version is `VERSION` in `src/nuc_config.py`; the workflow refuses a tag that does not match.
-- Nothing is downloaded twice: the Windows and macOS installers keep the Python they fetched and check it again before use.
+- Archives per system **and processor**, built by CI on a version tag and attested: `nuc-console-X.Y.Z-linux-x86_64.tar.gz`,
+  `-linux-arm64.tar.gz`, `-macos-arm64.tar.gz`, `-macos-x86_64.tar.gz`, `-windows-x64.zip`, `-windows-arm64.zip`, and `SHA256SUMS`.
+  **Every archive carries the Python it runs with**, so that downloading, unpacking and using it needs no Python on the machine and no
+  network. Windows: the official embeddable Python (SHA-256 pinned in `install-windows.ps1`). Linux and macOS: a python-build-standalone CPython
+  (`install_only_stripped`), already unpacked in `python/`, pinned by version, release, file, SHA-256 and size in `tools/python-pins.json` and
+  checked by the release workflow and by the build, which refuses to build while a pin is missing. The updater picks the archive by system and
+  processor, and says clearly when there is none (32-bit, RISC-V). The version is `VERSION` in `src/nuc_config.py`; the workflow refuses a tag
+  that does not match.
+- Nothing is downloaded twice: what the installer of a clone fetches (the python.org package on macOS, the Python zip on Windows) is kept and
+  checked again before use. An installer run from a release archive downloads nothing.
 - **Portable run**: `run.sh [--console|--web] [--port N]` (Linux: the terminal screen; macOS: the browser) and `run.cmd` / `run.ps1`
-  (Windows) run the dashboard from the extracted folder without installing it. No service, nothing outside the folder (config, state and
+  (Windows) run the dashboard from the extracted folder without installing it, with the Python of the archive (`python/`: `run.sh` uses it
+  first, `$PYTHON` overrides it, a clone falls back to the machine's `python3`). No service, nothing outside the folder (config, state and
   baseline in `data/`, via `NUC_CONSOLE_HOME`), listens on `127.0.0.1` only. Without root or Administrator it still runs and the screen
   says what it cannot see.
 - `nuc-console-update [--check] [--yes]`: asks GitHub for the latest release and does nothing unless it is newer. It downloads only what is
@@ -149,6 +156,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
 - The root collector looks inside every running container for the MAP (see the upgrade notes); the state files carry an `os` field.
 - `install.sh` copies every module of `src/` and removes the ones no longer shipped.
+- `install.sh` (Linux) uses the system's `/usr/bin/python3` when it is 3.8 or newer, else the Python of the release archive, which it copies to
+  `/opt/nuc-console/python` (root-owned) and points the units and the commands at; from a clone with no usable `python3` it now stops with a
+  message instead of installing units that cannot start. `install-macos.sh` uses the archive's Python (copied to `/opt/nuc-console/python`)
+  and downloads the python.org package only from a clone that has no Python.
+- `nuc-console-update` takes the archive of the processor that runs it, unpacks the symbolic links of the bundled Python (relative, inside the
+  folder) and replaces a portable folder's `python/` as a whole. Archives are 20 to 40 MB instead of a few hundred kB.
 
 ### Security
 
@@ -176,8 +189,11 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   service never reads a message (only `--setup` reads the one `/start` that carries its one-time code). The bot token is never in
   `config.ini`: it is in `/var/lib/nuc-console-notify` (0600, Linux user `nuc-console-notify`, not the web view's) or, on Windows,
   `%ProgramData%\nuc-console\notify\private` (SYSTEM, Administrators, NETWORK SERVICE). The uninstallers delete it.
-- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, an installer that
-  has to fetch a Python, and the Telegram notifier once you have set it up.
+- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, the installer of a clone
+  that has to fetch a Python, and the Telegram notifier once you have set it up.
+- The Pythons in the archives (python-build-standalone for Linux and macOS, python.org's embeddable zip for Windows) are pinned by SHA-256 and
+  size, checked by the release workflow and again by the build; the pins are filled by a job that reads them from the release, never typed;
+  the build refuses a tarball with a member outside `python/`, a link that leaves it, or a device. Details: SECURITY.md, *The Python in the archives*.
 - Releases: built from the tag on a CI runner with only the built-in `GITHUB_TOKEN`, actions pinned by commit SHA, build provenance
   attested for every archive (`gh attestation verify`). `SHA256SUMS` shows a file is whole; the attestation shows this repository's
   workflow built it. Neither is a signature by a person, and nothing in the archives is code-signed.

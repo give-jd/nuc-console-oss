@@ -28,7 +28,8 @@ import update  # noqa: E402
 WINDOWS = sys.platform == "win32"
 VERSION = update.read_version(os.path.join(ROOT, "src"))
 NEW = "99.1.0"
-NAMES = ["nuc-console-%s-%s" % (NEW, s) for s in ("linux.tar.gz", "macos.tar.gz", "windows-x64.zip", "windows-arm64.zip")]
+SUFFIXES = ("linux-x86_64.tar.gz", "linux-arm64.tar.gz", "macos-arm64.tar.gz", "macos-x86_64.tar.gz", "windows-x64.zip", "windows-arm64.zip")
+NAMES = ["nuc-console-%s-%s" % (NEW, s) for s in SUFFIXES]
 
 
 def sha(data):
@@ -52,8 +53,12 @@ def set_version(text, version):
     return re.sub(r'^VERSION = "[^"]+"', 'VERSION = "%s"' % version, text, count=1, flags=re.M)
 
 
+class Sym(str):
+    """The data of a file of make_archive that is a symbolic link: its target."""
+
+
 def make_archive(kind, top, files):
-    """-> bytes of a .tar.gz or .zip with one top folder; files = {relative path: (bytes, mode)}."""
+    """-> bytes of a .tar.gz or .zip with one top folder; files = {relative path: (bytes or Sym, mode)}."""
     raw = io.BytesIO()
     if kind == "zip":
         with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as z:
@@ -63,8 +68,13 @@ def make_archive(kind, top, files):
         with tarfile.open(fileobj=raw, mode="w:gz") as t:
             for rel, (data, mode) in sorted(files.items()):
                 info = tarfile.TarInfo("%s/%s" % (top, rel))
-                info.size, info.mode, info.mtime = len(data), mode, 1700000000
-                t.addfile(info, io.BytesIO(data))
+                info.mode, info.mtime = mode, 1700000000
+                if isinstance(data, Sym):
+                    info.type, info.linkname = tarfile.SYMTYPE, str(data)
+                    t.addfile(info)
+                else:
+                    info.size = len(data)
+                    t.addfile(info, io.BytesIO(data))
     return raw.getvalue()
 
 
@@ -179,15 +189,20 @@ class Versions(unittest.TestCase):
 
 class Assets(unittest.TestCase):
     def pick(self, os_name, arch, version="1.5.0", names=None):
-        every = ["nuc-console-%s-%s" % (version, s) for s in ("linux.tar.gz", "macos.tar.gz", "windows-x64.zip", "windows-arm64.zip")]
+        every = ["nuc-console-%s-%s" % (version, s) for s in SUFFIXES]
         return update.pick_asset(release_json(version, (every if names is None else names) + [update.SUMS]), os_name, arch)
 
-    def test_linux_and_macos_have_one_archive_each(self):
-        for arch in ("x86_64", "aarch64", "arm64"):
-            self.assertEqual(self.pick("linux", arch)["name"], "nuc-console-1.5.0-linux.tar.gz")
-            self.assertEqual(self.pick("Linux", arch)["name"], "nuc-console-1.5.0-linux.tar.gz")
-            self.assertEqual(self.pick("darwin", arch)["name"], "nuc-console-1.5.0-macos.tar.gz")
-            self.assertEqual(self.pick("macos", arch)["name"], "nuc-console-1.5.0-macos.tar.gz")
+    def test_linux_and_macos_have_one_archive_per_processor(self):
+        for os_name in ("linux", "Linux"):
+            for arch in ("x86_64", "AMD64", "amd64", "x64"):
+                self.assertEqual(self.pick(os_name, arch)["name"], "nuc-console-1.5.0-linux-x86_64.tar.gz", (os_name, arch))
+            for arch in ("aarch64", "arm64", "ARM64", "AARCH64"):
+                self.assertEqual(self.pick(os_name, arch)["name"], "nuc-console-1.5.0-linux-arm64.tar.gz", (os_name, arch))
+        for os_name in ("darwin", "macos", "Darwin"):
+            for arch in ("x86_64", "amd64"):
+                self.assertEqual(self.pick(os_name, arch)["name"], "nuc-console-1.5.0-macos-x86_64.tar.gz", (os_name, arch))
+            for arch in ("arm64", "aarch64"):
+                self.assertEqual(self.pick(os_name, arch)["name"], "nuc-console-1.5.0-macos-arm64.tar.gz", (os_name, arch))
 
     def test_windows_per_processor(self):
         for arch in ("AMD64", "amd64", "x86_64", "x64"):
@@ -198,10 +213,37 @@ class Assets(unittest.TestCase):
             with self.assertRaises(update.UpdateError):
                 self.pick("windows", arch)
 
+    def test_every_system_and_processor_gets_a_different_archive_of_the_six(self):
+        got = {(o, a): self.pick(o, a)["name"] for o in ("linux", "macos", "windows") for a in ("x86_64", "arm64")}
+        self.assertEqual(len(set(got.values())), 6)
+        self.assertEqual(sorted(got.values()), sorted("nuc-console-1.5.0-%s" % s for s in SUFFIXES))
+
+    def test_a_processor_without_an_archive_is_refused_with_a_clear_message(self):
+        for os_name in ("linux", "macos", "windows"):
+            for arch in ("armv7l", "i686", "x86", "riscv64", "ppc64le", "s390x", "", None):
+                with self.assertRaisesRegex(update.UpdateError, "no nuc-console archive for", msg=(os_name, arch)) as cm:
+                    self.pick(os_name, arch)
+                self.assertIn("64-bit", str(cm.exception))
+        with self.assertRaisesRegex(update.UpdateError, r"Linux on the processor 'armv7l'.*x86_64.*arm64"):
+            self.pick("linux", "armv7l")
+
+    def test_a_release_that_has_no_archive_for_this_processor_says_which_ones_it_has(self):
+        names = ["nuc-console-1.5.0-linux-x86_64.tar.gz", "nuc-console-1.5.0-linux-arm64.tar.gz", "nuc-console-1.5.0-macos-arm64.tar.gz",
+                 "nuc-console-1.5.0-windows-x64.zip"]
+        with self.assertRaises(update.UpdateError) as cm:
+            self.pick("macos", "x86_64", names=names)  # the Intel Mac archive is missing
+        msg = str(cm.exception)
+        self.assertIn("nuc-console-1.5.0-macos-x86_64.tar.gz", msg)
+        self.assertIn("for this system it has nuc-console-1.5.0-macos-arm64.tar.gz", msg)
+        self.assertNotIn("linux", msg)
+        # the old single archive of a system (no processor in the name) is not one of these
+        with self.assertRaises(update.UpdateError):
+            self.pick("linux", "x86_64", names=["nuc-console-1.5.0-linux.tar.gz"])
+
     def test_result_carries_version_urls_and_sums(self):
         a = self.pick("linux", "x86_64", "1.10.0")
         self.assertEqual(a["version"], "1.10.0")
-        self.assertEqual(a["url"], "https://github.com/give-jd/nuc-console-oss/releases/download/v1.10.0/nuc-console-1.10.0-linux.tar.gz")
+        self.assertEqual(a["url"], "https://github.com/give-jd/nuc-console-oss/releases/download/v1.10.0/nuc-console-1.10.0-linux-x86_64.tar.gz")
         self.assertTrue(a["sums_url"].endswith("/SHA256SUMS"))
 
     def test_an_unknown_system_is_refused(self):
@@ -210,14 +252,14 @@ class Assets(unittest.TestCase):
 
     def test_a_release_without_the_archive_or_the_sums_is_refused(self):
         with self.assertRaises(update.UpdateError):
-            self.pick("macos", "arm64", names=["nuc-console-1.5.0-linux.tar.gz"])  # only linux so far
-        rel = release_json("1.5.0", ["nuc-console-1.5.0-linux.tar.gz"])
+            self.pick("macos", "arm64", names=["nuc-console-1.5.0-linux-arm64.tar.gz"])  # only linux so far
+        rel = release_json("1.5.0", ["nuc-console-1.5.0-linux-x86_64.tar.gz"])
         with self.assertRaises(update.UpdateError):
             update.pick_asset(rel, "linux", "x86_64")  # no SHA256SUMS
 
     def test_only_https_and_only_github(self):
         for url in ("http://github.com/x/a.tar.gz", "ftp://github.com/a", "https://evil.example/a.tar.gz", "file:///etc/passwd", ""):
-            rel = release_json("1.5.0", ["nuc-console-1.5.0-linux.tar.gz", update.SUMS])
+            rel = release_json("1.5.0", ["nuc-console-1.5.0-linux-x86_64.tar.gz", update.SUMS])
             rel["assets"][0]["browser_download_url"] = url
             with self.assertRaises(update.UpdateError, msg=url):
                 update.pick_asset(rel, "linux", "x86_64")
@@ -242,9 +284,13 @@ class Assets(unittest.TestCase):
         path = os.path.join(ROOT, "tools", "build_release.py")
         if not os.path.exists(path):
             self.skipTest("tools/ is not in this tree")
-        text = read(path)
-        for tail in ("-linux.tar.gz", "-macos.tar.gz", "-windows-{suffix}.zip"):
-            self.assertIn(tail, text)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("build_release", path)
+        br = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(br)
+        made = br.archive_names("1.5.0")
+        wanted = {(o, a): update.archive_name("1.5.0", o, a) for o in ("linux", "macos", "windows") for a in ("x86_64", "arm64")}
+        self.assertEqual(sorted(wanted.values()), sorted(made))  # the six names of the build are the six the updater asks for
 
 
 class Sums(unittest.TestCase):
@@ -536,6 +582,32 @@ class Extract(unittest.TestCase):
                 with self.assertRaises(update.UpdateError):
                     update.extract(path, os.path.join(d, "out"))
 
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_a_link_inside_the_folder_is_extracted_as_a_link(self):
+        """The Python of the Linux and macOS archives: python/bin/python3 -> python3.13."""
+        with tempfile.TemporaryDirectory() as d:
+            path = self.tar(d, [(self.info("t/python/bin/python3.13", 1, 0o755), b"x"),
+                                (self.info("t/python/bin/python3", 0, 0o777, tarfile.SYMTYPE, "python3.13"), None),
+                                (self.info("t/python/bin/python", 0, 0o777, tarfile.SYMTYPE, "python3"), None),
+                                (self.info("t/python/lib/libx.so", 0, 0o777, tarfile.SYMTYPE, "../lib64/libx.so.1"), None),
+                                (self.info("t/python/lib64/libx.so.1", 1), b"y")])
+            top = update.extract(path, os.path.join(d, "out"))
+            link = os.path.join(top, "python", "bin", "python3")
+            self.assertTrue(os.path.islink(link))
+            self.assertEqual(os.readlink(link), "python3.13")
+            self.assertEqual(read(os.path.join(top, "python", "bin", "python")), "x")  # a link to a link
+            self.assertEqual(read(os.path.join(top, "python", "lib", "libx.so")), "y")
+            self.assertTrue(os.stat(os.path.join(top, "python", "bin", "python3.13")).st_mode & stat.S_IXUSR)
+
+    def test_a_link_that_leaves_the_folder_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name, target in (("t/l", "../x"), ("t/a/l", "../../x"), ("t/a/l", "../../../etc/passwd"), ("t/l", "/etc/passwd"),
+                                 ("t/l", "\\\\server\\share"), ("t/l", "C:\\x"), ("t/l", ""), ("t/l", ".."), ("t/a/l", "../.."), ("t/l", "a/../../x")):
+                path = self.tar(d, [(self.info("t/a/f", 1), b"x"), (self.info(name, 0, 0o777, tarfile.SYMTYPE, target), None)])
+                with self.assertRaises(update.UpdateError, msg=(name, target)):
+                    update.extract(path, os.path.join(d, "out"))
+            self.assertFalse(os.path.exists(os.path.join(d, "x")))
+
     def test_one_top_folder(self):
         with tempfile.TemporaryDirectory() as d:
             path = self.tar(d, [(self.info("one/a", 1), b"x"), (self.info("two/b", 1), b"y")])
@@ -692,6 +764,75 @@ class Flow(unittest.TestCase):
         self.portable(world)
         self.assertEqual(sorted(os.listdir(os.path.join(self.root, "python"))),
                          ["nuc-console-python.txt", "python-9.9.9-embed-amd64.zip", "python.exe"])
+
+    def new_python(self, minor="13"):
+        return {"python/bin/python3.%s" % minor: (b"#!/bin/sh\n# python 3.%s\n" % minor.encode(), 0o755),
+                "python/bin/python3": (Sym("python3.%s" % minor), 0o777),
+                "python/bin/python": (Sym("python3"), 0o777),
+                "python/lib/libpython3.%s.so.1.0" % minor: (b"lib" + minor.encode(), 0o755),
+                "python/lib/libpython3.%s.so" % minor: (Sym("libpython3.%s.so.1.0" % minor), 0o777),
+                "python/lib/python3.%s/os.py" % minor: (b"# os " + minor.encode() + b"\n", 0o644)}
+
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_the_python_of_a_linux_or_macos_archive_is_replaced_links_and_all(self):
+        """Python 3.12 -> 3.13: the links point to the new files, the old Python is gone, data/ and what is not shipped stay."""
+        write(os.path.join(self.root, "python", "bin", "python3.12"), "#!/bin/sh\n# python 3.12\n", 0o755)
+        os.symlink("python3.12", os.path.join(self.root, "python", "bin", "python3"))
+        os.symlink("python3", os.path.join(self.root, "python", "bin", "python"))
+        write(os.path.join(self.root, "python", "lib", "python3.12", "os.py"), "# os 12\n")
+        write(os.path.join(self.root, "python", "lib", "python3.12", "__pycache__", "os.pyc"), "stray")  # a Python that was run without -B
+        os.symlink("libpython3.12.so.1.0", os.path.join(self.root, "python", "lib", "libpython3.12.so"))
+        write(os.path.join(self.root, "python", "lib", "libpython3.12.so.1.0"), "lib12")
+        world = World("linux", "x86_64", extra=self.new_python())
+        self.portable(world)
+        py = os.path.join(self.root, "python")
+        self.assertEqual(os.readlink(os.path.join(py, "bin", "python3")), "python3.13")
+        self.assertEqual(os.readlink(os.path.join(py, "bin", "python")), "python3")
+        self.assertEqual(os.readlink(os.path.join(py, "lib", "libpython3.13.so")), "libpython3.13.so.1.0")
+        self.assertEqual(read(os.path.join(py, "bin", "python")), "#!/bin/sh\n# python 3.13\n")  # through both links
+        self.assertTrue(os.stat(os.path.join(py, "bin", "python3.13")).st_mode & stat.S_IXUSR)
+        self.assertFalse(os.path.lexists(os.path.join(py, "lib", "libpython3.12.so")))  # the dangling old link went too
+        self.assertEqual(sorted(os.listdir(os.path.join(py, "bin"))), ["python", "python3", "python3.13"])
+        self.assertEqual(sorted(os.listdir(os.path.join(py, "lib"))), ["libpython3.13.so", "libpython3.13.so.1.0", "python3.13"])
+        self.assertFalse(os.path.exists(os.path.join(py, "lib", "python3.12")))  # no stray folder of the old Python
+        self.assertEqual(read(os.path.join(self.root, "data", "config.ini")), "[features]\nmap = no\n")
+        self.assertEqual(read(os.path.join(self.root, "notes.txt")), "mine\n")
+        self.assertFalse([f for dp, _d, fs in os.walk(self.root) for f in fs + _d if f.endswith(".new")])
+
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_an_unchanged_python_is_not_written_again_and_keeps_its_times(self):
+        new = os.path.join(self.tmp.name, "new")
+        archive = os.path.join(self.tmp.name, "a.tar.gz")
+        write(archive, make_archive("tar", "nuc-console-9.0.0", release_files("9.0.0", self.new_python())))
+        top = update.extract(archive, new)
+        first = update.apply_portable(top, self.root, say=lambda m: None)
+        self.assertGreater(first, 5)
+        lib = os.path.join(self.root, "python", "lib", "python3.13", "os.py")
+        self.assertEqual(os.stat(lib).st_mtime, 1700000000)  # the time of the archive: the .pyc files of a library may record it
+        self.assertEqual(update.apply_portable(top, self.root, say=lambda m: None), 0)  # nothing to write: files and links are the same
+        os.remove(os.path.join(self.root, "python", "bin", "python3"))  # a link that is gone is made again, and only it
+        os.symlink("elsewhere", os.path.join(self.root, "python", "bin", "python3"))  # a link that points elsewhere is corrected
+        self.assertEqual(update.apply_portable(top, self.root, say=lambda m: None), 1)
+        self.assertEqual(os.readlink(os.path.join(self.root, "python", "bin", "python3")), "python3.13")
+
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_a_file_a_folder_and_a_link_may_change_places_between_releases(self):
+        write(os.path.join(self.root, "python", "bin", "python3.13"), "old file")
+        write(os.path.join(self.root, "python", "bin", "python3"), "was a file")  # now a link
+        write(os.path.join(self.root, "python", "lib", "libpython3.13.so", "inside"), "was a folder")  # now a link
+        world = World("linux", "x86_64", extra=self.new_python())
+        self.portable(world)
+        py = os.path.join(self.root, "python")
+        self.assertTrue(os.path.islink(os.path.join(py, "bin", "python3")))
+        self.assertTrue(os.path.islink(os.path.join(py, "lib", "libpython3.13.so")))
+        self.assertEqual(read(os.path.join(py, "bin", "python3.13")), "#!/bin/sh\n# python 3.13\n")
+
+    def test_a_folder_python_is_only_cleaned_when_the_release_ships_one(self):
+        """A release without python/bin/python3 (Windows, a source tree) leaves the unpacked python/ of the run alone."""
+        write(os.path.join(self.root, "python", "bin", "extra"), "mine")
+        world = World("linux", "x86_64")
+        self.portable(world)
+        self.assertEqual(read(os.path.join(self.root, "python", "bin", "extra")), "mine")
 
     def test_the_second_update_does_not_download_the_archive_again(self):
         world = World()
@@ -1017,6 +1158,71 @@ class RunSh(unittest.TestCase):
         r = self.sh("--which-python")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Python 3.8", r.stderr)
+
+    def bundled_python(self, body=None):
+        """A python/bin/python3 like the one of a release archive (a link to python3.99, as there), here a script that logs what it is
+        asked and runs this machine's Python; -> the path of the link."""
+        log = os.path.join(self.tmp.name, "bundled.log")
+        body = body or '#!/bin/sh\necho "$@" >> "%s"\nexec "%s" "$@"\n' % (log, sys.executable)
+        write(os.path.join(self.dir, "python", "bin", "python3.99"), body, 0o755)
+        os.symlink("python3.99", os.path.join(self.dir, "python", "bin", "python3"))
+        self.log = log
+        return os.path.join(self.dir, "python", "bin", "python3")
+
+    def test_the_python_of_the_archive_is_used_first(self):
+        bundled = self.bundled_python()
+        del self.env["PYTHON"]  # nothing chooses: the archive's Python comes before the one of the machine
+        r = self.sh("--which-python")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, bundled), r.stderr)
+        self.assertEqual(len(read(self.log).splitlines()), 1)  # it was run once, to ask whether it is 3.8+
+        r = self.sh("--accept")  # and it is the one that runs the program
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)  # nothing collected yet
+        calls = read(self.log).splitlines()
+        self.assertTrue([c for c in calls if c.startswith("-B ") and c.endswith("src/render.py --accept")], calls)
+        r = self.sh("--problems", stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue([c for c in read(self.log).splitlines() if c.endswith("src/render.py --problems")])
+
+    def test_python_in_the_environment_still_chooses(self):
+        self.bundled_python()
+        r = self.sh("--which-python")  # PYTHON is set by setUp
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, sys.executable), r.stderr)
+
+    def test_the_python_of_the_archive_is_found_from_any_directory_and_through_a_link(self):
+        bundled = self.bundled_python()
+        del self.env["PYTHON"]
+        link = os.path.join(self.tmp.name, "link-to-run.sh")
+        os.symlink(os.path.join(self.dir, "run.sh"), link)
+        for cwd in (self.tmp.name, "/"):
+            r = subprocess.run([os.path.join(self.dir, "run.sh"), "--which-python"], capture_output=True, text=True, env=self.env, cwd=cwd, timeout=60)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, bundled), (cwd, r.stderr))
+
+    def test_a_python_of_the_archive_that_does_not_run_here_is_skipped_with_a_warning(self):
+        """The archive of another processor: the machine's Python is used if there is one, and the message says what happened."""
+        self.bundled_python("#!/bin/sh\nexit 126\n")
+        del self.env["PYTHON"]
+        r = self.sh("--which-python")
+        self.assertIn("the Python in %s does not run here" % os.path.join(self.dir, "python"), r.stderr)
+        self.assertIn("archive for", r.stderr)
+        if r.returncode == 0:  # this machine has a python3 3.8+ somewhere: that one
+            self.assertNotEqual(r.stdout.strip(), os.path.join(self.dir, "python", "bin", "python3"))
+        else:
+            self.assertIn("Python 3.8 or newer not found", r.stderr)
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0, "as root only")
+    def test_as_root_a_python_that_others_can_write_is_not_run(self):
+        """sudo ./run.sh runs everything as root: a bundled Python that anybody can replace would be root's code."""
+        marker = os.path.join(self.tmp.name, "ran-as-root")
+        self.bundled_python('#!/bin/sh\ntouch "%s"\nexit 0\n' % marker)
+        del self.env["PYTHON"]
+        os.chmod(os.path.join(self.dir, "python", "bin"), 0o777)
+        r = self.sh("--which-python")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("writable by others", r.stderr)
+        self.assertFalse(os.path.exists(marker))  # refused before it was even asked for its version
+        os.chmod(os.path.join(self.dir, "python", "bin"), 0o755)
+        r = self.sh("--which-python")
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_problems_name_the_commands_of_a_portable_folder(self):
         # nothing is collected yet: the collectors are reported, with advice that exists here (no systemctl, no nuc-console-accept)
@@ -1361,7 +1567,7 @@ cp "$src" "$out"
         self.publish(NEW)
 
     def publish(self, version, tamper=None):
-        name = update.archive_name(version, self.os_name, "x86_64")
+        name = update.archive_name(version, self.os_name, update.detect_arch())  # the archive for this machine, whichever it is
         data = make_archive("tar", "nuc-console-" + version, release_files(version))
         sums = "%s  %s\n" % (sha(data), name)
         write(os.path.join(self.fake, name), tamper(data) if tamper else data)

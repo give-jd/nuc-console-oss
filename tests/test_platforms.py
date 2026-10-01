@@ -886,7 +886,7 @@ class Installers(unittest.TestCase):
         self.assertIn("useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify", s)
         self.assertIn("install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify", s)
         self.assertIn("systemctl enable nuc-console-notify.service", s)
-        self.assertRegex(s, r'if python3 "\$DEST/notify\.py" --enabled; then systemctl restart nuc-console-notify\.service\n'
+        self.assertRegex(s, r'if "\$PY" "\$DEST/notify\.py" --enabled; then systemctl restart nuc-console-notify\.service\n'
                             r'else systemctl stop nuc-console-notify\.service 2>/dev/null \|\| true; fi')
         down = s[s.index('"--uninstall" ]'):s.index("exit 0")]                                       # the uninstall branch
         self.assertRegex(down, r"for u in [^\n]*nuc-console-notify\.service; do\n\s+systemctl disable --now \"\$u\"")   # one by one
