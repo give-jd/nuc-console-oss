@@ -4,7 +4,7 @@ One command on each system; re-run it to upgrade, add `--uninstall` / `-Uninstal
 
 | System | Command | The monitor shows |
 |---|---|---|
-| **Linux** (systemd) | `sudo ./install.sh` | the text console (a virtual terminal): sections 1–7 below |
+| **Linux** (systemd) | `sudo ./install.sh` | the text console (a virtual terminal): sections 1–8 below |
 | **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | your browser, or a full-screen window at login: [macOS](#macos) |
 | **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | your browser, or a full-screen window at login: [Windows](#windows) |
 
@@ -53,7 +53,7 @@ sudo ./install.sh
 What it does (all idempotent, re-run it to upgrade):
 
 1. creates the system user `nuc-console` (no shell, no home);
-2. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the helper `nuc-console-accept` to `/usr/local/sbin`;
+2. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started);
 3. writes `/etc/nuc-console/config.ini` **only if it does not exist**;
 4. starts the root collector, **masks `getty@tty<N>`** and starts the dashboard on that terminal;
 5. waits for the first fresh collector snapshot and stores the **port baseline** (only if none exists).
@@ -107,14 +107,35 @@ or vanished port shows a red banner. After an intended change: `sudo nuc-console
 The default VT font is small on a full-HD monitor. On Debian/Ubuntu: `sudo dpkg-reconfigure console-setup` (choose Terminus 16×32),
 or `setfont Lat15-TerminusBold32x16` for a one-off test. To let the monitor sleep, add `consoleblank=600` (seconds) to the kernel command line.
 
-## 7. Update, uninstall
+## 7. Optional: a local AI model
+
+The AI screen (console key `a`) already tells you which local models this machine can run: RAM, GPU and GPU memory, one verdict per
+model. To install one and let it explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules):
+
+```bash
+nuc-console-ai models                         # the same table in a terminal; no root (/usr/local/sbin/nuc-console-ai if your PATH lacks sbin)
+sudo nuc-console-ai setup                     # the recommended model (or: setup qwen3-8b qwen3-4b); downloads once, SHA-256 checked
+sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only, on the GPU when the model fits there (or: nuc-console-ai serve, in the foreground)
+# set [ai] enabled = yes in /etc/nuc-console/config.ini, then:
+nuc-console-ask advise
+```
+
+`install.sh` itself downloads nothing and starts no model server. `setup` needs the network once and downloads only what this release
+pins: the models are pinned; the runtime's SHA-256 is still to be confirmed, and until it is `setup` stops and names it. The files go
+to `/var/lib/nuc-console/ai` (a model is 0.4 to 19 GB). To switch the installed service to another model (`sudo nuc-console-ai use
+qwen3-4b`) or after changing `[ai] gpu`, run `sudo nuc-console-ai serve --install-service` again: the service keeps what it was installed
+with. On a machine with a GPU the unit it writes lets the service see the GPU (`PrivateDevices=no`, the `render` and `video` groups).
+
+## 8. Update, uninstall
 
 ```bash
 git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT and time zone)
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` and `nuc-console-notify` users; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
+Uninstall removes the commands and, if you installed it, the AI model service. It leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline,
+accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`), the `nuc-console` and `nuc-console-notify` users and the `nuc-console-ai` account with its
+state `/var/lib/nuc-console-ai`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -171,6 +192,10 @@ What it does (idempotent):
    Safari: press Ctrl+Cmd+F once). It opens it right away for the user at the screen.
 6. Stores the port baseline (only if missing).
 
+The commands `nuc-console-problems`, `nuc-console-accept`, `nuc-console-ask` and `nuc-console-ai` are linked into `/usr/local/bin` and `/usr/local/sbin`
+(only when root owns that folder; otherwise run them from `/opt/nuc-console/bin`). The last two are for the optional local AI model
+([AI.md](AI.md): Metal uses the GPU of Apple silicon; `nuc-console-ai models` (no root), `sudo nuc-console-ai setup`, `serve --install-service`); nothing is downloaded or started.
+
 Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is written to `config.ini`; without it the file decides).
 
 ## A Mac used as a wall screen
@@ -186,7 +211,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console` and the `_nuc-console` user are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
+It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
 
 ## What is different from Linux
 
@@ -243,7 +268,8 @@ What it does (idempotent):
    task too, `notify` (NETWORK SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
    its token lives in `%ProgramData%\nuc-console\notify\private`, which only SYSTEM, Administrators and NETWORK SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
-   `nuc-console-accept` (administrator prompt).
+   `nuc-console-accept` (administrator prompt) and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
+   prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them.
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),
@@ -260,7 +286,7 @@ Python is downloaded only the first time: a re-install reuses it.
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state and the HEALTH history `lib\history.db`) is left in place, except its `notify` folder (the Telegram token), which is deleted.
+the tasks (the AI model's too, if you installed it), `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state, the HEALTH history `lib\history.db` and the AI runtime and models in `ai\`) is left in place, except its `notify` folder (the Telegram token), which is deleted. An update keeps the AI model's task.
 
 ## What is different from Linux
 

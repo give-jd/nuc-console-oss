@@ -5,8 +5,9 @@ which apps use the CPU and the memory, which crash, hang or get killed for lack 
 keep restarting or failing, when the machine runs hot, which disks are filling up, which log messages are flooding or new.
 Each finding comes with how to fix or check it. It works the same on Linux, macOS and Windows.
 
-No AI is involved: the findings are rules over numbers, so they can be checked. (An optional local model that turns them
-into plain-language advice is a separate, opt-in part.)
+No AI is involved in the findings: they are rules over numbers, so they can be checked. An optional local model can turn
+them into plain-language advice (the ADVICE block below) and answer questions about the history; it is off by default, runs
+on this machine and only suggests: [AI.md](AI.md).
 
 ## What is kept
 
@@ -75,7 +76,20 @@ boot times. On a narrow console the sections become one line each.
 For a quick look over SSH: `render.py --once --view health` (`--period 1|7|30`, `--select TEXT`, `--details`, `--demo`).
 The report is computed at most once a minute per period, however many keys or browsers ask.
 
+### ADVICE (optional)
+
+With `[ai] enabled = yes` and a model server running ([AI.md](AI.md)), an **ADVICE** block appears under the findings, before the
+tables: a few lines in plain language about this period's findings, headed `ADVICE (AI, <model>) — check before acting`, with the
+findings it relies on cited in `[brackets]` and listed on a `cites:` line. The screens never ask the model (a key press or a page would have to wait for it):
+they show an answer that already exists, and with none yet a line says so and names the command that asks. That command is
+`sudo nuc-console-ask advise [--days N]` (1, 7 or 30 days; default 7), or `[ai] daily = yes` for one digest of the last 7 days a day
+([AI.md](AI.md#the-daily-digest)); a question: `nuc-console-ask "why is the disk filling up?"`. The screens show the latest answer
+for the period in view from the shared `advice.json` when it is at most 36 hours old, with its age ("generated 5 h ago"); a cited
+finding that no longer exists is not a link. The model gets the findings as data (names and numbers,
+never log lines), may only read the history through fixed queries, and cannot run or change anything: the commands in its advice are
+for you to check and run. Without `[ai] enabled = yes` the screen is exactly as above.
+
 ## Turning it off
 
 `[features] health = no` in `config.ini`: no history thread, no file written. `[dashboard] health_in_rotation = yes` adds
-the HEALTH screen to the pages a monitor with no keyboard rotates through.
+the HEALTH screen to the pages a monitor with no keyboard rotates through. The advice is off unless `[ai] enabled = yes`.

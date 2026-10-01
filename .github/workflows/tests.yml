@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-telegram
+      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-ai bin/nuc-console-ask bin/nuc-console-telegram
 
   # The real installers on fresh machines: install, collect, problems, uninstall.
   install-linux:
@@ -52,11 +52,13 @@ jobs:
           rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
           nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
           state=$(systemctl is-failed nuc-console-notify || true); echo "nuc-console-notify: $state"; [ "$state" != failed ]
+      - run: nuc-console-ask --help && sudo nuc-console-ai --help   # the optional AI commands are installed (nothing is downloaded or started)
       - run: sudo ./install.sh --uninstall
       - run: |
           for p in /var/lib/nuc-console-notify /etc/systemd/system/nuc-console-notify.service /usr/local/bin/nuc-console-telegram; do
             [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "left behind by the uninstall: $p"; exit 1; }
           done
+      - run: test ! -e /usr/local/sbin/nuc-console-ai && test ! -e /usr/local/bin/nuc-console-ask
 
   install-macos:
     runs-on: macos-latest
@@ -65,6 +67,7 @@ jobs:
       - run: sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
       - run: sudo cat /var/log/nuc-console/collector.log || true
       - run: /opt/nuc-console/bin/nuc-console-problems
+      - run: /opt/nuc-console/bin/nuc-console-ask --help && /opt/nuc-console/bin/nuc-console-ai --help
       - run: |
           python3 - <<'PY'
           import json
@@ -87,6 +90,7 @@ jobs:
           for p in /var/lib/nuc-console-notify /Library/LaunchDaemons/com.nuc-console.notify.plist /usr/local/bin/nuc-console-telegram; do
             [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "left behind by the uninstall: $p"; exit 1; }
           done
+          test ! -e /opt/nuc-console/bin/nuc-console-ai
           if sudo launchctl print system/com.nuc-console.notify > /dev/null 2>&1; then echo "com.nuc-console.notify still loaded"; exit 1; fi
 
   install-windows:
@@ -99,6 +103,10 @@ jobs:
         run: |
           Get-Content "$env:ProgramData\nuc-console\logs\collector.log" -ErrorAction SilentlyContinue
           & "$env:ProgramFiles\nuc-console\bin\nuc-console-problems.cmd"
+          foreach ($c in 'nuc-console-ask', 'nuc-console-ai') {  # the optional AI commands are installed (nothing is downloaded or started)
+              & "$env:ProgramFiles\nuc-console\bin\$c.cmd" --help | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "$c.cmd --help failed" }
+          }
           $d = Get-Content "$env:ProgramData\nuc-console\run\net.json" -Raw | ConvertFrom-Json
           if ($d.os -ne 'windows' -or -not $d.listeners -or $d.firewall.kind -ne 'windows') { throw "unexpected net.json" }
           if (@($d.errors.PSObject.Properties).Count) { throw ("net errors: " + ($d.errors | ConvertTo-Json)) }
@@ -129,3 +137,4 @@ jobs:
         run: |
           if (Test-Path "$env:ProgramData\nuc-console\notify") { throw "the notifier's folder (bot token) survived the uninstall" }
           if (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify' -ErrorAction SilentlyContinue) { throw "the notify task survived the uninstall" }
+          if (Test-Path "$env:ProgramFiles\nuc-console\bin\nuc-console-ai.cmd") { throw "nuc-console-ai.cmd is still there" }

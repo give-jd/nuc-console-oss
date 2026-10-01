@@ -1,0 +1,15 @@
+#!/bin/sh
+# Local AI model for the HEALTH advisor, chosen by what this machine can run; installed once, served on 127.0.0.1 only (docs/AI.md).
+#   nuc-console-ai models                       the hardware found and every model: does it fit, how fast, installed, active, recommended
+#   nuc-console-ai setup [MODEL ...] [--yes]    download the runtime and the models you name (none: the recommended one), once, SHA-256
+#                                               verified; offers to write [ai] in config.ini. --force: a model that will not work here
+#   nuc-console-ai use MODEL                    make an installed model the one the advisor asks for ([ai] model in config.ini)
+#   nuc-console-ai serve [--port 8080] [--gpu-layers N]   run the server in the foreground, on the GPU when the model fits there
+#                                               (sudo ... serve --install-service: as a service; --remove-service)
+#   nuc-console-ai status                       what is installed and verified, whether the configured endpoint answers
+#   nuc-console-ai remove [MODEL]               delete the downloaded files of one model (none named: every model and the runtime)
+#   nuc-console-ai pins                         maintainers: the values to pin in aisetup.py (needs the network)
+# models and status only read: no root needed (they look in /var/lib/nuc-console/ai when `sudo setup` put models there).
+# Run setup, use and --install-service with sudo for a system-wide install (/var/lib/nuc-console/ai); without it the files go to your home.
+# env -u: NUC_CONSOLE_* variables must not be able to redirect a write done by root (e.g. with sudo -E): use --dir and --config
+exec env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG /usr/bin/python3 /opt/nuc-console/aisetup.py "$@"

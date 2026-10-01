@@ -18,11 +18,13 @@
        (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen); and the optional Telegram notifier (LOCAL SERVICE,
        outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md);
     4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
-       %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
+       %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept and, for the optional
+       local AI model, nuc-console-ai and nuc-console-ask: nothing is downloaded or started until you run them);
     5. waits for the first collector snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 .PARAMETER Uninstall
-  Removes the tasks, the program folder and the PATH entry. %ProgramData%\nuc-console (config, baseline) is left in place.
+  Removes the tasks (the AI model server's too, if you installed it), the program folder and the PATH entry.
+  %ProgramData%\nuc-console (config, baseline, and the AI runtime and models in its ai\ folder) is left in place.
   The Telegram notifier's folder (%ProgramData%\nuc-console\notify, with the bot token) is deleted.
 
 .PARAMETER Display
@@ -66,9 +68,10 @@ function Test-Admin {
     (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Remove-Tasks {
+function Remove-Tasks([switch]$KeepAi) {  # -KeepAi (an upgrade): the AI model server is stopped, not unregistered: the admin chose it
     foreach ($t in @(Get-ScheduledTask -TaskPath $TaskPath -ErrorAction SilentlyContinue)) {
         Stop-ScheduledTask -TaskPath $TaskPath -TaskName $t.TaskName -ErrorAction SilentlyContinue
+        if ($KeepAi -and $t.TaskName -eq 'ai') { continue }
         Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $t.TaskName -Confirm:$false
     }
     # tasks end their action, not always the Python process behind it: stop what still runs from our folder
@@ -91,7 +94,7 @@ if ($Uninstall) {
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-    Say "removed ($Data with config.ini and the baseline is left in place)"
+    Say "removed ($Data with config.ini, the baseline and the AI runtime and models in $Data\ai is left in place; delete $Data\ai to free the disk)"
     exit 0
 }
 
@@ -111,7 +114,7 @@ if (-not ((Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq "$($buil
     }
     $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
     if ($hash -ne $build.sha256) { throw "$zip has SHA-256 $hash, expected $($build.sha256): not installed" }
-    if (Test-Path $Py) { Remove-Tasks; Remove-Item -Recurse -Force $Py }
+    if (Test-Path $Py) { Remove-Tasks -KeepAi; Remove-Item -Recurse -Force $Py }
     Expand-Archive -Path $zip -DestinationPath $Py
     $sig = Get-AuthenticodeSignature (Join-Path $Py 'python.exe')
     if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
@@ -128,7 +131,8 @@ Set-Content -Path $pth.FullName -Value "$zipName`r`n.`r`n..\app" -Encoding ASCII
 $python, $pythonw = (Join-Path $Py 'python.exe'), (Join-Path $Py 'pythonw.exe')
 
 # ---- 2. code, commands, data folder ------------------------------------------------------------------------------------
-Remove-Tasks  # an upgrade must not keep running the old code
+$aiTask = [bool](Get-ScheduledTask -TaskPath $TaskPath -TaskName 'ai' -ErrorAction SilentlyContinue)  # started again at the end
+Remove-Tasks -KeepAi  # an upgrade must not keep running the old code
 New-Item -ItemType Directory -Force -Path $App, $Bin | Out-Null
 Get-ChildItem -Path $App -Filter '*.py' | Remove-Item -Force
 Copy-Item -Path (Join-Path $Here 'src\*.py') -Destination $App -Force
@@ -213,7 +217,8 @@ if ($web) {  # the web view starts in a moment: wait for it before opening anyth
 if ($mode -ne 'none') {  # now, for the user at the screen (the task runs as that user, never as administrator)
     try { Start-ScheduledTask -TaskPath $TaskPath -TaskName 'display' } catch { Say 'the dashboard opens at the next logon' }
 }
+if ($aiTask) { Start-ScheduledTask -TaskPath $TaskPath -TaskName 'ai' -ErrorAction SilentlyContinue }  # the AI model server of an earlier install
 
 $how = @{ browser = "opens in your browser at every logon (again: Start menu > nuc-console, or $url)"; fullscreen = "opens full screen at every logon (Alt+F4 closes it, F11 leaves full screen; again: Start menu > nuc-console)"; none = 'never opens by itself (-Display none)' }[$mode]
 Say "ok: collector running as SYSTEM; dashboard $how. Text size: A- / A+ at the bottom of the page"
-Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept (open a new prompt for the PATH)"
+Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept, nuc-console-ai, nuc-console-ask (open a new prompt for the PATH)"

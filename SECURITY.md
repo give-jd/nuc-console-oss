@@ -29,7 +29,7 @@ On **macOS** and **Windows** the split is the same:
 
 Design rules you can audit in the code:
 
-- **No network exposure by default.** The collector and the tty renderer open no socket. The read-only web view (`web.py`; Linux: off by default; macOS/Windows: on, bound to 127.0.0.1 only, as the dashboard) is the only listener: GET only, no JavaScript except one inline script on the MAP's graph view (pinned by its SHA-256 in that page's CSP; it can open no connection), strict CSP, loopback unless a token is configured (it refuses to start otherwise), token compared in constant time and read from a 0600 file; see [docs/WEB.md](docs/WEB.md). The optional Telegram notifier (`notify.py`, off by default) is not a listener either: it makes outbound HTTPS connections to `api.telegram.org` only, never listens, never reads incoming messages and accepts no commands (only `--setup`, run by an administrator, asks Telegram once for the `/start` message carrying its one-time code); see [docs/TELEGRAM.md](docs/TELEGRAM.md).
+- **No network exposure by default.** The collector and the tty renderer open no socket. The read-only web view (`web.py`; Linux: off by default; macOS/Windows: on, bound to 127.0.0.1 only, as the dashboard) is the only listener that is part of the dashboard (the optional AI model server below listens on 127.0.0.1 only, when you start it): GET only, no JavaScript except one inline script on the MAP's graph view (pinned by its SHA-256 in that page's CSP; it can open no connection), strict CSP, loopback unless a token is configured (it refuses to start otherwise), token compared in constant time and read from a 0600 file; see [docs/WEB.md](docs/WEB.md). The optional Telegram notifier (`notify.py`, off by default) is not a listener either: it makes outbound HTTPS connections to `api.telegram.org` only, never listens, never reads incoming messages and accepts no commands (only `--setup`, run by an administrator, asks Telegram once for the `/start` message carrying its one-time code); see [docs/TELEGRAM.md](docs/TELEGRAM.md).
 - **No shell, no user-controlled command lines.** Commands are fixed argument lists run with `subprocess.run([...])` (no `shell=True`) and a fixed `PATH`; the only variable arguments are container IDs/PIDs obtained from Docker itself. Windows PowerShell receives fixed scripts as `-EncodedCommand` (no quoting, no user input).
 - **The history keeps names and counts, not text.** With `[features] health` on, the collector writes `history.db` (SQLite,
   world-readable like the state files): per app CPU and memory per hour, events (crash, hang, OOM, restart, failed service,
@@ -39,18 +39,40 @@ Design rules you can audit in the code:
   validated ids, a fixed PowerShell script over the System and Application event logs that reads event ids and names, never
   the message text (Windows), and reads the first 4 KB of crash reports in `DiagnosticReports`, regular files only, no links
   followed (macOS, including the users' folders). The IP addresses and user names of failed logins are never stored.
+- **The optional local model analyses and never acts.** Off by default (`[ai] enabled = no`; the AI screen, `[features] ai`, only reads
+  the hardware with fixed commands and no shell, as the unprivileged user). The advisor talks only to an endpoint on this machine
+  (it refuses any other unless `[ai] allow_remote = yes`, and connects only to the addresses it checked); the model server that
+  `nuc-console-ai serve` starts binds `127.0.0.1` and has no option to bind anything else. What the model receives is the HEALTH
+  findings as JSON: names, counts and log *templates*, never log lines or command lines. Names are data, never instructions (they
+  travel inside the JSON only; the model's text is stripped of escape sequences and control characters and capped before it is shown;
+  every answer is marked "AI, check before acting"). To answer questions it may pick one of six fixed read-only queries: arguments
+  validated against whitelists and ranges, bound parameters, a read-only connection, three at most. It has no tool that runs a command,
+  writes a file or changes a setting. Nothing of it runs in the root collector, and a page never starts a generation. Details and the
+  model list: [docs/AI.md](docs/AI.md).
+- **One downloaded program, pinned.** `nuc-console-ai setup`, when you run it, downloads the llamafile runtime and the model files you name
+  from GitHub and Hugging Face: HTTPS only (a redirect to `http://` is refused), a size and a SHA-256 written in the code (a model
+  from a commit, not a branch), a temporary name until the check passes, no automatic update, permissive licences only. It refuses to
+  download anything that is not pinned yet (the models are pinned; the runtime's SHA-256 is still to be confirmed, and `setup` stops until it
+  is). The server runs as its own unprivileged account at low priority (Linux: a systemd unit with a sandbox and a memory cap; macOS: a
+  hidden `_nuc-console-ai` account under launchd; Windows: LOCAL SERVICE).
 - **Process names, never command lines.** The CPU screen lists processes by name (and PID, user, CPU, memory): their arguments can hold passwords or tokens, so they are never read or shown. On Windows the collector reads CPU sensors through WMI (LibreHardwareMonitor / OpenHardwareMonitor namespaces, ACPI thermal zones) with a fixed PowerShell script.
 - **Untrusted text is sanitised.** Container names, process names, journal lines etc. can contain terminal escape sequences; everything shown passes through `safe()` which strips control characters.
 - **Secrets are never stored or displayed.** To find which containers use a database, the collector checks whether container environment variable *names/values reference the DB's hostname*; it keeps only the match result, never the values (`env_uses`). Tests assert this.
 - **Fail-open for alarms.** Missing or unparsable data is reported as unknown (`?`) and treated as exposed, never as "OK".
 - **Malformed state files cannot crash the dashboard** (a crash would leave a black screen); they produce an error block instead.
-- **Only the standard library is used**: no third-party code to audit or to be supply-chain-compromised.
+- **Only the standard library is used**: no third-party code to audit or to be supply-chain-compromised. The one exception is the optional
+  AI model server above (llamafile and a model file, pinned by SHA-256, started by you, never by the collector).
 
 Things to be aware of (by design):
 
 - The JSON state files are **world-readable** so the unprivileged renderer can read them. They contain your topology (ports, container names, which container or process talks to which, the IPs of clients seen connected and of the hosts your services connect to) but no secrets. Do not run this on a multi-user machine where local users must not see that.
 - **The monitor itself shows your topology** to anyone who can see the screen.
 - **With the Telegram notifier on, what it sends leaves the machine** and is stored by Telegram (bot chats are not end-to-end encrypted). By default that is the host name and the problem *titles* ("Container unhealthy"); `detail = full` adds container names and ports. Leave it off, or keep `detail = titles`, if even that must not leave. Whoever holds the bot token can send messages as your bot: it is only in `/var/lib/nuc-console-notify` (Windows: `%ProgramData%\nuc-console\notify\private`), never in `config.ini`; `nuc-console-telegram --forget` deletes it and `/revoke` in @BotFather kills it.
+- A local model's advice can be wrong, or steered by a name or a log message that someone else controls (an app, a container, a
+  service): it is a hint to check, not an instruction, and it is marked as such. With a GPU backend loaded, llamafile's own
+  system-call sandbox cannot be used (the GPU drivers need device access), and on Linux the systemd unit has to let the service see the
+  GPU (`PrivateDevices=no`, the `render` and `video` groups); the rest of the unit's sandbox stays. `[ai] gpu = no` keeps the server on the
+  CPU, with `PrivateDevices=yes`.
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
 

@@ -1668,6 +1668,93 @@ def history_loop(make=None, sleep=time.sleep, stop=None, mono=time.monotonic):
             store.close()
 
 
+# ---- AI digest ([ai] enabled = yes and daily = yes): the advice the screens show, generated once a day --------------------------
+# The screens run unprivileged and cannot read the advisor's cache of root, so the collector (root/SYSTEM) writes the 7-day advice
+# once a day into the shared advice file (advisor.py "the shared advice", next to history.db). The model is slow and its client
+# must not weigh on the machine: a child process (`advisor.py advise --store --period 7`, fixed command line, low priority, time
+# limit) does the work and this thread only waits for it, so no other collector thread is ever held up. First digest ~10 minutes
+# after the start, then every 24 hours; the last attempt is kept in the shared file so that a restart does not run another one.
+AI_FIRST_S, AI_EVERY_S, AI_CHECK_S = 600, 86400, 3600  # the clock is looked at least hourly: a clock step or an edit is noticed
+AI_MARGIN_S, AI_PERIOD_DAYS = 120, 7                    # the child may take [ai] timeout_s plus the model listing and the report
+
+
+def ai_daily_on(cfg=None, off=None):
+    """The digest needs the model ([ai] enabled), the switch ([ai] daily) and the history it reads ([features] health)."""
+    ai = (CFG if cfg is None else cfg).get("ai") or {}
+    return bool(ai.get("enabled") and ai.get("daily")) and "health" not in (OFF if off is None else off)
+
+
+def ai_digest_argv():
+    return [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "advisor.py"), "advise", "--store", "--period",
+            str(AI_PERIOD_DAYS)]
+
+
+def ai_digest(cfg=None, run=None):
+    """One digest in a child process -> (ok, one line for the log). Never raises. The child lowers its own niceness (POSIX:
+    preexec_fn is not safe in a process with threads); on Windows it starts at BELOW_NORMAL priority without a window."""
+    run = run or subprocess.run
+    try:
+        limit = float(((CFG if cfg is None else cfg).get("ai") or {}).get("timeout_s", 120))
+    except (TypeError, ValueError):
+        limit = 120.0
+    limit = int(max(10.0, min(600.0, limit))) + AI_MARGIN_S
+    extra = {}
+    if WINDOWS:
+        extra["creationflags"] = (getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x4000)
+                                  | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    try:
+        r = run(ai_digest_argv(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=limit,
+                encoding="utf-8", errors="replace", **extra)
+    except subprocess.TimeoutExpired:
+        return False, "no answer within %d s: stopped" % limit
+    except Exception as e:  # noqa: BLE001 - no python, no such file...
+        return False, "cannot run the advisor: %s" % repr(e)[:150]
+    if r.returncode == 0:
+        return True, "advice for the last %d days stored" % AI_PERIOD_DAYS
+    lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    tail = re.sub(r"[^\x20-\x7e]", "?", lines[-1])[:200] if lines else ""  # printable: it goes to a log
+    return False, "exit %s%s" % (r.returncode, ": " + tail if tail else "")
+
+
+def ai_daily_loop(cfg=None, sleep=time.sleep, wall=time.time, run=None, stop=None):
+    """The digest thread. A failure (the model is down, a timeout, a full disk) is printed once and the digest is tried again the
+    next day, never in a loop; the thread itself never dies. sleep/wall/run/stop: the tests' clock and child."""
+    import advisor  # only here: --once and a collector without [ai] daily never load it
+    run = run or ai_digest
+    started, last, seen = wall(), None, None
+    mark = advisor.read_store().get("daily")  # the previous collector's last attempt
+    if mark and mark["at"] <= started + advisor.SKEW:  # one from the future: the clock was wrong, it counts for nothing
+        last = mark["at"]
+
+    def note(at, ok):
+        nonlocal seen
+        try:
+            advisor.mark_daily(at, ok)
+        except Exception as e:  # noqa: BLE001 - the digest still runs once a day: `last` is kept in memory too
+            msg = repr(e)[:200]
+            if msg != seen:
+                print("ai digest: cannot keep the schedule:", msg, file=sys.stderr)
+                seen = msg
+    while not (stop and stop()):
+        now = wall()
+        if started > now + advisor.SKEW:  # the clock went back (a wrong one corrected): counted from now on
+            started = now
+        if last is not None and last > now + advisor.SKEW:
+            last = now
+        due = max(started + AI_FIRST_S, last + AI_EVERY_S if last is not None else 0)
+        if now < due:
+            sleep(max(1.0, min(due - now, AI_CHECK_S)))
+            continue
+        last = now
+        note(now, None)
+        try:
+            ok, msg = run(cfg)
+        except Exception as e:  # noqa: BLE001
+            ok, msg = False, repr(e)[:200]
+        note(now, bool(ok))
+        print("ai digest:" if ok else "ai digest failed:", msg, file=sys.stdout if ok else sys.stderr)
+
+
 def sensors_loop():
     while True:
         try:
@@ -1690,6 +1777,8 @@ def loops():
         out.append(sensors_loop)  # powermetrics takes ~1 s, PowerShell longer: never in another loop's way
     if "health" not in OFF:
         out.append(history_loop)  # the history: its own thread and file (history.db), never touched by --once
+    if ai_daily_on():
+        out.append(ai_daily_loop)  # the daily AI digest: its own thread, the model runs in a low-priority child process
     return out
 
 

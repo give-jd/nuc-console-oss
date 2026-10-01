@@ -654,3 +654,132 @@ def health_report(os_name=None, days=7, now=None, variant=""):
         notes = ["collecting: 5 hours so far; trends need 24 hours of data"]
     return {"period": period, "coverage": {"hours": hours, "since": since}, "findings": findings, "top_cpu": top_cpu, "top_mem": top_mem,
             "events": events, "logs": logs, "disks": disks, "thermal": thermal, "boots": boots, "notes": notes}
+
+
+# ---- AI: three invented machines and the catalog aisetup.catalog() would hand the AI screen for each ------------------------------
+# A Linux box with a 12 GB NVIDIA card, a Windows laptop (16 GB RAM, a 4 GB card, nothing installed yet) and an M2 with 16 GB of unified
+# memory. The models are the catalog's candidates with approximate sizes; the verdicts come from _ai_assess(), a small copy of the rules of
+# aihw.assess() (the demo must not depend on that module and must give the same screen at every run).
+
+AI_OSES = ("linux", "windows", "darwin")
+_AI_MODELS = (  # id, name, licence, params_b, active_b, quant, layers, ctx_max, rank, approx_mb, notes, pinned
+    ("gpt-oss-20b", "OpenAI gpt-oss 20B", "Apache-2.0", 21.0, 3.6, "MXFP4", 24, 131072, 1, 12100, "fast for its size (MoE, 3.6B active); reasoning effort is a setting", False),
+    ("qwen3-30b-a3b", "Qwen3 30B-A3B", "Apache-2.0", 30.5, 3.3, "Q4_K_M", 48, 40960, 2, 18600, "fast on CPU (MoE: only 3.3B parameters work per token)", True),
+    ("phi-4", "Phi-4 14B", "MIT", 14.7, None, "Q4_K_M", 40, 16384, 3, 9100, "strong at reasoning and code; short context (16k)", True),
+    ("qwen3-14b", "Qwen3 14B", "Apache-2.0", 14.8, None, "Q4_K_M", 40, 40960, 4, 9000, "thinking mode: /no_think turns it off", True),
+    ("qwen3-8b", "Qwen3 8B", "Apache-2.0", 8.2, None, "Q4_K_M", 36, 40960, 5, 5000, "thinking mode: /no_think turns it off", True),
+    ("granite-3.3-8b", "IBM Granite 3.3 8B", "Apache-2.0", 8.2, None, "Q4_K_M", 40, 131072, 6, 5000, "long context (128k); tuned for business tasks", True),
+    ("phi-4-mini", "Phi-4-mini 3.8B", "MIT", 3.8, None, "Q4_K_M", 32, 131072, 7, 2500, "small and good at reasoning; long context", True),
+    ("qwen3-4b", "Qwen3 4B", "Apache-2.0", 4.0, None, "Q4_K_M", 36, 40960, 8, 2500, "the default of nuc-console-ai: good advice in about 4 GB", True),
+    ("smollm3-3b", "SmolLM3 3B", "Apache-2.0", 3.1, None, "Q4_K_M", 36, 65536, 9, 1900, "small, multilingual, long context", True),
+    ("granite-3.3-2b", "IBM Granite 3.3 2B", "Apache-2.0", 2.5, None, "Q4_K_M", 40, 131072, 10, 1600, "very small; fine for short advice", True),
+    ("qwen3-1.7b", "Qwen3 1.7B", "Apache-2.0", 1.7, None, "Q4_K_M", 28, 40960, 11, 1100, "runs anywhere; thinking mode: /no_think", True),
+    ("qwen3-0.6b", "Qwen3 0.6B", "Apache-2.0", 0.6, None, "Q4_K_M", 28, 40960, 12, 400, "a toy: too small to give reliable advice", True),
+)
+_AI_MACHINES = {
+    "linux": {"os": "linux", "arch": "x86_64",
+              "cpu": {"model": "AMD Ryzen 7 5800X 8-Core Processor", "cores": 8, "threads": 16, "flags": ["avx2"]},
+              "ram": {"total_mb": 31923, "available_mb": 21540},
+              "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce RTX 3060", "vram_mb": 12288, "vram_free_mb": 11264, "unified": False,
+                        "backend": "cuda", "source": "nvidia-smi"}],
+              "notes": []},
+    "windows": {"os": "windows", "arch": "x86_64",
+                "cpu": {"model": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz", "cores": 6, "threads": 12, "flags": ["avx2"]},
+                "ram": {"total_mb": 16176, "available_mb": 7410},
+                "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce GTX 1650", "vram_mb": 4096, "vram_free_mb": None, "unified": False,
+                          "backend": "cuda", "source": "registry"},
+                         {"vendor": "intel", "name": "Intel(R) UHD Graphics", "vram_mb": None, "vram_free_mb": None, "unified": True,
+                          "backend": "vulkan", "source": "registry"}],
+                "notes": ["nvidia-smi not found: the free video memory could not be read"]},
+    "darwin": {"os": "darwin", "arch": "arm64",
+               "cpu": {"model": "Apple M2", "cores": 8, "threads": 8, "flags": ["neon"]},
+               "ram": {"total_mb": 16384, "available_mb": 9830},
+               "gpus": [{"vendor": "apple", "name": "Apple M2 (10-core GPU)", "vram_mb": None, "vram_free_mb": None, "unified": True,
+                         "backend": "metal", "source": "sysctl"}],
+               "notes": []},
+}
+_AI_STATE = {  # per machine: what is installed, the active model, the runtime, the advisor's [ai] settings and whether its server answers
+    "linux": {"installed": ("qwen3-4b", "qwen3-1.7b"), "active": "qwen3-4b", "runtime": {"installed": True, "version": "0.10.6"},
+              "dir": "/var/lib/nuc-console-ai", "enabled": True, "endpoint": "http://127.0.0.1:11434/v1",
+              "probe": {"state": "answering", "msg": "", "models": ["qwen3-4b"]}},
+    "windows": {"installed": (), "active": None, "runtime": {"installed": False, "version": ""},
+                "dir": r"C:\ProgramData\nuc-console-ai", "enabled": False, "endpoint": "http://127.0.0.1:11434/v1",
+                "probe": {"state": "off", "msg": "[ai] enabled = no in config.ini", "models": []}},
+    "darwin": {"installed": ("qwen3-8b",), "active": "qwen3-8b", "runtime": {"installed": True, "version": "0.10.6"},
+               "dir": "/usr/local/var/nuc-console-ai", "enabled": True, "endpoint": "http://127.0.0.1:8080/v1",
+               "probe": {"state": "down", "msg": "no server on 127.0.0.1:8080: start Ollama or run nuc-console-ai serve", "models": []}},
+}
+_AI_CPU_GBS, _AI_GPU_GBS = (20.0, 40.0), {"nvidia": (150.0, 250.0), "apple": (60.0, 90.0), "amd": (150.0, 250.0)}  # effective memory bandwidth, GB/s
+
+
+def _ai_gb(mb):
+    return "%.1f GB" % (mb / 1024.0)
+
+
+def _ai_assess(m, hw):
+    """{verdict, where, need_mb, gpu_layers, tok_s, why} of a model on a machine, by the rules of aihw.assess(): weights + KV cache + 300 MB;
+    gpu = fits the free video memory with 10% to spare (Apple silicon: at most 65% of the RAM and no more than is free), partial = some layers
+    on the card and the rest comfortably in RAM, ram = CPU only and at most half of the RAM, slow = fits up to 85% of the RAM, no = too big."""
+    need = int(m["approx_mb"] + m["layers"] * 17 + 300)
+    total, free = hw["ram"]["total_mb"], hw["ram"]["available_mb"]
+    gpu = next((g for g in hw["gpus"] if g["backend"] in ("cuda", "rocm", "metal") and (g["unified"] or g["vram_mb"])), None)
+    active = m["active_b"] or m["params_b"]
+    gb = m["approx_mb"] / 1024.0 * active / m["params_b"]  # bytes read per token: the active parameters only (MoE)
+    cpu_t = tuple(gb / x for x in reversed(_AI_CPU_GBS))   # seconds per token at the fast and at the slow end
+    rate = lambda t: [max(1, int(round(1 / t[1]))), max(1, int(round(1 / t[0])))]  # noqa: E731  # [slow end, fast end] tokens/s
+
+    def out(verdict, where, layers, tok, why):
+        return {"verdict": verdict, "where": where, "need_mb": need, "gpu_layers": layers, "tok_s": tok, "why": why}
+    if gpu and gpu["unified"] and need <= 0.65 * total and need <= free:
+        bw = _AI_GPU_GBS.get(gpu["vendor"], _AI_CPU_GBS)
+        return out("gpu", "GPU", m["layers"], rate(tuple(gb / x for x in reversed(bw))),
+                   "needs %s, the %s has %s of unified memory free: all on the GPU" % (_ai_gb(need), gpu["name"], _ai_gb(free)))
+    if gpu and not gpu["unified"]:
+        vram = gpu["vram_free_mb"] if gpu["vram_free_mb"] is not None else int(gpu["vram_mb"] * 0.85)
+        bw = _AI_GPU_GBS.get(gpu["vendor"], _AI_CPU_GBS)
+        if need * 1.1 <= vram:
+            return out("gpu", "GPU", m["layers"], rate(tuple(gb / x for x in reversed(bw))),
+                       "needs %s, the %s has %s free: all on the GPU" % (_ai_gb(need), gpu["name"], _ai_gb(vram)))
+        on_gpu = int(m["layers"] * max(0, vram - 300) / need)
+        rest = need - need * on_gpu / m["layers"]
+        if on_gpu >= max(2, m["layers"] // 8) and rest <= 0.5 * total and rest <= free - 1024:
+            share = on_gpu / float(m["layers"])
+            t = tuple(gb * share / g + gb * (1 - share) / c for g, c in zip(reversed(bw), reversed(_AI_CPU_GBS)))
+            return out("partial", "GPU+CPU", on_gpu, rate(t), "needs %s, the %s has %s free: %d of %d layers on the GPU, the rest (%s) in RAM"
+                       % (_ai_gb(need), gpu["name"], _ai_gb(vram), on_gpu, m["layers"], _ai_gb(rest)))
+    if need <= 0.5 * total and need <= free - 1024:
+        return out("ram", "CPU", 0, rate(cpu_t), "needs %s, the RAM has %s free of %s: fits comfortably (CPU only)" % (_ai_gb(need), _ai_gb(free), _ai_gb(total)))
+    if need <= 0.85 * total:
+        shared = bool(gpu and gpu["unified"])  # Apple silicon: the GPU works on the same memory, slow or not
+        return out("slow", "GPU" if shared else "CPU", m["layers"] if shared else 0,
+                   rate(tuple(gb / x for x in reversed(_AI_GPU_GBS.get(gpu["vendor"], _AI_CPU_GBS)))) if shared else rate(cpu_t),
+                   "needs %s of %s of RAM (%s free now): it runs, but the PC will slow down (swapping, other programs squeezed)"
+                   % (_ai_gb(need), _ai_gb(total), _ai_gb(free)))
+    return out("no", "-", 0, None, "needs %s, more than the %s of RAM: it will not work" % (_ai_gb(need), _ai_gb(total)))
+
+
+def ai_catalog(os_name=None):
+    """The dict aisetup.catalog() returns (docs/AI.md), for a demo machine of this OS (linux, windows, darwin)."""
+    os_name = os_name if os_name in AI_OSES else "linux"
+    hw, st = _AI_MACHINES[os_name], _AI_STATE[os_name]
+    sudo = "" if os_name == "windows" else "sudo "
+    models = []
+    for mid, name, lic, params, active, quant, layers, ctx, rank, mb, notes, pinned in _AI_MODELS:
+        m = {"id": mid, "name": name, "license": lic, "params_b": params, "quant": quant, "layers": layers, "ctx_max": ctx, "rank": rank,
+             "approx_mb": mb, "notes": notes}
+        if active:
+            m["active_b"] = active
+        m.update(assess=_ai_assess(dict(m, active_b=active), hw), installed=mid in st["installed"], pinned=pinned,
+                 commands={"install": "%snuc-console-ai setup %s" % (sudo, mid), "use": "%snuc-console-ai use %s" % (sudo, mid),
+                           "remove": "%snuc-console-ai remove %s" % (sudo, mid)})
+        models.append(m)
+    best = [m for m in models if m["assess"]["verdict"] in ("gpu", "ram")] or [m for m in models if m["assess"]["verdict"] == "partial"] \
+        or sorted((m for m in models if m["assess"]["verdict"] != "no"), key=lambda m: m["approx_mb"])[:1]
+    return {"hw": hw, "dir": st["dir"], "runtime": dict(st["runtime"]), "recommended": min(best, key=lambda m: m["rank"])["id"] if best else None,
+            "active": st["active"], "models": models}
+
+
+def ai_status(os_name=None):
+    """What the STATUS section reads: [ai] as that machine's config has it and the last probe of its model server."""
+    st = _AI_STATE[os_name if os_name in AI_OSES else "linux"]
+    return {"enabled": st["enabled"], "endpoint": st["endpoint"], "model": st["active"] or "", "probe": dict(st["probe"])}
