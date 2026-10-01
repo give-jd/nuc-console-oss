@@ -1039,9 +1039,10 @@ def service_argv(d, model, port, threads, ctx, plat=None, python=None, script=No
     return argv
 
 
-def _readable_by_all(path):
-    """Every directory above `path` can be entered, and the file read, by any user (the service user is not the one who ran setup)."""
-    p = os.path.abspath(path)
+def _readable_by_all(path, stop=None):
+    """Every directory above `path` (up to `stop`, tests) can be entered, and the file read, by any user (the service user is not
+    the one who ran setup)."""
+    p, stop = os.path.abspath(path), stop and os.path.abspath(stop)
     while True:
         try:
             mode = os.stat(p).st_mode
@@ -1051,7 +1052,7 @@ def _readable_by_all(path):
         if mode & need != need:
             return False
         parent = os.path.dirname(p)
-        if parent == p:
+        if parent == p or p == stop:
             return True
         p = parent
 

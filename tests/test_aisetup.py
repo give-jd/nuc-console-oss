@@ -686,7 +686,7 @@ class SetupTests(unittest.TestCase):
             if os.name == "posix":
                 self.assertEqual(os.stat(runtime_file).st_mode & 0o777, 0o755)
                 self.assertEqual(os.stat(os.path.join(self.d, "models", "tiny.gguf")).st_mode & 0o777, 0o644)
-            self.assertEqual(sorted(aisetup.load_stamp(self.d)), ["llamafile-0.0", "tiny.gguf"])
+            self.assertEqual(sorted(aisetup.load_stamp(self.d)), [os.path.basename(runtime_file), "tiny.gguf"])  # (.exe on Windows)
             rc, out, err = self.run_setup(srv, "--yes")  # second run
             self.assertEqual(rc, 0)
             self.assertEqual(len(srv.requests), 2, "no request at all the second time")
@@ -789,7 +789,8 @@ class SetupTests(unittest.TestCase):
             rc, out, err = self.setup_many(srv, models, "b", "a", "--yes")
             self.assertEqual(rc, 0, out + err)
             self.assertEqual(sorted(p for p, _r in srv.requests), ["/a.gguf", "/b.gguf", "/llamafile-0.0"], "the runtime once, each model once")
-            self.assertEqual(sorted(aisetup.load_stamp(self.d)), ["a.gguf", "b.gguf", "llamafile-0.0"])
+            rt = os.path.basename(aisetup.runtime_path(self.d, {"url": srv_base(srv) + "/llamafile-0.0"}))  # (.exe on Windows)
+            self.assertEqual(sorted(aisetup.load_stamp(self.d)), ["a.gguf", "b.gguf", rt])
             self.assertFalse(os.path.exists(os.path.join(self.d, "models", "c.gguf")), "only what was asked for")
             rc, out, err = self.setup_many(srv, models, "a", "b", "--yes")  # again, in another order
             self.assertEqual(rc, 0)
@@ -1277,8 +1278,9 @@ class ModelsCommandTests(unittest.TestCase):
 
     def test_commands_are_shown_and_output_is_ascii(self):
         rc, out, err = self.models_cmd(HW_BIG)
-        self.assertIn("sudo nuc-console-ai setup ID", out)
-        self.assertIn("sudo nuc-console-ai use ID", out)
+        how = (lambda c: "nuc-console-ai %s ID (in an administrator prompt)" % c) if sys.platform == "win32" else "sudo nuc-console-ai {} ID".format
+        self.assertIn(how("setup"), out)
+        self.assertIn(how("use"), out)
         self.assertTrue(out.isascii(), "Windows consoles")
 
     def test_the_real_catalog_on_every_machine(self):
@@ -1332,7 +1334,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual([m["pinned"] for m in c["models"]], [False, True, True, True])
 
     def test_commands_per_system(self):
-        c = self.cat(HW_BIG)
+        c = self.cat(HW_BIG, plat="linux")
         self.assertEqual(c["models"][2]["commands"], {"install": "sudo nuc-console-ai setup mid", "use": "sudo nuc-console-ai use mid",
                                                       "remove": "sudo nuc-console-ai remove mid"})
         w = self.cat(HW_BIG, plat="win32")
@@ -1467,7 +1469,7 @@ class UseTests(unittest.TestCase):
         self.assertIn("# the model", text)
         self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "mid")
         self.assertEqual(nuc_config.load(self.cfg)["features"]["health"], True)
-        self.assertIn("sudo nuc-console-ai serve --install-service", out)
+        self.assertIn(("" if sys.platform == "win32" else "sudo ") + "nuc-console-ai serve --install-service", out)
         self.assertIn("one model at a time", out)
         self.assertNotIn("still the Ollama default", out)
         self.assertNotIn("enabled = no", out)
@@ -1768,7 +1770,8 @@ class ServiceTemplateTests(unittest.TestCase):
             p = os.path.join(d, "nuc-console-ai.service")
             put(p, aisetup.systemd_unit(["/bin/true", "serve"], 2000, gpu=True, groups=["root"]))
             r = subprocess.run(["systemd-analyze", "verify", "--man=no", p], capture_output=True, text=True)
-        bad = [ln for ln in (r.stdout + r.stderr).splitlines() if re.search(r"Unknown (key|section)|Invalid|Failed to parse|Unknown lvalue", ln)]
+        bad = [ln for ln in (r.stdout + r.stderr).splitlines()  # only about this unit: the runner's own units have their warnings
+               if "nuc-console-ai.service" in ln and re.search(r"Unknown (key|section)|Invalid|Failed to parse|Unknown lvalue", ln)]
         self.assertEqual(bad, [])
 
     def test_launchd_plist(self):
@@ -1813,12 +1816,12 @@ class ServiceTemplateTests(unittest.TestCase):
             f = os.path.join(d, "m.gguf")
             put(f, "x")
             os.chmod(f, 0o644)
-            self.assertTrue(aisetup._readable_by_all(f))
+            self.assertTrue(aisetup._readable_by_all(f, stop=d))  # (above d: the system's temp dir, 0700 on macOS)
             os.chmod(f, 0o600)
-            self.assertFalse(aisetup._readable_by_all(f))
+            self.assertFalse(aisetup._readable_by_all(f, stop=d))
             os.chmod(f, 0o644)
             os.chmod(d, 0o700)
-            self.assertFalse(aisetup._readable_by_all(f))
+            self.assertFalse(aisetup._readable_by_all(f, stop=d))
             os.chmod(d, 0o755)
 
     def test_install_needs_root(self):
@@ -1844,7 +1847,8 @@ class ServiceTemplateTests(unittest.TestCase):
                     mock.patch.object(aisetup, "_write_root_file", side_effect=lambda p, data, mode=0o644: wrote.update({p: data})), \
                     mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: "/usr/bin/" + n), \
                     mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: ran.append(argv)), \
-                    mock.patch.object(aisetup, "_is_win", return_value=False), mock.patch.object(aisetup, "_is_mac", return_value=False):
+                    mock.patch.object(aisetup, "_is_win", return_value=False), mock.patch.object(aisetup, "_is_mac", return_value=False), \
+                    mock.patch.object(aisetup, "_readable_by_all", return_value=True):  # (the temp dir's parents: 0700 on macOS)
                 _r, out, _e = call(aisetup.install_service, d, m, 8080, 2, 4096, "linux")
             argv = aisetup.service_argv(d, m, 8080, 2, 4096, "linux")
         user.assert_called_once_with()

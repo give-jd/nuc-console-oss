@@ -87,6 +87,11 @@ WIN_BASE = {"api:memory": "total=17179869184 available=8589934592", "api:cpu": "
             "reg:" + aihw.CPU_KEY + "\\ProcessorNameString": "AMD Ryzen 7 5800H with Radeon Graphics        "}
 
 
+# The fixtures describe x86_64 machines unless a test says otherwise (it patches platform.machine itself): the real host's
+# architecture (an arm64 macOS runner) must not leak into them.
+X86_HOST = mock.patch.object(aihw.platform, "machine", lambda: "x86_64")
+
+
 class Fake(object):
     """A fake machine: `files` (path -> text, or an Exception to raise) and `tools` (program name -> (rc, out) or a callable
     taking argv). A program that is not listed cannot be started (rc None); every call is recorded."""
@@ -273,6 +278,7 @@ class Parsers(unittest.TestCase):
         self.assertEqual((g["vram_mb"], g["backend"]), (None, "none"))
 
 
+@X86_HOST
 class DetectLinux(unittest.TestCase):
     def test_cpu_and_ram(self):
         f = linux_box()
@@ -402,6 +408,7 @@ class DetectLinux(unittest.TestCase):
         check_shape(self, aihw.detect("linux", f.run, f.read))
 
 
+@X86_HOST
 class DetectDarwin(unittest.TestCase):
     def mac(self, sysctl, extra=None):
         tools = {"sysctl": (0, sysctl), "vm_stat": (0, VM_STAT)}
@@ -454,6 +461,7 @@ class DetectDarwin(unittest.TestCase):
         self.assertFalse(any("nvidia" in c[0][0] for c in f.calls))
 
 
+@X86_HOST
 class DetectWindows(unittest.TestCase):
     def setUp(self):
         env = mock.patch.dict(os.environ, {"ProgramFiles": "C:\\Program Files"})
@@ -546,6 +554,7 @@ class DetectWindows(unittest.TestCase):
         self.assertTrue(any(n.startswith("RAM") for n in hw["notes"]))
 
 
+@X86_HOST
 class DetectSafety(unittest.TestCase):
     def test_never_raises(self):
         class Boom(Exception):
