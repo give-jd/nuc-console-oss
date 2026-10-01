@@ -189,9 +189,16 @@ def read_private(path, limit=65536):
     return data.decode("utf-8")
 
 
+def secret_dir(d):
+    """Where the token, the chat and sent.json live. Windows: NOTIFY_DIR\\private, which only SYSTEM, Administrators and the
+    notifier (NETWORK SERVICE) can open; the web view (LOCAL SERVICE) reads status.json in NOTIFY_DIR, never a secret.
+    Linux/macOS: NOTIFY_DIR itself (0711: files 0600 of the notifier's own user)."""
+    return os.path.join(d, "private") if nuc_config.WINDOWS else d
+
+
 def read_token(d):
     """The bot token in folder d, validated. Raises OSError / ValueError (its text never holds the token)."""
-    tok = read_private(os.path.join(d, "token"), 256).strip()
+    tok = read_private(os.path.join(secret_dir(d), "token"), 256).strip()
     if not TOKEN_RE.fullmatch(tok):
         raise ValueError("the token file does not hold a bot token (123456789:AA...)")
     return tok
@@ -200,7 +207,7 @@ def read_token(d):
 def read_chat(d):
     """{"chat_id": int, "username": str, "bot": str, "paired_ts": int} from folder d. Raises OSError / ValueError."""
     try:
-        chat = json.loads(read_private(os.path.join(d, "chat.json")))
+        chat = json.loads(read_private(os.path.join(secret_dir(d), "chat.json")))
     except (RecursionError, UnicodeDecodeError):
         raise ValueError("chat.json is not readable") from None
     cid, user = (chat.get("chat_id"), chat.get("username")) if isinstance(chat, dict) else (None, None)
@@ -253,7 +260,7 @@ def load_sent(d):
     """{"keys": Counter | None, "stamps": [send times], "last_sent": ts | None}. None keys: a first run (no file, or a broken one)."""
     out = {"keys": None, "stamps": [], "last_sent": None}
     try:
-        data = json.loads(read_private(os.path.join(d, "sent.json")))
+        data = json.loads(read_private(os.path.join(secret_dir(d), "sent.json")))
         keys = data["keys"]
         if not all(isinstance(k, str) and isinstance(n, int) and not isinstance(n, bool) and n > 0 for k, n in keys.items()):
             raise ValueError("keys")
@@ -593,7 +600,7 @@ class Notifier:
     def save(self):
         data = {"keys": dict(self.sent), "sent_ts": [int(t) for t in self.stamps], "last_sent_ts": self.last_sent}
         try:
-            put(self.dir, "sent.json", json.dumps(data) + "\n", 0o600)
+            put(secret_dir(self.dir), "sent.json", json.dumps(data) + "\n", 0o600)
         except OSError as e:
             self.log("cannot write sent.json: " + clean(redact(e), 120))
 
@@ -746,7 +753,7 @@ def service_user():
     """(uid, gid) of the unprivileged service user the installer creates, or None."""
     try:
         import pwd
-        pw = pwd.getpwnam("_nuc-console" if nuc_config.MACOS else "nuc-console")
+        pw = pwd.getpwnam("_nuc-console" if nuc_config.MACOS else "nuc-console-notify")  # Linux: its own user, not the web view's
         return pw.pw_uid, pw.pw_gid
     except (ImportError, KeyError):
         return None
@@ -755,7 +762,7 @@ def service_user():
 def prepare_dir(d):
     """The folder exists: 0711 (others reach status.json, they cannot list the secrets), owned by the service user."""
     created = not os.path.isdir(d)  # a folder the installer made keeps its mode and owner
-    os.makedirs(d, exist_ok=True)
+    os.makedirs(secret_dir(d), exist_ok=True)  # Windows: the installer made both, with their own ACLs
     if created and POSIX:
         os.chmod(d, 0o711)
         user = service_user() if os.geteuid() == 0 else None
@@ -815,10 +822,10 @@ def setup(term, make_transport, d=None, clock=time.time, sleep=time.sleep, wait=
             return 2
         prepare_dir(d)
         try:
-            os.remove(os.path.join(d, "chat.json"))  # a new token, a new pairing: the old chat belongs to the old bot
+            os.remove(os.path.join(secret_dir(d), "chat.json"))  # a new token, a new pairing: the old chat belongs to the old bot
         except FileNotFoundError:
             pass
-        put(d, "token", token + "\n", 0o600)
+        put(secret_dir(d), "token", token + "\n", 0o600)
         code = secrets.token_urlsafe(16)  # only A-Za-z0-9_-, what a /start link may carry
         term.say()
         term.say("Open this link on your phone and press Start:")
@@ -829,7 +836,7 @@ def setup(term, make_transport, d=None, clock=time.time, sleep=time.sleep, wait=
             term.say("Nobody pressed Start in time: nothing was paired. The token is saved: run --setup again.")
             return 1
         chat.update(bot=bot, paired_ts=int(clock()))
-        put(d, "chat.json", json.dumps(chat) + "\n", 0o600)
+        put(secret_dir(d), "chat.json", json.dumps(chat) + "\n", 0o600)
     except TelegramError as e:
         term.say("Telegram: " + str(e) + (" (a bot with a webhook cannot be paired: remove it with @BotFather)" if e.status == 409 else ""))
         return 1
@@ -955,7 +962,7 @@ def forget(term, d=None):
     failed = False
     for name in ("token", "chat.json", "sent.json"):
         try:
-            os.remove(os.path.join(d, name))
+            os.remove(os.path.join(secret_dir(d), name))
         except FileNotFoundError:
             pass
         except OSError as e:

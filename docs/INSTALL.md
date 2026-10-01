@@ -95,7 +95,7 @@ thermal = no
 ## 5. Port alarms and problems
 
 `nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
-Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
+Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, user `nuc-console-notify`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
 
 ### Port baseline
 
@@ -114,7 +114,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT 
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` user; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
+Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline, accepted problems, the HEALTH history `history.db`) and the `nuc-console` and `nuc-console-notify` users; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -240,8 +240,8 @@ What it does (idempotent):
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
    `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
    logon: opens the dashboard as that user, in the browser or full screen; not with `none`). The optional Telegram notifier is a
-   task too, `notify` (LOCAL SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
-   its token lives in `%ProgramData%\nuc-console\notify`, which only SYSTEM, Administrators and LOCAL SERVICE can open.
+   task too, `notify` (NETWORK SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
+   its token lives in `%ProgramData%\nuc-console\notify\private`, which only SYSTEM, Administrators and NETWORK SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt).
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.

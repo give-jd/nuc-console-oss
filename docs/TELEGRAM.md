@@ -5,11 +5,15 @@ New and resolved ATTENTION problems on your phone, as a Telegram message, so you
 and no account to open with this project. It only **sends**: no listener, no webhook, no commands, and the service never reads a message.
 
 ```
-nuc: ⚠ New problem: Container unhealthy
-nuc: ✔ Resolved: Container unhealthy
+nuc-console · nuc
+NEW  ‼ Database/broker open on the LAN
+NEW  Container exited with an error
+OK   ufw is off
 ```
 
-(An example: every message starts with the host name, here `nuc`, so with the same bot on several of your machines you see which one speaks.)
+Every message starts with the host name (here `nuc`), so with the same bot on several of your machines you see which one speaks.
+`NEW` is a problem that appeared, `OK` one that went away, `‼` marks errors and port changes. `nuc-console-telegram --preview` prints
+the message the current problems would send, without sending anything.
 
 ## Set it up in three steps
 
@@ -63,12 +67,13 @@ The **token is never in `config.ini`** (it is world-readable, and so is `config.
 
 | | |
 |---|---|
-| Linux, macOS | `/var/lib/nuc-console-notify` (mode 0711, owned by the service user `nuc-console` / `_nuc-console`): `token` and `chat.json` are 0600, `sent.json` too; `status.json` (0644) holds no secret |
-| Windows | `%ProgramData%\nuc-console\notify`: only SYSTEM, Administrators and LOCAL SERVICE (the notifier's account) have access; users have none |
+| Linux | `/var/lib/nuc-console-notify` (mode 0711), owned by **`nuc-console-notify`**, a user of its own: the web view's user `nuc-console` (the web view may be reachable on your LAN) cannot read the token. `token`, `chat.json` and `sent.json` are 0600; `status.json` (0644) holds no secret |
+| macOS | `/var/lib/nuc-console-notify` (0711, owned by `_nuc-console`; files 0600). The macOS web view only ever listens on 127.0.0.1 |
+| Windows | the notifier runs as **NETWORK SERVICE**, not as the web view's LOCAL SERVICE. `%ProgramData%\nuc-console\notify\private` (token, chat): only SYSTEM, Administrators and NETWORK SERVICE; `%ProgramData%\nuc-console\notify` itself holds `status.json` only, readable by the dashboard |
 
 Changes to `config.ini`: `--on` / `--off` apply them at once; after editing the file by hand restart the service
 (Linux `sudo systemctl restart nuc-console-notify`, macOS `sudo launchctl kickstart -k system/com.nuc-console.notify`,
-Windows `Start-ScheduledTask -TaskPath \nuc-console\ -TaskName notify` from an administrator PowerShell).
+Windows `nuc-console-telegram.cmd --on` from an administrator prompt: it stops and starts the task, `Start-ScheduledTask` alone does nothing while it runs).
 
 ## When a message is sent
 
@@ -90,7 +95,7 @@ Windows `Start-ScheduledTask -TaskPath \nuc-console\ -TaskName notify` from an a
 | reading messages | the **service** never asks Telegram for anything you wrote and has **no commands**: you cannot control the machine from the chat. Only `--setup`, a command you run yourself, asks Telegram once for the single `/start` message that carries your one-time code, then stops |
 | the token in `config.ini`, logs, `status.json` or the screen | it is read from its 0600 file by the service user only; the dashboard and the status file show an error, never the token |
 | a central server | there is none: your bot, your token, your chat. Nothing is sent to this project or anyone else |
-| root | the service runs as an unprivileged user (Linux `nuc-console`, macOS `_nuc-console`, Windows LOCAL SERVICE) with the same hardening as the web view |
+| root | the service runs as an unprivileged user (Linux `nuc-console-notify`, macOS `_nuc-console`, Windows NETWORK SERVICE) with the same hardening as the web view; on Linux and Windows it is not the web view's account, so a web view reachable on the LAN cannot read the token |
 
 The notifier reads the same state files as the dashboard, so it needs no more rights than the monitor. The pairing link carries a **one-time code**:
 only a Start that carries it pairs the chat.

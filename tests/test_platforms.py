@@ -838,7 +838,8 @@ class Installers(unittest.TestCase):
             if "=" in line and not line.lstrip().startswith(("#", "[")):
                 k, _, v = line.partition("=")
                 unit[k.strip()] = v.strip()
-        self.assertEqual((unit["User"], unit["Group"]), ("nuc-console", "nuc-console"))
+        self.assertEqual((unit["User"], unit["Group"]), ("nuc-console-notify", "nuc-console-notify"))   # not the web view's user
+        self.assertEqual(unit["UMask"], "0077")
         self.assertEqual(unit["ExecStart"], "/usr/bin/python3 -B /opt/nuc-console/notify.py")
         self.assertEqual((unit["Restart"], unit["RestartSec"]), ("on-failure", "30"))              # exit 0 (off / not paired) = idle
         self.assertEqual((unit["StateDirectory"], unit["StateDirectoryMode"]), ("nuc-console-notify", "0711"))
@@ -856,12 +857,13 @@ class Installers(unittest.TestCase):
         s = self.read("install.sh")
         self.assertIn("install -m 0644 systemd/*.service /etc/systemd/system/", s)                 # the unit goes in with the others
         self.assertIn("install -m 0755 bin/nuc-console-telegram /usr/local/bin/", s)
-        self.assertIn("install -d -m 0711 -o nuc-console -g nuc-console /var/lib/nuc-console-notify", s)
+        self.assertIn("useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify", s)
+        self.assertIn("install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify", s)
         self.assertIn("systemctl enable nuc-console-notify.service", s)
         self.assertRegex(s, r'if python3 "\$DEST/notify\.py" --enabled; then systemctl restart nuc-console-notify\.service\n'
                             r'else systemctl stop nuc-console-notify\.service 2>/dev/null \|\| true; fi')
         down = s[s.index('"--uninstall" ]'):s.index("exit 0")]                                       # the uninstall branch
-        self.assertRegex(down, r"systemctl disable --now [^\n]*nuc-console-notify\.service")
+        self.assertRegex(down, r"for u in [^\n]*nuc-console-notify\.service; do\n\s+systemctl disable --now \"\$u\"")   # one by one
         self.assertIn("/etc/systemd/system/nuc-console-notify.service", down)
         self.assertIn("/usr/local/bin/nuc-console-telegram", down)
         self.assertRegex(down, r"rm -rf /var/lib/nuc-console-notify\b")                            # the token must not outlive the install
@@ -883,14 +885,15 @@ class Installers(unittest.TestCase):
 
     def test_windows_installer_registers_the_notifier_with_a_private_folder(self):
         s = self.read("install-windows.ps1")
-        self.assertIn("Register-Service 'notify' 'notify.py' 'S-1-5-19' 'notify.log'", s)          # LOCAL SERVICE, like the web view
+        self.assertIn("Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log'", s)          # NETWORK SERVICE: not the web view's account
         acl = next(l for l in s.splitlines() if "icacls.exe" in l and '"$Data\\notify"' in l and "/inheritance:r" in l)
-        self.assertEqual(sorted(re.findall(r"\*(S-[0-9-]+):", acl)), ["S-1-5-18", "S-1-5-19", "S-1-5-32-544"])   # SYSTEM, LOCAL SERVICE, Administrators
-        self.assertNotIn("S-1-5-32-545", acl)                                                       # Users must not read the token
-        self.assertNotIn("S-1-1-0", acl)
-        self.assertIn("(OI)(CI)M", acl)                                                             # LOCAL SERVICE: modify, not full control
+        self.assertIn("'*S-1-5-20:(OI)(CI)M'", acl)                                                 # the notifier writes status.json there
+        self.assertIn("'*S-1-5-19:(OI)(CI)RX'", acl)                                                # the web view reads it
+        private = next(l for l in s.splitlines() if "icacls.exe" in l and '"$Data\\notify\\private"' in l)
+        self.assertEqual(sorted(re.findall(r"\*(S-[0-9-]+):", private)), ["S-1-5-18", "S-1-5-20", "S-1-5-32-544"])  # SYSTEM, NETWORK SERVICE, Admins
+        self.assertIn("/inheritance:r", private)                                                    # nobody else, Users and the web view included
         down = s[s.index("if ($Uninstall) {"):s.index("# ---- 1. private Python")]
-        self.assertIn('Remove-Item -Recurse -Force "$Data\\notify"', down)
+        self.assertLess(down.index('Remove-Item -Recurse -Force "$Data\\notify"'), down.index("Remove-Item -Recurse -Force $Dest"))  # the token first
         self.assertIn("bin\\*.cmd", s)                                                              # nuc-console-telegram.cmd rides along
 
     def test_windows_wrappers_clear_the_redirect_variables(self):

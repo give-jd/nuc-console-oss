@@ -48,7 +48,7 @@ jobs:
       # the Telegram notifier is installed idle (disabled by default); its folder holds the bot token: nobody else may list it
       - run: |
           test -f /etc/systemd/system/nuc-console-notify.service
-          [ "$(stat -c '%a %U' /var/lib/nuc-console-notify)" = "711 nuc-console" ]
+          [ "$(stat -c '%a %U' /var/lib/nuc-console-notify)" = "711 nuc-console-notify" ]   # its own user, not the web view's
           rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
           nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
           state=$(systemctl is-failed nuc-console-notify || true); echo "nuc-console-notify: $state"; [ "$state" != failed ]
@@ -112,8 +112,11 @@ jobs:
           if (-not (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify' -ErrorAction SilentlyContinue)) { throw "no notify task" }
           $notify = "$env:ProgramData\nuc-console\notify"
           if (-not (Test-Path $notify)) { throw "no notify folder" }
-          $acl = (& icacls.exe $notify) -join "`n"
-          if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users') { throw "the notify folder is open to ordinary users: $acl" }
+          $acl = (& icacls.exe "$notify\private") -join "`n"
+          if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users|LOCAL SERVICE') { throw "the notifier's private folder is open to others: $acl" }
+          if ($acl -notmatch 'NETWORK SERVICE') { throw "the notifier (NETWORK SERVICE) cannot use its private folder: $acl" }
+          $who = (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify').Principal.UserId
+          if ($who -notmatch 'NETWORK SERVICE') { throw "the notify task runs as $who, not NETWORK SERVICE" }
           & "$env:ProgramFiles\nuc-console\python\python.exe" -B "$env:ProgramFiles\nuc-console\app\notify.py" --enabled
           if ($LASTEXITCODE -ne 1) { throw "notify.py --enabled exited $LASTEXITCODE (expected 1: disabled by default)" }
           $out = (& "$env:ProgramFiles\nuc-console\bin\nuc-console-telegram.cmd" --status --json) -join "`n"

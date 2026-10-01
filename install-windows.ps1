@@ -86,11 +86,11 @@ if (-not (Test-Admin)) { throw 'administrator rights required: right-click insta
 
 if ($Uninstall) {
     Remove-Tasks
+    if (Test-Path "$Data\notify") { Remove-Item -Recurse -Force "$Data\notify" }  # the Telegram bot token is in there: first
     try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\').DeleteFolder('nuc-console', 0) } catch { }
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-    if (Test-Path "$Data\notify") { Remove-Item -Recurse -Force "$Data\notify" }  # the Telegram bot token is in there
     Say "removed ($Data with config.ini and the baseline is left in place)"
     exit 0
 }
@@ -139,11 +139,16 @@ foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs")) { New-Item -Ite
 & icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
 & icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
-# the Telegram notifier's folder (bot token, paired chat, status): NOT readable by users (the token is in there); SYSTEM and
-# Administrators full control, LOCAL SERVICE (the notifier) modify
-New-Item -ItemType Directory -Force -Path "$Data\notify" | Out-Null
-& icacls.exe "$Data\notify" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)M' | Out-Null
+# the Telegram notifier runs as NETWORK SERVICE, not as the web view's LOCAL SERVICE (the web view may be reachable on the LAN):
+# notify\ holds status.json only (no secret: readable by the dashboard and its users); notify\private\ holds the bot token
+# and the paired chat: SYSTEM, Administrators and NETWORK SERVICE only
+& icacls.exe $Data /grant '*S-1-5-20:(OI)(CI)RX' | Out-Null  # it reads config.ini and the state, like the web view
+& icacls.exe "$Data\logs" /grant '*S-1-5-20:(OI)(CI)M' | Out-Null
+New-Item -ItemType Directory -Force -Path "$Data\notify", "$Data\notify\private" | Out-Null
+& icacls.exe "$Data\notify" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify" }
+& icacls.exe "$Data\notify\private" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\private" }
 $cfg = Join-Path $Data 'config.ini'
 if (-not (Test-Path $cfg)) { Copy-Item (Join-Path $Here 'config\config.ini') $cfg }  # never overwrite the admin's edits
 Copy-Item (Join-Path $Here 'config\config.ini') (Join-Path $Data 'config.ini.dist') -Force  # diff it to see new options
@@ -179,7 +184,7 @@ if ($web) {
 
 # the Telegram notifier: always registered; it exits at once (and stays idle) unless [telegram] enabled = yes and the chat is paired.
 # Outbound HTTPS to api.telegram.org only, as LOCAL SERVICE; its folder (token, chat) is the one locked above
-Register-Service 'notify' 'notify.py' 'S-1-5-19' 'notify.log' 'nuc-console Telegram notifier: outbound only'
+Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log' 'nuc-console Telegram notifier: outbound only (NETWORK SERVICE)'
 Start-ScheduledTask -TaskPath $TaskPath -TaskName 'notify'
 
 if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a full-screen one (--kiosk)

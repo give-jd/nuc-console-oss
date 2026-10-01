@@ -1308,7 +1308,7 @@ OS_CATALOG["windows"].update({
                           "then tap the link it prints and press Start"),
     "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
                          "nuc-console-telegram.cmd --status; nuc-console-telegram.cmd --test; log: %ProgramData%\\nuc-console\\logs\\notify.log; "
-                         "restart (administrator PowerShell): Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName notify"),
+                         "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
 })
 OS_CATALOG["darwin"].update({
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",

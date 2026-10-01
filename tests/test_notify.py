@@ -334,7 +334,7 @@ class Cycles(Base):
         # a journal problem appears (news, once) while temperatures and error counts move all the time
         self.run_cycles(nt, clock, *[[temp(70 + i), rec("journal-errors", 1, f"{100 + i} errors in this boot's journal")] for i in range(12)])
         self.assertEqual(len(fake.texts), 2)
-        self.assertEqual(fake.texts[1].splitlines()[1:], ["NEW  Errors in this boot's journal"])
+        self.assertEqual(fake.texts[1].splitlines()[1:], ["NEW  " + render.CATALOG["journal-errors"][0]])   # the title of this OS
 
     def test_the_notifiers_own_problems_are_never_announced(self):
         nt, fake, clock = self.notifier()
@@ -1238,6 +1238,20 @@ class Wrappers(unittest.TestCase):
         attrs = self.read(".gitattributes")
         self.assertIn("bin/nuc-console-telegram text eol=lf", attrs)
         self.assertIn("*.cmd text eol=crlf", attrs)
+
+
+class SecretsFolder(unittest.TestCase):
+    """The token and the chat are where the web view's account cannot read them (docs/TELEGRAM.md, SECURITY.md)."""
+
+    def test_windows_keeps_the_secrets_in_private_and_status_beside_it(self):
+        with mock.patch.object(nuc_config, "WINDOWS", True):
+            self.assertEqual(notify.secret_dir(os.path.join("X", "notify")), os.path.join("X", "notify", "private"))
+        with mock.patch.object(nuc_config, "WINDOWS", False):
+            self.assertEqual(notify.secret_dir(os.path.join("X", "notify")), os.path.join("X", "notify"))
+
+    def test_linux_service_user_is_its_own(self):
+        src = open(notify.__file__, encoding="utf-8").read()
+        self.assertIn('"nuc-console-notify"', src)  # not "nuc-console", the web view's user
 
 
 if __name__ == "__main__":

@@ -6,8 +6,10 @@ Wants=network-online.target
 [Service]
 # Outbound HTTPS to api.telegram.org only: no listener, no socket activation; it never reads incoming messages.
 Type=simple
-User=nuc-console
-Group=nuc-console
+# its own user: the web view (nuc-console) cannot read the token
+User=nuc-console-notify
+Group=nuc-console-notify
+UMask=0077
 ExecStart=/usr/bin/python3 -B /opt/nuc-console/notify.py
 # exit 0 when disabled or not paired: no restart loop (sudo nuc-console-telegram --setup / --on starts it)
 Restart=on-failure

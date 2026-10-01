@@ -10,6 +10,8 @@
     <array><string>@PYTHON@</string><string>-B</string><string>@DEST@/notify.py</string></array>
     <key>UserName</key><string>_nuc-console</string>
     <key>GroupName</key><string>_nuc-console</string>
+    <!-- 0077: whatever it creates is its own only (the token, the chat); status.json is opened up on purpose -->
+    <key>Umask</key><integer>63</integer>
     <key>RunAtLoad</key><true/>
     <!-- exit 0 = disabled or not paired: no restart loop (nuc-console-telegram setup or on starts it again) -->
     <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>

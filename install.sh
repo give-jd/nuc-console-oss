@@ -23,7 +23,9 @@ TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service nuc-console-notify.service || true
+    for u in nuc-console.service nuc-console-collector.service nuc-console-web.service nuc-console-notify.service; do
+        systemctl disable --now "$u" 2>/dev/null || true  # one by one: a unit an older version did not have must not stop the others
+    done
     rm -f /usr/local/bin/nuc-console-problems "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
     rm -f /usr/local/bin/nuc-console-telegram /etc/systemd/system/nuc-console-notify.service
     rm -rf /var/lib/nuc-console-notify  # the Telegram bot token is in there: it must not outlive the installation
@@ -43,6 +45,8 @@ fi
 [ "$(tty 2>/dev/null)" != "/dev/tty$VT" ] || { echo "do not run from tty$VT: use SSH or another terminal" >&2; exit 1; }
 
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
+# the Telegram notifier has a user of its own: the web view (user nuc-console, maybe reachable on the LAN) cannot read the bot token
+id nuc-console-notify >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify
 install -d "$DEST"
 rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
 install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
@@ -60,7 +64,7 @@ install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
 install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
 install -d /var/lib/nuc-console
-install -d -m 0711 -o nuc-console -g nuc-console /var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
+install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service
 # restart, not --now: on an upgrade the service is already running and would keep the old code
