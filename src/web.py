@@ -164,6 +164,7 @@ class Server(http.server.ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         render.DEMO = demo
         self.smp = render.Sampler()
+        self.smp.sample()  # starts the background reads (sessions, disks): the first page must not say "unavailable"
         self.lock = threading.Lock()
         self.cache = {}  # cols -> (time, page): a burst of requests renders once
         super().__init__(addr, Handler)
@@ -195,9 +196,10 @@ class Server(http.server.ThreadingHTTPServer):
                 style = "body{font-size:%.1fpx}" % (14 * zoom / 100)
             try:
                 if full:  # overview + every detail page: nothing hidden behind "… +N more"
-                    body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols - 1, grows, mode="overview", keys=False))
+                    body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True))
                 else:
-                    screen, _ = render.render_screen(self.smp, gcols - 1, grows, mode="overview", at=time.time() if rotate else None, keys=False)
+                    screen, _ = render.render_screen(self.smp, gcols, grows, mode="overview", at=time.time() if rotate else None,
+                                                     keys=False, page=True)  # all the columns: "wide" (200) is the 2-column layout
                     body = to_html(screen)
             except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
                 print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page

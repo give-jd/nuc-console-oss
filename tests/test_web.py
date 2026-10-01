@@ -154,6 +154,12 @@ class Web(unittest.TestCase):
             web.Server = saved
         self.assertEqual((seen["addr"][0], seen["token"]), ("127.0.0.1", ""))
 
+    def test_wide_is_the_two_column_layout_with_every_section(self):
+        _, _, wide = get(self.open, "/?cols=200")
+        for name in ("NETWORK TRAFFIC", "SESSIONS", "DISKS", "DOCKER · DISK"):                       # the wide-only sections
+            self.assertIn(name, wide)
+        self.assertIn("console 200x", wide)
+
     def test_html_escapes_everything(self):
         out = web.to_html("\x1b[31m<img src=x onerror=1>\x1b[0m & \x1b[2J\x1b[H\x1b[1;36mok\x1b[0m")
         self.assertNotIn("<img", out)
