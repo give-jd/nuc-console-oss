@@ -23,8 +23,8 @@ shellcheck install.sh install-macos.sh scripts/*.sh bin/nuc-console-{accept,prob
   use the API or PowerShell objects (`ConvertTo-Json`), never `netstat`/`netsh` text.
 - The AI screen reads the hardware in `aihw.py` the same way: the commands (`nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler`) and the files
   (`/proc`, `/sys`) go through two injectable functions, so each OS has fixtures in the tests; fixed argument lists, a short time limit, never a
-  shell, and whatever cannot be read goes to the notes instead of being guessed. The thresholds of the five verdicts are named constants at
-  the top of that file; change one together with the table in `docs/AI.md`.
+  shell, and whatever cannot be read goes to the notes instead of being guessed. The thresholds of the five verdicts and the memory
+  bandwidths behind the speed estimates are named constants at the top of that file; change one together with the tables in `docs/AI.md`.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view has none except `src/graphjs.py` (the MAP's graph view). Keep it that way; `tests/test_graphjs.py` lists
@@ -45,7 +45,9 @@ Small, focused, with tests. Describe the *why*. Do not include secrets, real hos
 ## Pinning the AI manifest
 
 `nuc-console-ai setup` downloads only what `RUNTIME` and `MODELS` in `src/aisetup.py` pin, and refuses while a value is `None`. A
-release must fill them, from the sources, never from memory or from a web page:
+release must fill them, from the sources, never from memory or from a web page. (A new model is an entry in `MODELS`, kept in rank order,
+`rank` 1..n with the best first: `params_b`, and `active_b` for a mixture of experts, `layers` (the blocks `--gpu-layers` counts), `ctx_max`,
+`approx_mb` (the file, in MB), `ram_mb`, a one-line ASCII `notes`, and the `repo` and `file` it comes from; `pins` then finds the rest.)
 
 1. On a machine with network access: `python3 src/aisetup.py pins`. It asks the GitHub API for the llamafile release (asset digest and size)
    and the Hugging Face API for every model (the repository's current commit, and the file's LFS SHA-256 and size at that commit) and prints one
@@ -53,11 +55,14 @@ release must fill them, from the sources, never from memory or from a web page:
 2. Check the output: the licence it prints must be Apache-2.0 or MIT (`ALLOWED_LICENSES`; the tests refuse others); the file must be the
    Q4_K_M GGUF you meant (or the model's own quantisation, noted in its entry); the size should be near its `approx_mb`, which only feeds the
    advice before and after pinning. Change `approx_mb` if it is off by more than a few percent.
-3. Paste `revision`, `sha256` and `size` into the entries (the `version` and `url` of the runtime too, when you move to a newer llamafile, and
-   then check its `args` against `llamafile --help` of that version). A model's `revision` is a 40-hex commit, never `main`.
+3. Paste `revision`, `sha256` and `size` into the entries (for the runtime `sha256` and `size`, and its `version` and `url` when you move to a newer
+   llamafile). Then check the flags `serve_argv` passes (`--server --host --port -m -a -t -c --nobrowser`, `--gpu auto -ngl N` or
+   `--gpu disable`, and the runtime's `args`) against `llamafile --help` of that version, and that the models that need a recent llama.cpp
+   (SmolLM3, gpt-oss) load with it. A model's `revision` is a 40-hex commit, never `main`.
 4. `python3 -m unittest discover -s tests`, then try it for real on each OS you can reach: `setup`, `serve`, `status`, a question with
    `nuc-console-ask`, and `nuc-console-ai remove`. A new model or a new runtime is a new pin in a new release; nothing updates by itself.
-5. Keep `docs/AI.md` (the table of models: names, approximate sizes, notes) in step with `MODELS`.
+5. Keep `docs/AI.md` in step with the code: the table of models (ids, names, parameters, approximate sizes, needs, context, notes) with `MODELS`
+   (`python3 src/aisetup.py models` prints the numbers), the verdicts and the speed table with the constants at the top of `src/aihw.py`.
 
 ## Regenerating the README screenshots
 

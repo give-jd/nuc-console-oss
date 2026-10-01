@@ -112,15 +112,18 @@ The AI screen (console key `a`) already tells you which local models this machin
 model. To install one and let it explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules):
 
 ```bash
-sudo nuc-console-ai models                    # the same table in a terminal
-sudo nuc-console-ai setup                     # the recommended model (or: setup qwen3-8b); downloads once, SHA-256 checked
-sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only (or: nuc-console-ai serve, in the foreground)
+nuc-console-ai models                         # the same table in a terminal; no root (/usr/local/sbin/nuc-console-ai if your PATH lacks sbin)
+sudo nuc-console-ai setup                     # the recommended model (or: setup qwen3-8b qwen3-4b); downloads once, SHA-256 checked
+sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only, on the GPU when the model fits there (or: nuc-console-ai serve, in the foreground)
 # set [ai] enabled = yes in /etc/nuc-console/config.ini, then:
-nuc-console-ask --advise
+nuc-console-ask advise
 ```
 
-`install.sh` itself downloads nothing and starts no model server. `setup` needs the network once and refuses to download what this
-release does not pin yet. The files go to `/var/lib/nuc-console/ai` (a model is 0.4 to 19 GB).
+`install.sh` itself downloads nothing and starts no model server. `setup` needs the network once and downloads only what this release
+pins: the models are pinned; the runtime's SHA-256 is still to be confirmed, and until it is `setup` stops and names it. The files go
+to `/var/lib/nuc-console/ai` (a model is 0.4 to 19 GB). To switch the installed service to another model (`sudo nuc-console-ai use
+qwen3-4b`) or after changing `[ai] gpu`, run `sudo nuc-console-ai serve --install-service` again: the service keeps what it was installed
+with. On a machine with a GPU the unit it writes lets the service see the GPU (`PrivateDevices=no`, the `render` and `video` groups).
 
 ## 8. Update, uninstall
 
@@ -130,8 +133,8 @@ sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
 Uninstall removes the commands and, if you installed it, the AI model service. It leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline,
-accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`) and the `nuc-console` user; remove them by hand if you want. To
-give the disk of the AI files back first: `sudo nuc-console-ai remove`.
+accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`), the `nuc-console` user and the `nuc-console-ai` account with its
+state `/var/lib/nuc-console-ai`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`.
 
 ## Troubleshooting (Linux)
 
@@ -188,7 +191,7 @@ What it does (idempotent):
 
 The commands `nuc-console-problems`, `nuc-console-accept`, `nuc-console-ask` and `nuc-console-ai` are linked into `/usr/local/bin` and `/usr/local/sbin`
 (only when root owns that folder; otherwise run them from `/opt/nuc-console/bin`). The last two are for the optional local AI model
-([AI.md](AI.md): Metal uses the GPU of Apple silicon; `sudo nuc-console-ai models`, `setup`, `serve --install-service`); nothing is downloaded or started.
+([AI.md](AI.md): Metal uses the GPU of Apple silicon; `nuc-console-ai models` (no root), `sudo nuc-console-ai setup`, `serve --install-service`); nothing is downloaded or started.
 
 Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is written to `config.ini`; without it the file decides).
 
@@ -205,7 +208,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the `_nuc-console` user and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place.
+It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place.
 
 ## What is different from Linux
 
@@ -261,7 +264,7 @@ What it does (idempotent):
    logon: opens the dashboard as that user, in the browser or full screen; not with `none`).
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt) and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
-   prompt) and `nuc-console-ask`. Nothing is downloaded or started until you run them.
+   prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them.
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),

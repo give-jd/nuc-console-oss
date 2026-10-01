@@ -12,28 +12,30 @@ says. It does not send anything to a cloud service (the endpoint must be on this
 is not a chat window and it does not see raw logs. The web view stays read-only: the screen *shows* the command to run
 (`sudo nuc-console-ai setup qwen3-8b`), you run it. The model can be wrong: every answer is marked "AI, check before acting".
 
-It works the same on Linux, macOS and Windows. On Windows, run the commands that install or serve from an
+It works the same on Linux, macOS and Windows. On Windows, run the commands that install, switch or serve from an
 **administrator** prompt (no `sudo`).
 
 ## In short
 
 ```bash
-sudo nuc-console-ai models                    # what this machine can run, model by model (or: key a on the console)
+nuc-console-ai models                         # what this machine can run, model by model; no root (or: key a on the console)
 sudo nuc-console-ai setup                     # downloads the recommended runtime and model once, SHA-256 checked
 sudo nuc-console-ai serve --install-service   # runs it as a service on 127.0.0.1 (or `nuc-console-ai serve`: foreground)
 # config.ini: [ai] enabled = yes              # (setup offers to write endpoint and model)
-nuc-console-ask --status                      # does the server answer?
-nuc-console-ask --advise                      # advice on the last 7 days of HEALTH findings
+nuc-console-ask status                        # does the server answer?
+nuc-console-ask advise                        # advice on the last 7 days of HEALTH findings
 ```
 
-`setup` refuses to download until the build you run has its files pinned: see [The pins](#the-pins).
-Preview the screen without any of this: `python3 src/render.py --once --demo --view ai`.
+`setup` downloads only what the build you run pins (see [The pins](#the-pins)): the twelve models are pinned; the runtime's
+SHA-256 and size are still to be confirmed, and until they are `setup` stops before it downloads anything and names the runtime.
+`models` and the screen work meanwhile. Preview the screen without any of this: `python3 src/render.py --once --demo --view ai`.
 
 ## The AI screen
 
 Console key `a` (back: `a`, `Esc` or `q`; also after 10 minutes without a key), the **ai** link in the web view's bottom
-bar (`/?view=ai`), or once, for a look over SSH: `render.py --once --view ai`. It shows even with `[ai] enabled = no`:
-it is where you choose. `[features] ai = no` removes it (and the hardware is never probed).
+bar (`/?view=ai`), or once, for a look over SSH: `render.py --once --view ai`. It is not one of the rotating pages (nobody
+chooses a model from a monitor). It shows even with `[ai] enabled = no`: it is where you choose. `[features] ai = no` removes it
+(and the hardware is never probed).
 
 | Section | Shows |
 |---|---|
@@ -43,84 +45,146 @@ it is where you choose. `[features] ai = no` removes it (and the hardware is nev
 | STATUS | `[ai] enabled`, the endpoint, whether it answers (checked at most once a minute, one second at most, never while a page is drawn), the active model |
 
 Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter`. `render.py --once --view ai` takes `--select TEXT`, `--details`,
-`--demo` (three invented machines: a Linux box with a 12 GB NVIDIA card, a Windows laptop with 4 GB of GPU memory and
-16 GB of RAM, an M2 with 16 GB of unified memory) and `--demo-os windows|darwin`.
+`--demo` and `--demo-os windows|darwin`: the demo has three invented machines, a Linux box with a 12 GB NVIDIA card
+(`--demo`), a Windows laptop with 4 GB of GPU memory and 16 GB of RAM (`--demo-os windows`) and an M2 with 16 GB of unified
+memory (`--demo-os darwin`).
+
+`nuc-console-ai models` prints the same table in a terminal, and needs no root. A trimmed example, as printed on a machine
+with 16 GB of RAM and no GPU:
+
+```
+This machine (the advice below is based on it):
+  CPU      : Intel(R) Xeon(R) Processor @ 2.10GHz (4 cores, 4 threads) avx2 avx512
+  RAM      : 15.7 GB, 14.5 GB free
+  GPU      : none found: the CPU does the work
+
+  ID              MODEL                           SIZE    NEEDS  FITS         TOK/S  STATE
+  qwen3-30b-a3b   Qwen3 30B-A3B (MoE)          18.6 GB ~19.2 GB  TOO BIG          ?  not installed
+  gpt-oss-20b     OpenAI gpt-oss 20B (MoE)     11.6 GB ~12.0 GB  SLOW        2.1-14  not installed
+  phi-4           Phi-4 14B                     9.1 GB  ~9.8 GB  SLOW       0.5-3.2  not installed
+* qwen3-8b        Qwen3 8B                      5.0 GB  ~5.7 GB  RAM        4.1-8.2  not installed
+  qwen3-4b        Qwen3 4B                      2.5 GB  ~3.3 GB  RAM         8.2-16  not installed
+  qwen3-0.6b      Qwen3 0.6B                    400 MB  ~1.1 GB  RAM         51-102  not installed
+  ...
+
+* recommended for this machine: qwen3-8b: needs 5.7 GB, this machine has 16 GB of RAM (15 GB free): runs on the CPU, comfortably
+FITS: GPU = all on the GPU; GPU+CPU = partly on the GPU; RAM = fits in memory; SLOW = fits, but the PC
+      will slow down a lot; TOO BIG = will not work here.
+TOK/S is a rough estimate of the generation speed, not a promise. NEEDS: with 4096 tokens of context.
+Install: sudo nuc-console-ai setup ID
+Switch : sudo nuc-console-ai use ID
+Remove : sudo nuc-console-ai remove ID
+```
+
+(The full table has the twelve models of [the list below](#the-models).) `*` marks the recommended model. STATE is `not installed`,
+`installed`, `installed, ACTIVE` (the one in `[ai] model`) or `not pinned yet` (this build cannot download it). SIZE is the
+size of the file (the pinned size, or `~` the approximate one while a model is not pinned); NEEDS is memory, counted like the RAM
+line above it. Below 10 tokens per second the speed keeps one decimal (`0.5-3.2`), from 10 on it is a whole number. When the hardware
+cannot be read at all, every row shows `?` for the verdict and the speed, and nothing is recommended.
 
 ## Choosing a model
 
 The hardware is read once and kept five minutes (the hardware does not change; free memory does). What a model **needs**
-is its weights, plus the context memory for 4096 tokens, plus about 300 MB of runtime: roughly the file size plus 0.5 to 1 GB.
-Each model gets one of five verdicts, always with a symbol as well as a colour:
+is its weights (the file), plus the memory of the context (16 MB per layer for 4096 tokens), plus about 300 MB of runtime:
+the file plus 0.7 to 1.1 GB, depending on the number of layers. Each model gets one of five verdicts, always with a symbol as
+well as a colour (the console command prints the short names `GPU`, `GPU+CPU`, `RAM`, `SLOW`, `TOO BIG`):
 
 | Verdict | Means | When (the thresholds are constants at the top of `src/aihw.py`) |
 |---|---|---|
-| **FITS GPU** (green) | fits entirely in the GPU's memory: the fastest | a dedicated GPU whose *free* memory holds the need plus 10 %. Apple silicon: the need is at most 65 % of the RAM and of what is free now (the GPU shares the RAM) |
-| **GPU+CPU** (cyan) | the GPU is too small for all of it: some layers run on the GPU, the rest in RAM. Works, slower | a dedicated GPU that holds part of the model, and the RAM holds the rest comfortably |
-| **FITS RAM** (green) | runs on the CPU, with room to spare | no usable GPU: the need is at most 50 % of the total RAM and at most the free RAM minus 1 GB |
-| **SLOW** (yellow) | fits in RAM, but the PC will slow down: swapping, other programs squeezed | the need is up to 85 % of the total RAM, or more than what is free now |
-| **TOO BIG** (red) | will not work | the need is more than 85 % of the total RAM and no GPU can hold it. `setup` refuses it unless you add `--force` |
+| **FITS GPU** (green) | fits entirely in the GPU's memory: the fastest | a dedicated GPU (CUDA, ROCm, Metal or Vulkan backend) whose *free* memory is at least the need plus 10 % (`GPU_FIT` 1.10); where only the total is known (the Windows registry, an Intel Mac) the free memory is taken as the total less 512 MB for the display. Apple silicon: the need is at most 65 % of the RAM (`UNIFIED_MAX_FRAC`) and at most the RAM that is free now (the GPU shares the RAM) |
+| **GPU+CPU** (cyan) | the GPU is too small for all of it: some layers run on the GPU, the rest in RAM. Works, slower | a dedicated GPU that holds at least a tenth of the layers (`PARTIAL_MIN_FRAC`) but not all of them, and the part left for the RAM is comfortable by the FITS RAM rule below |
+| **FITS RAM** (green) | runs on the CPU, with room to spare | no GPU that helps: the need is at most half of the total RAM (`RAM_COMFY_FRAC` 0.50) and at most the free RAM minus 1 GB (`RAM_RESERVE_MB` 1024) |
+| **SLOW** (yellow) | fits in RAM, but the PC will slow down: swapping, other programs squeezed | the need is more than half of the total RAM, or more than the free RAM minus 1 GB, and at most 85 % of the total RAM (`RAM_MAX_FRAC` 0.85). Also: the part left for the RAM after a small GPU is of that kind, or the RAM size could not be read |
+| **TOO BIG** (red) | will not work | the need is more than 85 % of the total RAM and no GPU can hold enough of it. `setup` and `use` refuse it unless you add `--force` |
 
-Free memory is the free memory *at the time of the reading*: a verdict can improve after you close something. `setup`
-warns about SLOW and asks before it downloads.
+Free memory is the free memory *at the time of the reading*: a verdict can improve after you close something. `setup` and
+`use` warn about SLOW; `setup` asks before it downloads.
 
 **The speed** is an estimate, shown as a range and labelled as one everywhere: a model generates about as many tokens
 per second as the memory bandwidth divided by the bytes read for each token (a mixture-of-experts model reads only its
-*active* parameters). The machine's bandwidth is taken as about 20-40 GB/s for the CPU (dual-channel DDR4/DDR5), 150-400 GB/s
-for a GPU by its class, and by chip class for Apple silicon. It is not a promise: the quantisation, the context, the
-temperature and everything else that runs change it. For scale: an advice is a few hundred tokens, so at 5 tokens/s it
-takes about a minute and at 50 a few seconds (`[ai] timeout_s`, 120 by default, bounds it).
+*active* parameters). The bandwidth is assumed per class of memory, in GB/s: the CPU 20-40 (dual-channel DDR4/DDR5); a GPU
+by vendor, NVIDIA 150-400, AMD 100-300, Intel 80-250, others 50-150, and 400-900 for any card with 20 GB or more; Apple silicon
+by chip, 45-85 (base), 100-180 (Pro), 220-380 (Max) and 450-650 (Ultra), and 60 % of that for its CPU cores. A model split between GPU
+and RAM adds the time of both parts; a SLOW estimate is cut to 20 % of its low end and 70 % of its high end, and not given at all when
+the RAM size is unknown. It is not a promise: the quantisation, the context, the temperature and everything else that runs change it. For
+scale: an advice is a few hundred tokens, so at 5 tokens/s it takes about a minute and at 50 a few seconds (`[ai] timeout_s`, 120 by
+default, bounds it).
 
-**The recommended model** (★) is the best-ranked one whose verdict is FITS GPU or FITS RAM; if there is none, the best
-GPU+CPU one; else the smallest that is not TOO BIG; nothing if everything is too big. Advice works with small models; questions
-(`nuc-console-ask "..."`) need the model to pick a query and follow a format, which models under about 3 billion
-parameters often do badly. If answers are empty or confused, take the next size up before changing anything else.
+**The recommended model** (★, `*` in the console) is the best-ranked one whose verdict is FITS GPU or FITS RAM; a GPU+CPU model
+counts as comfortable too when the RAM alone would hold it just as well. If there is none, the best GPU+CPU one; else the smallest
+that is not TOO BIG; nothing if everything is too big. Advice works with small models; questions (`nuc-console-ask "..."`) need
+the model to pick a query and follow a format, which models under about 3 billion parameters often do badly. If answers are empty
+or confused, take the next size up before changing anything else.
 
 ### The models
 
-Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation (Q4_K_M, GGUF) unless
-the model is published only in another one. **Sizes are approximate**; `nuc-console-ai models` shows the exact figure of
-your build.
+Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation (Q4_K_M, GGUF). Ordered best first,
+as in `nuc-console-ai models`. **Sizes are approximate** (they feed the advice); the download is checked against the exact pinned
+size. *Needs* is for 4096 tokens of context, the default of `serve`.
 
-| Model | Parameters | File (approx.) | Licence | Notes |
-|---|---|---|---|---|
-| Qwen3 0.6B | 0.6 B | 0.4 GB | Apache-2.0 | tiny: shows the setup works; thin advice |
-| Qwen3 1.7B | 1.7 B | 1.1 GB | Apache-2.0 | for a small or old PC |
-| Granite 3.3 2B | 2 B | 1.5 GB | Apache-2.0 | IBM; small, plain answers |
-| SmolLM3 3B | 3 B | 1.9 GB | Apache-2.0 | small, fast on a CPU |
-| Phi-4-mini 3.8B | 3.8 B | 2.5 GB | MIT | Microsoft; good for its size |
-| Qwen3 4B | 4 B | 2.5 GB | Apache-2.0 | the usual first choice on a PC with 8 GB or more |
-| Qwen3 8B | 8 B | 5 GB | Apache-2.0 | good advice and queries; wants 16 GB of RAM or a GPU of 8 GB |
-| Granite 3.3 8B | 8 B | 4.9 GB | Apache-2.0 | IBM |
-| Qwen3 14B | 14 B | 9 GB | Apache-2.0 | 16 GB of GPU memory, or 32 GB of RAM |
-| Phi-4 14B | 14 B | 9 GB | MIT | Microsoft |
-| gpt-oss-20b | 21 B (3.6 B active) | 12 GB | Apache-2.0 | mixture of experts; published as MXFP4, not Q4_K_M |
-| Qwen3 30B-A3B | 30 B (3 B active) | 18.6 GB | Apache-2.0 | mixture of experts: the whole file must fit in memory, but it runs at the speed of a 3 B model, which makes it good on a CPU with plenty of RAM |
+| Id | Model | Parameters | File (approx.) | Needs | Context | Licence | Notes |
+|---|---|---|---|---|---|---|---|
+| `qwen3-30b-a3b` | Qwen3 30B-A3B (MoE) | 30.5 B (3.3 B active) | 18.6 GB | 19.2 GB | 32k | Apache-2.0 | MoE: reads only 3.3B per token, fast on CPU if the RAM holds it |
+| `gpt-oss-20b` | OpenAI gpt-oss 20B (MoE) | 21 B (3.6 B active) | 11.6 GB | 12.0 GB | 128k | Apache-2.0 | MoE: reads only 3.6B per token; a reasoning model (long answers) |
+| `phi-4` | Phi-4 14B | 14.7 B | 9.1 GB | 9.8 GB | 16k | MIT | dense 14B: strong reasoning, slow without a GPU |
+| `qwen3-14b` | Qwen3 14B | 14.8 B | 9.0 GB | 9.7 GB | 32k | Apache-2.0 | dense 14B: slow without a GPU |
+| `qwen3-8b` | Qwen3 8B | 8.2 B | 5.0 GB | 5.7 GB | 32k | Apache-2.0 | a good balance on 16 GB |
+| `granite-3.3-8b` | IBM Granite 3.3 8B instruct | 8.2 B | 4.9 GB | 5.7 GB | 128k | Apache-2.0 | enterprise-tuned |
+| `qwen3-4b` | Qwen3 4B | 4 B | 2.5 GB | 3.3 GB | 32k | Apache-2.0 | the default: small and capable |
+| `phi-4-mini` | Phi-4-mini instruct 3.8B | 3.8 B | 2.5 GB | 3.2 GB | 128k | MIT | good at reasoning for its size |
+| `smollm3-3b` | SmolLM3 3B | 3.1 B | 1.9 GB | 2.7 GB | 64k | Apache-2.0 | 3B with a thinking mode |
+| `granite-3.3-2b` | IBM Granite 3.3 2B instruct | 2.5 B | 1.6 GB | 2.4 GB | 128k | Apache-2.0 | small and quick |
+| `qwen3-1.7b` | Qwen3 1.7B | 1.7 B | 1.1 GB | 1.8 GB | 32k | Apache-2.0 | for old or small machines |
+| `qwen3-0.6b` | Qwen3 0.6B | 0.6 B | 400 MB | 1.1 GB | 32k | Apache-2.0 | the smallest: simple summaries only |
 
-Qwen3 starts in a "thinking" mode that writes a long `<think>` block first; the advisor removes it from what it shows, and the
-model's notes on the details page say how to turn it off (`/no_think`). Which models the list holds, and in which
-order, is part of each release (a new model is a new entry with new pins); there is no automatic update.
+`serve` refuses a `--ctx` above the model's own context. The model `serve` starts when none is named is the `[ai] model` if it
+is installed, else `qwen3-4b` if that is installed, else the first installed one.
+
+Qwen3 and SmolLM3 start in a "thinking" mode that writes a long `<think>` block first; the advisor removes that block from what it
+shows, but the time it takes still counts against `[ai] timeout_s`. (The `/no_think` in some model notes is the models' own switch:
+the advisor does not send it.) Which models the list holds, and in which order, is part of each release (a new model is a new entry
+with new pins); there is no automatic update.
 
 ## GPU support
 
 The runtime is [llamafile](https://github.com/mozilla-ai/llamafile) (Mozilla, Apache-2.0): one program for the three
-systems that serves a GGUF model on an OpenAI-compatible API. `serve` gives it the number of layers to put on the GPU
-(`--gpu auto -ngl N`) when the verdict is FITS GPU or GPU+CPU, and `--gpu disable` otherwise. If the GPU cannot be set up,
-llamafile falls back to the CPU without failing: the model then runs at CPU speed, whatever the verdict said.
-Run `nuc-console-ai serve` in the foreground once and read its start-up lines to see which backend was loaded.
+systems that serves a GGUF model on an OpenAI-compatible API. `serve` tells it how many layers to put on the GPU
+(`--gpu auto -ngl N`) when the verdict is FITS GPU or GPU+CPU, and `--gpu disable` otherwise (no GPU, a SLOW or TOO BIG model,
+`[ai] gpu = no`). `N` is 999, llamafile's own spelling of "every layer", when the model fits entirely, and the number of layers
+that fit for GPU+CPU. The start line says which: `all 36 layers on the GPU`, `20 of 36 layers on the GPU` or `CPU only`, followed
+by the reason (the sentence of the verdict). `serve --gpu-layers N` sets it by hand (`0` = CPU only, `999` = all) and wins over
+the advice and over `[ai] gpu`.
+
+If the GPU cannot be set up, llamafile falls back to the CPU without failing: the model then runs at CPU speed, whatever the
+verdict said. Run `nuc-console-ai serve` in the foreground once and read its start-up lines to see which backend was loaded.
+llamafile's own documentation lists what each GPU needs; its 0.10 series has not been tested on every GPU and platform yet, so
+the AMD and Windows paths in particular are best effort.
 
 | GPU | Linux | Windows | macOS |
 |---|---|---|---|
-| **NVIDIA** (CUDA) | the NVIDIA driver (`nvidia-smi` must work: that is how memory is read); depending on the llamafile build, the CUDA toolkit (`nvcc`) to compile its CUDA module on first start | the driver; the llamafile release carries prebuilt CUDA support | not supported |
-| **AMD** (ROCm / Vulkan) | memory read from `/sys/class/drm`; Vulkan through the Mesa or AMD driver, or ROCm with the HIP SDK (experimental) | memory read from the display adapter's registry entry; Vulkan through the Adrenalin driver, ROCm with the HIP SDK | an AMD GPU in an Intel Mac: CPU only |
-| **Apple** (Metal) | n/a | n/a | Apple silicon: Metal, on by default. The first start compiles a small module and needs the **Xcode Command Line Tools** (`xcode-select --install`). The memory is unified: the GPU uses the RAM, up to about two thirds of it. Intel Macs: CPU only |
-| **Intel** (integrated) | shares the system RAM: shown on the screen, but not counted as a GPU in the verdict; Vulkan is possible but gains little | same | an Intel Mac: CPU only |
-
-`[ai] gpu = no` makes `serve` start the server CPU-only whatever the hardware says (a GPU you need for something
-else, a driver you do not trust, a monitoring box that must never start compiling GPU code). The default is `auto`.
-It changes how `serve` starts the server, not what the AI screen says about the hardware.
+| **NVIDIA** (CUDA) | the NVIDIA driver (`nvidia-smi` must work: that is how memory is read; without it the card is listed from `/sys` with its memory unknown and is not counted); llamafile may need the CUDA SDK (`nvcc`) to build its CUDA module on first start | the driver (memory from `nvidia-smi`, also found under `%ProgramFiles%\NVIDIA Corporation\NVSMI`; without it the adapter's registry entry gives the total only); llamafile's release carries prebuilt CUDA support | not supported |
+| **AMD** (ROCm / Vulkan) | memory read from `/sys/class/drm` (amdgpu) and counted as ROCm; a card with less than 2 GB is an APU's carve-out of the RAM: shared, not counted. llamafile uses ROCm with the HIP SDK (`hipcc`), or Vulkan | memory read from the display adapter's registry entry (counted as Vulkan; same 2 GB rule); Vulkan through the Adrenalin driver, ROCm with the HIP SDK | not supported |
+| **Apple** (Metal) | n/a | n/a | Apple silicon: Metal, on by default. The first start compiles a small module and needs the **Xcode Command Line Tools** (`xcode-select --install`). The memory is unified: the GPU uses the RAM, up to about two thirds of it. Intel Macs: `system_profiler` gives a dedicated GPU's memory, but llamafile uses the GPU on Apple silicon only: expect the CPU |
+| **Intel** | Arc cards (own memory, `lmem_total_bytes` in `/sys`) are counted, as Vulkan. An integrated GPU shares the RAM: shown on the screen, never counted | Arc A/B cards are counted (Vulkan); an integrated GPU is shown, never counted | an Intel Mac: CPU |
 
 A GPU the program cannot read is listed in the notes ("nvidia-smi not found", ...), never guessed. Over RDP, in a VM
 or in a container the GPU is often not visible at all.
+
+`[ai] gpu = no` makes `serve` start the server CPU-only whatever the hardware says (a GPU you need for something
+else, a driver you do not trust, a monitoring box that must never start compiling GPU code); it then does not even read the
+hardware. The default is `auto`. It changes how `serve` starts the server, not what the AI screen says about the hardware.
+
+**An installed service keeps what it was installed with.** The service account reads none of our configuration and does not look at
+the hardware: `serve --install-service` decides the model, the port, the threads, the context and the GPU layers once, and writes them into
+the service (`serve --dir ... --model ... --gpu-layers N`). A later `nuc-console-ai use MODEL`, a change of `[ai] model` or of
+`[ai] gpu`, a new GPU or a new driver reaches it **only** when you run `sudo nuc-console-ai serve --install-service` again, which writes
+the service again and restarts it (Windows: an administrator prompt, no `sudo`). `use` prints that command.
+
+On Linux the systemd unit of a server that uses the GPU differs from the CPU one in two lines, because its sandbox otherwise hides
+the GPU: `PrivateDevices=no` (the device nodes `/dev/nvidia*`, `/dev/dri`, `/dev/kfd` must exist for it) and `SupplementaryGroups=`
+the `render` and `video` groups that the machine has (they own those nodes). The rest of the sandbox stays. A CPU-only unit has
+`PrivateDevices=yes` and no extra groups. The launchd daemon and the scheduled task are the same with or without a GPU, apart from
+the `--gpu-layers` value in their command.
 
 ## Using a server you already have
 
@@ -134,32 +198,38 @@ endpoint = http://127.0.0.1:11434/v1     # Ollama's default; LM Studio: http://1
 model = qwen3:8b                         # the name that server lists under /v1/models
 ```
 
-`nuc-console-ask --status` says whether it answers and lists its models. The AI screen still tells you what this
+`nuc-console-ask status` says whether it answers and lists its models. The AI screen still tells you what this
 hardware can run, so it helps to choose what to `ollama pull`. The endpoint has to be on this machine: see
 [Security](#security).
 
 ## The commands
 
-`nuc-console-ai` is the administrator's command: it lives in `/usr/local/sbin`, which a normal user's PATH usually lacks, so
-run `sudo nuc-console-ai ...` (`models` and `status` only read; without root, `setup` and `serve` use your home folder).
+`nuc-console-ai` is the administrator's command: it lives in `/usr/local/sbin`, which a normal user's PATH may lack. `sudo`
+finds it; without `sudo`, `models` and `status` only read and work for anyone (type `/usr/local/sbin/nuc-console-ai models` if the
+shell does not find it): they look in the system-wide folder when `sudo setup` put models there, else in your own. The commands
+that write (`setup`, `use`, `serve --install-service`, `remove`) need `sudo`; without it `setup` and `serve` use your home folder.
 `nuc-console-ask` only reads and needs no root. Both are on the PATH after the install. Windows: the same names, from an
-administrator prompt for the first.
+administrator prompt for the first when it writes. Every `nuc-console-ai` command but `pins` accepts `--dir DIR` (the cache folder)
+and `--config FILE` (the `config.ini`); the command ignores `NUC_CONSOLE_HOME` and `NUC_CONSOLE_CONFIG`, so that an environment
+variable cannot redirect a write done as root.
 
 | Command | Does |
 |---|---|
-| `nuc-console-ai models` | the hardware summary and the table of models with a verdict, the estimated speed, whether each is installed and which one is active |
-| `nuc-console-ai setup [MODEL ...]` | downloads the runtime and the models you name (none: the recommended one), once; a file that is already there with the right hash is not downloaded again. Asks before downloading; offers to write `[ai] endpoint` and `model` in `config.ini`. `--yes`, `--force` (a TOO BIG model), `--no-config`, `--port N`, `--dir DIR` |
-| `nuc-console-ai use MODEL` | makes it the model the advisor asks (`[ai] model`); tells you how to restart the service so that it serves that one |
-| `nuc-console-ai serve` | runs the server in the foreground on 127.0.0.1 at low priority; Ctrl+C stops it. `--port N`, `--threads N` (default: cores minus two), `--ctx N` (default 4096), `--dry-run` (print the command) |
-| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account. `--remove-service` removes it |
-| `nuc-console-ai status` | what is installed and verified, whether the endpoint answers. Exit status: 0 it answers, 3 installed but not answering, 1 nothing installed. `--verify` hashes the files again |
-| `nuc-console-ai remove [MODEL]` | deletes the downloaded files of that model (none named: every model and the runtime), after asking. `config.ini` is not changed |
-| `nuc-console-ask "question"` | an answer from the history, through read-only queries |
-| `nuc-console-ask --advise [--days N]` | advice on the HEALTH findings of the last N days (1-30, default 7) |
-| `nuc-console-ask --status` | is the server reachable, which models it lists, which one is configured |
+| `nuc-console-ai models` | the hardware summary and the table of models with a verdict, the estimated speed, whether each is installed and which one is active. Only reads, no root |
+| `nuc-console-ai setup [MODEL ...]` | downloads the runtime and the models you name (none: the recommended one), once; a file that is already there with the right hash is not downloaded again, a partial one is resumed. Asks before downloading (`--yes` agrees); a SLOW model is installed with a warning, a TOO BIG one is refused unless `--force`. Then offers to write `[ai] endpoint = http://127.0.0.1:PORT/v1` and `model` (the first one named) in `config.ini`: `--yes` does that only for a first setup and never replaces an endpoint or model you set, and `[ai] enabled` is never switched on for you. Also `--no-config`, `--port N` (the port for that endpoint, default 8080) |
+| `nuc-console-ai use MODEL` | makes an installed, verified model the one the advisor asks (`[ai] model`, nothing else in `config.ini` changes); refuses a TOO BIG one unless `--force`, warns about SLOW; tells you how to restart the server so that it serves that one (`serve --install-service` again) |
+| `nuc-console-ai serve` | runs the server in the foreground on 127.0.0.1 at low priority; Ctrl+C stops it. `--model ID`, `--port N` (8080), `--threads N` (default: cores minus two, at least 1), `--ctx N` (default 4096, at most the model's context), `--gpu-layers N` (0 = CPU only, 999 = all; default: decided from the hardware and `[ai] gpu`), `--dry-run` (print the command), `--log FILE` (for the Windows task) |
+| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account, with the values of that moment written into it. Run it again after `use` or a change of `[ai] gpu`. `--remove-service` removes it |
+| `nuc-console-ai status` | what is installed and verified, whether the endpoint answers. Exit status: 0 it answers and lists the configured model; 3 it answers without that model, or does not answer (or is not on this machine and `allow_remote = no`) while a model is installed: run `serve`; 1 it does not answer and nothing is installed: run `setup`. `--verify` hashes the files again, `--endpoint URL` probes another server. Only reads, no root |
+| `nuc-console-ai remove [MODEL]` | deletes the downloaded files of that model (none named: every model and the runtime), after asking (`--yes`). `config.ini` is not changed |
+| `nuc-console-ai pins` | for maintainers: prints the values to paste in `RUNTIME` and `MODELS` (needs the network) |
+| `nuc-console-ask QUESTION...` | an answer from the history, through read-only queries (also `ask QUESTION...`) |
+| `nuc-console-ask advise [--days N]` | advice on the HEALTH findings of the last N days (1-30, default 7) (also `--advise`) |
+| `nuc-console-ask status` | is the server reachable, which models it lists, which one is configured (also `--status`) |
 
-`nuc-console-ask` exit codes: 0 ok, 1 the server or model failed, 2 usage, 3 `[ai]` off or the endpoint refused, 4 no history
-yet, 5 busy or rate limited. Questions need the history that the collector writes with `[features] health = yes`.
+`nuc-console-ask` exit codes: 0 ok, 1 the server or model failed (for `status`: unreachable, or the configured model is not on
+the server), 2 usage, 3 `[ai]` off or the endpoint refused, 4 no history yet, 5 busy or rate limited. Questions need the history
+that the collector writes with `[features] health = yes`.
 
 ## Security
 
@@ -184,26 +254,34 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
 - **Rate limits.** One generation at a time, at most one waiting, ten seconds between two. A page never starts one: the
   web and console views use a stored answer.
 - **The server is not privileged.** It runs as its own account (Linux `nuc-console-ai`, macOS `_nuc-console-ai`, Windows
-  LOCAL SERVICE) at low priority; the systemd unit adds a sandbox and a memory cap. Nothing of this runs in the root
-  collector. llamafile also confines itself with a system-call sandbox on CPU runs; with a GPU backend loaded that is not
-  possible (the drivers need device access), so a GPU server relies on the account and the unit alone.
+  LOCAL SERVICE) at low priority; the systemd unit adds a sandbox (no new privileges, read-only system, no home, private
+  `/tmp`, kernel and control groups protected, no capabilities, only IP and Unix sockets) and a memory cap of 1.5 times the model's
+  expected memory. With a GPU the unit has to let the service see the device nodes (`PrivateDevices=no`, the `render` and `video`
+  groups: see [GPU support](#gpu-support)). Nothing of this runs in the root collector. llamafile also confines itself with a
+  system-call sandbox on CPU runs; with a GPU backend loaded that is not possible (the drivers need device access), so a GPU
+  server relies on the account and the unit alone: `[ai] gpu = no` keeps it on the CPU.
 - **Downloads are pinned.** HTTPS only (a redirect to `http://` is refused), size and SHA-256 written in the code, a model
   from a Hugging Face *commit* and never from a branch, written to `<name>.part` and renamed only after the check; a mismatch
-  deletes the file. No automatic update: a new runtime or model is a new pin in a new release. `setup` is the only code in
-  the project that connects outward (huggingface.co and github.com), and only when you run it.
+  deletes the file. No automatic update: a new runtime or model is a new pin in a new release. `setup` (and `pins`, for
+  maintainers) is the only code in the project that connects outward (huggingface.co and github.com), and only when you run it.
 
 ## Files and disk
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Runtime and models | `/var/lib/nuc-console/ai` (run as root); `~/.local/share/nuc-console/ai` otherwise | `/Library/Application Support/nuc-console/ai` (root); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` |
+| Runtime and models | `/var/lib/nuc-console/ai` (run as root); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (root); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` |
 | Service | unit `nuc-console-ai.service`, user `nuc-console-ai`, state `/var/lib/nuc-console-ai`; log: `journalctl -u nuc-console-ai` | `/Library/LaunchDaemons/com.nuc-console.ai.plist`, user `_nuc-console-ai`; log `/var/log/nuc-console/ai.log` | scheduled task `\nuc-console\ai` (LOCAL SERVICE); log `%ProgramData%\nuc-console\logs\ai.log` |
-| Advice cache | `~/.cache/nuc-console` of whoever runs the screen | `~/Library/Caches/nuc-console` | `%LOCALAPPDATA%\nuc-console` |
+| Advice cache | `advisor-cache.json` in `~/.cache/nuc-console` (`$XDG_CACHE_HOME`) of whoever asked | `~/Library/Caches/nuc-console` | `%LOCALAPPDATA%\nuc-console` |
 
-`NUC_CONSOLE_HOME=<dir>` (and `--dir`) moves the first row to `<dir>/ai`. Inside it: `runtime/` (llamafile, tens to a few
-hundred MB depending on the version), `models/` (the sizes of the table), `verified.json` (what was checked, so that `status`
-does not hash 2 GB each time). `setup` needs the missing files plus 300 MB free and stops, naming the folder, if there is not
-enough. At its first start llamafile unpacks a small loader into the service account's home.
+The screens and `models` and `status` read the system-wide folder when it holds `verified.json` (what `sudo setup` leaves there),
+else your own. `NUC_CONSOLE_HOME=<dir>` moves the first row to `<dir>/ai` (and the advice cache to `<dir>`) for the screens and for
+`python3 aisetup.py`; the `nuc-console-ai` command ignores it, use `--dir DIR` there (the folder itself, not `DIR/ai`). Inside it:
+`runtime/` (llamafile, tens to a few hundred MB depending on the version), `models/` (the sizes of the table), `verified.json` (what
+was checked, so that `status` does not hash 2 GB each time). `setup` needs the missing files plus 300 MB free and stops, naming the
+folder, if there is not enough. At its first start llamafile unpacks a small loader into the service account's home.
+
+The advice cache keeps up to 20 answers for 7 days; it belongs to the account that asked, which is why a screen run by another
+account does not see an answer you asked for (see [HEALTH.md](HEALTH.md#advice-optional)).
 
 The installers add the two commands and remove them on uninstall, together with the service. They **keep** the runtime and
 the models (and the `nuc-console-ai` account and its state), because downloading them again is the expensive part: to give
@@ -214,8 +292,9 @@ the disk back, run `sudo nuc-console-ai remove` before uninstalling, or delete t
 `setup` downloads only what the code pins: for the runtime a SHA-256 and a size, for each model a Hugging Face commit
 (40 hex), a SHA-256 and a size. They are written in `src/aisetup.py` (`RUNTIME` and `MODELS`); they are never read from
 the network at run time and never filled in from memory. A value that is still empty means "not pinned": `setup` says
-which and downloads nothing. The AI screen and `models` keep working, because the verdicts use the approximate sizes, not
-the pins; the details of such a model say "not pinned yet".
+which and downloads nothing. In this release the twelve models are pinned; the runtime's SHA-256 and size are the part still
+to be confirmed, so `setup` stops and names `runtime` until they are. The AI screen and `models` keep working either way, because
+the verdicts use the approximate sizes, not the pins; the details of a model that is not pinned say "not pinned yet".
 
 A maintainer pins a release with `python3 src/aisetup.py pins` (it asks the Hugging Face and GitHub APIs, so it needs the
 network); the steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#pinning-the-ai-manifest). A model counts as installed
@@ -227,8 +306,11 @@ when its file has the pinned size and hash.
 |---|---|
 | The screen says nothing about the GPU | the notes under HARDWARE say what could not be read (`nvidia-smi` missing, no permission on `/sys`, a VM) |
 | `setup`: "not pinned" | the build you run does not pin that file yet: [The pins](#the-pins) |
-| `nuc-console-ask`: exit 3 | `[ai] enabled = yes`? the endpoint on this machine? `nuc-console-ask --status` |
+| `nuc-console-ai status` says nothing is installed after `sudo setup` | it looks in the system-wide folder when that holds `verified.json`; with `--dir` it looks only there. `status` shows the folder it used |
+| `nuc-console-ask`: exit 3 | `[ai] enabled = yes`? the endpoint on this machine? `nuc-console-ask status` |
 | `nuc-console-ask`: exit 4 | no history yet: `[features] health = yes`, a few minutes of the collector |
 | The first answer takes a minute | the model is loaded into memory on its first request; later ones are faster |
 | Answers are slow, the GPU is idle | the GPU backend did not load and llamafile fell back to the CPU: run `nuc-console-ai serve` in the foreground, read the start-up lines; [GPU support](#gpu-support) |
+| A new `[ai] model`, or `[ai] gpu`, changed nothing in the running server | an installed service keeps what it was installed with: `sudo nuc-console-ai serve --install-service` again |
+| HEALTH shows "no advice yet" | the screens only show an answer that is already in their own account's cache: [HEALTH.md](HEALTH.md#advice-optional) |
 | macOS: the server does not start the first time | `xcode-select --install` (Apple silicon needs the Command Line Tools once) |

@@ -47,11 +47,12 @@ Design rules you can audit in the code:
   validated against whitelists and ranges, bound parameters, a read-only connection, three at most. It has no tool that runs a command,
   writes a file or changes a setting. Nothing of it runs in the root collector, and a page never starts a generation. Details and the
   model list: [docs/AI.md](docs/AI.md).
-- **One downloaded program, pinned.** `nuc-console-ai setup`, when you run it, downloads the llamafile runtime and a model file
+- **One downloaded program, pinned.** `nuc-console-ai setup`, when you run it, downloads the llamafile runtime and the model files you name
   from GitHub and Hugging Face: HTTPS only (a redirect to `http://` is refused), a size and a SHA-256 written in the code (a model
   from a commit, not a branch), a temporary name until the check passes, no automatic update, permissive licences only. It refuses to
-  download anything that is not pinned yet. The server runs as its own unprivileged account at low priority (systemd unit with a
-  sandbox and a memory cap on Linux).
+  download anything that is not pinned yet (the models are pinned; the runtime's SHA-256 is still to be confirmed, and `setup` stops until it
+  is). The server runs as its own unprivileged account at low priority (Linux: a systemd unit with a sandbox and a memory cap; macOS: a
+  hidden `_nuc-console-ai` account under launchd; Windows: LOCAL SERVICE).
 - **Process names, never command lines.** The CPU screen lists processes by name (and PID, user, CPU, memory): their arguments can hold passwords or tokens, so they are never read or shown. On Windows the collector reads CPU sensors through WMI (LibreHardwareMonitor / OpenHardwareMonitor namespaces, ACPI thermal zones) with a fixed PowerShell script.
 - **Untrusted text is sanitised.** Container names, process names, journal lines etc. can contain terminal escape sequences; everything shown passes through `safe()` which strips control characters.
 - **Secrets are never stored or displayed.** To find which containers use a database, the collector checks whether container environment variable *names/values reference the DB's hostname*; it keeps only the match result, never the values (`env_uses`). Tests assert this.
@@ -66,7 +67,9 @@ Things to be aware of (by design):
 - **The monitor itself shows your topology** to anyone who can see the screen.
 - A local model's advice can be wrong, or steered by a name or a log message that someone else controls (an app, a container, a
   service): it is a hint to check, not an instruction, and it is marked as such. With a GPU backend loaded, llamafile's own
-  system-call sandbox cannot be used (the GPU drivers need device access); `[ai] gpu = no` keeps the server on the CPU.
+  system-call sandbox cannot be used (the GPU drivers need device access), and on Linux the systemd unit has to let the service see the
+  GPU (`PrivateDevices=no`, the `render` and `video` groups); the rest of the unit's sandbox stays. `[ai] gpu = no` keeps the server on the
+  CPU, with `PrivateDevices=yes`.
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
 

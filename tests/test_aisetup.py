@@ -2173,5 +2173,87 @@ class MainTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class DocsTests(unittest.TestCase):
+    """docs/AI.md says what the code does: the table of models, the numbers of the verdicts and the speeds, the options of every command,
+    and config.ini, are checked against the code, so that a change on one side without the other fails here."""
+
+    @classmethod
+    def setUpClass(cls):
+        def read(*parts):
+            with open(os.path.join(ROOT, *parts), encoding="utf-8") as f:
+                return f.read()
+        cls.text, cls.config = read("docs", "AI.md"), read("config", "config.ini")
+        cls.configuration = read("docs", "CONFIGURATION.md")
+
+    def test_the_table_of_models_is_the_catalog(self):
+        import aihw
+        rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in self.text.splitlines() if re.match(r"\| `[a-z0-9.-]+` \|", ln)]
+        self.assertEqual([r[0].strip("`") for r in rows], [m["id"] for m in aisetup.MODELS], "the same models, in the same order (best first)")
+        for r, m in zip(rows, aisetup.MODELS):
+            with self.subTest(m["id"]):
+                params = "%g B" % m["params_b"] + (" (%g B active)" % m["active_b"] if m.get("active_b") else "")
+                self.assertEqual(r[1:7], [m["name"], params, aisetup.fmt_mb(m["approx_mb"]), aisetup.fmt_mem(aihw.need_mb(m)),
+                                          "%dk" % (m["ctx_max"] // 1024), m["license"]])
+
+    def test_the_numbers_of_the_verdicts_and_the_speeds_are_the_codes(self):
+        import aihw
+        rng = lambda t: "%g-%g" % tuple(t)  # noqa: E731
+        want = ["`GPU_FIT` %.2f" % aihw.GPU_FIT, "`RAM_COMFY_FRAC` %.2f" % aihw.RAM_COMFY_FRAC, "`RAM_MAX_FRAC` %.2f" % aihw.RAM_MAX_FRAC,
+                "`RAM_RESERVE_MB` %d" % aihw.RAM_RESERVE_MB, "%d %% of the RAM (`UNIFIED_MAX_FRAC`)" % round(aihw.UNIFIED_MAX_FRAC * 100),
+                "less %d MB for the display" % aihw.GPU_DISPLAY_RESERVE_MB, "about %d MB of runtime" % aihw.OVERHEAD_MB,
+                "16 MB per layer",
+                "the CPU %s" % rng(aihw.CPU_BW), "NVIDIA %s, AMD %s, Intel %s, others %s" % tuple(rng(aihw.GPU_BW[k]) for k in ("nvidia", "amd", "intel", "other")),
+                "%s for any card with %d GB or more" % (rng(aihw.HIGH_END_BW), aihw.HIGH_END_VRAM_MB // 1000),
+                "%s (base), %s (Pro), %s (Max) and %s (Ultra)" % tuple(rng(aihw.APPLE_BW[k]) for k in ("base", "pro", "max", "ultra")),
+                "%d %% of that for its CPU cores" % round(aihw.APPLE_CPU_FACTOR * 100),
+                "cut to %d %% of its low end and %d %% of its high end" % tuple(round(x * 100) for x in aihw.SLOW_FACTOR),
+                "less than 2 GB"]
+        for w in want:
+            with self.subTest(w):
+                self.assertIn(w, self.text)
+        self.assertEqual(aihw.PARTIAL_MIN_FRAC, 0.10, "the text says a tenth of the layers")
+        self.assertEqual(aihw.APU_VRAM_MAX_MB, 2048, "the text says 2 GB")
+        self.assertEqual(aihw.KV_BYTES_PER_LAYER_TOKEN * aihw.DEFAULT_CTX // 2 ** 20, 16, "the text says 16 MB per layer")
+        self.assertEqual((aisetup.DEFAULT_PORT, aisetup.DEFAULT_CTX, aisetup.ALL_LAYERS), (8080, 4096, 999))
+
+    def test_every_option_of_every_command_is_documented(self):
+        subs = next(a for a in aisetup.build_parser()._actions if isinstance(a, argparse._SubParsersAction)).choices
+        for name, sub in subs.items():
+            self.assertIn("`nuc-console-ai %s" % name, self.text, name)
+            for act in sub._actions:
+                for opt in act.option_strings:
+                    if opt in ("-h", "--help", "-y") or act.help == argparse.SUPPRESS:
+                        continue
+                    with self.subTest(command=name, option=opt):
+                        self.assertIn(opt, self.text)
+
+    def test_the_defaults_in_the_text_are_the_codes(self):
+        p = aisetup.build_parser()
+        self.assertEqual(p.parse_args(["serve"]).port, 8080)
+        self.assertEqual(p.parse_args(["setup"]).port, 8080)
+        self.assertEqual(p.parse_args(["serve"]).ctx, 4096)
+        self.assertIn("`--ctx N` (default 4096", self.text)
+        self.assertIn("`--port N` (8080)", self.text)
+        self.assertEqual(aisetup.DEFAULT_MODEL, "qwen3-4b")
+        self.assertIn("else `qwen3-4b` if that is installed", self.text)
+
+    def test_config_ini_is_strict_and_documents_only_real_keys(self):
+        import configparser
+        cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))  # strict: a key twice is an error
+        cp.read_string(self.config)
+        self.assertIn("ai", cp["features"], "[features] ai, once")
+        self.assertEqual(len(re.findall(r"^ai\s*=", self.config, re.M)), 1)
+        known = nuc_config.load("/nonexistent")["ai"]
+        for key in cp["ai"]:
+            self.assertIn(key, known, "config.ini documents a key the code does not read")
+        documented = re.findall(r"^\| `([a-z_]+)` \|", self.configuration[self.configuration.index("## `[ai]`"):self.configuration.index("## Commands")], re.M)
+        self.assertEqual(sorted(documented), sorted(cp["ai"]), "the same [ai] keys in CONFIGURATION.md and in config.ini")
+        for key in documented:
+            self.assertIn(key, known)
+        self.assertEqual(cp["ai"]["gpu"], known["gpu"])
+        self.assertEqual(int(cp["ai"]["timeout_s"]), known["timeout_s"])
+        self.assertEqual(cp["ai"]["endpoint"], aisetup.SHIPPED_ENDPOINT)
+
+
 if __name__ == "__main__":
     unittest.main()

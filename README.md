@@ -35,7 +35,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧮 **CPU, like htop** | a screen of its own (console `c`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
 | 🌡️ **Health now** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
 | 🩺 **HEALTH over time** | a small local history (SQLite) and a screen of its own (console `h`, web **health** link): over the last day, week or month, which apps use the CPU and memory, which crash, hang or get killed, which services and containers keep restarting, hot hours, disks filling up ("full in 12 days"), noisy or new log messages, each with how to fix it. Rules over numbers; names and counts only, never command lines or log lines as they are ([docs/HEALTH.md](docs/HEALTH.md)) |
-| 🤖 **AI advisor** *(optional, off by default)* | an **AI** screen (console `a`, web **ai** link) reads this machine's RAM, GPU and GPU memory and tells, model by model, whether it *fits entirely on the GPU*, runs on *GPU+CPU* or *in RAM*, *fits but slows the PC*, or is *too big*, with a rough speed. `nuc-console-ai` installs a small open model (hash-pinned) and serves it on 127.0.0.1; it turns the HEALTH findings into plain advice and answers questions from the history (`nuc-console-ask`). It analyses, **never acts**; Linux, macOS, Windows ([docs/AI.md](docs/AI.md)) |
+| 🤖 **AI advisor** *(optional, off by default)* | an **AI** screen (console `a`, web **ai** link) reads this machine's RAM, GPU and GPU memory and tells, model by model, whether it *fits entirely on the GPU*, runs on *GPU+CPU* or *in RAM*, *fits but slows the PC*, or is *too big*, with a rough speed. `nuc-console-ai` installs the open model you choose (hash-pinned; 12 sizes, 0.4 to 19 GB) and serves it on 127.0.0.1, on the GPU when it fits there; it turns the HEALTH findings into plain advice and answers questions from the history (`nuc-console-ask`). It analyses, **never acts**; Linux, macOS, Windows ([docs/AI.md](docs/AI.md)) |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
@@ -153,7 +153,7 @@ ethibid = 8180, 8543
 enabled = no
 endpoint = http://127.0.0.1:11434/v1   # any OpenAI-compatible server on this machine: Ollama, LM Studio, llama.cpp, llamafile
 model =
-gpu = auto            # auto | no: with no, `nuc-console-ai serve` never puts the model on the GPU
+gpu = auto            # auto | no: with no, `nuc-console-ai serve` never puts the model on the GPU (an installed service: `serve --install-service` again)
 
 [web]                 # optional read-only web view, see docs/WEB.md
 enabled = no
@@ -184,16 +184,17 @@ short list: *fits entirely on the GPU*, *GPU+CPU*, *fits in RAM*, *fits but will
 speed. It only reads; the commands to install one are shown, and you run them:
 
 ```bash
-sudo nuc-console-ai models                    # the same table in a terminal (Windows: an administrator prompt, no sudo)
-sudo nuc-console-ai setup                     # downloads the recommended runtime and model once, SHA-256 checked
-sudo nuc-console-ai serve --install-service   # serves it on 127.0.0.1 only; then set [ai] enabled = yes
-nuc-console-ask --advise                      # advice on the HEALTH findings; nuc-console-ask "why is the disk filling up?"
+nuc-console-ai models                         # the same table in a terminal; no root (/usr/local/sbin/nuc-console-ai if your PATH lacks sbin)
+sudo nuc-console-ai setup                     # downloads the recommended runtime and model once, SHA-256 checked (Windows: an administrator prompt, no sudo)
+sudo nuc-console-ai serve --install-service   # serves it on 127.0.0.1 only, on the GPU when the model fits there; then set [ai] enabled = yes
+nuc-console-ask advise                        # advice on the HEALTH findings; nuc-console-ask "why is the disk filling up?"
 ```
 
 Already running Ollama, LM Studio or a llama.cpp server? Set `[ai] endpoint` and `model` instead. The model **suggests and never acts**: no
 command is run, the history is read through six fixed read-only queries, names from the machine reach it only as data, the endpoint must be
 on this machine, and every answer is marked "AI, check before acting". It is one more thing to download and keep (a model is 0.4 to 19 GB):
-nothing is fetched until you run `setup`. Choosing, GPU support per system, the commands, files and the security rules: **[docs/AI.md](docs/AI.md)**.
+nothing is fetched until you run `setup`, which downloads only what this release pins (the models are pinned; the runtime's SHA-256 is still to be
+confirmed, and `setup` stops until it is). Choosing, GPU support per system, the commands, files and the security rules: **[docs/AI.md](docs/AI.md)**.
 
 ## How it works
 
@@ -231,7 +232,7 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 - macOS/Windows: the CPU temperature is best effort (macOS: `powermetrics` on Intel Macs; on Apple Silicon only with `smctemp` or `osx-cpu-temp` installed. Windows: LibreHardwareMonitor or OpenHardwareMonitor if running, else the ACPI thermal zones, often absent) and `?` when there is none; no throttling counters, fail2ban or "who connects" inside containers (Docker Desktop runs them in a VM); Windows Firewall rules from Group Policy, port keywords (RPC…) and macOS `pf` rules show as unknown `?`. Details: [docs/INSTALL.md](docs/INSTALL.md#macos).
 - Non-systemd Linux (OpenRC, runit…) and the BSDs are not supported.
 - Docker-published ports are assumed TCP; `tailscaled` ephemeral ports (≥32768 except 41641) are ignored; one NVMe sensor is read.
-- The AI screen reads GPU memory with `nvidia-smi` (NVIDIA), `/sys/class/drm` (AMD, Linux), `system_profiler` (Intel Macs) and the display adapters' registry entries (Windows); what it cannot read is listed in its notes, not guessed. Speeds are rough estimates. Integrated Intel GPUs share the RAM and count as no GPU.
+- The AI screen reads GPU memory with `nvidia-smi` (NVIDIA), `/sys/class/drm` (AMD and Intel Arc, Linux), `system_profiler` (Intel Macs) and the display adapters' registry entries (Windows); what it cannot read is listed in its notes, not guessed. Speeds are rough estimates. Integrated Intel GPUs and AMD APUs share the RAM and count as no GPU.
 - HEALTH needs a day of history before it draws trends (memory growth, disk forecast); crashes and OOM kills show from the first one. On macOS it reads crash reports, not the unified log.
 - Connections shorter than the 30 s sampling window are not seen by the database "who connects" view nor by the MAP (which remembers what it saw for 24 h).
 - MAP on macOS/Windows: the containers' own connections are inside Docker Desktop's VM, so container-to-container links are *declared* or *same network* only.
