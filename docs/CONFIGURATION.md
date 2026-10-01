@@ -85,6 +85,17 @@ admin-console = 9443
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
+## `[ai]` — optional local model for the HEALTH screen (off by default)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `no` | Use a local model to turn the HEALTH findings into advice and to answer questions. It only reads and suggests: it never runs anything |
+| `endpoint` | `http://127.0.0.1:11434/v1` | Any OpenAI-compatible server: Ollama (this default), llama.cpp server, LM Studio, llamafile (`nuc-console-ai setup` installs one) |
+| `model` | empty | The model name the server knows (e.g. the one `nuc-console-ai setup` downloaded) |
+| `allow_remote` | `no` | An endpoint that is not on this machine is refused unless `yes`: it would receive this machine's history |
+| `timeout_s` | `120` | Seconds a generation may take (10–600) |
+| `daily` | `no` | `yes`: one digest a day, generated at low priority |
+
 ## Commands
 
 Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept`; they are on the system PATH after the install.

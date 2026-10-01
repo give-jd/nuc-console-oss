@@ -35,7 +35,9 @@ def load(path=None):
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 2, "allowed_hosts": []},
-           "display": {"browser": "auto", "mode": "browser", "zoom": 100}}
+           "display": {"browser": "auto", "mode": "browser", "zoom": 100},
+           "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
+                  "daily": False}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -127,6 +129,19 @@ def load(path=None):
             cfg["display"]["zoom"] = max(50, min(200, cp.getint("display", "zoom", fallback=100)))
         except ValueError:
             print(f"nuc-console: {path}: [display] zoom must be an integer (percent)", file=sys.stderr)
+    if cp.has_section("ai"):  # the optional local model of the HEALTH screen (docs/HEALTH.md): off unless asked for
+        ai = cfg["ai"]
+        for key in ("enabled", "allow_remote", "daily"):
+            try:
+                ai[key] = cp.getboolean("ai", key, fallback=ai[key])
+            except ValueError:
+                print(f"nuc-console: {path}: [ai] {key} is not a boolean: kept {'on' if ai[key] else 'off'}", file=sys.stderr)
+        ai["endpoint"] = cp.get("ai", "endpoint", fallback=ai["endpoint"]).strip() or ai["endpoint"]
+        ai["model"] = cp.get("ai", "model", fallback="").strip()
+        try:
+            ai["timeout_s"] = max(10, min(600, cp.getint("ai", "timeout_s", fallback=ai["timeout_s"])))
+        except ValueError:
+            print(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)", file=sys.stderr)
     return cfg
 
 
