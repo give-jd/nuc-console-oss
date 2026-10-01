@@ -612,5 +612,81 @@ class GitCheckout(TempDirCase):
             self.assertNotIn("LICENSE", [p for p, _ in br.source_files(root)])
 
 
+class Workflow(unittest.TestCase):
+    """.github/workflows/release.yml, read as text (no YAML parser in the standard library): what must hold whatever else changes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = read(os.path.join(ROOT, ".github", "workflows", "release.yml")).decode("utf-8").replace("\r\n", "\n")  # a Windows checkout
+        cls.jobs = {}
+        name = None
+        for line in cls.text.split("\n"):
+            if line.startswith("jobs:"):
+                name = ""
+            elif name is not None and re.match(r"  [a-z][\w-]*:\s*$", line):
+                name = line.strip()[:-1]
+                cls.jobs[name] = []
+            elif name and line.startswith("   "):
+                cls.jobs[name].append(line)
+        cls.jobs = {k: "\n".join(v) for k, v in cls.jobs.items()}
+
+    def test_every_action_is_pinned_by_commit_sha_and_says_which_release(self):
+        uses = re.findall(r"^\s*(?:- )?uses:\s*(\S+)(.*)$", self.text, re.M)
+        self.assertGreaterEqual(len(uses), 5)
+        for ref, rest in uses:
+            self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$", ref)
+            self.assertRegex(rest, r"#\s*v\d+\.\d+\.\d+", ref)
+
+    def test_the_tag_must_be_the_version_of_the_code(self):
+        build = self.jobs["build"]
+        self.assertIn("nuc_config.VERSION", build)
+        self.assertIn('"${TAG#v}" != "$version"', build)
+        self.assertRegex(build, r"\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$")  # only vX.Y.Z
+        self.assertLess(build.index("nuc_config.VERSION"), build.index("unittest"))  # before the tests and the build
+
+    def test_only_the_publishing_job_can_write(self):
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
+        self.assertEqual(sorted(self.jobs), ["build", "release"])
+        build, release = self.jobs["build"], self.jobs["release"]
+        self.assertRegex(build, r"permissions:\n      contents: read\n")
+        for word in ("write", "id-token", "attestations"):
+            self.assertNotIn(word, build)
+        self.assertRegex(release, r"contents: write\b")
+        self.assertRegex(release, r"id-token: write\b")
+        self.assertRegex(release, r"attestations: write\b")
+        self.assertEqual(len(re.findall(r"^\s+\w[\w-]*: write\b", self.text, re.M)), 3)  # and nothing else is granted
+        # the job that can write runs nothing of this repository: no checkout, no tests, no script of tools/
+        for word in ("actions/checkout", "unittest", "tools/", "python", "setup-python"):
+            self.assertNotIn(word, release)
+        self.assertIn("needs: build", release)
+        self.assertIn("github.event_name == 'push'", release)  # a dry run publishes nothing
+
+    def test_what_is_published_is_what_was_built_and_attested(self):
+        release = self.jobs["release"]
+        self.assertIn("sha256sum --check SHA256SUMS", release)
+        self.assertIn("actions/attest-build-provenance@", release)
+        for pattern in ("dist/*.tar.gz", "dist/*.zip", "dist/SHA256SUMS"):
+            self.assertIn(pattern, release)  # every archive, and the sums
+        self.assertIn("gh release create", release)
+        self.assertIn("--verify-tag", release)
+        self.assertLess(release.index("attest-build-provenance"), release.index("gh release create"))
+        self.assertIn("--python-zips", self.jobs["build"])  # the Windows archives carry their Python
+        self.assertIn("cmp ", self.jobs["build"])  # and the build is made twice and compared
+
+    def test_no_expression_is_pasted_into_a_script(self):
+        # ${{ }} in a run: block is shell injection (a tag name, an input): values go through env: and are quoted there
+        in_run = False
+        for line in self.text.split("\n"):
+            indent = len(line) - len(line.lstrip())
+            if re.match(r"\s*(- )?run:\s*\|", line):
+                in_run, run_indent = True, indent
+                continue
+            if in_run and line.strip() and indent <= run_indent:
+                in_run = False
+            if in_run or re.match(r"\s*(- )?run:\s*\S", line):
+                self.assertNotIn("${{", line)
+        self.assertNotIn("pull_request_target", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()
