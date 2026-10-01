@@ -31,12 +31,12 @@ elif MACOS:
 # collected section -> feature that enables it (disabled = like a missing tool: no error, no alarm)
 NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailscale", "ufw": "firewall",
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
-               "f2b": "fail2ban", "firewall": "firewall"}
-BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "enabled": ("boot",), "journal": ("boot",),
+               "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
+BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
                 "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal"), "windows": ("blame",)}.get(OS_NAME, ())
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps"), "windows": ("blame",)}.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
@@ -75,6 +75,13 @@ SINCE = time.time()
 EXTERNAL_SEEN = {}  # DB name -> {ip: last time seen}: the memory lasts as long as the collector process
 EXIT_OK = re.compile(r"^Exited \(0\)")
 PROC = re.compile(r'\("([^"]+)"')
+PID = re.compile(r"\bpid=(\d+)")
+LINKS_TTL_S, LINKS_MAX, LINKS_MAX_EXT = 86400, 400, 20  # the memory of connections: 24 h, 400 edges, 20 outside peers per node
+LINKS_SEEN = {}  # (from, to, port) -> last time seen: like EXTERNAL_SEEN, it lasts as long as the collector process
+WILDCARD = ("0.0.0.0", "::", "*", "")
+# the hard reverse dependencies: the units that Require=, Requisite= or BindsTo= it, i.e. what breaks if it is down.
+# Not WantedBy (a target that only wants it keeps going), PartOf (the other way round) or UpheldBy (it only restarts it)
+REVERSE_DEPS = ("RequiredBy", "RequisiteOf", "BoundBy")
 DROP_SRC, DROP_DPT = re.compile(r"SRC=(\S+)"), re.compile(r"DPT=(\d+)")
 
 
@@ -220,7 +227,8 @@ def run(name, *args, timeout=15):
 
 
 def parse_ss(text):
-    """ss -tulnpH -> [{'proto','addr','port','proc'}]; '*' and '::' stay wildcards."""
+    """ss -tulnpH -> [{'proto','addr','port','proc','pid'}]; '*' and '::' stay wildcards. pid (None if not shown) is for
+    the collector only: it names the systemd unit, then it is dropped (it changes at every restart)."""
     out = []
     for line in text.splitlines():
         p = line.split(None, 6)
@@ -230,9 +238,38 @@ def parse_ss(text):
         if not port.isdigit():
             continue
         m = PROC.search(p[6]) if len(p) > 6 else None
+        pid = PID.search(p[6]) if len(p) > 6 else None
         out.append({"proto": p[0], "addr": addr.strip("[]").split("%")[0],
-                    "port": int(port), "proc": m.group(1) if m else ""})
+                    "port": int(port), "proc": m.group(1) if m else "", "pid": int(pid.group(1)) if pid else None})
     return out
+
+
+def unit_of_cgroup(text):
+    """/proc/PID/cgroup -> 'ssh.service': the systemd service the process runs in; None in a session or container scope.
+
+    cgroup v2 '0::/system.slice/ssh.service'; v1 the 'name=systemd' line. The leaf decides: from the innermost cgroup up,
+    the first '.service' wins and a '.scope'/'.slice' ends the search (a desktop app is not its user manager's service)."""
+    paths = []
+    for ln in text.splitlines():
+        _, _, rest = ln.partition(":")
+        ctrl, _, path = rest.partition(":")
+        if path:  # the systemd hierarchy first
+            paths.insert(0 if ctrl in ("", "name=systemd") else len(paths), path)
+    for path in paths[:1]:
+        for part in reversed([x for x in path.split("/") if x]):
+            if part.endswith(".service"):
+                return part
+            if part.endswith((".scope", ".slice")):
+                return None
+    return None
+
+
+def unit_of_pid(pid):
+    try:
+        with open(f"/proc/{int(pid)}/cgroup") as f:
+            return unit_of_cgroup(f.read())
+    except (OSError, ValueError):
+        return None
 
 
 def parse_serve(text):
@@ -307,9 +344,10 @@ def parse_iptables(text):
 
 
 def parse_ts_peers(text):
-    """tailscale status --json -> {'self': {...}, 'peers': [{'name','os','online','last_seen','direct','relay','exit'}]}.
+    """tailscale status --json -> {'self': {...}, 'peers': [{'name','os','online','last_seen','direct','relay','exit','ips'}]}.
 
     'direct' = there is a direct address (CurAddr); otherwise traffic goes through the relay. 'last_seen' is None if never seen.
+    'ips' (TailscaleIPs) lets the map name a tailnet client seen connected.
     """
     d = json.loads(text)
 
@@ -321,11 +359,16 @@ def parse_ts_peers(text):
         except ValueError:
             return None
 
+    def ips(p):
+        return [x for x in p.get("TailscaleIPs") or [] if isinstance(x, str)]
+
     me = d.get("Self") or {}
     peers = [{"name": p.get("HostName", "?"), "os": p.get("OS", ""), "online": bool(p.get("Online")),
               "last_seen": seen(p.get("LastSeen")), "direct": bool(p.get("CurAddr")), "relay": p.get("Relay", ""),
-              "exit": bool(p.get("ExitNode")), "exit_option": bool(p.get("ExitNodeOption"))} for p in (d.get("Peer") or {}).values()]
-    return {"self": {"name": me.get("HostName", "?"), "online": bool(me.get("Online")), "exit_option": bool(me.get("ExitNodeOption"))},
+              "exit": bool(p.get("ExitNode")), "exit_option": bool(p.get("ExitNodeOption")), "ips": ips(p)}
+             for p in (d.get("Peer") or {}).values()]
+    return {"self": {"name": me.get("HostName", "?"), "online": bool(me.get("Online")), "exit_option": bool(me.get("ExitNodeOption")),
+                     "ips": ips(me)},
             "peers": sorted(peers, key=lambda x: (not x["online"], x["name"].lower()))}
 
 
@@ -405,6 +448,20 @@ def parse_blame(text, n=12):
 
 def parse_failed(text):
     return [ln.replace("●", "").split()[0] for ln in text.splitlines() if ln.replace("●", "").strip()]
+
+
+def parse_reverse_deps(text):
+    """`systemctl show -p RequiredBy -p RequisiteOf -p BoundBy UNIT` -> the units that need it (first level only), sorted.
+
+    The hard dependencies of `systemctl list-dependencies --reverse`, machine-readable: its --plain output is flat on
+    recent systemd (every level at the same indent), so the first level could not be told from the targets it expands.
+    WantedBy is not read: one failed service wanted by multi-user.target does not break the target."""
+    out = set()
+    for ln in text.splitlines():
+        key, _, val = ln.partition("=")
+        if key.strip() in REVERSE_DEPS:
+            out.update(val.split())
+    return sorted(out)
 
 
 def parse_journal(text, cap=500):
@@ -520,6 +577,21 @@ def collect_boot():
         need(rc == 0, err, "systemctl --failed")
         return parse_failed(out)
 
+    def deps():
+        """What each failed unit leaves without its dependency. One call per unit: one failure costs only its own key."""
+        if not isinstance(d.get("failed"), list):
+            raise Absent("failed units unknown")
+        out = {}
+        for unit in d["failed"][:20]:
+            props = [a for k in REVERSE_DEPS for a in ("-p", k)]
+            try:
+                rc, text, _ = run("systemctl", "show", "--no-pager", *props, "--", unit)  # '--': '-.mount' is a unit, not an option
+            except Exception:  # noqa: BLE001 - per unit: the others still answer
+                continue
+            if rc == 0:
+                out[unit] = parse_reverse_deps(text)[:20]
+        return out
+
     def enabled():
         rc, out, err = run("systemctl", "list-unit-files", "--type=service", "--state=enabled", "--no-legend", "--plain")
         need(rc == 0, err, "systemctl list-unit-files")
@@ -560,9 +632,9 @@ def collect_boot():
                 "dangling_images": {"count": len(dimg.split()), "bytes": sum(parse_size(x) for x in dimg.split())} if rc == 0 else None}
 
     d["btime"] = boot_time()
-    if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal') stay unsupported
-        analyze, failed, enabled, journal = (from_native(k) for k in ("analyze", "failed", "enabled", "journal"))
-    for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("enabled", enabled),
+    if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
+        analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
+    for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
                     ("journal", journal), ("containers", containers), ("docker_df", docker_df)):
         section(key, fn)
     return d
@@ -584,7 +656,7 @@ def env_uses(aliases, key, value):
     if "://" in v:
         return any(h.lower() in aliases for h in URL_HOST.findall(v))
     if HOSTKEY.search(key):
-        return re.split(r"[:/]", v, 1)[0].lower() in aliases
+        return re.split(r"[:/]", v, maxsplit=1)[0].lower() in aliases
     return False
 
 
@@ -604,14 +676,56 @@ def parse_established(text):
     return out
 
 
-def container_conns(pid):
-    """Established connections seen *inside* the container's network namespace: external clients show up with their real
-    IP (from the host, Docker's DNAT hides them from ss). Needs root. None if unreadable."""
+def norm_ip(addr):
+    """'[::ffff:192.0.2.1]' -> '192.0.2.1', 'fe80::1%eth0' -> 'fe80::1': one spelling per address, so the two ends of a
+    connection (the host's sockets, the container's) and the docker inspect IPs compare equal. Not an IP: kept as is."""
+    a = str(addr or "").strip("[]").split("%")[0]
     try:
-        rc, out, _ = run("nsenter", "-t", str(pid), "-n", "ss", "-tnH", "state", "established", timeout=5)
+        ip = ipaddress.ip_address(a)
+    except ValueError:
+        return a
+    return str(getattr(ip, "ipv4_mapped", None) or ip)
+
+
+def parse_ss_all(text):
+    """`ss -tanH` (every state) -> {'listen': [{'addr','port'}], 'estab': [{'l_addr','l_port','p_addr','p_port','proc'}]}.
+
+    One call per container namespace gives both the ports it listens on and its connections (addresses normalised)."""
+    listen, estab = [], []
+    for ln in text.splitlines():
+        p = ln.split()
+        if p and p[0].startswith("tcp"):  # a Netid column (several socket types asked): not ours, but harmless
+            p = p[1:]
+        if len(p) < 5:
+            continue
+        la, _, lp = p[3].rpartition(":")
+        pa, _, pp = p[4].rpartition(":")
+        if not lp.isdigit():
+            continue
+        if p[0] == "LISTEN":
+            listen.append({"addr": norm_ip(la), "port": int(lp)})
+        elif p[0] in ("ESTAB", "ESTABLISHED") and pp.isdigit():
+            m = PROC.search(" ".join(p[5:]))
+            estab.append({"l_addr": norm_ip(la), "l_port": int(lp), "p_addr": norm_ip(pa), "p_port": int(pp),
+                          "proc": m.group(1) if m else ""})
+    return {"listen": listen, "estab": estab}
+
+
+def container_ss(pid):
+    """Every TCP socket *inside* the container's network namespace (parse_ss_all): external clients show up with their
+    real IP (from the host, Docker's DNAT hides them from ss). Needs root. None if unreadable."""
+    try:
+        rc, out, _ = run("nsenter", "-t", str(pid), "-n", "ss", "-tanH", timeout=5)
     except Absent:
         return None
-    return parse_established(out) if rc == 0 else None
+    return parse_ss_all(out) if rc == 0 else None
+
+
+def container_conns(pid, ss_fn=None):
+    """Established connections inside the container's namespace; ss_fn = the per-pass memo of container_ss (one nsenter
+    per container serves the databases and the map). None if unreadable."""
+    rows = (ss_fn or container_ss)(pid)
+    return None if rows is None else rows["estab"]
 
 
 def is_local(addr, local_addrs):
@@ -635,6 +749,17 @@ def ports_of(d):
             if (cport, hp, scope) not in seen:  # v4 and v6 of the same binding count once
                 seen.add((cport, hp, scope))
                 out.append({"p": int(hp) if hp.isdigit() else 0, "c": cport, "s": scope})
+    return out
+
+
+def aliases_of(name, d):
+    """Names other containers can reach it by: container name, compose service, network aliases and DNS names on the
+    user networks (not the 12-hex short ids: they would match any hex word)."""
+    nets = d["NetworkSettings"].get("Networks") or {}
+    out = {a.lower() for n in nets if n not in ("bridge", "host", "none")
+           for a in (nets[n].get("Aliases") or []) + (nets[n].get("DNSNames") or []) if not re.fullmatch(r"[0-9a-f]{12}", a)}
+    out |= {name.lower(), ((d["Config"].get("Labels") or {}).get("com.docker.compose.service") or name).lower()}
+    out.discard("")
     return out
 
 
@@ -665,10 +790,7 @@ def db_items(inspected, host_conns, conn_fn=None, local_addrs=(), now=None):
         host_net = d["HostConfig"].get("NetworkMode") == "host"
         ports = [{"p": 0, "c": "host", "s": "*"}] if host_net else ports_of(d)
         nets = {n for n in d["NetworkSettings"]["Networks"] if n not in ("bridge", "host", "none")}
-        aliases = {a.lower() for n in nets for a in (d["NetworkSettings"]["Networks"][n].get("Aliases") or [])
-                   if not re.fullmatch(r"[0-9a-f]{12}", a)} | {name.lower()}
-        aliases.add(labels.get("com.docker.compose.service", name).lower())
-        aliases.discard("")
+        aliases = aliases_of(name, d)
         peers = [o for o, od in by_name.items()
                  if o != name and nets & set(od["NetworkSettings"]["Networks"]) and not db_kind(od["Config"]["Image"])]
         usano = sorted(o for o in peers if any(env_uses(aliases, e.split("=", 1)[0], e.split("=", 1)[-1])
@@ -704,6 +826,192 @@ def db_items(inspected, host_conns, conn_fn=None, local_addrs=(), now=None):
     for gone in set(EXTERNAL_SEEN) - {i["name"] for i in items}:
         del EXTERNAL_SEEN[gone]  # containers gone: no orphan keys
     return {"since": SINCE, "items": items}
+
+
+def parse_depends_on(label):
+    """Compose label com.docker.compose.depends_on 'db:service_healthy:false,cache:service_started:true' -> ['db', 'cache']."""
+    out = []
+    for item in (label or "").split(","):
+        svc = item.split(":", 1)[0].strip()
+        if svc and svc not in out:
+            out.append(svc)
+    return out
+
+
+def remember_links(now_edges, names, now, seen=None):
+    """Adds this pass's edges {(from, to, port): {connection ids}} to the memory and returns every edge remembered.
+
+    Bounded: 24 h, at most LINKS_MAX_EXT outside peers per node and LINKS_MAX edges in all (the oldest go first, outside
+    peers before containers and processes); edges of a container that is gone are forgotten (names None = Docker
+    unreadable this pass: nothing is forgotten for that)."""
+    seen = LINKS_SEEN if seen is None else seen
+    n_of = lambda k: len(now_edges.get(k) or ())  # noqa: E731
+    for k in now_edges:
+        seen[k] = now
+    for k, t in list(seen.items()):
+        if now - t > LINKS_TTL_S or (names is not None and any(e.startswith("ct:") and e[3:] not in names for e in k[:2])):
+            del seen[k]
+    peers = {}  # node -> {outside peer: (last, n)}
+    for k, t in seen.items():
+        for node, peer in ((k[0], k[1]), (k[1], k[0])):
+            if peer.startswith("ext:") and not node.startswith("ext:"):
+                mine = peers.setdefault(node, {})
+                mine[peer] = max(mine.get(peer, (0, 0)), (t, n_of(k)))
+    keep = {node: set(sorted(m, key=lambda p: (m[p], p), reverse=True)[:LINKS_MAX_EXT]) for node, m in peers.items()}
+    for a, b, p in list(seen):
+        if (b.startswith("ext:") and b not in keep.get(a, ())) or (a.startswith("ext:") and a not in keep.get(b, ())):
+            del seen[(a, b, p)]
+    rank = lambda k: (seen[k], not (k[0].startswith("ext:") or k[1].startswith("ext:")), n_of(k), k)  # noqa: E731
+    for k in sorted(seen, key=rank, reverse=True)[LINKS_MAX:]:
+        del seen[k]
+    return [{"from": a, "to": b, "port": p, "n": n_of((a, b, p)), "last": seen[(a, b, p)]} for a, b, p in sorted(seen)]
+
+
+def link_items(inspected, netns_fn, host_conns, listeners, local_addrs, now=None, names=None):
+    """The MAP's data: every container (state, compose wiring, ports) and who is connected to whom.
+
+    Nodes: 'ct:<container>', 'proc:<host process>', 'ext:<ip>' (anything that is neither this host nor a container).
+    - inspected: docker inspect of the containers (running + exited with an error); None = Docker absent or unreadable;
+    - names: every container Docker lists, Exited (0) included: a finished one-shot job is not on the map's list, but
+      its connections are forgotten only when it is removed (or after 24 h), so a nightly job still shows the next morning;
+    - netns_fn(pid) -> parse_ss_all() of a container's namespace, None if unreadable; netns_fn None = host sockets only
+      (macOS/Windows: the containers live in Docker Desktop's VM);
+    - host_conns: the host's established sockets with their process (None = unreadable); listeners: net['listeners'].
+    Connections are counted once even when both ends are seen (two containers' namespaces, or a container's and the
+    host's), aggregated by (from, to, server port) and remembered for 24 h (remember_links).
+    Only names, ports and addresses are kept: never env values, command lines or payloads."""
+    now = now or time.time()
+    by_name = {d["Name"].lstrip("/"): d for d in inspected or []}
+    running = {n for n, d in by_name.items() if (d.get("State") or {}).get("Running")}
+    nets_of = {n: (d.get("NetworkSettings") or {}).get("Networks") or {} for n, d in by_name.items()}
+    ip_owner, gateways = {}, set()
+    for n, nets in nets_of.items():
+        for net in nets.values():
+            for k in ("IPAddress", "GlobalIPv6Address"):
+                if net.get(k) and n in running:  # a stopped container has no address (and its old one may be reused)
+                    ip_owner[norm_ip(net[k])] = n
+            gateways.update(norm_ip(net[k]) for k in ("Gateway", "IPv6Gateway") if net.get(k))
+    # the host's addresses (hostname -I lists the bridge gateways too); a macvlan network's gateway is the router, not us
+    host_addrs = {norm_ip(a) for a in local_addrs or ()} or set(gateways)
+    by_port = {}  # TCP listening port -> [(address, process)]
+    for x in listeners or []:
+        if x.get("proto") == "tcp" and isinstance(x.get("port"), int):
+            by_port.setdefault(x["port"], []).append((norm_ip(x.get("addr")), x.get("proc") or ""))
+    services = {p for ls in by_port.values() for _, p in ls if p}
+    published = {}  # host port -> [(scope, container)]
+    for n in sorted(running):
+        if (by_name[n].get("HostConfig") or {}).get("NetworkMode") != "host":
+            for x in ports_of(by_name[n]):
+                if x["p"] and str(x["c"]).endswith("/tcp"):
+                    published.setdefault(x["p"], []).append((x["s"], n))
+
+    def server_proc(port, addr):
+        """The process listening where a connection to addr:port lands; None if nothing listens there ('' = unknown)."""
+        ls = by_port.get(port) or ()
+        return next((p for a, p in ls if a == addr), next((p for a, p in ls if a in WILDCARD), None))
+
+    def target(port, addr):
+        """Node behind addr:port of this host: the container that publishes it, else the listening process."""
+        cands = published.get(port) or ()
+        owner = next((n for s, n in cands if s == addr or (s == "lo" and is_local(addr, ()))), None) \
+            or next((n for s, n in cands if s == "*"), None)
+        if owner:
+            return "ct:" + owner
+        p = server_proc(port, addr)
+        return "proc:" + p if p else None
+
+    now_edges = {}
+
+    def add(frm, to, port, c):
+        if frm != to and port:
+            now_edges.setdefault((frm, to, port), set()).add(frozenset(((c["l_addr"], c["l_port"]), (c["p_addr"], c["p_port"]))))
+
+    by_service = {}  # (compose project, service) -> container names
+    for n, d in by_name.items():
+        lb = (d.get("Config") or {}).get("Labels") or {}
+        by_service.setdefault((lb.get("com.docker.compose.project") or "", lb.get("com.docker.compose.service") or ""), []).append(n)
+    aliases = {n: aliases_of(n, d) for n, d in by_name.items()}
+    user_nets = {n: {k for k in nets if k not in ("bridge", "host", "none")} for n, nets in nets_of.items()}
+    containers, ns_ok, ns_bad = [], 0, 0
+    for name, d in sorted(by_name.items()):
+        st, cfg, hc = d.get("State") or {}, d.get("Config") or {}, d.get("HostConfig") or {}
+        labels, mode, up = cfg.get("Labels") or {}, hc.get("NetworkMode") or "", name in running
+        host_net = mode == "host"
+        rows = None
+        # 'container:X' shares X's namespace: reading it again would give X's connections to this one
+        if netns_fn and up and st.get("Pid") and not host_net and not mode.startswith("container:"):
+            rows = netns_fn(st["Pid"])
+            ns_ok, ns_bad = ns_ok + (rows is not None), ns_bad + (rows is None)
+        if rows is not None:
+            listen_all = {x["port"] for x in rows["listen"]}
+            listen = sorted({x["port"] for x in rows["listen"] if not is_local(x["addr"], ())})  # loopback: itself only
+        else:
+            listen = sorted({int(k.split("/")[0]) for k in cfg.get("ExposedPorts") or {}
+                             if str(k).endswith("/tcp") and k.split("/")[0].isdigit()})
+            listen_all = set(listen)
+        me = "ct:" + name
+        for c in (rows or {}).get("estab") or ():
+            c = dict(c, l_addr=norm_ip(c["l_addr"]), p_addr=norm_ip(c["p_addr"]))
+            peer = c["p_addr"]
+            other = ip_owner.get(peer)
+            if other == name or is_local(peer, ()):  # loopback inside a container is the container itself
+                continue
+            if c["l_port"] in listen_all:  # someone connected to it
+                if other:
+                    add("ct:" + other, me, c["l_port"], c)
+                elif not (peer in gateways or is_local(peer, host_addrs)):  # from the host side: the host's sockets say who
+                    add("ext:" + peer, me, c["l_port"], c)
+            elif other:
+                add(me, "ct:" + other, c["p_port"], c)
+            elif is_local(peer, host_addrs):  # to a service of the host (or a port another container publishes)
+                t = target(c["p_port"], peer)
+                if t:
+                    add(me, t, c["p_port"], c)
+            else:
+                add(me, "ext:" + peer, c["p_port"], c)
+        project = labels.get("com.docker.compose.project") or ""
+        depends = []
+        for svc in parse_depends_on(labels.get("com.docker.compose.depends_on")):
+            for x in sorted(by_service.get((project, svc)) or [svc]) if project else [svc]:
+                if x not in depends:
+                    depends.append(x)
+        env = [e.partition("=") for e in cfg.get("Env") or [] if "=" in e]
+        env_refs = sorted(o for o in by_name if o != name and user_nets[name] & user_nets[o]
+                          and any(env_uses(aliases[o], k, v) for k, _, v in env))
+        containers.append({"name": name, "image": cfg.get("Image") or "", "project": project,
+                           "service": labels.get("com.docker.compose.service") or "", "state": st.get("Status") or "",
+                           "health": (st.get("Health") or {}).get("Status") or "", "exit": None if up else st.get("ExitCode"),
+                           "restarts": d.get("RestartCount") or 0, "restart": (hc.get("RestartPolicy") or {}).get("Name") or "",
+                           "host_net": host_net, "nets": {k: v.get("IPAddress") or "" for k, v in nets_of[name].items() if k not in ("host", "none")},
+                           "ports": [] if host_net else ports_of(d), "listen": listen, "listen_src": "netns" if rows is not None else "image",
+                           "depends_on": depends, "env_refs": env_refs, "db": db_kind(cfg.get("Image") or "")})
+    for c in host_conns or ():
+        c = dict(c, l_addr=norm_ip(c["l_addr"]), p_addr=norm_ip(c["p_addr"]))
+        la, pa, proc = c["l_addr"], c["p_addr"], c.get("proc") or ""
+        other = ip_owner.get(pa)
+        peer_local = not other and is_local(pa, host_addrs)
+        if server_proc(c["l_port"], la) is not None:  # the server end: someone connected to a port of this host
+            t = target(c["l_port"], la)
+            if t and not peer_local:  # a local client is counted from its own socket, below
+                add("ct:" + other if other else "ext:" + pa, t, c["l_port"], c)
+        elif proc and proc not in DOCKER_PROXIES:  # the client end; a proxy's own connections are its containers' traffic
+            if other:
+                add("proc:" + proc, "ct:" + other, c["p_port"], c)
+            elif peer_local:
+                t = target(c["p_port"], pa)
+                if t:
+                    add("proc:" + proc, t, c["p_port"], c)
+            elif proc in services:  # only services: a desktop's hundreds of browser connections are noise
+                add("proc:" + proc, "ext:" + pa, c["p_port"], c)
+    errors = []
+    if netns_fn and ns_bad:
+        errors.append(f"{ns_bad} of {ns_ok + ns_bad} container namespaces unreadable" if ns_ok else
+                      "container namespaces unreadable (nsenter needs root): container links seen from the host only")
+    if listeners is None and host_conns is not None:
+        errors.append("listening ports unknown: host connections only partly classified")
+    return {"since": SINCE, "conn_source": "netns" if netns_fn and (ns_ok or not ns_bad) else "host", "containers": containers,
+            "conns": remember_links(now_edges, set(by_name) | set(names or ()) if inspected is not None else None, now),
+            "errors": errors}
 
 
 def collect_net():
@@ -744,7 +1052,14 @@ def collect_net():
             rc, out, err = run("ss", "-tulnpH")
             if rc != 0:
                 raise RuntimeError(err or "ss failed")
-            return parse_ss(out)
+            rows, units = parse_ss(out), {}
+            for x in rows:
+                pid = x.pop("pid", None)  # changes at every restart: only the unit it names is kept
+                if pid and pid not in units:
+                    units[pid] = unit_of_pid(pid)
+                if pid and units[pid]:
+                    x["unit"] = units[pid]
+            return rows
         if "firewall" in OFF:  # nothing was read: say so, never a verdict
             for x in out:
                 x["fw"] = ["unknown", "firewall check off in config.ini"]
@@ -784,29 +1099,95 @@ def collect_net():
             raise RuntimeError(err or "journalctl failed")
         return parse_drops(out)
 
-    def dbs():
-        rc, out, err = run("docker", "ps", "-q")
+    memo = {}  # one docker inspect, one host socket list, one nsenter per container per pass: dbs and links share them
+
+    def once(key, fn):
+        if key not in memo:
+            try:
+                memo[key] = fn()
+            except Exception as e:  # noqa: BLE001 - remembered: every section of this pass sees the same failure
+                memo[key] = e
+        if isinstance(memo[key], Exception):
+            raise memo[key]
+        return memo[key]
+
+    def inspect():
+        """docker inspect of the running containers and of those that exited with an error, and the names of every
+        container listed. Exited (0) = a finished one-shot job: not inspected (dropped like in collect()) but named, so
+        the map forgets its connections only once it is removed. The map shows both, the databases only the running ones."""
+        rc, out, err = run("docker", "ps", "-a", "--no-trunc", "--format", "{{.ID}}\t{{.Status}}\t{{.Names}}")
         if rc != 0:
             raise RuntimeError(err or "docker ps failed")
-        ids = out.split()
-        insp = "[]"
-        if ids:
-            # a container may vanish between ps and inspect: rc != 0 but the output for the others is valid
-            rc, insp, err = run("docker", "inspect", *ids)
-            if rc != 0 and not insp.strip().startswith("["):
-                raise RuntimeError(err or "docker inspect failed")
-        if WINDOWS:  # Docker Desktop: the containers live in a VM, their namespaces are out of reach (no 'who connects')
-            return db_items(json.loads(insp or "[]"), cwin.established(), None, cwin.local_addrs())
+        rows = [ln.split("\t", 2) + ["", ""] for ln in out.splitlines()]
+        ids = [r[0] for r in rows if r[0].strip() and not EXIT_OK.match(r[1])]
+        names = {n for r in rows for n in r[2].strip().split(",") if n and "/" not in n}  # 'other/alias': a legacy link, not a name
+        if not ids:
+            return [], names
+        # a container may vanish between ps and inspect: rc != 0 but the output for the others is valid
+        rc, insp, err = run("docker", "inspect", *ids)
+        if rc != 0 and not insp.strip().startswith("["):
+            raise RuntimeError(err or "docker inspect failed")
+        return json.loads(insp or "[]"), names
+
+    def host_conns():
+        if WINDOWS:
+            return cwin.established()
         if MACOS:
-            return db_items(json.loads(insp or "[]"), cmac.established(run), None, cmac.local_addrs(run))
+            return cmac.established(run)
         rc, est, err = run("ss", "-tnpH", "state", "established")
         if rc != 0:
             raise RuntimeError(err or "ss failed")
+        return parse_established(est)
+
+    def host_addrs():
+        if WINDOWS:
+            return cwin.local_addrs()
+        if MACOS:
+            return cmac.local_addrs(run)
         try:
             _, hostip, _ = run("hostname", "-I")
         except Absent:
             hostip = ""
-        return db_items(json.loads(insp or "[]"), parse_established(est), container_conns, set(hostip.split()))
+        return set(hostip.split())
+
+    def netns(pid):
+        return once(("netns", pid), lambda: container_ss(pid))
+
+    def dbs():
+        running = [x for x in once("docker", inspect)[0] if (x.get("State") or {}).get("Running")]
+        if not LINUX:  # Docker Desktop: the containers live in a VM, their namespaces are out of reach (no 'who connects')
+            return db_items(running, once("est", host_conns), None, once("addrs", host_addrs))
+        return db_items(running, once("est", host_conns), lambda pid: container_conns(pid, netns), once("addrs", host_addrs))
+
+    def links():
+        """Fails softly: without Docker the host's own connections still make a map, and the reverse; each missing
+        source is a note in links['errors']. Absent only when neither Docker nor the host sockets exist."""
+        notes, insp, names, est, absent = [], None, None, None, []
+        try:
+            insp, names = once("docker", inspect)
+        except Absent:
+            absent.append("docker")
+        except Exception as e:  # noqa: BLE001
+            notes.append("docker unreadable: " + str(e)[:100])
+        try:
+            est = once("est", host_conns)
+        except Absent as e:
+            absent.append(str(e))
+            notes.append(f"{e} not installed: host connections not seen")
+        except Exception as e:  # noqa: BLE001
+            notes.append("host connections unreadable: " + (str(e) or repr(e))[:100])
+        if len(absent) == 2:
+            raise Absent("docker and " + absent[1])
+        try:
+            addrs = once("addrs", host_addrs)
+        except Exception:  # noqa: BLE001 - without them only loopback counts as this host
+            addrs = set()
+        netns_fn = netns if LINUX and shutil.which("nsenter", path=SBIN) else None
+        if LINUX and not netns_fn and insp:
+            notes.append("nsenter not installed: container links seen from the host only")
+        out = link_items(insp, netns_fn, est, d.get("listeners"), addrs, names=names)
+        out["errors"] = notes + out["errors"]
+        return out
 
     def ts_peers():
         rc, out, err = run("tailscale", "status", "--json")
@@ -822,6 +1203,7 @@ def collect_net():
     section("docker_user", docker_user)
     section("iptables", iptables)
     section("dbs", dbs)
+    section("links", links)  # after listeners and dbs: it reads the first and reuses what the second ran
     section("ts_peers", ts_peers)
     section("f2b", f2b_jails)
     section("drops", drops)

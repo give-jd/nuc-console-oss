@@ -60,7 +60,9 @@ try {
   $e = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Diagnostics-Performance/Operational'; Id = 100 } -MaxEvents 1 -ErrorAction Stop
   if ($e.TimeCreated -gt $boot) { $x = [xml]$e.ToXml(); $d = @{}; foreach ($n in $x.Event.EventData.Data) { $d[$n.Name] = $n.'#text' }; $perf = @{ total = [int64]$d['BootTime']; main = [int64]$d['MainPathBootTime']; post = [int64]$d['BootPostBootTime'] } }
 } catch { $perf = $null }
-@{ boot = ([DateTimeOffset]$boot).ToUnixTimeSeconds(); services = $svc; events = $ev; perf = $perf } | ConvertTo-Json -Depth 4 -Compress
+$dep = @{}
+foreach ($s in $svc) { if ($s.s -eq 'Stopped' -and $s.e -ne 0 -and $s.e -ne 1077) { try { $dep[$s.n] = @((Get-Service -Name $s.n -ErrorAction Stop).DependentServices | Select-Object -First 20 | ForEach-Object { [string]$_.Name }) } catch { } } }
+@{ boot = ([DateTimeOffset]$boot).ToUnixTimeSeconds(); services = $svc; events = $ev; perf = $perf; deps = $dep } | ConvertTo-Json -Depth 4 -Compress
 """
 
 
@@ -298,7 +300,10 @@ def journal_from_events(events, cap=500):
 
 
 def boot_sections(data):
-    """PowerShell boot JSON -> {'btime', 'analyze', 'failed', 'enabled', 'journal'} (analyze None when not recorded)."""
+    """PowerShell boot JSON -> {'btime', 'analyze', 'failed', 'deps', 'enabled', 'journal'} (analyze None when not recorded).
+
+    deps: failed service -> the services that depend on it (DependentServices); a service whose list could not be read
+    has no key (unknown, not "none")."""
     svcs = data.get("services") or []
     # Automatic services that stopped with an error. 1077 = never started since boot (trigger/delayed start): not a failure.
     failed = sorted(s["n"] for s in svcs if s.get("s") == "Stopped" and s.get("e") not in (0, 1077, None))
@@ -309,5 +314,7 @@ def boot_sections(data):
     if perf and perf.get("total"):
         parts = {"main path": perf.get("main", 0) / 1000, "post boot": perf.get("post", 0) / 1000}
         analyze = {"parts": {k: v for k, v in parts.items() if v > 0}, "total": perf["total"] / 1000}
-    return {"btime": int(data.get("boot") or time.time()), "analyze": analyze, "failed": failed, "enabled": enabled,
+    raw = data.get("deps") if isinstance(data.get("deps"), dict) else {}
+    deps = {n: ([v] if isinstance(v, str) else [str(x) for x in v or []])[:20] for n, v in raw.items() if n in failed}
+    return {"btime": int(data.get("boot") or time.time()), "analyze": analyze, "failed": failed, "deps": deps, "enabled": enabled,
             "journal": journal_from_events(data.get("events"))}

@@ -25,6 +25,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `boot` | BOOT: time, slowest units, failed units, journal (Windows: boot time, failed services, System event log; macOS: launch daemons) | `systemd-analyze`, `journalctl` (Windows: PowerShell; macOS: `launchctl`) |
 | `docker_disk` | DOCKER · DISK | `docker system df` |
 | `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels (thermal: Linux only) | — (reads `/proc`, `/sys`; macOS/Windows: system calls) |
+| `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console keys `m`/`Tab`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
 

@@ -1092,14 +1092,14 @@ class Config(unittest.TestCase):
         calls = []
         orig_run, orig_off = collector.run, collector.OFF
         collector.run = lambda name, *a, **k: calls.append(name) or (0, "", "")
-        collector.OFF = {"firewall", "fail2ban", "tailscale", "exposure", "databases"}
+        collector.OFF = {"firewall", "fail2ban", "tailscale", "exposure", "databases", "map"}
         try:
             d = collector.collect_net()
         finally:
             collector.run, collector.OFF = orig_run, orig_off
         for tool in ("ufw", "iptables", "tailscale", "ss", "docker", "journalctl", "powershell", "socketfilterfw", "lsof"):
             self.assertNotIn(tool, calls)
-        expected = {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b"}
+        expected = {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b", "links"}
         self.assertEqual(set(d["disabled"]), expected if nuc_config.LINUX else expected | {"firewall"})
         self.assertEqual(d["errors"], {})
 
