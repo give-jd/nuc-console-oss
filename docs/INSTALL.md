@@ -140,7 +140,8 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 **Applications › nuc-console** (or Spotlight) opens it again any time. A plain re-install keeps the mode you chose.
 
-**Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
+**Text size**: the **A− / A+** links at the bottom of the page; the default is `[display] zoom`. Bigger text = fewer columns, never less
+content: in a browser window every section stays and the page scrolls; full screen rotates what does not fit onto Details pages.
 
 ## Install
 
@@ -215,7 +216,8 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 **Start › nuc-console** opens it again any time. A plain re-install (double-click) keeps the mode you chose.
 
-**Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
+**Text size**: the **A− / A+** links at the bottom of the page; the default is `[display] zoom`. Bigger text = fewer columns, never less
+content: in a browser window every section stays and the page scrolls; full screen rotates what does not fit onto Details pages.
 
 ## Install
 

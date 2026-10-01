@@ -2042,10 +2042,13 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     return columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else cols[0]
 
 
-def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None):
+def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None, scroll=False):
     """Everything on one screen. If it does not fit, details shrink (k = 0..3); at the last level no empty lines.
 
-    `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides()."""
+    `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides().
+    `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
+    in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
+    global FULL
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
@@ -2077,7 +2080,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
             cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
             cand["webapps"] = ("webapps", lambda c_: block(ov_webapp, "WEB APPS", c_, net, cont, c_, k))
-        if k <= 3 and w >= WIDE:  # wide consoles: the detail sections stay at every level (they shrink, they do not vanish)
+        if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
             cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
                         sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
                         tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
@@ -2111,6 +2114,23 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         if any(cols):
             flush()
         return pages
+
+    if scroll:
+        FULL = True
+        try:
+            pre = [fn(cw) for _, fn in make_cand(-2)]
+        finally:
+            FULL = False
+        blocks = [(lambda c_, lines=lines: lines) for lines in pre]
+        # the shortest column height that holds every section in the fixed order: the columns come out even
+        lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if pack(blocks, ncol, cw, w, mid, [""]) is None:
+                lo = mid + 1
+            else:
+                hi = mid
+        return pack(blocks, ncol, cw, w, hi, [""])
 
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
@@ -2161,9 +2181,11 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             return lines  # the last level has a 10**6 limit: we always return here
 
 
-def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None):
-    """Each page is split into chunks body_h tall: (page name, index, total, lines)."""
+def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll=False):
+    """Each page is split into chunks body_h tall: (page name, index, total, lines). scroll: one page, any height, nothing cut."""
     det = []
+    if scroll:
+        return [("Overview", 1, 1, page_overview(s, cont, net, boot, w, body_h, baseline=baseline, scroll=True))]
     if (mode or MODE) == "overview":
         pages = (("Overview", lambda: page_overview(s, cont, net, boot, w, body_h, baseline=baseline, details=det)),)
     else:
@@ -2234,7 +2256,7 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
-def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False):
+def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
     st, sm = snapshot(w), smp.sample()
@@ -2244,7 +2266,9 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False):
         socket.gethostname = lambda: "demo-host"
         if not CFG["webapps"]:
             CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}  # one up, one expected-but-down
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll)
+    if scroll:  # the page is as tall as its content (header + body + footer)
+        h = len(sl[0][3]) + 2
     n = pick_slide(sl, at) if at is not None else n
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
                  safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)

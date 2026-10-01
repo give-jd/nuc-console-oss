@@ -61,7 +61,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` |
 | `/?full=1` | the overview **plus every Details page**: everything the overview cuts ("… +N more"), stacked |
 | `/?zoom=150` | text size in % (50–200, the **A− / A+** links); default `[display] zoom` |
-| `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out. With `rows=` it fills the height too |
+| `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out; every section and item is shown and the page scrolls. With `rows=` it fills the height instead (one screen, like the console) |
 | `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
 | `/healthz` | `ok` (no data) |
 

@@ -198,8 +198,10 @@ class Server(http.server.ThreadingHTTPServer):
                 if full:  # overview + every detail page: nothing hidden behind "… +N more"
                     body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True))
                 else:
+                    # all the columns ("wide" 200 = the 2-column layout); fit without rows = a normal browser window: the page
+                    # scrolls, so it shows every section in full at any text size (full screen fits instead, and rotates)
                     screen, _ = render.render_screen(self.smp, gcols, grows, mode="overview", at=time.time() if rotate else None,
-                                                     keys=False, page=True)  # all the columns: "wide" (200) is the 2-column layout
+                                                     keys=False, page=True, scroll=fit and not rows)
                     body = to_html(screen)
             except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
                 print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
