@@ -303,11 +303,19 @@ class RepoArchives(TempDirCase):
 
     def test_line_endings_whatever_the_checkout_did(self):
         for label, members in self.all_archives():
+            shell = []
             for name, (_, data) in members.items():
-                if name.endswith((".cmd", ".bat")):
+                base = name.rsplit("/", 1)[-1]
+                if data is None:
+                    continue
+                if base.endswith((".cmd", ".bat")):
                     self.assertTrue(data.count(b"\n") == data.count(b"\r\n") > 0, (label, name))
-                elif name.endswith(".sh") or "/bin/" in name and not name.endswith(".cmd"):
+                elif base.endswith(".sh") or ("." not in base and data[:2] == b"#!"):  # bin\*.ps1 is neither: as checked out
                     self.assertNotIn(b"\r", data, (label, name))
+                    shell.append(name[len(self.top) + 1:])
+            if label in ("linux", "macos"):  # the shell scripts were all checked: run.sh, install.sh and the helpers in bin/
+                self.assertLessEqual({"run.sh", "install.sh", "bin/nuc-console-accept", "bin/nuc-console-problems", "bin/nuc-console-update"},
+                                     set(shell), label)
 
     def test_sums_match_the_archives(self):
         text = read(os.path.join(self.out, "SHA256SUMS")).decode("ascii")
