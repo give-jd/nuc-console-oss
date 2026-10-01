@@ -3,4 +3,6 @@
 #   nuc-console-problems            human-readable
 #   nuc-console-problems --json     machine-readable
 # Accept a known one (root):  sudo nuc-console-accept --problem <id> --reason "why it is fine"   (forget: --forget <id>)
+# not installed here (an extracted folder, the portable run)? ./run.sh --problems does the same there
+[ -f /opt/nuc-console/render.py ] || { echo "nuc-console is not installed here. In an extracted (portable) folder use: ./run.sh --problems" >&2; exit 1; }
 exec /usr/bin/python3 /opt/nuc-console/render.py --problems "$@"

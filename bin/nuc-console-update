@@ -1,0 +1,102 @@
+#!/bin/sh
+# Updates nuc-console to the latest GitHub release (Linux, macOS). You run it: it is never automatic, never in the background.
+#
+#   nuc-console-update --check      only say whether a newer release exists
+#   nuc-console-update              ask, then update            sudo nuc-console-update   (an installed nuc-console)
+#   nuc-console-update --yes        do not ask
+#   --installed                     the installed nuc-console (/opt/nuc-console), even when run from an extracted folder
+#
+# Run from the bin/ of an extracted folder that has run.sh (the portable mode) it updates that folder: src/, bin/, docs/ ...
+# are replaced, ./data (config, baseline) and ./cache stay (a git clone is not updated: git pull). Otherwise it updates the
+# installed one: that needs root, and it runs the new release's installer, which keeps /etc/nuc-console/config.ini and the
+# baseline.
+# What it does: asks api.github.com (HTTPS) for the latest release; if it is newer, downloads this OS's archive and SHA256SUMS
+# into the cache (Linux /var/cache/nuc-console, macOS /Library/Caches/nuc-console, portable ./cache; a file whose SHA-256 is
+# already right is not downloaded again), checks the archive's SHA-256, runs `gh attestation verify` when gh is installed (a
+# failure stops it; without gh it says the provenance was not checked), unpacks it and installs it.
+set -eu
+
+die() { echo "nuc-console-update: $*" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+usage: nuc-console-update [--check] [--yes] [--installed]
+  --check       only report: "already at X.Y.Z", or which release is available
+  --yes         update without asking
+  --installed   update the installed nuc-console, even from an extracted folder (needs root)
+Run in the bin/ of a folder with run.sh it updates that folder (data/ and cache/ stay); else the installed one: sudo.
+EOF
+}
+
+main() {
+    CHECK=0 YES=0 INSTALLED=0
+    for a in "$@"; do
+        case $a in
+            --check) CHECK=1 ;;
+            --yes|-y) YES=1 ;;
+            --installed) INSTALLED=1 ;;
+            -h|--help) usage; exit 0 ;;
+            *) usage >&2; exit 2 ;;
+        esac
+    done
+
+    API=https://api.github.com/repos/give-jd/nuc-console-oss/releases/latest
+    HERE=$(cd "$(dirname "$0")" && pwd -P)
+    if [ "$INSTALLED" = 0 ] && [ -f "$HERE/../run.sh" ] && [ -f "$HERE/../src/update.py" ]; then
+        MODE=portable
+        ROOT=$(cd "$HERE/.." && pwd -P)
+        APP=$ROOT/src
+        UPDATE_PY=$APP/update.py
+        CACHE=$ROOT/cache
+        # a clone is updated by git: this would overwrite the files it tracks
+        [ ! -e "$ROOT/.git" ] || die "$ROOT is a git checkout: update it with git pull (this replaces the files of an extracted release; --installed updates the installed nuc-console)"
+        PY=$("$ROOT/run.sh" --which-python) || exit 1
+        # as root, only in a folder that root owns: a user's folder must not be written by root (links, swapped files)
+        if [ "$(id -u)" -eq 0 ] && [ -z "$(find "$ROOT" -maxdepth 0 -user root)" ]; then
+            die "$ROOT is not root's: run this as the user who owns the folder, without sudo"
+        fi
+        if [ -f "$ROOT/data/portable.pid" ]; then
+            pid=$(cat "$ROOT/data/portable.pid" 2>/dev/null || true)
+            case $pid in ''|*[!0-9]*) ;; *) ! kill -0 "$pid" 2>/dev/null || die "nuc-console is running from this folder (pid $pid): quit it first" ;; esac
+        fi
+    else
+        MODE=installed
+        UPDATE_PY=/opt/nuc-console/update.py
+        APP=${UPDATE_PY%/*}
+        case $(uname -s) in Darwin) CACHE=/Library/Caches/nuc-console ;; *) CACHE=/var/cache/nuc-console ;; esac
+        PY=/usr/bin/python3
+        [ -f "$UPDATE_PY" ] || die "nuc-console is not installed ($UPDATE_PY is missing): install it first, or update a portable folder from its own bin/"
+        if [ "$CHECK" = 0 ] && [ "$(id -u)" -ne 0 ]; then die "installing an update needs root: sudo $0 $*"; fi
+    fi
+    command -v curl >/dev/null 2>&1 || die "curl is needed (it asks GitHub and downloads the archive)"
+
+    TMP=$(mktemp -d)
+    trap 'rm -rf "$TMP"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    echo "nuc-console-update: asking GitHub for the latest release"
+    curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 20 --max-time 60 \
+        -H 'Accept: application/vnd.github+json' -o "$TMP/release.json" "$API" \
+        || die "could not read the latest release from $API (no network, or no release published yet)"
+
+    set -- --release-json "$TMP/release.json" --cache "$CACHE" --mode "$MODE" --app "$APP" --stage-file "$TMP/stage"
+    [ "$MODE" = installed ] || set -- "$@" --root "$ROOT"
+    [ "$CHECK" = 0 ] || set -- "$@" --check
+    [ "$YES" = 0 ] || set -- "$@" --yes
+    rc=0
+    "$PY" -I -B "$UPDATE_PY" "$@" || rc=$?
+    [ "$rc" -eq 0 ] || exit "$rc"
+
+    # an installed one: the new release's installer runs here, after the Python that checked it has ended
+    if [ -s "$TMP/stage" ]; then
+        top=$(cat "$TMP/stage")
+        stage=$(dirname "$top")
+        case $stage in "$CACHE"/stage-*) ;; *) die "unexpected folder to install from: $top" ;; esac
+        (cd "$top" && bash ./install.sh) || rc=$?
+        rm -rf "$stage"
+        [ "$rc" -eq 0 ] || die "the installer failed (exit code $rc): the previous version may be partly replaced, run it again"
+    fi
+    exit 0
+}
+
+main "$@"
