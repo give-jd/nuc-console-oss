@@ -619,6 +619,29 @@ class Kiosk(unittest.TestCase):
             self.assertIn(part, cmd[1])
         self.assertIn("--start-fullscreen", cmd)
 
+    def test_browser_mode_opens_a_normal_window_of_the_default_browser(self):
+        opened, saved = [], (render.web_up, render.user_dir, getattr(render.os, "startfile", None), render.subprocess.run)
+        with tempfile.TemporaryDirectory() as d:
+            render.user_dir = lambda: d
+            render.os.startfile = lambda url: opened.append(url)
+            render.subprocess.run = lambda cmd, **kw: opened.append(cmd[-1])
+            import webbrowser
+            saved_wb, webbrowser.open = webbrowser.open, lambda url: opened.append(url) or True
+            try:
+                render.web_up = lambda port, wait: False
+                self.assertEqual(render.open_in_browser(["render.py", "--open", "--log", os.path.join(d, "o.log")]), 1)  # no web view
+                render.web_up = lambda port, wait: True
+                self.assertEqual(render.open_in_browser(["render.py", "--open", "--log", os.path.join(d, "o.log")]), 0)
+            finally:
+                render.web_up, render.user_dir, render.subprocess.run = saved[0], saved[1], saved[3]
+                if saved[2] is None:
+                    del render.os.startfile
+                else:
+                    render.os.startfile = saved[2]
+                webbrowser.open = saved_wb
+                sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
+        self.assertEqual(opened, ["http://127.0.0.1:8787/?fit=1"])                                  # a plain tab: no kiosk, no grid
+
     def test_display_section_and_paths(self):
         with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
             f.write("[display]\nbrowser = none\nmode = kiosk\nzoom = 900\n")
@@ -749,6 +772,10 @@ class Installers(unittest.TestCase):
         self.assertIn("Start Menu\\Programs\\nuc-console.url", ps)
         self.assertIn("browser|fullscreen|kiosk|none|no)", mac)
         self.assertIn("/Applications/nuc-console.webloc", mac)
+        for text in (ps, mac):  # both modes open at login, as the user: a normal window (--open) or full screen (--kiosk)
+            self.assertIn("--open", text)
+            self.assertIn("--kiosk", text)
+        self.assertNotIn("explorer.exe", ps)
 
     @unittest.skipUnless(shutil.which("pwsh") or (sys.platform == "win32" and shutil.which("powershell")), "PowerShell")
     def test_windows_installer_parses(self):

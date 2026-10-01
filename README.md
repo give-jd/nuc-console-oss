@@ -69,7 +69,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
 | Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
-| Display | Linux: a virtual terminal. macOS/Windows: your choice — your normal browser (a *nuc-console* shortcut), or a full-screen window at login (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
+| Display | Linux: a virtual terminal. macOS/Windows: it opens at every login, your choice how — a normal browser window (default) or full screen (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
 
 ## Quick start
 
@@ -144,8 +144,8 @@ For web apps you expose on purpose, declare them under `[webapps]` instead: they
 - `nuc-console.service` owns the VT (`TTYPath=/dev/tty1`), `Restart=always`. `install.sh` masks `getty@tty1` so nothing draws over it; login stays on **tty2** (Ctrl+Alt+F2) and SSH.
 - **macOS / Windows**: the collector is a LaunchDaemon (root) / a scheduled task (SYSTEM) that reads sockets, the OS firewall and services
   with native tools (`lsof`, `socketfilterfw`, `launchctl` / the IP helper API and PowerShell) and judges every listening port against the
-  firewall *per program*. The read-only web view (unprivileged) serves the same screen on **127.0.0.1 only**: a *nuc-console* shortcut
-  opens it in your browser, or (`[display] mode = fullscreen`) a full-screen window opens at every login. Same layout, same alarms.
+  firewall *per program*. The read-only web view (unprivileged) serves the same screen on **127.0.0.1 only**, and at every login it opens
+  in a normal browser window (or full screen: `[display] mode = fullscreen`); a *nuc-console* shortcut reopens it. Same layout, same alarms.
 - Exposure rules and the design principles behind the layout: [docs/DESIGN.md](docs/DESIGN.md). Hardening the things it reports: [docs/HARDENING.md](docs/HARDENING.md).
 
 ### Cost

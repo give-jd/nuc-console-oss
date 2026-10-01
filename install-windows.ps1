@@ -14,7 +14,8 @@
        Administrators, readable by users;
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
        and the read-only web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser;
-       with [display] mode = fullscreen also a full-screen window at every logon (Alt+F4 closes it, F11 leaves full screen);
+       at every logon the dashboard opens: in a normal browser window ([display] mode = browser, the default) or full screen
+       (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen);
     4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
        %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
     5. waits for the first collector snapshot, stores the port baseline (only if missing) and opens the dashboard.
@@ -23,8 +24,9 @@
   Removes the tasks, the program folder and the PATH entry. %ProgramData%\nuc-console (config, baseline) is left in place.
 
 .PARAMETER Display
-  browser (default): the Start menu shortcut opens it in your browser. fullscreen (or kiosk): a full-screen window at every
-  logon. none: nothing (a machine without a monitor). Written to [display] mode in config.ini; without it, config.ini decides.
+  browser (default): at every logon the dashboard opens in a normal window of your browser. fullscreen (or kiosk): it opens
+  full screen. none: it never opens by itself (a machine without a monitor). Written to [display] mode in config.ini; without
+  it, config.ini decides (a re-install keeps the choice; the default is browser).
 
 .PARAMETER NoDisplay
   Same as -Display none.
@@ -167,12 +169,13 @@ if ($web) {
     Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
 } elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
 
-if ($mode -eq 'fullscreen') {
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\render.py`" --kiosk" -WorkingDirectory $App
+if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a full-screen one (--kiosk)
+    $arg = @{ browser = '--open'; fullscreen = '--kiosk' }[$mode]
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\render.py`" $arg" -WorkingDirectory $App
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $principal = New-ScheduledTaskPrincipal -GroupId (Account 'S-1-5-32-545') -RunLevel Limited
     Register-ScheduledTask -TaskPath $TaskPath -TaskName 'display' -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
-        -Settings $settings -Principal $principal -Description 'nuc-console dashboard, full screen at logon (Alt+F4 closes it, F11 leaves full screen)' -Force | Out-Null
+        -Settings $settings -Principal $principal -Description "nuc-console dashboard at logon ($mode)" -Force | Out-Null
 }
 
 # ---- 4. first snapshot, baseline, dashboard ----------------------------------------------------------------------------
@@ -189,12 +192,10 @@ if ($web) {  # the web view starts in a moment: wait for it before opening anyth
         Start-Sleep -Seconds 1
     }
 }
-if ($mode -eq 'fullscreen') {
+if ($mode -ne 'none') {  # now, for the user at the screen (the task runs as that user, never as administrator)
     try { Start-ScheduledTask -TaskPath $TaskPath -TaskName 'display' } catch { Say 'the dashboard opens at the next logon' }
-} elseif ($mode -eq 'browser') {
-    Start-Process explorer.exe $url  # through Explorer: the browser opens as the user, not as administrator
 }
 
-$how = @{ browser = "in your browser: Start menu > nuc-console, or $url"; fullscreen = "full screen at every logon (Alt+F4 closes it, F11 leaves full screen); also Start menu > nuc-console"; none = 'not shown (-Display none)' }[$mode]
+$how = @{ browser = "opens in your browser at every logon (again: Start menu > nuc-console, or $url)"; fullscreen = "opens full screen at every logon (Alt+F4 closes it, F11 leaves full screen; again: Start menu > nuc-console)"; none = 'never opens by itself (-Display none)' }[$mode]
 Say "ok: collector running as SYSTEM; dashboard $how. Text size: A- / A+ at the bottom of the page"
 Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept (open a new prompt for the PATH)"

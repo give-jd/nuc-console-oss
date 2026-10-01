@@ -134,9 +134,11 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 | `NUC_CONSOLE_DISPLAY=` | |
 |---|---|
-| `browser` (default) | **Applications › nuc-console** (or Spotlight) opens it in your normal browser: http://127.0.0.1:8787 |
-| `fullscreen` (or `kiosk`) | a full-screen window at every login, overview and Details pages taking turns. **Cmd+Q** closes it, **Ctrl+Cmd+F** leaves full screen |
-| `none` | nothing (a Mac without a monitor: `nuc-console-problems`) |
+| `browser` (default) | at install and at every login it opens in a normal window of your browser (http://127.0.0.1:8787) |
+| `fullscreen` (or `kiosk`) | at install and at every login it opens full screen, overview and Details pages taking turns. **Cmd+Q** closes it, **Ctrl+Cmd+F** leaves full screen |
+| `none` | it never opens by itself (a Mac without a monitor: `nuc-console-problems`) |
+
+**Applications › nuc-console** (or Spotlight) opens it again any time. A plain re-install keeps the mode you chose.
 
 **Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
 
@@ -159,8 +161,9 @@ What it does (idempotent):
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
 4. Starts the web view as the hidden user `_nuc-console`: on 127.0.0.1, or as configured in `[web]` if you enabled it there.
-5. `browser`: adds `/Applications/nuc-console.webloc` and opens the page now. `fullscreen`: installs a **LaunchAgent** that opens a
-   full-screen Chrome, Edge, Brave or Chromium window at every login (else Safari: press Ctrl+Cmd+F once), and opens it now.
+5. Adds `/Applications/nuc-console.webloc` and a **LaunchAgent** that opens the dashboard at every login, as the user: a normal
+   window of the default browser (`browser`), or full screen (`fullscreen`: Chrome, Edge, Brave or Chromium if installed, else
+   Safari: press Ctrl+Cmd+F once). It opens it right away for the user at the screen.
 6. Stores the port baseline (only if missing).
 
 Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is written to `config.ini`; without it the file decides).
@@ -195,7 +198,7 @@ sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launch
 |---|---|
 | "collector not running" | `sudo launchctl print system/com.nuc-console.collector`; `/var/log/nuc-console/collector.log` |
 | The page does not open | `curl http://127.0.0.1:8787/healthz`; `sudo launchctl print system/com.nuc-console.web`; `/var/log/nuc-console/web.log` |
-| No full-screen window after login | `[display] mode = fullscreen`?; `launchctl print gui/$(id -u)/com.nuc-console.display`; `~/Library/Application Support/nuc-console/display.log` |
+| Nothing opens at login | `[display] mode` is not `none`?; `launchctl print gui/$(id -u)/com.nuc-console.display`; `~/Library/Application Support/nuc-console/display.log` |
 | Safari, not full screen | install Chrome/Edge, or set `[display] browser` to a browser's path |
 | Docker or Tailscale "not installed" | the collector looks in `/usr/local/bin`, `/opt/homebrew/bin` and the apps in `/Applications`; someone must be logged in at the console |
 
@@ -206,9 +209,11 @@ installer runs on **127.0.0.1 only** (not reachable from the network). You choos
 
 | `install-windows.cmd -Display` | |
 |---|---|
-| `browser` (default) | **Start › nuc-console** opens it in your normal browser: http://127.0.0.1:8787 |
-| `fullscreen` (or `kiosk`) | a full-screen Edge window at every logon, overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
-| `none` | nothing (a machine without a monitor: `nuc-console-problems`) |
+| `browser` (default) | at install and at every logon it opens in a normal window of your browser (http://127.0.0.1:8787) |
+| `fullscreen` (or `kiosk`) | at install and at every logon it opens full screen in Edge, overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
+| `none` | it never opens by itself (a machine without a monitor: `nuc-console-problems`) |
+
+**Start › nuc-console** opens it again any time. A plain re-install (double-click) keeps the mode you chose.
 
 **Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
 
@@ -225,8 +230,8 @@ What it does (idempotent):
 2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`): writable only by SYSTEM and
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
-   `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and, in `fullscreen` mode,
-   `display` (every user, at logon).
+   `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
+   logon: opens the dashboard as that user, in the browser or full screen; not with `none`).
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt).
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
@@ -263,7 +268,7 @@ the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-c
 |---|---|
 | "collector not running" | Task Scheduler › `nuc-console` › `collector` (Last Run Result); `%ProgramData%\nuc-console\logs\collector.log` |
 | The page does not open | task `web`; `%ProgramData%\nuc-console\logs\web.log`; http://127.0.0.1:8787/healthz must answer `ok` |
-| No full-screen window after logon | `[display] mode = fullscreen`?; task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; Edge must be installed (or set `[display] browser`) |
+| Nothing opens at logon | `[display] mode` is not `none`?; task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; full screen needs Edge (or `[display] browser`) |
 | Docker "not installed" or "not responding" | Docker Desktop must be running (it runs in a user's session) |
 | Many `?` in EXPOSURE | rules the evaluation cannot read with certainty: see the NOTE column; `Get-NetFirewallRule` shows them |
 
