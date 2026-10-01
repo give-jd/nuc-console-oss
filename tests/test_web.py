@@ -1,4 +1,6 @@
+import html
 import http.client
+import re
 import os
 import sys
 import tempfile
@@ -132,8 +134,13 @@ class Web(unittest.TestCase):
         _, _, big = get(self.open, "/?fit=1&zoom=150")
         _, _, small = get(self.open, "/?fit=1&zoom=75")
         self.assertIn("calc(98vw /", big)                                                            # the text fills the width
-        self.assertIn("console 133x40", big)                                                         # bigger text = a smaller grid
-        self.assertIn("console 267x80", small)
+        self.assertIn("console 133x", big)                                                           # bigger text = fewer columns
+        self.assertIn("console 267x", small)
+        names = lambda page: set(re.findall(r"── ([A-Z][A-Z ·]+?) ─", render.ANSI.sub("", html.unescape(re.sub("<[^>]+>", "", page)))))  # noqa: E731
+        _, _, huge = get(self.open, "/?fit=1&zoom=200")
+        self.assertEqual(names(huge), names(small))                                                  # zooming in never loses a section
+        self.assertIn("NETWORK TRAFFIC", names(huge))
+        self.assertNotIn("… +", html.unescape(re.sub("<[^>]+>", "", huge)))                         # nor an item: the page scrolls
         self.assertIn('href="/?zoom=125&amp;fit=1">A−</a> 150% <a href="/?zoom=175&amp;fit=1">A+', big)
         self.assertIn('href="/?cols=100&amp;zoom=150&amp;fit=1">compact', big)                    # the other links keep the size
         _, _, kiosk = get(self.open, "/?fit=1&cols=220&rows=64&rotate=1&kiosk=1")

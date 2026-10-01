@@ -48,7 +48,7 @@ macOS and Windows have no text console to take over. The installers start the re
 | Key | Default | Meaning |
 |---|---|---|
 | `mode` | `browser` | How the dashboard opens, at install and at every login. `browser`: a normal window of your default browser. `fullscreen` (or `kiosk`): full screen, overview and Details pages taking turns. `none`: never by itself (a machine without a monitor). The **nuc-console** shortcut (Windows Start menu, macOS Applications) opens it again any time. The installers apply it: run them again after a change, or choose with `install-windows.cmd -Display fullscreen` / `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (that writes this key; a plain re-install keeps it) |
-| `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). The **A− / A+** links at the bottom of the page change it while you look |
+| `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). In a browser window **nothing is left out**: every section and every item, the page scrolls; full screen shows what does not fit on the rotating Details pages. The **A− / A+** links at the bottom of the page change it while you look |
 | `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
 
 The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
