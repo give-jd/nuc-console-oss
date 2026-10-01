@@ -49,6 +49,7 @@ DEMO_FREE = 412 * 10 ** 9
 
 VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server"}
 LOCKED = "locked by config.ini ([ai] web_actions = no): the page and the screen only show"
+ASKING = "asking the model: the answer appears below (a small model on a slow CPU may need a minute)"
 
 
 class Engine(object):
@@ -774,7 +775,7 @@ class Engine(object):
                 return self._result(False, "busy: an answer is being written; wait for it")
             self.pending = {"kind": kind, "q": label, "started": time.time()}
             self._chat_thread = threading.Thread(target=self._chat_run, args=(kind, label, work), daemon=True)
-            ok = self._result(True, "asking the model: the answer appears below (a small model on a slow CPU may need a minute)")
+            ok = self._result(True, ASKING)
             self._chat_thread.start()
         return ok
 
@@ -791,6 +792,8 @@ class Engine(object):
             with self.lock:
                 self.history.append({"kind": kind, "q": label, "res": res, "error": error, "at": time.time()})
                 self.pending = None
+                if self.notice and self.notice["text"] == ASKING:  # the answer is on the page: "asking the model" is no longer true
+                    self.notice = None
                 self.version += 1
 
     def wait_chat(self, timeout=30):

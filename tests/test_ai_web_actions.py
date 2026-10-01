@@ -887,6 +887,25 @@ class Chat(Base):
         self.assertEqual(e["res"]["tools_used"], ["events"])
         self.assertEqual(self.model.posts()[0]["body"]["messages"][1]["content"], "which app crashes?")
 
+    def test_asking_the_model_is_said_only_while_it_is_asked(self):
+        release = threading.Event()
+        self.model.queue.append({"body": ta.completion("done."), "wait": release})
+        ok, text = self.eng.ask("is it up?")
+        self.assertEqual((ok, text), (True, aiweb.ASKING))
+        self.assertEqual(self.eng.snapshot()["notice"]["text"], aiweb.ASKING)
+        release.set()
+        self.chat()
+        self.assertIsNone(self.eng.snapshot()["notice"], "the answer is on the page: the notice must not go on saying it is being asked")
+
+    def test_a_notice_that_is_not_the_question_is_kept_when_the_answer_comes(self):
+        release = threading.Event()
+        self.model.queue.append({"body": ta.completion("done."), "wait": release})
+        self.eng.ask("is it up?")
+        self.eng._result(False, "something else happened")
+        release.set()
+        self.chat()
+        self.assertEqual(self.eng.snapshot()["notice"]["text"], "something else happened")
+
     def test_the_request_never_waits_for_the_model_and_the_answer_is_written_by_another_thread(self):
         release, threads = threading.Event(), []
         self.model.queue.append({"body": ta.completion("late"), "wait": release})
