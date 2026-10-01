@@ -37,6 +37,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `spacing` | `1` | A blank line under each section title. If something would be cut, the layout is first retried without it: complete content beats spacing |
 | `details` | `yes` | The overview cuts a list only when it really does not fit; those sections then get **Details** pages showing everything, rotating on the monitor (it has no keyboard). `no`: never rotate |
 | `overview_seconds` | `45` | How long the overview stays before the Details pages (10-600) |
+| `map_in_rotation` | `no` | `yes`: the MAP, expanded as far as it fits, joins the pages the monitor rotates through (a monitor with no keyboard). The interactive MAP is always one key / one click away |
 | `rotate_seconds` | `15` | How long each page stays in `rotate` mode and each Details page (3-600) |
 | `refresh_seconds` | `2` | Seconds between two redraws, **1–10** (smaller or larger values are clamped): the console, the full-screen window and the browser pages, where the **− / +** links next to "refresh every" change it while you look. Faster = livelier CPU and traffic bars, a little more CPU |
 

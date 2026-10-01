@@ -16,10 +16,12 @@ import signal
 import socket
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 
-import nuc_config  # same directory
+import graph  # same directory: the MAP model
+import nuc_config
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -2202,6 +2204,12 @@ def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None, scroll
         chunks = [lines[i:i + body_h] for i in range(0, len(lines), body_h)] or [[]]
         out += [(name, i + 1, len(chunks), ch) for i, ch in enumerate(chunks)]
     out += [("Details", i + 1, len(det), pg) for i, pg in enumerate(det)]  # full content of what the overview cut ("… +N more")
+    if CFG.get("map_in_rotation") and on("map"):  # a monitor without a keyboard sees the Map too, opened as far as it fits
+        try:
+            lines = map_slide(cont, net, boot, baseline, w, body_h)
+        except Exception as e:  # noqa: BLE001 - same rule as the pages above
+            lines = [c(31, f" error on page Map: {safe(repr(e))[:w - 20]}")]
+        out.append(("Map", 1, 1, lines))
     return out
 
 
@@ -2221,8 +2229,9 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False):
-    """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1)."""
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None):
+    """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1).
+    mapkey: say that `m` opens the Map (default: when keys are); foot: a footer of its own (the Map's key help)."""
     name, part, parts, body = slide
     text, code = status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
@@ -2234,9 +2243,11 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False):
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
-    foot = c(90, (f" single screen   console {size}" if n == 1 else
-                  f" screen {idx + 1}/{n}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
+    mk = "   m: map" if (keys if mapkey is None else mapkey) and on("map") else ""
+    if foot is None:
+        foot = c(90, (f" single screen{mk}   console {size}" if n == 1 else
+                      f" screen {idx + 1}/{n}{mk}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
+                      + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
     foot = clip(foot, w)
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
@@ -2260,6 +2271,273 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
+def demo_defaults():
+    """--demo: the host name and the [webapps] the screenshots show (one up, one expected-but-down)."""
+    socket.gethostname = lambda: "demo-host"
+    if not CFG["webapps"]:
+        CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
+
+
+def map_graph(smp=None):
+    """(MAP graph, header problems) of the current state: shared by the console's Map screen and the web view's map page."""
+    st = snapshot(0)
+    sm = smp.sample() if smp else {"thermal": {}}
+    if DEMO:
+        demo_defaults()
+    G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"])
+    return G, safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+
+
+# ---- MAP screen: graph.py's tree drawn on the console, moved through with the keyboard ------------------------------------
+
+MAP_PANE_W = 140  # from this width up the details pane sits beside the tree, below it otherwise
+MAP_IDLE_S = 600  # the Map left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
+ST_COL = {"err": "31", "down": "31", "warn": "33", "unknown": "33", "ok": "32", "info": ""}
+LV_COL = {"err": "31", "warn": "33", "ok": "32", "info": "90"}
+EV_COL = {"seen": "1", "declared": "", "possible": "90", "bind": "90"}  # how sure the link is: bright, normal, dim
+
+
+def cc(code, s):
+    """c() that leaves the terminal's own colour alone when there is no code."""
+    return c(code, s) if code else s
+
+
+class MapView(object):
+    """The interactive Map: open branches (graph.State), the selected row (its key survives refreshes; its index is where
+    the cursor stays when that row vanishes), the scroll position, the details pane, when it was opened and last touched."""
+
+    def __init__(self, now=None):
+        self.st, self.cur, self.idx, self.top, self.details = graph.State(), None, 0, 0, False
+        self.opened = self.touched = now or time.time()
+
+
+def map_sync(mv, rs):
+    """The cursor back on its row after the rows changed: by key, else the same index (clamped). Returns the index."""
+    i = graph.find(rs, mv.cur) if mv.cur else None
+    mv.idx = i if i is not None else max(0, min(mv.idx, len(rs) - 1))
+    mv.cur = rs[mv.idx]["key"] if rs else None
+    return mv.idx
+
+
+def map_parent(rs, i):
+    d = rs[i]["depth"]
+    return next((j for j in range(i - 1, -1, -1) if rs[j]["depth"] < d), i)
+
+
+def map_key(mv, key, rs, page=10):
+    """One key in the Map, on the rows rs drawn from mv.st. Returns 'back' (leave the Map), 'rows' (branches opened or
+    closed: rebuild the rows, then map_sync) or '' (only the cursor or the details pane changed)."""
+    if key in ("tab", "btab", "m", "esc", "q"):
+        return "back"
+    if key in ("enter", "space"):
+        mv.details = not mv.details
+        return ""
+    if key in ("e", "p"):
+        if key == "e":
+            mv.st.expand_all()
+        else:
+            mv.st.only = not mv.st.only
+        return "rows"
+    if not rs:
+        return ""
+    i = map_sync(mv, rs)
+    row = rs[i]
+    if key == "c":  # every branch closes: the cursor goes up to its root, which stays
+        i = next((j for j in range(i, -1, -1) if rs[j]["depth"] == 0), i)
+        mv.idx, mv.cur = i, rs[i]["key"]
+        mv.st.collapse_all()
+        return "rows"
+    if key in ("right", "l", "left", "h") and (row["open"] if key in ("left", "h") else row["kids"] and not row["open"]):
+        mv.st.toggle(row)
+        return "rows"
+    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rs) - 1,
+         "right": i + 1 if row["open"] else i, "l": i + 1 if row["open"] else i,  # already open: down to its first child
+         "left": map_parent(rs, i), "h": map_parent(rs, i)}.get(key, i)  # closed or a leaf: up to its parent
+    mv.idx = max(0, min(i, len(rs) - 1))
+    mv.cur = rs[mv.idx]["key"]
+    return ""
+
+
+def map_layout(G, w, h, details=False):
+    """(notes shown, tree rows, details rows, details beside the tree?) of a Map body h lines tall."""
+    notes = min(len(G["notes"]), max(0, (h - 4) // 4))
+    avail = max(1, h - 1 - notes)
+    if not details or avail < 6:
+        return notes, avail, 0, False
+    if w >= MAP_PANE_W:
+        return notes, avail, avail, True
+    return notes, avail - avail // 2, avail // 2, False
+
+
+def map_scroll(top, i, n, rows, margin=2):
+    """First tree row shown, so that row i stays in sight, a few rows from the edges when there is room."""
+    m = min(margin, max(0, (rows - 1) // 2))
+    top = max(min(top, i - m), i + m + 1 - rows)
+    return max(0, min(top, n - rows))
+
+
+def map_title(G, w, only=False):
+    """'── MAP  27 nodes · 14 links · ✖ 7 problems ───── ━━► seen  ╌╌► declared …': the legend goes first when narrow."""
+    k = graph.counts(G)
+    probs = (c(31, f"✖ {k['problems']} need" + ("s" if k["problems"] == 1 else "") + " attention") if k["problems"]
+             else c(90, "none needs attention"))  # not a green: missing data also draws nothing
+    left = (c(36, "──") + c("1;36", " MAP ") + " " + c(90, f"{plural(k['nodes'], 'node')} · {plural(k['edges'], 'link')} · ") + probs
+            + (c("1;33", "  problems only") if only else "") + " ")
+    legend = []
+    for item in graph.LEGEND.split("  "):
+        glyph, _, word = item.partition(" ")
+        ev = "seen" if "━" in glyph else "declared" if "╌" in glyph else "possible" if "┄" in glyph else "bind"
+        legend.append(cc(EV_COL[ev], glyph) + " " + c(90, word))
+    while legend and vlen(left) + 4 + vlen("  ".join(legend)) > w:
+        legend.pop()
+    right = "  ".join(legend)
+    return clip(left + c(36, "─" * max(0, w - vlen(left) - vlen(right) - (1 if right else 0))) + (" " + right if right else ""), w)
+
+
+def map_row(G, row):
+    """One tree row: tree (dim), toggle, arrow (by evidence), label (by state), owner of a port, port used, sub, note."""
+    p, n = graph.parts(G, row), G["nodes"].get(row["node"]) or {}
+    st, label = p["state"], safe(p["label"])
+    s = (c(90, safe(p["tree"])) if p["tree"] else "") + c("36" if p["toggle"] in ("▸", "▾") else "90", safe(p["toggle"])) + " "
+    if p["arrow"]:
+        s += cc(EV_COL.get(p["ev"], ""), safe(p["arrow"])) + " "
+    if not row["depth"]:
+        s += c("1;" + {"err": "31", "down": "31", "warn": "33"}.get(st, "36"), label)
+    else:  # a symbol too: colour alone is not enough
+        s += cc(ST_COL.get(st, ""), {"down": "✖ ", "unknown": "? "}.get(st, "") + label)
+    if p["kind"] == "port":
+        s += "  " + (c(33, "?") if p["owner"] in ("", "?") else c(1, safe(p["owner"])))
+    if p["port"]:
+        s += " " + safe(p["port"])
+    if p["sub"]:
+        s += "  " + c(90, safe(p["sub"]))
+    if p["note"]:
+        lv = next((lv for lv, t in n.get("findings") or [] if t == p["note"]), "")
+        s += "  " + c({"err": "31", "warn": "33"}.get(lv, "90"), safe(p["note"]))
+    return s
+
+
+def map_pane(G, nid, w, h):
+    """Everything known about a node, w columns, h lines at most: long values wrap, what does not fit is counted."""
+    items = graph.details(G, nid)
+    lw = min(max([len(safe(x[0])) for x in items] + [4]) + 2, 18, max(6, w // 3))
+    out = [section("DETAILS", w)]
+    for i, (label, value, level) in enumerate(items):
+        label, col = safe(label), LV_COL.get(level, "")
+        if i == 0:
+            col = "1;" + col if col else "1"
+        head = cc(col if label.strip() in ("!", "·") else "90", pad(label[:lw - 1], lw))
+        chunks = textwrap.wrap(safe(value), max(8, w - lw), break_on_hyphens=False) or [""]
+        out += [(head if j == 0 else " " * lw) + cc(col, x) for j, x in enumerate(chunks)]
+    if len(out) > h:
+        out = out[:max(0, h - 1)] + [c(90, f" … +{len(out) - h + 1} more lines")]
+    return out[:h]
+
+
+def map_view(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
+    """(the Map body: at most h lines, none wider than w; the first tree row shown). details: True = the selected row's
+    node, or a node id. Without a cursor (the rotation slide) what does not fit is counted on the last line."""
+    notes, tree_h, pane_h, side = map_layout(G, w, h, bool(details))
+    out = [map_title(G, w, only)]
+    nl = [safe(x) for x in G["notes"]]
+    if len(nl) > notes:
+        nl = nl[:max(0, notes - 1)] + ([f"… +{len(nl) - notes + 1} more notes"] if notes else [])
+    out += [clip(c(90, "  · " + x), w) for x in nl]
+    i = graph.find(rs, cursor_key) if cursor_key else None
+    tw = w - (int(w * 0.42) + 3 if side else 0)
+    if not rs:
+        tree, top = [msg("info", "no problem on any path: p shows every path" if only else "nothing to draw: see the notes above")], 0
+    elif cursor_key is None and len(rs) > tree_h:
+        tree, top = [clip(map_row(G, r), tw) for r in rs[:tree_h - 1]] + [c(90, f"   … +{len(rs) - tree_h + 1} more rows")], 0
+    else:
+        top = map_scroll(top or 0, i or 0, len(rs), tree_h)
+        tree = [c(7, pad(ANSI.sub("", clip(map_row(G, rs[j]), tw)), tw)) if j == i else clip(map_row(G, rs[j]), tw)
+                for j in range(top, min(len(rs), top + tree_h))]
+    nid = details if isinstance(details, str) else rs[i if i is not None else 0]["node"] if rs else None
+    if pane_h and nid:
+        tree += [""] * (tree_h - len(tree))
+        if side:
+            pane = map_pane(G, nid, w - tw - 3, pane_h)
+            tree = [pad(t, tw) + c(90, " │ ") + (pane[k] if k < len(pane) else "") for k, t in enumerate(tree)]
+        else:
+            tree += map_pane(G, nid, w, pane_h)
+    return [clip(x, w) for x in (out + tree)[:h]], top
+
+
+def map_lines(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
+    """The Map body as ANSI lines (title and legend, notes, tree, details pane): the console, --once, the rotation slide."""
+    return map_view(G, rs, w, h, cursor_key, details, top, only)[0]
+
+
+def map_footer(mv, n, w, truncated=False):
+    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    hide, only = mv.details, mv.st.only
+    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (2, "←→: close/open", "←→: open"),
+            (3, "Enter: " + ("hide details" if hide else "details"), "Enter: " + ("hide" if hide else "details")),
+            (5, "e/c: expand/collapse all", "e/c: all"), (4, "p: " + ("all paths" if only else "problems only"), "p: " + ("all" if only else "problems")),
+            (0, "m/Esc: back", "m: back")]
+    pos = f"{mv.idx + 1}/{n}{'+' if truncated else ''}" if n else "0/0"
+    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
+    keys = [k for k in keys if k[2]]
+    while len(text) > w and keys:
+        text = f" {pos}  " + "  ".join(k[2] for k in keys)
+        keys.remove(max(keys))
+    return clip(c(90, text), w)
+
+
+def map_screen(G, pb, mv, w, h):
+    """(the interactive Map as one frame: header, body, key help; the rows it shows): the live loop and --once."""
+    rs = graph.rows(G, mv.st)
+    map_sync(mv, rs)
+    body, mv.top = map_view(G, rs, w, h - 2, mv.cur, mv.details, mv.top, mv.st.only)
+    return frame(("Map", 1, 1, body), 0, 1, w, h, pb, foot=map_footer(mv, len(rs), w, getattr(rs, "truncated", False))), rs
+
+
+def map_slide(cont, net, boot, baseline, w, body_h):
+    """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
+    G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline)
+    return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
+
+
+def map_select(G, mv, text):
+    """The cursor on the first row whose name (or port owner) contains text, the branches above it opened. False: none."""
+    t = text.lower()
+    for rs in (graph.rows(G, mv.st), graph.rows(G, graph.State(all=True, only=mv.st.only))):
+        i = next((j for j, r in enumerate(rs) if t in (G["nodes"][r["node"]]["label"] + " " + graph.parts(G, r)["owner"]).lower()), None)
+        if i is None:
+            continue
+        d = rs[i]["depth"]
+        for r in reversed(rs[:i]):  # its ancestors: the nearest row above it at each smaller depth
+            if r["depth"] < d:
+                d = r["depth"]
+                mv.st.shut.discard(r["key"])
+                if d:
+                    mv.st.open.add(r["key"])
+        mv.cur = rs[i]["key"]
+        return True
+    return False
+
+
+def map_once(argv, w, h):
+    """`--once --view map`: the Map screen as the console draws it (tests, README screenshots).
+    --expand all: every branch open (e); --expand fit: opened level by level while it fits the screen, as the rotation
+    slide does; --expand N: the same for at most N tree rows; none: only the roots open, as when `m` opens it.
+    --select TEXT: the cursor on the first row whose name contains TEXT (any case), opening the branches above it;
+    --details: the details pane of the selected row (Enter); --only: problems only (p)."""
+    opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
+    G, pb = map_graph(None if DEMO else Sampler())
+    mv = MapView()
+    mv.st.only, mv.details = "--only" in argv, "--details" in argv
+    exp = opt("--expand")
+    if exp == "all":
+        mv.st.expand_all()
+    elif exp == "fit" or exp.isdigit():
+        mv.st.open = graph.fit_open(G, int(exp) if exp.isdigit() else map_layout(G, w, h - 2, mv.details)[1])
+    if opt("--select"):
+        map_select(G, mv, opt("--select"))
+    return map_screen(G, pb, mv, w, h)[0]
+
+
 def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
@@ -2267,9 +2545,7 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
     if DEMO:
         import demo
         sm = demo.sampler_data(sm, DEMO_OS)
-        socket.gethostname = lambda: "demo-host"
-        if not CFG["webapps"]:
-            CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}  # one up, one expected-but-down
+        demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll)
     if scroll:  # the page is as tall as its content (header + body + footer)
         h = len(sl[0][3]) + 2
@@ -2284,9 +2560,7 @@ def render_screens(smp, w, h, mode=None, keys=True, page=False):
     if DEMO:
         import demo
         sm = demo.sampler_data(sm, DEMO_OS)
-        socket.gethostname = lambda: "demo-host"
-        if not CFG["webapps"]:
-            CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
+        demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
     return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
@@ -2305,10 +2579,16 @@ def once(argv):
     DEMO_OS = argv[argv.index("--demo-os") + 1] if "--demo-os" in argv[:-1] else None
     arg = lambda k, d: int(argv[argv.index(k) + 1]) if k in argv else d
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
-    smp = Sampler()
-    smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
-    time.sleep(0.5)
-    out, _ = render_screen(smp, w, h, n=n)
+    if "--view" in argv[:-1] and argv[argv.index("--view") + 1] == "map":  # the Map screen (see map_once for its options)
+        if not on("map"):
+            print("the map is off: [features] map = no in config.ini", file=sys.stderr)
+            return 2
+        out = map_once(argv, w, h)
+    else:
+        smp = Sampler()
+        smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
+        time.sleep(0.5)
+        out, _ = render_screen(smp, w, h, n=n)
     print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 
@@ -2501,15 +2781,78 @@ def kiosk_file(argv, base, cols, rows):
         time.sleep(REFRESH_S)
 
 
+# ---- keys: the same names on every OS (up down left right pgup pgdn home end tab btab enter esc space, or the character) ---
+
+KEY_CHAR = {"\t": "tab", "\r": "enter", "\n": "enter", "\x1b": "esc", " ": "space"}
+CSI_KEY = {"A": "up", "B": "down", "C": "right", "D": "left", "H": "home", "F": "end", "Z": "btab"}
+TILDE_KEY = {"1": "home", "7": "home", "4": "end", "8": "end", "5": "pgup", "6": "pgdn"}  # Linux VT, xterm, rxvt
+WIN_SCAN = {"H": "up", "P": "down", "K": "left", "M": "right", "G": "home", "O": "end", "I": "pgup", "Q": "pgdn", "\x0f": "btab"}
+ESC_SEQ = re.compile(r"\x1b(\[\[|\[|O)([0-9;]*)([A-Za-z~])")  # CSI / SS3 (+ modifiers); '\x1b[[A' = F1 on the Linux VT
+ESC_TAIL = re.compile(rb"\x1b(\[\[?[0-9;]*|O)?$")  # a read that ends inside a sequence (or on a lone Esc)
+
+
+def decode_keys(raw):
+    """Key names in what a POSIX terminal sent: one read may hold several keys. Unknown sequences (F keys) are dropped."""
+    s = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw)
+    out, i = [], 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\x1b" and s[i + 1:i + 2] in ("[", "O"):
+            m = ESC_SEQ.match(s, i)
+            if m:
+                intro, args, fin = m.groups()
+                name = "" if intro == "[[" else TILDE_KEY.get(args.split(";")[0], "") if fin == "~" else CSI_KEY.get(fin, "")
+                out += [name] if name else []
+            i = m.end() if m else i + 2  # cut short: dropped, never read as Esc + letters
+            continue
+        if ch == "\r" and s[i + 1:i + 2] == "\n":
+            i += 1
+            continue
+        name = KEY_CHAR.get(ch) or (ch if ch.isprintable() else "")
+        out += [name] if name else []
+        i += 1
+    return out
+
+
+def read_keys(fd, wait):
+    """Keys typed on the POSIX terminal fd within `wait` seconds: [] if none, None when the terminal is gone."""
+    if not select.select([fd], [], [], max(0.0, wait))[0]:
+        return []
+    raw = os.read(fd, 64)
+    if not raw:
+        return None
+    for _ in range(4):  # an escape sequence cut in two by the read, or a lone Esc: the rest comes within milliseconds
+        if not ESC_TAIL.search(raw) or not select.select([fd], [], [], 0.05)[0]:
+            break
+        more = os.read(fd, 64)
+        if not more:
+            break
+        raw += more
+    return decode_keys(raw)
+
+
+def win_key(ch, nxt=""):
+    """The name of a key read with msvcrt.getwch(): arrows & co. are two reads, '\\x00' or '\\xe0' then a scan code."""
+    if ch in ("\x00", "\xe0") and nxt:
+        return WIN_SCAN.get(nxt, "")
+    if ch == "\x00":
+        return ""
+    return KEY_CHAR.get(ch) or (ch if ch.isprintable() else "")
+
+
 def windows_key(timeout):
-    """A key typed in a Windows console within `timeout` seconds, or '' (msvcrt has no select)."""
+    """The name of a key typed in a Windows console within `timeout` seconds, or '' (msvcrt has no select)."""
     import msvcrt
     end = time.monotonic() + timeout
-    while time.monotonic() < end:
+    while True:
         if msvcrt.kbhit():
-            return msvcrt.getwch()
+            ch = msvcrt.getwch()
+            # a prefix is followed at once by its scan code; '\xe0' alone is a letter ('à' on an Italian keyboard)
+            nxt = msvcrt.getwch() if ch == "\x00" or (ch == "\xe0" and msvcrt.kbhit()) else ""
+            return win_key(ch, nxt)
+        if time.monotonic() >= end:
+            return ""
         time.sleep(0.05)
-    return ""
 
 
 def main(argv):
@@ -2545,6 +2888,9 @@ def main(argv):
             tty.setcbreak(fd)
         out.write("\x1b[?25l\x1b[2J")
         t0, hold_until, held, size = time.time(), 0, 0, None
+        map_ok = on("map") and bool(old or win_keys)  # the Map needs a keyboard: without one only map_in_rotation shows it
+        mv, G, pb, fresh, rs = None, None, [], 0.0, []  # the Map while it is shown, its graph and problems, next data refresh
+        err, last_pb = None, []  # why the Map could not be drawn (until the next refresh); the rotation's last problems
         while True:
             w, h = shutil.get_terminal_size((120, 33))
             # config.ini [dashboard] columns/rows: layout size forced smaller than the real console (never larger: it would run off-screen)
@@ -2554,28 +2900,61 @@ def main(argv):
                 out.write("\x1b[2J")
                 size = (w, h)
             w -= 1  # the Linux VT keeps the cursor on the last column: \x1b[K there would erase the last character
-            st, sm = snapshot(w), smp.sample()
-            sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
             now = time.time()
-            idx = held if now < hold_until else pick_slide(sl, now - t0)
-            out.write("\x1b[H" + frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
-                                        safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"],
-                                                      baseline=st["baseline"])))
+            if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
+                t0, mv = t0 + now - mv.opened, None
+                out.write("\x1b[2J")
+            if mv is not None:  # the Map: new data every REFRESH_S, a new frame at every key
+                try:
+                    if now >= fresh:
+                        fresh, err = now + REFRESH_S, None  # set first: after a failure keys redraw the error, never postpone the retry
+                        G, pb = map_graph(smp)
+                    if err is None:
+                        screen, rs = map_screen(G, pb, mv, w, h)
+                except Exception as e:  # noqa: BLE001 - a broken map must not take the console down; Esc still goes back
+                    G, rs, err = None, [], e
+                    pb = last_pb + [(2, "the map could not be built")]  # its problems are unknown: never a reassuring "ALL OK"
+                if err is not None:
+                    screen = frame(("Map", 1, 1, [c(31, f" error on the map: {safe(repr(err))[:w - 20]}")]), 0, 1, w, h, pb,
+                                   foot=c(90, " m/Esc back"))
+                wait = fresh - time.time()
+            else:
+                st, sm = snapshot(w), smp.sample()
+                sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
+                idx = held if now < hold_until else pick_slide(sl, now - t0)
+                last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h, last_pb, mapkey=map_ok)
+                wait = REFRESH_S
+            out.write("\x1b[H" + screen)
             out.flush()
-            k = ""
-            if old and select.select([fd], [], [], REFRESH_S)[0]:
-                raw = os.read(fd, 8)
-                if not raw:  # tty closed/hangup: select always fires, without a pause it would be a busy loop
+            keys = []
+            if old:
+                keys = read_keys(fd, wait)
+                if keys is None:  # tty closed/hangup: select always fires, without a pause it would be a busy loop
                     time.sleep(REFRESH_S)
                     continue
-                k = raw.decode(errors="ignore")[:1]
             elif win_keys:
-                k = windows_key(REFRESH_S)
-            elif not old:
-                time.sleep(REFRESH_S)
-            if k.isdigit() and 1 <= int(k) <= len(PAGES):
-                held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
-                out.write("\x1b[2J")
+                keys = [k for k in [windows_key(wait)] if k]
+            else:
+                time.sleep(max(0.0, wait))
+            for k in keys:
+                if mv is not None:
+                    mv.touched = time.time()
+                    act = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
+                    if act == "back":
+                        t0, mv = t0 + time.time() - mv.opened, None  # the rotation was paused: it goes on where it was
+                        out.write("\x1b[2J")
+                        break
+                    if act == "rows" and G is not None:  # the next key of the same read moves on the new tree
+                        rs = graph.rows(G, mv.st)
+                        map_sync(mv, rs)
+                elif k in ("m", "tab") and map_ok:
+                    mv, fresh = MapView(), 0.0
+                    out.write("\x1b[2J")
+                    break
+                elif len(k) == 1 and k in "123456789" and int(k) <= len(PAGES):
+                    held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
+                    out.write("\x1b[2J")
     finally:
         out.write("\x1b[?25h\x1b[0m")
         out.flush()

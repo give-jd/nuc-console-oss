@@ -32,7 +32,7 @@ SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "container
 def load(path=None):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int}"""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
-    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "sections": list(SECTIONS), "webapps": {},
+    cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100}}
@@ -70,11 +70,12 @@ def load(path=None):
             cfg["refresh_seconds"], dash_refresh = refresh("dashboard"), True
         except ValueError:
             print(f"nuc-console: {path}: [dashboard] refresh_seconds must be an integer (1-10)", file=sys.stderr)
-    if cp.has_section("dashboard") and cp.has_option("dashboard", "details"):
-        try:
-            cfg["details"] = cp.getboolean("dashboard", "details")
-        except ValueError:
-            print(f"nuc-console: {path}: [dashboard] details is not a boolean: kept on", file=sys.stderr)
+    for key in ("details", "map_in_rotation"):
+        if cp.has_section("dashboard") and cp.has_option("dashboard", key):
+            try:
+                cfg[key] = cp.getboolean("dashboard", key)
+            except ValueError:
+                print(f"nuc-console: {path}: [dashboard] {key} is not a boolean: kept {'on' if cfg[key] else 'off'}", file=sys.stderr)
     if cp.has_section("dashboard") and cp.has_option("dashboard", "sections"):
         asked = [x.strip().lower() for x in cp.get("dashboard", "sections").split(",") if x.strip()]
         for x in asked:
