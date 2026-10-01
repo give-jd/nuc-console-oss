@@ -8,6 +8,7 @@ A broken file never stops the dashboard: the problem goes to stderr and defaults
 import configparser
 import os
 import sys
+import threading
 
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
@@ -208,6 +209,20 @@ def load(path=None):
         except ValueError:
             print(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)", file=sys.stderr)
     return cfg
+
+
+_CURRENT, _CURRENT_LOCK = None, threading.Lock()
+
+
+def current():
+    """The configuration of this process: read once, by the first caller, and the very same dict at every call.
+    Modules read it through here (render.CFG is this object); a test or a --demo run changes it in place and every module sees it.
+    Code that needs the file read again (notify.py's cycle, the AI installer after it wrote a key) calls load()."""
+    global _CURRENT
+    with _CURRENT_LOCK:
+        if _CURRENT is None:
+            _CURRENT = load()
+        return _CURRENT
 
 
 def set_key(path, section, key, value):

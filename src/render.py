@@ -40,7 +40,7 @@ STATE = os.environ.get("NUC_CONSOLE_STATE", os.path.join(nuc_config.RUN_DIR, "co
 NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "net.json"))
 BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
 BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
-CFG = nuc_config.load()
+CFG = nuc_config.current()  # the process's one configuration dict (tests and --demo change it in place)
 # the commands the advice on screen refers to, in the words of this OS
 if WINDOWS:
     ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
