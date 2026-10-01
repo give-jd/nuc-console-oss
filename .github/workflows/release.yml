@@ -1,8 +1,11 @@
 name: release
 
-# Push a tag vX.Y.Z (X.Y.Z = VERSION in src/nuc_config.py) and this builds the archives for every OS with
-# tools/build_release.py, attests each one (SLSA build provenance, signed with this workflow's identity) and creates the
-# GitHub release with the archives and SHA256SUMS.
+# Push a tag vX.Y.Z (X.Y.Z = VERSION in src/nuc_config.py) and this builds the six archives (Linux and macOS for x86-64 and ARM,
+# Windows for x64 and ARM64) with tools/build_release.py, attests each one (SLSA build provenance, signed with this workflow's
+# identity) and creates the GitHub release with the archives and SHA256SUMS. Every archive carries the Python it runs with:
+# the Windows ones the official embeddable Python (pinned in install-windows.ps1), the Linux and macOS ones a python-build-standalone
+# CPython (pinned in tools/python-pins.json, filled by the python-pins job of ai-pins.yml): this workflow downloads the six files,
+# checks each against its pin, and the build checks them again. While a pin is null the workflow stops: no archive without a Python.
 #
 # Dry run: Actions > release > Run workflow, choose the branch or tag to build and type the tag it is for (v1.4.0). The same
 # checks and the same archives, uploaded as a workflow artifact: no provenance is signed and no release is created.
@@ -28,7 +31,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -61,38 +64,52 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
-      - name: Download the embeddable Pythons and check their SHA-256
+      - name: Download the Pythons (four python-build-standalone tarballs, two Windows embeddable zips) and check their SHA-256
         shell: bash
         run: |
           set -euo pipefail
-          # file, SHA-256 and URL of each one: from $PyVersion / $PyBuilds of install-windows.ps1, the pins the installer checks
-          python3 tools/build_release.py --list-python > python-zips.txt
-          [ "$(wc -l < python-zips.txt)" -eq 2 ]
-          mkdir pyzips
+          # file, SHA-256 and URL of each one: the Linux and macOS ones from tools/python-pins.json, the Windows ones from $PyVersion /
+          # $PyBuilds of install-windows.ps1, the pins the installer checks. This stops here while a pin is null (never pinned).
+          python3 tools/build_release.py --list-python > python-files.txt
+          [ "$(wc -l < python-files.txt)" -eq 6 ]
+          mkdir pythons
           while read -r file sha256 url; do
             curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
-              --output "pyzips/$file" "$url"
-            echo "$sha256  pyzips/$file" | sha256sum --check -
-          done < python-zips.txt
+              --output "pythons/$file" "$url"
+            echo "$sha256  pythons/$file" | sha256sum --check -
+          done < python-files.txt
+          [ "$(ls pythons | wc -l)" -eq 6 ]
 
       - name: Build the archives
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/build_release.py --version "$VERSION" --out dist --python-zips pyzips
+          python3 tools/build_release.py --version "$VERSION" --out dist --python-dir pythons
           # the same input must give the same bytes: build again and compare
-          python3 tools/build_release.py --version "$VERSION" --out dist-again --python-zips pyzips > /dev/null
+          python3 tools/build_release.py --version "$VERSION" --out dist-again --python-dir pythons > /dev/null
           diff <(ls dist) <(ls dist-again)
           for f in dist/*; do cmp "$f" "dist-again/$(basename "$f")"; done
           rm -r dist-again
-          for os in linux.tar.gz macos.tar.gz windows-x64.zip windows-arm64.zip; do
+          for os in linux-x86_64.tar.gz linux-arm64.tar.gz macos-arm64.tar.gz macos-x86_64.tar.gz windows-x64.zip windows-arm64.zip; do
             test -s "dist/nuc-console-$VERSION-$os"
           done
-          test "$(find dist -type f | wc -l)" -eq 5   # the four archives and SHA256SUMS
+          test "$(find dist -type f | wc -l)" -eq 7   # the six archives and SHA256SUMS
           (cd dist && sha256sum --check SHA256SUMS)
           ls -l dist
-          tar tzf "dist/nuc-console-$VERSION-linux.tar.gz"
+          tar tzf "dist/nuc-console-$VERSION-linux-x86_64.tar.gz" > linux-x86_64.list
+          head -40 linux-x86_64.list
           unzip -l "dist/nuc-console-$VERSION-windows-x64.zip"
+
+      - name: The Linux x86-64 archive runs on its own Python, unpacked somewhere else
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          tar xzf "dist/nuc-console-$VERSION-linux-x86_64.tar.gz" -C "$d"
+          cd "$d/nuc-console-$VERSION"
+          test "$(./run.sh --which-python)" = "$PWD/python/bin/python3"   # the Python of the archive, not the runner's
+          ./python/bin/python3 -c 'import sys, ssl, sqlite3, json, ctypes, http.server; print(sys.version); print(sys.prefix)'
+          timeout 120 ./run.sh --problems > /dev/null
 
       - name: Keep the archives for the release job (a dry run keeps them for a week, to look at)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -125,8 +142,8 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum --check SHA256SUMS
-          test "$(find . -type f | wc -l)" -eq 5   # the four archives and SHA256SUMS
-          for os in linux.tar.gz macos.tar.gz windows-x64.zip windows-arm64.zip; do
+          test "$(find . -type f | wc -l)" -eq 7   # the six archives and SHA256SUMS
+          for os in linux-x86_64.tar.gz linux-arm64.tar.gz macos-arm64.tar.gz macos-x86_64.tar.gz windows-x64.zip windows-arm64.zip; do
             test -s "nuc-console-${TAG#v}-$os"
           done
 

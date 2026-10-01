@@ -1,12 +1,16 @@
 """tools/build_release.py: the release archives (what is in them, byte-for-byte reproducible, SHA256SUMS, what is refused).
 
-Runs on every OS and downloads nothing: the Windows archives are built with small fake "Python zips" whose hashes are
-written to a fake pin file (--pins) that looks like the one in install-windows.ps1.
+Runs on every OS and downloads nothing: every archive carries a Python, and the tests build them with small fakes whose hashes
+are written to fake pin files: "Python zips" for Windows (--pins, a file like install-windows.ps1) and fake python-build-standalone
+tarballs for Linux and macOS (--python-pins, a file like tools/python-pins.json). The real pin file may still hold null (nothing
+is pinned until the python-pins job of the ai-pins workflow has been run): then the real build is refused, which is tested too.
 """
 import contextlib
+import gzip
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
@@ -50,8 +54,80 @@ def repo_version():
     return br.read_version(ROOT)
 
 
+FAKE_RELEASE = "20991231"  # the tag of a fake python-build-standalone release
+PBS_MTIME = 1500000000  # what the members of the fake tarballs carry: it must survive into the archives
+TOPS = ("linux-x86_64", "linux-arm64", "macos-arm64", "macos-x86_64")
+
+
+def fake_tarball(members, top="python"):
+    """-> bytes of a .tar.gz; members = [(name, kind, content/target, mode)] with kind one of file, dir, sym, hard, dev."""
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:gz") as t:
+        for name, kind, content, mode in members:
+            info = tarfile.TarInfo(name)
+            info.mtime, info.mode, info.uid, info.gid, info.uname, info.gname = PBS_MTIME, mode, 1234, 5678, "someone", "somegroup"
+            if kind == "dir":
+                info.type = tarfile.DIRTYPE
+                t.addfile(info)
+            elif kind in ("sym", "hard"):
+                info.type, info.linkname = (tarfile.SYMTYPE if kind == "sym" else tarfile.LNKTYPE), content
+                t.addfile(info)
+            elif kind == "dev":
+                info.type, info.devmajor, info.devminor = tarfile.CHRTYPE, 1, 3
+                t.addfile(info)
+            else:
+                info.size = len(content)
+                t.addfile(info, io.BytesIO(content))
+    return raw.getvalue()
+
+
+def fake_python_tree(label, version=FAKE_PY):
+    """The members of a small fake `install_only` Python: what the real one has in kind (an exec file, links, folders, a library)."""
+    minor = ".".join(version.split(".")[:2])
+    return [
+        ("python", "dir", None, 0o755),
+        ("python/bin", "dir", None, 0o755),
+        ("python/bin/python3.%s" % minor.split(".")[1], "file", ("#!/bin/sh\n# fake python for %s\n" % label).encode(), 0o755),
+        ("python/bin/python3", "sym", "python3.%s" % minor.split(".")[1], 0o777),
+        ("python/bin/python", "sym", "python3", 0o777),
+        ("python/bin/pip3", "file", b"#!/bin/sh\necho pip\n", 0o755),
+        ("python/lib", "dir", None, 0o755),
+        ("python/lib/libpython%s.so.1.0" % minor, "file", b"\x7fELF fake library for " + label.encode(), 0o755),
+        ("python/lib/libpython%s.so" % minor, "sym", "libpython%s.so.1.0" % minor, 0o777),
+        ("python/lib/python%s" % minor, "dir", None, 0o755),
+        ("python/lib/python%s/os.py" % minor, "file", b"# os of " + label.encode() + b"\n", 0o644),
+        ("python/lib/python%s/__pycache__" % minor, "dir", None, 0o755),
+        ("python/lib/python%s/__pycache__/os.cpython-39.pyc" % minor.replace(".", ""), "file", b"pyc " + label.encode(), 0o644),
+        ("python/lib/python%s/empty" % minor, "dir", None, 0o755),
+        ("python/include", "dir", None, 0o755),
+        ("python/include/Python.h", "file", b"/* header */\n", 0o600),
+    ]
+
+
+def standalone_pins(folder, tarballs, version=FAKE_PY, release=FAKE_RELEASE, **override):
+    """Writes the tarballs {suffix: bytes} into folder under their pinned names and a pin file for them; -> pin file path.
+    override: suffix -> dict of the fields of its entry to change (a wrong hash, a wrong size...)."""
+    targets = {}
+    for suffix, triple in br.STANDALONE_TARGETS.items():
+        file = "cpython-%s+%s-%s-install_only_stripped.tar.gz" % (version, release, triple)
+        data = tarballs[suffix]
+        write(os.path.join(folder, file), data)
+        targets[suffix] = {"target": triple, "file": file, "sha256": sha256(data), "size": len(data)}
+        targets[suffix].update(override.get(suffix, {}))
+    path = os.path.join(folder, "python-pins.json")
+    write(path, json.dumps({"_comment": "fake", "python": version, "release": release, "targets": targets}, indent=1))
+    return path
+
+
+def fake_standalone(folder, version=FAKE_PY, release=FAKE_RELEASE, **override):
+    """Four small fake python-build-standalone tarballs and their pin file; -> pin file path."""
+    return standalone_pins(folder, {suffix: fake_tarball(fake_python_tree(suffix, version)) for suffix in br.STANDALONE_TARGETS},
+                           version, release, **override)
+
+
 def fake_pythons(folder, version=FAKE_PY):
-    """Writes two small fake embeddable Pythons into folder and a pin file for them; -> pin file path."""
+    """Writes everything an archive carries into folder: two small fake embeddable Pythons (Windows) and four fake
+    python-build-standalone tarballs (Linux, macOS), and a pin file for each kind; -> (windows pin file, standalone pin file)."""
     pins = ["#Requires -Version 5.1", "$ErrorActionPreference = 'Stop'", "", "$PyVersion = '%s'" % version, "$PyBuilds = @{  # fake"]
     for key in ("AMD64", "ARM64"):
         data = ("PK fake embeddable python %s %s\n" % (version, key)).encode("ascii") * 20
@@ -60,7 +136,7 @@ def fake_pythons(folder, version=FAKE_PY):
     pins += ["}", "$Dest = 'whatever follows'", ""]
     path = os.path.join(folder, "pins.ps1")
     write(path, "\n".join(pins))
-    return path
+    return path, fake_standalone(folder, version)
 
 
 def tar_members(path):
@@ -105,21 +181,45 @@ class RealPins(unittest.TestCase):
         # one source of truth: the URL the script gives to the workflow is the one the installer builds
         self.assertIn('https://www.python.org/ftp/python/$PyVersion/$($build.file)', ps1)
         self.assertEqual(br.PY_URL, "https://www.python.org/ftp/python/{version}/{file}")
-        for file, digest, url in br.python_downloads(os.path.join(ROOT, "install-windows.ps1")):
+        with tempfile.TemporaryDirectory() as d:
+            _, standalone = fake_pythons(d)
+            rows = br.python_downloads(os.path.join(ROOT, "install-windows.ps1"), standalone)
+        self.assertEqual(len(rows), 6)
+        for file, digest, url in rows[4:]:  # the Windows ones come last
             self.assertTrue(url.startswith("https://www.python.org/ftp/python/"), url)
             self.assertTrue(url.endswith("/" + file), url)
 
-    def test_list_python_prints_file_sha_url(self):
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(br.main(["--list-python"]), 0)
+    def test_list_python_prints_file_sha_url_of_all_six(self):
+        with tempfile.TemporaryDirectory() as d:
+            windows, standalone = fake_pythons(d)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(br.main(["--list-python", "--pins", windows, "--python-pins", standalone]), 0)
         lines = out.getvalue().splitlines()
-        self.assertEqual(len(lines), 2)
-        for line in lines:
+        self.assertEqual(len(lines), 6)
+        for line, suffix in zip(lines[:4], br.STANDALONE_TARGETS):  # in the order of the archives
+            file, digest, url = line.split(" ")
+            self.assertEqual(file, "cpython-%s+%s-%s-install_only_stripped.tar.gz" % (FAKE_PY, FAKE_RELEASE, br.STANDALONE_TARGETS[suffix]))
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+            # a + in a file name is %2B in the URL: the one GitHub serves
+            self.assertEqual(url, "https://github.com/astral-sh/python-build-standalone/releases/download/%s/%s" % (FAKE_RELEASE, file.replace("+", "%2B")))
+        for line in lines[4:]:
             file, digest, url = line.split(" ")
             self.assertRegex(file, r"^python-\d+\.\d+\.\d+-embed-(amd64|arm64)\.zip$")
             self.assertRegex(digest, r"^[0-9a-f]{64}$")
-            self.assertTrue(url.startswith("https://"))
+            self.assertTrue(url.startswith("https://www.python.org/"))
+
+    def test_list_python_with_the_pin_file_of_the_repository(self):
+        """Not pinned yet (null): it refuses, and says how to fill it. Pinned: six lines. Never anything in between."""
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = br.main(["--list-python"])
+        if rc == 0:
+            self.assertEqual(len(out.getvalue().splitlines()), 6)
+        else:
+            self.assertEqual((rc, out.getvalue()), (1, ""))
+            self.assertIn("not pinned yet", err.getvalue())
+            self.assertIn("python-pins", err.getvalue())
 
     def test_the_windows_archives_carry_python_where_the_installer_looks_first(self):
         ps1 = read(os.path.join(ROOT, "install-windows.ps1")).decode("utf-8")
@@ -162,23 +262,153 @@ class PinParsing(TempDirCase):
             br.read_pins(self.pins("$PyBuilds = @{\n}\n"))
 
 
+class RealPythonPins(unittest.TestCase):
+    """tools/python-pins.json, the pin file of the repository: placeholders (null) until the python-pins job of the ai-pins workflow
+    has read the real values; once somebody pastes them it must be complete and consistent, never half filled."""
+
+    def load(self):
+        with open(os.path.join(ROOT, "tools", "python-pins.json"), encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_it_names_the_four_targets_and_says_what_it_is(self):
+        doc = self.load()
+        self.assertEqual(sorted(doc["targets"]), sorted(br.STANDALONE_TARGETS))
+        for suffix, triple in br.STANDALONE_TARGETS.items():
+            self.assertEqual(doc["targets"][suffix]["target"], triple)
+        self.assertEqual(sorted(k for k in doc if not k.startswith("_")), ["python", "release", "targets"])
+        self.assertIn("NOT PINNED YET", doc["_comment"])
+        self.assertIn("python-pins", doc["_comment"])
+
+    def test_either_not_pinned_at_all_or_pinned_completely(self):
+        doc = self.load()
+        values = [doc["python"], doc["release"]] + [t[k] for t in doc["targets"].values() for k in ("file", "sha256", "size")]
+        if all(v is None for v in values):  # the placeholders: the build refuses, tested below
+            with self.assertRaisesRegex(br.ReleaseError, "not pinned yet"):
+                br.read_python_pins(os.path.join(ROOT, "tools", "python-pins.json"))
+            return
+        python, release, pins = br.read_python_pins(os.path.join(ROOT, "tools", "python-pins.json"))  # raises on anything half filled
+        self.assertEqual(sorted(pins), sorted(br.STANDALONE_TARGETS))
+        self.assertRegex(python, r"^3\.(12|13)\.\d+$")  # what the python-pins job offers: 3.13.x, or 3.12.x
+        for suffix, (file, digest, size) in pins.items():
+            self.assertEqual(len({d for _f, d, _s in pins.values()}), 4, "four different files")
+            self.assertTrue(file.startswith("cpython-%s+%s-" % (python, release)), suffix)
+
+    def test_the_comment_is_the_one_the_pins_script_writes(self):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        try:
+            import python_pins
+        finally:
+            sys.path.remove(os.path.join(ROOT, "tools"))
+        self.assertEqual(self.load()["_comment"], python_pins.COMMENT)
+
+    def test_the_build_refuses_while_nothing_is_pinned_and_writes_nothing(self):
+        """The refusal comes first: whatever --python-dir holds, and even with a Python dir of fakes."""
+        if not all(t["sha256"] is None for t in self.load()["targets"].values()):
+            self.skipTest("the Pythons are pinned")
+        with tempfile.TemporaryDirectory() as d:
+            windows, _ = fake_pythons(os.path.join(d, "py"))
+            out = os.path.join(d, "dist")
+            with self.assertRaisesRegex(br.ReleaseError, "not pinned yet"):
+                br.build(repo_version(), out, root=ROOT, python_dir=os.path.join(d, "py"), pins=windows, epoch=EPOCH, log=lambda s: None)
+            self.assertFalse(os.path.exists(out))
+            r = subprocess.run([sys.executable, SCRIPT, "--version", repo_version(), "--out", out, "--python-dir", os.path.join(d, "py")],
+                               capture_output=True, text=True, env=dict(os.environ, SOURCE_DATE_EPOCH=str(EPOCH)))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("not pinned yet", r.stderr)
+            self.assertFalse(os.path.exists(out))
+
+
+class PythonPinParsing(TempDirCase):
+    def pins(self, mutate=None, **fields):
+        d = self.tmp()
+        path = fake_standalone(d)
+        doc = json.loads(read(path).decode("utf-8"))
+        doc.update(fields)
+        if mutate:
+            mutate(doc)
+        write(path, json.dumps(doc))
+        return path
+
+    def test_a_good_file_is_read(self):
+        python, release, pins = br.read_python_pins(self.pins())
+        self.assertEqual((python, release, list(pins)), (FAKE_PY, FAKE_RELEASE, list(br.STANDALONE_TARGETS)))
+        for suffix, (file, digest, size) in pins.items():
+            self.assertEqual(file, "cpython-%s+%s-%s-install_only_stripped.tar.gz" % (FAKE_PY, FAKE_RELEASE, br.STANDALONE_TARGETS[suffix]))
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+            self.assertGreater(size, 0)
+
+    def test_a_null_anywhere_is_not_pinned(self):
+        for where in ("python", "release", "file", "sha256", "size"):
+            def mutate(doc):
+                if where in ("python", "release"):
+                    doc[where] = None
+                else:
+                    doc["targets"]["macos-arm64"][where] = None
+            with self.assertRaisesRegex(br.ReleaseError, "not pinned yet"):
+                br.read_python_pins(self.pins(mutate))
+
+    def test_all_null_says_so_and_names_the_way_out(self):
+        def mutate(doc):
+            doc["python"] = doc["release"] = None
+            for t in doc["targets"].values():
+                t["file"] = t["sha256"] = t["size"] = None
+        with self.assertRaisesRegex(br.ReleaseError, r"every value is null.*python-pins job.*python_pins\.py"):
+            br.read_python_pins(self.pins(mutate))
+
+    def test_malformed_values_are_refused(self):
+        def target(**kw):
+            return lambda doc: doc["targets"]["linux-arm64"].update(kw)
+        cases = [
+            ("64 lowercase hex", target(sha256="A" * 64)),
+            ("64 lowercase hex", target(sha256="a" * 63)),
+            ("positive number", target(size=0)),
+            ("positive number", target(size="12")),
+            ("positive number", target(size=True)),
+            ("file must be", target(file="cpython-3.99.1+20991231-evil-install_only_stripped.tar.gz")),
+            ("file must be", target(file="../evil.tar.gz")),
+            ("target must be", target(target="x86_64-unknown-linux-musl")),
+            ("exactly", lambda doc: doc["targets"].pop("macos-x86_64")),
+            ("exactly", lambda doc: doc["targets"].update({"freebsd-x86_64": {}})),
+            ("unknown key", lambda doc: doc.update({"extra": 1})),
+        ]
+        for message, mutate in cases:
+            with self.assertRaisesRegex(br.ReleaseError, message, msg=message):
+                br.read_python_pins(self.pins(mutate))
+        for field, value in (("python", "3.13"), ("python", 3), ("release", "2099-12-31"), ("release", 20991231)):
+            with self.assertRaises(br.ReleaseError, msg=(field, value)):
+                br.read_python_pins(self.pins(**{field: value}))
+
+    def test_a_file_that_is_not_json_or_not_there_is_refused(self):
+        d = self.tmp()
+        write(os.path.join(d, "bad.json"), "{ not json")
+        with self.assertRaisesRegex(br.ReleaseError, "not JSON"):
+            br.read_python_pins(os.path.join(d, "bad.json"))
+        write(os.path.join(d, "list.json"), "[]")
+        with self.assertRaisesRegex(br.ReleaseError, "expected"):
+            br.read_python_pins(os.path.join(d, "list.json"))
+        with self.assertRaises(br.ReleaseError):
+            br.read_python_pins(os.path.join(d, "missing.json"))
+
+
 # ---- archives of this repository ----------------------------------------------------------------------------------------
 
 class RepoArchives(TempDirCase):
-    """One build of the real repository (Linux, macOS, Windows x64/arm64 with fake Pythons) shared by the tests."""
+    """One build of the real repository (the six archives, with fake Pythons) shared by the tests."""
 
     @classmethod
     def setUpClass(cls):
         cls.base = tempfile.mkdtemp(prefix="nuc-release-repo-")
-        cls.pyzips = os.path.join(cls.base, "pyzips")
-        cls.pins = fake_pythons(cls.pyzips)
+        cls.pythons = os.path.join(cls.base, "pythons")
+        cls.pins, cls.python_pins = fake_pythons(cls.pythons)
         cls.out = os.path.join(cls.base, "dist")
         cls.version = repo_version()
         cls.top = "nuc-console-%s" % cls.version
         with contextlib.redirect_stderr(io.StringIO()):  # "uncommitted changes" while developing
-            cls.names = br.build(cls.version, cls.out, root=ROOT, python_zips=cls.pyzips, pins=cls.pins, epoch=EPOCH, log=lambda s: None)
-        cls.linux = tar_members(os.path.join(cls.out, cls.top + "-linux.tar.gz"))
-        cls.macos = tar_members(os.path.join(cls.out, cls.top + "-macos.tar.gz"))
+            cls.names = br.build(cls.version, cls.out, root=ROOT, python_dir=cls.pythons, pins=cls.pins, python_pins=cls.python_pins,
+                                 epoch=EPOCH, log=lambda s: None)
+        cls.unix = {suffix: tar_members(os.path.join(cls.out, "%s-%s.tar.gz" % (cls.top, suffix))) for suffix in br.STANDALONE_TARGETS}
+        cls.linux = cls.unix["linux-x86_64"]
+        cls.macos = cls.unix["macos-arm64"]
         cls.x64 = zip_members(os.path.join(cls.out, cls.top + "-windows-x64.zip"))
         cls.arm64 = zip_members(os.path.join(cls.out, cls.top + "-windows-arm64.zip"))
 
@@ -187,10 +417,19 @@ class RepoArchives(TempDirCase):
         shutil.rmtree(cls.base, True)
 
     def all_archives(self):
-        return (("linux", self.linux), ("macos", self.macos), ("windows-x64", self.x64), ("windows-arm64", self.arm64))
+        return [(suffix, members) for suffix, members in self.unix.items()] + [("windows-x64", self.x64), ("windows-arm64", self.arm64)]
 
-    def test_the_four_archives_and_the_sums_are_there(self):
-        self.assertEqual(sorted(self.names), sorted(self.top + s for s in ("-linux.tar.gz", "-macos.tar.gz", "-windows-x64.zip", "-windows-arm64.zip")))
+    def python_part(self, members):
+        return {n: v for n, v in members.items() if n.startswith(self.top + "/python/") or n == self.top + "/python"}
+
+    def repo_part(self, members):
+        return {n: v for n, v in members.items() if not n.startswith(self.top + "/python/") and n != self.top + "/python"}
+
+    def test_the_six_archives_and_the_sums_are_there(self):
+        expected = ["%s-%s" % (self.top, s) for s in ("linux-x86_64.tar.gz", "linux-arm64.tar.gz", "macos-arm64.tar.gz", "macos-x86_64.tar.gz",
+                                                       "windows-x64.zip", "windows-arm64.zip")]
+        self.assertEqual(self.names, expected)
+        self.assertEqual(self.names, br.archive_names(self.version))
         self.assertEqual(sorted(os.listdir(self.out)), sorted(self.names + ["SHA256SUMS"]))  # no .part left behind
 
     def test_one_top_folder_and_nothing_for_development(self):
@@ -201,6 +440,7 @@ class RepoArchives(TempDirCase):
                 self.assertFalse(any(p.startswith(".") for p in parts), (label, name))  # .github, .gitignore, .gitattributes
                 self.assertNotIn(parts[1:2], (["tests"], ["tools"]), (label, name))
                 self.assertNotEqual(name, self.top + "/CONTRIBUTING.md", label)
+            for name in self.repo_part(members):
                 self.assertNotIn("__pycache__", name)
 
     def test_what_every_archive_carries(self):
@@ -211,35 +451,40 @@ class RepoArchives(TempDirCase):
                 self.assertIn("%s/%s" % (self.top, rel), members, (label, rel))
             self.assertIn(self.top, members)  # the folder entries are there too
             self.assertIn(self.top + "/src", members)
+            self.assertIn(self.top + "/python", members)  # and every archive has its Python
 
     def test_linux_has_systemd_and_install_sh(self):
-        have = set(self.linux)
-        for rel in ("install.sh", "systemd/nuc-console.service", "systemd/nuc-console-collector.service", "systemd/nuc-console-web.service",
-                    "bin/nuc-console-accept", "bin/nuc-console-problems", "scripts/enable-ufw.sh", "scripts/rebind-all-dbs.sh"):
-            self.assertIn("%s/%s" % (self.top, rel), have, rel)
-        for rel in ("install-macos.sh", "install-windows.ps1", "install-windows.cmd", "launchd", "bin/nuc-console-accept.cmd"):
-            self.assertNotIn("%s/%s" % (self.top, rel), have, rel)
-        self.assertFalse([n for n in have if "/launchd/" in n])
+        for suffix in ("linux-x86_64", "linux-arm64"):
+            have = set(self.unix[suffix])
+            for rel in ("install.sh", "run.sh", "systemd/nuc-console.service", "systemd/nuc-console-collector.service",
+                        "systemd/nuc-console-web.service", "bin/nuc-console-accept", "bin/nuc-console-problems", "scripts/enable-ufw.sh",
+                        "scripts/rebind-all-dbs.sh"):
+                self.assertIn("%s/%s" % (self.top, rel), have, (suffix, rel))
+            for rel in ("install-macos.sh", "install-windows.ps1", "install-windows.cmd", "launchd", "bin/nuc-console-accept.cmd"):
+                self.assertNotIn("%s/%s" % (self.top, rel), have, (suffix, rel))
+            self.assertFalse([n for n in have if "/launchd/" in n])
 
     def test_macos_has_launchd_and_both_installers(self):
-        have = set(self.macos)
-        for rel in ("install.sh", "install-macos.sh", "launchd/com.nuc-console.collector.plist", "launchd/com.nuc-console.web.plist",
-                    "launchd/com.nuc-console.display.plist", "bin/nuc-console-accept", "src/collect_darwin.py"):
-            self.assertIn("%s/%s" % (self.top, rel), have, rel)
-        for rel in ("install-windows.ps1", "install-windows.cmd", "systemd", "bin/nuc-console-accept.cmd"):
-            self.assertNotIn("%s/%s" % (self.top, rel), have, rel)
-        self.assertFalse([n for n in have if "/systemd/" in n])
+        for suffix in ("macos-arm64", "macos-x86_64"):
+            have = set(self.unix[suffix])
+            for rel in ("install.sh", "install-macos.sh", "run.sh", "launchd/com.nuc-console.collector.plist",
+                        "launchd/com.nuc-console.web.plist", "launchd/com.nuc-console.display.plist", "bin/nuc-console-accept",
+                        "src/collect_darwin.py"):
+                self.assertIn("%s/%s" % (self.top, rel), have, (suffix, rel))
+            for rel in ("install-windows.ps1", "install-windows.cmd", "systemd", "bin/nuc-console-accept.cmd"):
+                self.assertNotIn("%s/%s" % (self.top, rel), have, (suffix, rel))
+            self.assertFalse([n for n in have if "/systemd/" in n])
 
     def test_windows_has_the_cmd_world_and_no_shell(self):
         for label, members in (("x64", self.x64), ("arm64", self.arm64)):
             have = set(members)
-            for rel in ("install-windows.ps1", "install-windows.cmd", "bin/nuc-console-accept.cmd", "bin/nuc-console-problems.cmd",
+            for rel in ("install-windows.ps1", "install-windows.cmd", "run.cmd", "bin/nuc-console-accept.cmd", "bin/nuc-console-problems.cmd",
                         "src/collect_windows.py", "src/winapi.py"):
                 self.assertIn("%s/%s" % (self.top, rel), have, (label, rel))
             for name in have:
                 self.assertFalse(name.endswith(".sh"), name)
                 self.assertNotIn(name.split("/", 2)[1:2], (["systemd"], ["launchd"], ["scripts"]), name)
-            for rel in ("install.sh", "install-macos.sh", "bin/nuc-console-accept", "bin/nuc-console-problems"):
+            for rel in ("install.sh", "install-macos.sh", "run.sh", "bin/nuc-console-accept", "bin/nuc-console-problems"):
                 self.assertNotIn("%s/%s" % (self.top, rel), have, (label, rel))
 
     def test_windows_zip_carries_the_pinned_python_for_its_own_architecture_only(self):
@@ -251,32 +496,89 @@ class RepoArchives(TempDirCase):
             self.assertIn(name, members, label)
             self.assertEqual(sha256(members[name][1]), builds[key][1], label)
             self.assertEqual([n for n in members if n.endswith(".zip")], [name], label)
+            self.assertEqual(sorted(self.python_part(members)), [self.top + "/python", name], label)  # the zip, nothing unpacked
         self.assertNotEqual(self.x64[self.top + "/python/python-%s-embed-amd64.zip" % FAKE_PY][1],
                             self.arm64[self.top + "/python/python-%s-embed-arm64.zip" % FAKE_PY][1])
 
-    def test_linux_and_macos_do_not_carry_python(self):
-        for label, members in (("linux", self.linux), ("macos", self.macos)):
-            self.assertFalse([n for n in members if "/python/" in n or n.endswith(".zip")], label)
+    def test_linux_and_macos_carry_their_python_unpacked_for_their_own_target_only(self):
+        _, _, pins = br.read_python_pins(self.python_pins)
+        for suffix, members in self.unix.items():
+            tree = {n[len(self.top) + 1:]: v for n, v in self.python_part(members).items()}
+            tarball = tar_members(os.path.join(self.pythons, pins[suffix][0]))  # the pinned file, as the build read it
+            self.assertEqual(set(tree), set(tarball), suffix)  # the same entries: nothing added, nothing dropped
+            self.assertFalse([n for n in members if n.endswith(".zip")], suffix)
+            for name, (member, data) in tarball.items():  # every file, with its content, from this target's tarball and no other
+                got_member, got_data = tree[name]
+                self.assertEqual(got_data, data, (suffix, name))
+                self.assertEqual(got_member.type, member.type, (suffix, name))
+                if member.issym():
+                    self.assertEqual(got_member.linkname, member.linkname, (suffix, name))
+        # four different tarballs, four different Pythons
+        probes = {self.unix[s][self.top + "/python/bin/python3.99"][1] for s in br.STANDALONE_TARGETS}
+        self.assertEqual(len(probes), 4)
+
+    def test_the_symbolic_links_of_the_python_are_links_and_stay_inside_it(self):
+        for suffix, members in self.unix.items():
+            links = {n: m for n, (m, _) in members.items() if m.issym()}
+            self.assertEqual(sorted(n[len(self.top) + 1:] for n in links),
+                             ["python/bin/python", "python/bin/python3", "python/lib/libpython3.99.so"], suffix)
+            for name, m in links.items():
+                self.assertEqual(m.mode & 0o777, 0o777, (suffix, name))
+                self.assertFalse(m.linkname.startswith("/"), (suffix, name))
+                target = os.path.normpath(os.path.join(os.path.dirname(name), m.linkname)).replace(os.sep, "/")
+                self.assertIn(target, members, (suffix, name, m.linkname))  # a link that points at something that is there
+                self.assertTrue(target.startswith(self.top + "/python/"), (suffix, name))
+            self.assertEqual(members[self.top + "/python/bin/python3"][0].linkname, "python3.99", suffix)
+
+    def test_the_python_keeps_its_exec_bits_and_its_times_everything_else_is_normal(self):
+        for suffix, members in self.unix.items():
+            python = self.python_part(members)
+            self.assertEqual(mode_of(python[self.top + "/python/bin/python3.99"][0]), 0o755, suffix)
+            self.assertEqual(mode_of(python[self.top + "/python/bin/pip3"][0]), 0o755, suffix)
+            self.assertEqual(mode_of(python[self.top + "/python/lib/libpython3.99.so.1.0"][0]), 0o755, suffix)
+            self.assertEqual(mode_of(python[self.top + "/python/lib/python3.99/os.py"][0]), 0o644, suffix)
+            self.assertEqual(mode_of(python[self.top + "/python/include/Python.h"][0]), 0o644, suffix)  # 0600 in the tarball: no stray bits
+            for name, (m, data) in python.items():
+                self.assertEqual((m.uid, m.gid, m.uname, m.gname), (0, 0, "", ""), (suffix, name))  # not the 1234 of the tarball
+                if m.issym():
+                    continue
+                self.assertIn(mode_of(m), (0o644, 0o755), (suffix, name))
+                if data is None:
+                    self.assertEqual(mode_of(m), 0o755, (suffix, name))
+            # the times of the Python are the ones of its (pinned) tarball: its .pyc files may record them; the empty folder is kept
+            self.assertEqual(python[self.top + "/python/lib/python3.99/os.py"][0].mtime, PBS_MTIME, suffix)
+            self.assertIn(self.top + "/python/lib/python3.99/empty", python, suffix)
+            self.assertEqual(python[self.top + "/python/lib/python3.99/empty"][0].mtime, PBS_MTIME, suffix)
+
+    def test_nothing_else_changed_the_repository_files_are_the_same_as_without_python(self):
+        # the files outside python/ are exactly those of the repository, the same set on both processors of a system
+        for system, pair in (("linux", ("linux-x86_64", "linux-arm64")), ("macos", ("macos-arm64", "macos-x86_64"))):
+            a, b = (self.repo_part(self.unix[s]) for s in pair)
+            self.assertEqual(sorted(a), sorted(b), system)
+            for name in a:
+                self.assertEqual(a[name][1], b[name][1], (system, name))
+                self.assertEqual(mode_of(a[name][0]), mode_of(b[name][0]), (system, name))
 
     def test_exec_bits(self):
-        for label, members in (("linux", self.linux), ("macos", self.macos)):
-            for rel in ("install.sh", "bin/nuc-console-accept", "bin/nuc-console-problems", "scripts/enable-ufw.sh"):
+        for label, members in self.unix.items():
+            for rel in ("install.sh", "run.sh", "bin/nuc-console-accept", "bin/nuc-console-problems", "scripts/enable-ufw.sh"):
                 self.assertEqual(mode_of(members["%s/%s" % (self.top, rel)][0]), 0o755, (label, rel))
             self.assertEqual(mode_of(members[self.top + "/README.md"][0]), 0o644, label)
             self.assertEqual(mode_of(members[self.top + "/config/config.ini"][0]), 0o644, label)
-        self.assertEqual(mode_of(self.macos[self.top + "/install-macos.sh"][0]), 0o755)
+        for suffix in ("macos-arm64", "macos-x86_64"):
+            self.assertEqual(mode_of(self.unix[suffix][self.top + "/install-macos.sh"][0]), 0o755)
         for label, members in (("x64", self.x64), ("arm64", self.arm64)):
             for rel in ("install-windows.ps1", "install-windows.cmd", "bin/nuc-console-accept.cmd"):
                 self.assertEqual(mode_of(members["%s/%s" % (self.top, rel)][0]), 0o644, (label, rel))
-        for label, members in self.all_archives():  # every mode is one of the two, folders 0755
-            for name, (info, data) in members.items():
+        for label, members in self.all_archives():  # every mode of the repository's files is one of the two, folders 0755
+            for name, (info, data) in self.repo_part(members).items():
                 self.assertIn(mode_of(info), (0o644, 0o755), (label, name))
                 if data is None:
                     self.assertEqual(mode_of(info), 0o755, (label, name))
 
     def test_no_user_names_no_ids_fixed_times(self):
-        for label, members in (("linux", self.linux), ("macos", self.macos)):
-            for name, (m, _) in members.items():
+        for label, members in self.unix.items():
+            for name, (m, _) in self.repo_part(members).items():
                 self.assertEqual((m.uid, m.gid, m.uname, m.gname, m.mtime), (0, 0, "", "", EPOCH), (label, name))
         stamp = time.gmtime(EPOCH)[:6]
         for label, members in (("x64", self.x64), ("arm64", self.arm64)):
@@ -295,7 +597,7 @@ class RepoArchives(TempDirCase):
 
     def test_contents_are_the_files_of_the_repository(self):
         for label, members in self.all_archives():
-            for name, (_, data) in members.items():
+            for name, (_, data) in self.repo_part(members).items():
                 if data is None or name.endswith(".zip"):
                     continue
                 source = read(os.path.join(ROOT, name.split("/", 1)[1]))
@@ -304,7 +606,7 @@ class RepoArchives(TempDirCase):
     def test_line_endings_whatever_the_checkout_did(self):
         for label, members in self.all_archives():
             shell = []
-            for name, (_, data) in members.items():
+            for name, (_, data) in self.repo_part(members).items():
                 base = name.rsplit("/", 1)[-1]
                 if data is None:
                     continue
@@ -313,7 +615,7 @@ class RepoArchives(TempDirCase):
                 elif base.endswith(".sh") or ("." not in base and data[:2] == b"#!"):  # bin\*.ps1 is neither: as checked out
                     self.assertNotIn(b"\r", data, (label, name))
                     shell.append(name[len(self.top) + 1:])
-            if label in ("linux", "macos"):  # the shell scripts were all checked: run.sh, install.sh and the helpers in bin/
+            if label in self.unix:  # the shell scripts were all checked: run.sh, install.sh and the helpers in bin/
                 self.assertLessEqual({"run.sh", "install.sh", "bin/nuc-console-accept", "bin/nuc-console-problems", "bin/nuc-console-update"},
                                      set(shell), label)
 
@@ -325,28 +627,44 @@ class RepoArchives(TempDirCase):
         for digest, name in rows:
             self.assertRegex(digest, r"^[0-9a-f]{64}$")
             self.assertEqual(digest, sha256(read(os.path.join(self.out, name))), name)  # what `sha256sum -c` checks
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len(rows), 6)
         self.assertNotIn("SHA256SUMS", text)
 
     def test_the_command_line_does_the_same(self):
         """main(): the same files, and the paths are those the workflow passes."""
         out = os.path.join(self.tmp(), "cli")
-        r = subprocess.run([sys.executable, SCRIPT, "--version", self.version, "--out", out, "--python-zips", self.pyzips, "--pins", self.pins],
+        r = subprocess.run([sys.executable, SCRIPT, "--version", self.version, "--out", out, "--python-dir", self.pythons,
+                            "--pins", self.pins, "--python-pins", self.python_pins],
                            capture_output=True, text=True, env=dict(os.environ, SOURCE_DATE_EPOCH=str(EPOCH)))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(sorted(os.listdir(out)), sorted(self.names + ["SHA256SUMS"]))
         for name in self.names + ["SHA256SUMS"]:
             self.assertEqual(read(os.path.join(out, name)), read(os.path.join(self.out, name)), name)  # SOURCE_DATE_EPOCH honoured
 
+    def test_the_archives_unpack_with_tar_and_the_python_runs_from_there(self):
+        """What a user does: tar xzf, then run. The links are links on disk and the fake python3 (a script) answers."""
+        if os.name == "nt" or not shutil.which("tar"):
+            self.skipTest("tar and links")
+        d = self.tmp()
+        subprocess.run(["tar", "xzf", os.path.join(self.out, "%s-linux-x86_64.tar.gz" % self.top), "-C", d], check=True)
+        py = os.path.join(d, self.top, "python", "bin", "python3")
+        self.assertTrue(os.path.islink(py))
+        self.assertEqual(os.readlink(py), "python3.99")
+        self.assertTrue(os.access(py, os.X_OK))
+        r = subprocess.run([py], capture_output=True, text=True)  # the fake: a #!/bin/sh script that prints a comment, so exit 0
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.stat(os.path.join(d, self.top, "python", "lib", "python3.99", "os.py")).st_mtime, PBS_MTIME)
+
 
 class Reproducible(TempDirCase):
     def build(self, root, tag, **kw):
         out = os.path.join(self.tmp(), tag)
         py = os.path.join(self.tmp(), tag + "-py")
-        pins = fake_pythons(py)
+        pins, python_pins = fake_pythons(py)
         kw.setdefault("epoch", EPOCH)
         with contextlib.redirect_stderr(io.StringIO()):
-            names = br.build(repo_version() if root == ROOT else "9.9.9", out, root=root, python_zips=py, pins=pins, log=lambda s: None, **kw)
+            names = br.build(repo_version() if root == ROOT else "9.9.9", out, root=root, python_dir=py, pins=pins, python_pins=python_pins,
+                             log=lambda s: None, **kw)
         return {n: read(os.path.join(out, n)) for n in names + ["SHA256SUMS"]}
 
     def test_two_builds_of_the_repository_are_byte_identical(self):
@@ -370,12 +688,32 @@ class Reproducible(TempDirCase):
         b = self.build(root, "b")
         self.assertEqual(a, b)
 
+    def test_the_order_and_the_times_of_the_tarball_do_not_matter_but_its_content_does(self):
+        """The same Python in a tarball written in another order, with other owners and a gzip made at another time, gives the same
+        archive: what is in the archive is what is in the tree, sorted. The hash pin is what ties it to the real release."""
+        def build(members, **kw):
+            d = self.tmp()
+            windows, _ = fake_pythons(d)
+            tarballs = {s: fake_tarball(fake_python_tree(s)) for s in br.STANDALONE_TARGETS}
+            tarballs["linux-x86_64"] = members
+            python_pins = standalone_pins(d, tarballs)
+            out = os.path.join(self.tmp(), "dist")
+            with contextlib.redirect_stderr(io.StringIO()):
+                br.build("9.9.9", out, root=make_tree(self.tmp()), python_dir=d, pins=windows, python_pins=python_pins, epoch=EPOCH,
+                         log=lambda s: None)
+            return read(os.path.join(out, "nuc-console-9.9.9-linux-x86_64.tar.gz"))
+        tree = fake_python_tree("linux-x86_64")
+        same = build(fake_tarball(tree))
+        self.assertEqual(same, build(fake_tarball(list(reversed(tree)))))  # another order: the folders come after their files
+        other = [(n, k, (c + b"!" if k == "file" and n.endswith("os.py") else c), m) for n, k, c, m in tree]
+        self.assertNotEqual(same, build(fake_tarball(other)))  # another file inside: another archive
+
     def test_old_epochs_are_clamped_to_what_a_zip_can_hold(self):
         root = make_tree(self.tmp())
         out = self.tmp()
         py = os.path.join(self.tmp(), "py")
-        pins = fake_pythons(py)
-        br.build("9.9.9", out, root=root, python_zips=py, pins=pins, epoch=0, log=lambda s: None)
+        pins, python_pins = fake_pythons(py)
+        br.build("9.9.9", out, root=root, python_dir=py, pins=pins, python_pins=python_pins, epoch=0, log=lambda s: None)
         members = zip_members(os.path.join(out, "nuc-console-9.9.9-windows-x64.zip"))
         self.assertEqual({i.date_time for i, _ in members.values()}, {(1980, 1, 1, 0, 0, 0)})
 

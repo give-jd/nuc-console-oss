@@ -1,0 +1,11 @@
+{
+  "_comment": "The Python that the Linux and macOS archives carry: python-build-standalone (github.com/astral-sh/python-build-standalone), the install_only_stripped build, one tarball per target. null = NOT PINNED YET: tools/build_release.py refuses to build while any value is null, and so does the release workflow. Never type these values from memory: run the python-pins job of .github/workflows/ai-pins.yml (or python3 tools/python_pins.py on a machine with network access) and paste the JSON it prints over this file.",
+  "python": null,
+  "release": null,
+  "targets": {
+    "linux-x86_64": {"target": "x86_64-unknown-linux-gnu", "file": null, "sha256": null, "size": null},
+    "linux-arm64": {"target": "aarch64-unknown-linux-gnu", "file": null, "sha256": null, "size": null},
+    "macos-arm64": {"target": "aarch64-apple-darwin", "file": null, "sha256": null, "size": null},
+    "macos-x86_64": {"target": "x86_64-apple-darwin", "file": null, "sha256": null, "size": null}
+  }
+}
