@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ Health │ 14:13:20                                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[90msince 2026-09-05 14:00 UTC · 168 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 6 warn[0m  [90m· 3 info[0m [36m─────────────────────[0m[0m[0m[0m[K
+[36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
+ [1;41;37m ✖ ERR  [0m [1mOut of memory: shop-worker-1[0m  [90mshop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (l…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mMemory keeps growing: node[0m  [90mnode grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 31 hours in the last 7 days (peak 143%, bu…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m14 hours at or above the temperature limit in the last 7 days (about 2.0 h/day, max 91 C); bus…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mFailed logins: sshd[0m  [90m412 failed logins on 2026-09-28 against a median of 18 a day; 1204 in the last 7 days.[0m[0m[0m[0m[K
+ [90m · INFO [0m [1mNoisy log: dockerd[0m  [90mdockerd logged one message 18420 times in the last 7 days (about 2631 a day): "level=<v…[0m[0m[0m[0m[K
+ [90m · INFO [0m [1mNew log messages[0m  [90m4 log messages appeared for the first time in the last 24 hours, most often from kernel (…[0m[0m[0m[0m[K
+ [90m · INFO [0m [1mSlower boot[0m  [90mThe last boot took 58 s, 2.5x the median of the 7 boots before (23 s).[0m[0m[0m[0m[K
+[36m──[0m[1;36m TOP CPU [0m[36m────────────────[0m[90m  share of CPU time · per day[0m[0m     [36m──[0m[1;36m TOP MEMORY [0m[36m───────────────────────────[0m[90m  RSS · per day[0m[0m  [0m[0m[K
+ chrome          [36m████████[0m[90m[0m  31%  avg 62%   [36m▅█▇▇▆█▅[0m[0m             chrome          avg 2.4G   max 3.9G   [90m→ steady[0m   [0m        [0m[0m[K
+ node            [36m████[0m[90m░░░░[0m  14%  avg 28%   [36m▅▄▅▇█▄▇[0m[0m             node            avg 1.3G   max 1.9G   [33m↗ +180M/day[0m[0m        [0m[0m[K
+ dockerd         [36m██[0m[90m░░░░░░[0m   6%  avg 12%   [36m▅▄▇▅██▅[0m[0m             postgres        avg 922M   max 1.1G   [90m→ steady[0m   [0m        [0m[0m[K
+ postgres        [36m█[0m[90m░░░░░░░[0m   5%  avg 10%   [36m▆█▆▅██▇[0m[0m             shop-worker-1   avg 717M   max 2.0G   [90mno trend[0m   [0m        [0m[0m[K
+ python3         [36m█[0m[90m░░░░░░░[0m   4%  avg 7%    [36m█▆█▆█▆▇[0m[0m             dockerd         avg 307M   max 410M   [90mno trend[0m   [0m        [0m[0m[K
+ shop-worker-1   [36m█[0m[90m░░░░░░░[0m   3%  avg 6%    [36m█▄▇▄▆▆▇[0m[0m             python3         avg 205M   max 512M   [90mno trend[0m   [0m        [0m[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m screen 5/5   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 120x33[0m[0m
