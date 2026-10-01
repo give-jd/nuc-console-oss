@@ -1316,6 +1316,12 @@ def cmd_serve(args, runtime=None, models=None, hw=None):
         layers, why = gpu_plan(model, hw if hw is not None else (_hardware() if ai["gpu"] != "no" else {}), ai["gpu"], args.ctx)
     argv = serve_argv(d, model, args.port, threads, args.ctx, runtime, gpu_layers=layers)
     if args.install_service:
+        # the AI page and screen download into this folder as the unprivileged web account, which can then replace what is in it: the service runs
+        # these files as another account, so they are hashed again now, not trusted by their stamp (docs/AI.md)
+        print("checking the SHA-256 of the files the service will run...", flush=True)
+        for name, path, entry in (("the runtime", runtime_path(d, runtime), runtime), ("model %s" % model["id"], model_path(d, model), model)):
+            if not is_verified(d, path, entry, rehash=True):
+                raise SetupError("%s in %s is not the pinned file (its SHA-256 differs): run nuc-console-ai setup again to download it, nothing was installed" % (name, d))
         install_service(d, model, args.port, threads, args.ctx, gpu_layers=layers)
         return 0
     if args.dry_run:

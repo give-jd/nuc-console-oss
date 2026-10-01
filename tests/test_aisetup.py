@@ -1310,6 +1310,38 @@ class ServeCommandFlowTests(unittest.TestCase):
     def parse(self, *extra):
         return aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg] + list(extra))
 
+    def test_install_service_hashes_the_files_again_the_stamp_is_not_enough(self):
+        """The web account may write the AI folder (the AI page downloads there): it can swap a file for another of the same size and put the date
+        back, and the stamp would still say 'verified'. The service runs those files as another account: they are hashed again first."""
+        self.install()
+        calls = []
+        with mock.patch.object(aisetup, "install_service", side_effect=lambda *a, **k: calls.append(a)):
+            rc, out, _e = call(aisetup.cmd_serve, self.parse("--install-service"), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
+        self.assertEqual((rc, len(calls)), (0, 1))
+        self.assertIn("checking the SHA-256 of the files the service will run", out)
+        for which, path in (("the runtime", aisetup.runtime_path(self.d, self.runtime)), ("model tiny", aisetup.model_path(self.d, self.model))):
+            with self.subTest(which):
+                self.install()
+                st = os.stat(path)
+                put(path, b"#" * st.st_size)                         # the same size,
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))  # the same date: the stamp cannot tell
+                self.assertTrue(aisetup.is_verified(self.d, path, self.runtime if "runtime" in which else self.model), "by the stamp it is still 'verified'")
+                calls.clear()
+                with mock.patch.object(aisetup, "install_service", side_effect=lambda *a, **k: calls.append(a)):
+                    with self.assertRaises(aisetup.SetupError) as cm:
+                        call(aisetup.cmd_serve, self.parse("--install-service"), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
+                self.assertEqual(calls, [], "nothing was installed")
+                self.assertIn(which, str(cm.exception))
+                self.assertIn("is not the pinned file", str(cm.exception))
+                self.assertIn("nuc-console-ai setup", str(cm.exception))
+
+    def test_a_foreground_serve_does_not_hash_again(self):
+        self.install()
+        with mock.patch.object(aisetup, "sha256_file", side_effect=AssertionError("serve trusts the stamp")), \
+                mock.patch.object(aisetup, "run_server", return_value=0):
+            rc, out, _e = call(aisetup.cmd_serve, self.parse(), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
+        self.assertEqual(rc, 0)
+
     def test_serve_refuses_when_nothing_is_installed(self):
         with self.assertRaises(aisetup.SetupError) as cm:
             call(aisetup.cmd_serve, self.parse(), runtime=self.runtime, models=[self.model])
