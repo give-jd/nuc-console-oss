@@ -249,7 +249,15 @@ def read_filesystems():
 
 
 class Sampler:
-    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls."""
+    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls.
+
+    sample() is the one place the dashboard reads the host from. Besides the per-core CPU, the thermal sensors, the interfaces, the
+    sessions and the filesystems it holds the figures of the SYSTEM block and of the System page, so that --demo can replace all of
+    them (demo.sampler_data) and no block calls /proc, statvfs or hostinfo while it draws:
+      "mem"        {"MemTotal", "MemAvailable", "Cached", "SwapTotal", "SwapFree"} in bytes, or None (not readable: drawn as ?)
+      "disk_root"  (used, total, label) of the system volume, or None
+      "uptime"     seconds since boot, or None
+      "load"       ['0.12', '0.30', '0.25']; [] where the OS has no load average (Windows); None when it could not be read"""
 
     def __init__(self):
         self.cpu = self._cpu()
@@ -310,7 +318,8 @@ class Sampler:
             th["recent"] = rec if rec is None or rec >= 0 else None  # falling sum = a CPU went offline: invalid figure
         return {"cpu": per, "thermal": th if on("thermal") else {}, "net": net if on("network_traffic") else {},
                 "sessions": cached("sessions", 10, read_sessions) if on("sessions") else None,
-                "fs": cached("fs", 30, read_filesystems) if on("disks") else None}
+                "fs": cached("fs", 30, read_filesystems) if on("disks") else None,
+                "mem": read_host(meminfo), "disk_root": read_host(root_disk), "uptime": read_host(uptime_s), "load": read_load()}
 
 
 def meminfo():
@@ -347,8 +356,64 @@ def root_disk():
     return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, "/"
 
 
+def read_host(fn):
+    """fn() for a Sampler figure: its value, or None when the host cannot give it (the screen draws `?`, whatever /proc, sysctl or the
+    Windows API raised: one unreadable figure must not take the SYSTEM block, or the frame, down)."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 - the answer is "unknown", never a traceback in the middle of the dashboard
+        return None
+
+
+def read_load():
+    """The Sampler's "load" (see loadavg()): [] where the OS has no load average (Windows), None when it has one but it could not be read."""
+    try:
+        load = loadavg()
+    except Exception:  # noqa: BLE001 - same rule as read_host()
+        return None
+    return [] if load is None else load if len(load) == 3 else None
+
+
+def fmt_up(sec):
+    """'5d 0h', or '?' when the uptime is not known."""
+    return "?" if sec is None else fmt_dur(sec)
+
+
+def fmt_load(load):
+    """The three load averages, '?' when they could not be read; '' (nothing to say) where the OS has none ([])."""
+    return "" if load == [] else "?" if load is None else " ".join(load)
+
+
 def up_load_note(up, load):
-    return f"up {fmt_dur(up)}" + (f" · load {' '.join(load)}" if load else "")
+    """'up 5d 0h · load 0.82 0.64 0.51': ? for what could not be read (None), no load at all where the OS has none ([])."""
+    return f"up {fmt_up(up)}" + (f" · load {fmt_load(load)}" if load != [] else "")
+
+
+def ram_figures(m):
+    """(used, total) bytes of the RAM from a Sampler's "mem": None when it does not say (an old kernel without MemAvailable, no data)."""
+    try:
+        total, avail = m["MemTotal"], m["MemAvailable"]
+        return (total - avail, total) if total else None
+    except (KeyError, TypeError):
+        return None
+
+
+def swap_figures(m):
+    """(used, total) bytes of the swap from a Sampler's "mem": None when there is no swap (or no figures)."""
+    try:
+        total, free = m["SwapTotal"], m["SwapFree"]
+        return (total - free, total) if total else None
+    except (KeyError, TypeError):
+        return None
+
+
+def disk_figures(d):
+    """(used, total, label) of a Sampler's "disk_root": None when it is missing or empty."""
+    try:
+        used, total, label = d
+        return (used, total, label) if total else None
+    except (TypeError, ValueError):
+        return None
 
 
 def is_absent(d, key):
@@ -395,19 +460,16 @@ def thermal_lines(th, bw, maxw=None):
 
 
 def page_sistema(s, w, cont=None):
-    m, lines = meminfo(), []
-    load, up = loadavg(), uptime_s()
-    disk_used, disk_tot, disk_label = root_disk()
-    lines.append(f" up {fmt_dur(up)}" + (f"   load {' '.join(load)}" if load else ""))
-    lines.append("")
+    m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
+    lines = [f" up {fmt_up(up)}" + (f"   load {fmt_load(load)}" if load != [] else ""), ""]
     bw = max(10, min(60, w - 40))
-    ram_used = m["MemTotal"] - m["MemAvailable"]
-    swap_used = m["SwapTotal"] - m["SwapFree"]
-    lines.append(f" RAM   {bar(ram_used / m['MemTotal'], bw)} {human(ram_used)}/{human(m['MemTotal'])}"
-                 f"  cache {human(m['Cached'])}")
-    if m["SwapTotal"]:
-        lines.append(f" SWAP  {bar(swap_used / m['SwapTotal'], bw)} {human(swap_used)}/{human(m['SwapTotal'])}")
-    lines.append(f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}  {safe(disk_label)}")
+    ram, swap = ram_figures(m), swap_figures(m)
+    lines.append(f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}  cache {human(m.get('Cached'))}" if ram
+                 else f" RAM   {c(33, '?')}")
+    if swap:
+        lines.append(f" SWAP  {bar(swap[0] / swap[1], bw)} {human(swap[0])}/{human(swap[1])}")
+    lines.append(f" DISK  {bar(disk[0] / disk[1], bw)} {human(disk[0])}/{human(disk[1])}  {safe(disk[2])}" if disk
+                 else f" DISK  {c(33, '?')}")
     if on("thermal"):
         lines += thermal_lines(s.get("thermal") or {}, bw)
     lines.append("")
@@ -1347,14 +1409,14 @@ def stack_lines(cont, w, cap):
 
 
 def ov_sistema(s, w, k, cont=None):
-    m = meminfo()
-    disk_used, disk_tot, _ = root_disk()
+    m, disk = s.get("mem"), disk_figures(s.get("disk_root"))  # the Sampler's figures: this block reads nothing from the host
     bw = max(8, min(40, w - 52))
-    ram = m["MemTotal"] - m["MemAvailable"]
-    lines = [section("SYSTEM", w, up_load_note(uptime_s(), loadavg())),
-             f" RAM   {bar(ram / m['MemTotal'], bw)} {human(ram)}/{human(m['MemTotal'])}   cache {human(m['Cached'])}",
-             f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}"]
-    lines += thermal_lines(s.get("thermal") or {}, bw, w)
+    ram = ram_figures(m)
+    lines = [section("SYSTEM", w, up_load_note(s.get("uptime"), s.get("load"))),
+             f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}   cache {human(m.get('Cached'))}" if ram else f" RAM   {c(33, '?')}",
+             f" DISK  {bar(disk[0] / disk[1], bw)} {human(disk[0])}/{human(disk[1])}" if disk else f" DISK  {c(33, '?')}"]
+    if on("thermal"):  # (the sampler leaves it empty when the feature is off; the demo's is not, so the switch is honoured here too)
+        lines += thermal_lines(s.get("thermal") or {}, bw, w)
     cores = [v for _, v in sorted(s["cpu"].items(), key=lambda kv: int(kv[0][3:]))]
     if cores:
         mean = sum(cores) / len(cores)
@@ -1943,6 +2005,16 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
+def host_sample(smp):
+    """The Sampler's reading for a screen. Under --demo it is the demo machine's (demo.sampler_data), whatever sampler is given (the web view
+    always has a real one) and without calling it: nothing of the machine running the demo is read or shown. Without a sampler: no figures
+    ({"thermal": {}}: the screens that only judge the header's problems)."""
+    if DEMO:
+        import demo
+        return demo.sampler_data(DEMO_OS)
+    return smp.sample() if smp else {"thermal": {}}
+
+
 def demo_defaults():
     """--demo: the host name and the [webapps] the screenshots show (one up, one expected-but-down)."""
     socket.gethostname = lambda: "demo-host"
@@ -1955,7 +2027,7 @@ def demo_defaults():
 def map_graph(smp=None):
     """(MAP graph, header problems) of the current state: shared by the console's Map screen and the web view's map page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
@@ -2888,7 +2960,7 @@ def fill_cpu(sl, idx, w, body_h, feed):
 def cpu_problems(smp=None):
     """The header's problems of the current state: the CPU screen has no graph of its own to take them from."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -2920,10 +2992,8 @@ def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
 def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False, cpu_feed=None):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
@@ -2936,10 +3006,8 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
 
 def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
@@ -2984,9 +3052,10 @@ def once(argv):
             return 2
         out = ai_once(argv, w, h)
     else:
-        smp = Sampler()
-        smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
-        time.sleep(0.5)
+        smp = None if DEMO else Sampler()  # the demo reads nothing from this machine (render_screen)
+        if smp:
+            smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
+            time.sleep(0.5)
         out, _ = render_screen(smp, w, h, n=n)
     print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
@@ -3597,7 +3666,7 @@ def health_select(fl, hv, text):
 def health_state(smp, days):
     """(the cached report data, the header's problems): shared by the console loop and --once."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return health_data(days), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -3719,7 +3788,7 @@ def ai_status(wait=0.0):
 def ai_state(smp):
     """(the catalog's data, the header's problems): shared by the console loop, --once and the web page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
     if DEMO:
         demo_defaults()
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])

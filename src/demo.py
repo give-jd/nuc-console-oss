@@ -1,11 +1,15 @@
 """Synthetic data for `render.py --once --demo` (screenshots, trying the dashboard without root, docs).
 
-Invented: hostnames, users, containers and addresses (documentation ranges). CPU, RAM, temperature, uptime and root-disk
-figures are the real ones of the machine running it (read from /proc and /sys); nothing is written and no real state is read.
+Invented: hostnames, users, containers, addresses (documentation ranges) and every figure of the machine itself (CPU, RAM, disk,
+uptime, load, temperatures, traffic). Nothing of the machine running it is shown, nothing is written and no real state is read, so the
+screen is the same on every machine and depends only on the clock.
 """
+import math
 import random
 import time
 
+MiB = 2 ** 20
+UP_DEMO = 5 * 86400  # how long the demo machine has been up: the BOOT section's boot time and the SYSTEM block's uptime say the same
 LAN = "192.168.0"    # private range, generic (a public TEST-NET would be flagged as "not local")
 EXT = "198.51.100"   # TEST-NET-2
 TS = "100.64.0"      # CGNAT range used by Tailscale
@@ -106,12 +110,12 @@ def snapshot(now=None, os_name=None):
                {"name": "phone", "os": "android", "online": False, "last_seen": now - 7200, "direct": False, "relay": "fra", "exit": False, "exit_option": False,
                 "ips": [TS + ".3"]}]},
            "links": _links(now)}
-    boot = {"ts": now, "errors": {}, "absent": [], "kernel": "6.8.0-demo", "btime": int(now) - 5 * 86400,
+    boot = {"ts": now, "errors": {}, "absent": [], "kernel": "6.8.0-demo", "btime": int(now) - UP_DEMO,
             "analyze": {"parts": {"firmware": 5.1, "loader": 2.0, "kernel": 1.2, "initrd": 1.1, "userspace": 12.4}, "total": 21.8},
             "blame": [{"unit": u, "s": s} for u, s in (("docker.service", 6.2), ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
             "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
-            "containers": [{"name": "shop-web-1", "started": int(now) - 5 * 86400 + 40, "restart": "unless-stopped"},
+            "containers": [{"name": "shop-web-1", "started": int(now) - UP_DEMO + 40, "restart": "unless-stopped"},
                            {"name": "cache-1", "started": int(now) - 3600, "restart": "no"}],
             "docker_df": {"rows": [{"type": "Images", "count": "14", "active": "6", "size": "5.2GB", "reclaimable": "2.1GB (40%)"},
                                    {"type": "Containers", "count": "7", "active": "6", "size": "180MB", "reclaimable": "0B (0%)"},
@@ -177,23 +181,62 @@ def _native(net, boot, os_name, now):
     return net, dict(boot, os=os_name, ts=now)
 
 
-def sampler_data(real, os_name=None):
-    """Replace machine-specific parts of a real Sampler.sample() result (users, mounts, interface names)."""
-    real = dict(real)
+# What the overview's SYSTEM, NETWORK TRAFFIC, SESSIONS and DISKS blocks and the System page show, per demo machine. Every number is invented
+# and fixed (the traffic moves with the clock, see _traffic): nothing of the machine running the demo gets in. Memory in MiB.
+_HOST = {
+    "linux": {
+        "cores": (0.18, 0.09, 0.41, 0.24),                                        # per logical CPU, 0..1: 23% in all
+        "mem": {"MemTotal": 16077, "MemAvailable": 6247, "Cached": 1229, "SwapTotal": 4096, "SwapFree": 3968},   # 9.6 GiB used of 15.7
+        "load": ["0.82", "0.64", "0.51"],
+        "disk": "/", "iface": "eth0", "rx": 1_900_000, "tx": 310_000, "rx_tot": 41_200 * MiB, "tx_tot": 6_500 * MiB,
+        # warm but not hot, like its CPU screen (package at 78 of 100), and nothing throttling now
+        "thermal": {"cpu": (78.0, 100.0), "nvme": (44.0, 84.85), "throttle": 1204, "throttle_s": 252.4, "clk": (3.1, 4.7), "recent": 0},
+    },
+    "windows": {
+        "cores": (0.22, 0.09, 0.61, 0.12, 0.18, 0.07, 0.33, 0.10),
+        "mem": {"MemTotal": 32695, "MemAvailable": 17540, "Cached": 5325, "SwapTotal": 0, "SwapFree": 0},      # 14.8 GiB used of 31.9
+        "load": [],                                                               # Windows has no load average
+        "disk": "C:", "iface": "Ethernet", "rx": 2_400_000, "tx": 520_000, "rx_tot": 88_300 * MiB, "tx_tot": 12_900 * MiB,
+        "thermal": {"throttle": None, "throttle_s": None, "clk": None},           # the sensors are the collector's (sensors.json)
+    },
+    "darwin": {
+        "cores": (0.41, 0.37, 0.29, 0.22, 0.88, 0.52, 0.34, 0.17),
+        "mem": {"MemTotal": 16384, "MemAvailable": 6554, "Cached": 3174, "SwapTotal": 2048, "SwapFree": 1536},  # 9.6 GiB used of 16
+        "load": ["1.12", "0.98", "0.87"],
+        "disk": "/", "iface": "en0", "rx": 1_300_000, "tx": 280_000, "rx_tot": 52_700 * MiB, "tx_tot": 8_100 * MiB,
+        "thermal": {"throttle": None, "throttle_s": None, "clk": None},
+    },
+}
+_NET_POINTS = 30  # render.NET_HIST: the samples of a traffic sparkline (a test keeps the two equal)
+
+
+def _traffic(now, base, salt):
+    """The last _NET_POINTS rates, two seconds apart, around `base` bytes/s: a slow swell and a small wobble, the same at the same time."""
+    ts = [now - 2 * j for j in range(_NET_POINTS - 1, -1, -1)]
+    return [max(0.0, base * (1 + 0.5 * math.sin(t / 9.0 + salt) + _wob(t, salt, 15) / 100.0)) for t in ts]
+
+
+def sampler_data(os_name=None, now=None):
+    """What Sampler.sample() returns on the demo machine of that OS: every figure invented, none read from the machine running the demo,
+    so the screen is the same on every machine and depends only on the clock (the traffic moves a little, like the CPU screen's)."""
+    now = now or time.time()
+    h = _HOST.get(os_name) or _HOST["linux"]
+    used, total, big = 180 * 2 ** 30, 480 * 2 ** 30, (1200 * 2 ** 30, 2000 * 2 ** 30)
+    rx, tx = _traffic(now, h["rx"], 1), _traffic(now, h["tx"], 2)
+    out = {"cpu": {f"cpu{i}": v for i, v in enumerate(h["cores"])}, "thermal": dict(h["thermal"]),
+           "net": {h["iface"]: {"rx": rx[-1], "tx": tx[-1], "rx_tot": h["rx_tot"], "tx_tot": h["tx_tot"], "hist_rx": rx, "hist_tx": tx}},
+           "mem": {k: v * MiB for k, v in h["mem"].items()}, "disk_root": (used, total, h["disk"]), "uptime": float(UP_DEMO),
+           "load": list(h["load"])}
     if os_name == "windows":
-        real["sessions"] = {"local": [{"user": "alice", "tty": "Console"}], "ssh": [], "rdp": [LAN + ".20"]}
-        real["fs"] = [{"mount": "C:", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "D:", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
-        real["net"] = {"Ethernet": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}
-        return real
-    if os_name == "darwin":
-        real["sessions"] = {"local": [{"user": "alice", "tty": "console"}], "ssh": [LAN + ".20"], "vnc": []}
-        real["fs"] = [{"mount": "/", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "/Volumes/Data", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
-        real["net"] = {"en0": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}
-        return real
-    real["sessions"] = {"local": [{"user": "alice", "tty": "tty1"}], "ssh": [LAN + ".20"]}
-    real["fs"] = [{"mount": "/", "used": 180 * 2 ** 30, "total": 480 * 2 ** 30}, {"mount": "/data", "used": 1200 * 2 ** 30, "total": 2000 * 2 ** 30}]
-    real["net"] = {"eth0": dict(next(iter(real["net"].values()), {"rx": 0, "tx": 0, "rx_tot": 0, "tx_tot": 0, "hist_rx": [0], "hist_tx": [0]}))}
-    return real
+        out["sessions"] = {"local": [{"user": "alice", "tty": "Console"}], "ssh": [], "rdp": [LAN + ".20"]}
+        out["fs"] = [{"mount": "C:", "used": used, "total": total}, {"mount": "D:", "used": big[0], "total": big[1]}]
+    elif os_name == "darwin":
+        out["sessions"] = {"local": [{"user": "alice", "tty": "console"}], "ssh": [LAN + ".20"], "vnc": []}
+        out["fs"] = [{"mount": "/", "used": used, "total": total}, {"mount": "/Volumes/Data", "used": big[0], "total": big[1]}]
+    else:
+        out["sessions"] = {"local": [{"user": "alice", "tty": "tty1"}], "ssh": [LAN + ".20"]}
+        out["fs"] = [{"mount": "/", "used": used, "total": total}, {"mount": "/data", "used": big[0], "total": big[1]}]
+    return out
 
 
 # ---- the CPU screen (render.py --view cpu): the three producers' data as they would read on three invented machines ---------
@@ -201,7 +244,6 @@ def sampler_data(real, os_name=None):
 # macOS: an Apple M2. The figures move a little from one second to the next (the web page is alive), the same at the same time.
 
 UP_LINUX, UP_WINDOWS, UP_DARWIN = 3 * 86400 + 4 * 3600 + 12 * 60, 26 * 3600 + 33 * 60, 2 * 86400 + 6 * 3600
-MiB = 2 ** 20
 
 
 def _wob(now, i, span):

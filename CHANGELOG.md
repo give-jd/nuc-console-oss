@@ -186,6 +186,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Fixed
 
+- `--demo` no longer shows the real machine's memory, disk, uptime and load. Neither does it show its CPU cores, temperatures or network
+  traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
+  whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
+- A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
 - The web view drew its pages one column narrower than asked: at the default 200 columns that is 199, below the 2-column layout, and
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
