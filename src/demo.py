@@ -700,13 +700,13 @@ _AI_MACHINES = {
 }
 _AI_STATE = {  # per machine: what is installed, the active model, the runtime, the advisor's [ai] settings and whether its server answers
     "linux": {"installed": ("qwen3-4b", "qwen3-1.7b"), "active": "qwen3-4b", "runtime": {"installed": True, "version": "0.10.6"},
-              "dir": "/var/lib/nuc-console-ai", "enabled": True, "endpoint": "http://127.0.0.1:11434/v1",
+              "dir": "/var/lib/nuc-console/ai", "enabled": True, "endpoint": "http://127.0.0.1:11434/v1",
               "probe": {"state": "answering", "msg": "", "models": ["qwen3-4b"]}},
     "windows": {"installed": (), "active": None, "runtime": {"installed": False, "version": ""},
-                "dir": r"C:\ProgramData\nuc-console-ai", "enabled": False, "endpoint": "http://127.0.0.1:11434/v1",
+                "dir": r"C:\ProgramData\nuc-console\ai", "enabled": False, "endpoint": "http://127.0.0.1:11434/v1",
                 "probe": {"state": "off", "msg": "[ai] enabled = no in config.ini", "models": []}},
     "darwin": {"installed": ("qwen3-8b",), "active": "qwen3-8b", "runtime": {"installed": True, "version": "0.10.6"},
-               "dir": "/usr/local/var/nuc-console-ai", "enabled": True, "endpoint": "http://127.0.0.1:8080/v1",
+               "dir": "/Library/Application Support/nuc-console/ai", "enabled": True, "endpoint": "http://127.0.0.1:8080/v1",
                "probe": {"state": "down", "msg": "no server on 127.0.0.1:8080: start Ollama or run nuc-console-ai serve", "models": []}},
 }
 _AI_CPU_GBS, _AI_GPU_GBS = (20.0, 40.0), {"nvidia": (150.0, 250.0), "apple": (60.0, 90.0), "amd": (150.0, 250.0)}  # effective memory bandwidth, GB/s

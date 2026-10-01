@@ -3502,7 +3502,8 @@ def health_advice(report):
             return hit[2]
         try:
             import advisor
-            res = (True, advisor.try_advise(report, CFG, cached_only=True)) if advisor.available(CFG)[0] else (False, None)
+            cfg = ai_cfg()
+            res = (True, advisor.try_advise(report, cfg, cached_only=True)) if advisor.available(cfg)[0] else (False, None)
         except Exception:  # noqa: BLE001
             res = (False, None)
         _ADVICE["hit"] = (report, now, res)
@@ -4082,11 +4083,10 @@ def ai_build(now):
     """{"cat": dict | None, "msg": why there is none, "err": bool, "at": now}: the demo's machine, or aisetup.catalog() (it reads the
     hardware and the files of the AI directory, never the network)."""
     if DEMO:
-        import demo
-        return {"cat": demo.ai_catalog(DEMO_OS), "msg": "", "err": False, "at": now}
+        return {"cat": ai_engine().demo_catalog(DEMO_OS), "msg": "", "err": False, "at": now}  # the invented machine, as the simulated actions left it
     try:
         import aisetup  # a missing or broken module costs this screen, never the dashboard
-        cat = aisetup.catalog()
+        cat = aisetup.catalog()  # the folder the buttons work in (aisetup.work_dir()), the active model as the AI page chose it
         if not isinstance(cat, dict):
             raise TypeError("catalog() gave no dict")
         return {"cat": cat, "msg": "", "err": False, "at": now}
@@ -4100,9 +4100,48 @@ def ai_data():
     with _AI_LOCK:
         now, key = time.time(), (DEMO, DEMO_OS)
         hit = _AI.get("hit")
-        if hit is None or hit["key"] != key or not 0 <= now - hit["at"] < AI_TTL:
-            hit = _AI["hit"] = dict(ai_build(now), key=key)
+        ver = ai_version()
+        if hit is None or hit["key"] != key or not 0 <= now - hit["at"] < AI_TTL or hit.get("ver", ver) != ver:  # a job moved: read it again
+            hit = _AI["hit"] = dict(ai_build(now), key=key, ver=ver)
         return hit
+
+
+def ai_report(days):
+    """The HEALTH report of the last `days` days, from the history the screens share (health_data): what "advice now" is asked about."""
+    import advisor
+    data = health_data(days)
+    if data.get("report") is None:
+        raise advisor.NoHistory(str(data.get("msg") or "no history yet"))
+    return data["report"]
+
+
+def ai_engine():
+    """The engine of this process (src/aiweb.py), told where this program's settings and HEALTH report are (it must not import render: it may be
+    __main__): the real one, or while --demo is on the demo's: the invented machines act on an engine of their own, in memory (nothing is
+    downloaded, started or written)."""
+    import aiweb
+    aiweb.bind(cfg=lambda: CFG, report=ai_report)
+    eng = aiweb.engine()
+    return eng if eng.demo == bool(DEMO) else aiweb.configure(demo=bool(DEMO))
+
+
+def ai_version():
+    """The engine's change counter (a download ended, a server started...): the catalog is read again when it moves. 0 without an engine."""
+    try:
+        import aiweb
+        return aiweb.version()
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def ai_cfg():
+    """The advisor's settings as the AI page and screen left them: config.ini with web.json laid over it (advisor.effective_cfg)."""
+    try:
+        import advisor
+        import aiweb
+        return advisor.effective_cfg(CFG, aiweb.engine().web_path())
+    except Exception:  # noqa: BLE001 - a broken module is config.ini's word
+        return CFG
 
 
 def ai_probe_run(ai):
@@ -4126,7 +4165,7 @@ def ai_probe(wait=0.0):
     """Does the model server answer? The last probe, or None while there is none yet. A probe older than AI_PROBE_TTL is made again in a thread
     of its own and the older answer stays until the new one is in: a key or a page never waits for the network (wait: --once, which may).
     Nothing is asked while [ai] enabled = no."""
-    ai = CFG.get("ai") or {}
+    ai = (CFG if DEMO else ai_cfg()).get("ai") or {}
     if not ai.get("enabled"):
         return {"state": "off", "msg": "[ai] enabled = no in config.ini", "models": []}
     key = (str(ai.get("endpoint")), bool(ai.get("allow_remote")))
@@ -4146,10 +4185,19 @@ def ai_probe(wait=0.0):
 def ai_status(wait=0.0):
     """What the STATUS section reads: {enabled, endpoint, model, probe}: [ai] as config.ini has it, and the last probe of its server."""
     if DEMO:
-        import demo
-        return demo.ai_status(DEMO_OS)
-    ai = CFG.get("ai") or {}
-    return {"enabled": bool(ai.get("enabled")), "endpoint": hclean(ai.get("endpoint"), 120), "model": hclean(ai.get("model"), 80), "probe": ai_probe(wait)}
+        eng = ai_engine()
+        st = eng.demo_status(DEMO_OS)
+        st["snap"] = eng.snapshot()
+        st["switch"] = st["snap"]["switch"]
+        return st
+    ai = ai_cfg().get("ai") or {}
+    out = {"enabled": bool(ai.get("enabled")), "endpoint": hclean(ai.get("endpoint"), 120), "model": hclean(ai.get("model"), 80), "probe": ai_probe(wait)}
+    try:
+        out["snap"] = ai_engine().snapshot()
+        out["switch"] = out["snap"]["switch"]
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def ai_state(smp):
@@ -4221,6 +4269,8 @@ class AiView(object):
 
     def __init__(self, now=None):
         self.cur, self.idx, self.top, self.details, self.rows = None, 0, 0, False, 10
+        self.confirm = None   # (kind, model id, the question) while a key waits for y or n
+        self.msg = None       # (level, text): a line only this screen says (the engine's own answers are in its snapshot)
         self.opened = self.touched = now or time.time()
 
 
@@ -4236,10 +4286,21 @@ def ai_sync(av, rows):
     return av.idx
 
 
+AI_ACTION_KEYS = {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"}  # AI on/off, use the model, delete it, delete all, cancel
+
+
 def ai_key(av, key, rows):
-    """One key on the AI screen. Returns 'back' (leave it) or '' (only the cursor or the details pane changed)."""
+    """One key on the AI screen. Returns 'back' (leave it), an action for ai_do() ('toggle', 'use', 'delete', 'delete-all', 'cancel', and 'yes' for the
+    question that is waiting) or '' (only the cursor or the details pane changed)."""
+    if av.confirm:  # a question is waiting: y does it, any other key says no
+        yes = key in ("y", "Y")
+        if not yes:
+            av.confirm = None
+        return "yes" if yes else ""
     if key in ("a", "esc", "q"):
         return "back"
+    if key in AI_ACTION_KEYS:
+        return AI_ACTION_KEYS[key]
     if key in ("enter", "space"):
         av.details = not av.details
         return ""
@@ -4260,6 +4321,109 @@ def ai_select(rows, av, text):
         return False
     av.idx, av.cur = i, rows[i]["id"]
     return True
+
+
+def ai_do(av, act, rows):
+    """What a key of the AI screen asked (ai_key): done through the engine, which works in the background (a download, the server, the answers
+    come back as its snapshot: ai_work_lines draws them), or a question first (av.confirm, answered with y). A line only this screen says
+    goes in av.msg. Never raises: an engine that cannot start is a line."""
+    av.msg = None
+    try:
+        import aiweb
+        eng = ai_engine()
+        if act == "yes":
+            kind, mid, _q = av.confirm or (None, None, None)
+            av.confirm = None
+            return {"on": lambda: eng.turn_on(mid), "delete": lambda: eng.delete(mid), "delete-all": eng.delete_all}.get(kind, lambda: None)()
+        if eng.locked():
+            av.msg = ("err", aiweb.LOCKED)
+            return None
+        row = rows[ai_sync(av, rows)] if rows else None
+        if act == "cancel":
+            return eng.cancel()
+        if act == "toggle":
+            snap = eng.snapshot()
+            if snap["state"][0] == "working":
+                return eng.cancel()
+            if snap["switch"]["on"]:
+                return eng.turn_off()
+            ch = eng.choice()
+            if ch["model"] is None and ch["recommended"]:  # nothing chosen yet: ask about the recommended one first, naming its size
+                t = next((r for r in rows if r["id"] == ch["recommended"]), None)
+                todo = "installed here" if ch["installed"] else (f"{ai_mb((ch['size'] or 0) / 2 ** 20)} to download" if ch["size"] else "not downloadable yet")
+                av.confirm = ("on", ch["recommended"], f"Turn AI on with {t['name'] if t else ch['recommended']} ({todo})?")
+                return None
+            return eng.turn_on()
+        if row is None:
+            av.msg = ("warn", "no model is selected")
+            return None
+        if act == "use":
+            return eng.use_model(row["id"])
+        if act == "delete":
+            if not row["installed"]:
+                av.msg = ("warn", f"{row['name']} is not installed: nothing to delete")
+                return None
+            av.confirm = ("delete", row["id"], f"Delete the files of {row['name']} ({ai_mb(row['size_mb'])})?")
+        elif act == "delete-all":
+            used = dd(dd(ai_data()["cat"]).get("space")).get("used")
+            if not used and not any(r["installed"] for r in rows):
+                av.msg = ("warn", "nothing is downloaded: nothing to delete")
+                return None
+            av.confirm = ("delete-all", None, f"Delete the runtime and every downloaded model ({aisetup_size(used)})?")
+    except Exception as e:  # noqa: BLE001 - the screen goes on
+        av.msg = ("err", "the AI engine could not do that: " + hclean(repr(e), 120))
+    return None
+
+
+def aisetup_size(n):
+    """5000000000 -> '5.0 GB' ('nothing' for none): sizes of files, as aisetup says them."""
+    try:
+        import aisetup
+        return aisetup.fmt_size(n) if n else "nothing"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def ai_busy():
+    """Something is running (a download, the server starting, an answer): the screen looks again every second. False without an engine."""
+    try:
+        return bool(ai_engine().snapshot()["busy"])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ai_work_lines(st, cat, av, w, k=0):
+    """The lines under the title: whether the AI is on and what it is doing (a download with its bar, the server starting, an error), that it is locked,
+    the answer to the last key, and the folder the models are downloaded to with what it holds and what is free. At level k the folder goes first
+    when the screen is small (k 1), then the lock and the answer (k 2), the state line stays (k 3). [] when the status has no engine snapshot."""
+    snap = dd(st).get("snap")
+    if not isinstance(snap, dict) or not isinstance(snap.get("state"), (list, tuple)):
+        return []
+    state, text = snap["state"]
+    mark, col = {"off": ("○ OFF", "90"), "working": ("◐ WORKING", "36"), "running": ("● ON", "32"), "on": ("● ON", "32"), "error": ("✖ ERROR", "31")}.get(state, ("?", "90"))
+    job, extra = snap.get("job"), ""
+    if state == "working" and job and job.get("total"):
+        n = min(14, round(14 * job["done"] / job["total"]))
+        extra = " " + c(36, "█" * n) + c(90, "░" * (14 - n))
+    tail = c(90, "   (c: cancel)") if state == "working" and not snap.get("locked") else ""
+    lock = c(33, "[locked by config.ini] ") if snap.get("locked") and k >= 2 else ""  # the line that says it is gone: it goes up front, where a narrow screen keeps it
+    out = [clip(" " + c("1;" + col, pad(mark, 10)) + " " + lock + hclean(text, 200) + extra + tail, w)]
+    if k >= 3:
+        return out
+    note = av.msg if av is not None and av.msg else None
+    if note is None and isinstance(snap.get("notice"), dict):
+        note = ("ok" if snap["notice"].get("ok") else "err", snap["notice"].get("text"))
+    if snap.get("locked") and k < 2:
+        out.append(clip(" " + c(33, "locked by config.ini ([ai] web_actions = no): this screen only shows"), w))
+    if note and note[1] and k < 3:
+        out.append(clip(" " + c({"ok": 32, "err": 31, "warn": 33}.get(note[0], 90), hclean(note[1], 300)), w))
+    cat = dd(cat)
+    if cat.get("dir") and k < 1:
+        sp = dd(cat.get("space"))
+        free = num(sp.get("free"))
+        out.insert(1, clip(" " + c(90, "folder") + " " + hclean(cat["dir"], 120) + c(90, f" · {aisetup_size(sp.get('used'))} downloaded · "
+                                                                                   + (f"{aisetup_size(free)} free on that disk" if free else "free space unknown")), w))
+    return out
 
 
 def ai_title(rows, w):
@@ -4364,9 +4528,10 @@ def ai_status_texts(st, cat, ids):
     """The STATUS section's pieces as ANSI text: what [ai] says (adv, with its note), the endpoint and whether it answers (ep, ans, and ans in
     short), the model in use (model), the runtime (run), the directory of the files (files)."""
     st, probe, rt = dd(st), dd(st).get("probe"), dd(dd(cat).get("runtime"))
-    on_ = bool(st.get("enabled"))
-    out = {"on": on_, "adv": c(32, "✔ on") if on_ else c(90, "· off"), "note": c(90, "  ([ai] enabled = yes)" if on_ else "  ([ai] enabled = no in config.ini)"),
-           "ep": hclean(st.get("endpoint"), 120)}
+    on_, sw = bool(st.get("enabled")), dd(st.get("switch"))
+    note = ("  ([ai] enabled = yes)" if on_ else "  ([ai] enabled = no in config.ini)") if not sw else \
+        "  ([ai] enabled = yes)" if sw.get("by") == "config" else "  (turned on from the AI page or screen)" if on_ else "  (off: the AI switch turns it on)"
+    out = {"on": on_, "adv": c(32, "✔ on") if on_ else c(90, "· off"), "note": c(90, note), "ep": hclean(st.get("endpoint"), 120)}
     out["detail"] = ""
     if not on_ or (probe or {}).get("state") == "off":
         out["short"] = c(90, "· not asked while the advisor is off")
@@ -4525,12 +4690,13 @@ def ai_body(data, st, av, rows, w, h):
     full = len(ai_pane(sel, w - fw - 3 if side else w, 99, windows)) if pane else 0
     for want in ((6, 4) if pane and not side else (8, 4)):  # first the comfortable list, then the tight one
         for k in range(4):
+            work = ai_work_lines(st, cat, av, w, k)  # the switch, the folder, the last answer: they give way last, one line at a time
             if two:
                 lw = (w - 3) * 6 // 11
                 top, bottom = columns([(ai_hw_lines(hwd, lw, k), lw), (ai_status_lines(st, cat, ids, w - 3 - lw, k), w - 3 - lw)], w, gap=3) if k < 3 else [], []
             else:
                 top, bottom = ai_hw_lines(hwd, w, k), [] if pane else ai_status_lines(st, cat, ids, w, k)
-            avail = h - 1 - len(top) - len(bottom) - 3  # the title; MODELS and its header and the legend
+            avail = h - 1 - len(work) - len(top) - len(bottom) - 3  # the title and the work lines; MODELS and its header and the legend
             if pane and not side:  # the details need their lines: the list keeps what is left
                 rows_n = min(n, max(want, avail - full))
                 fits = avail - rows_n >= full
@@ -4544,7 +4710,7 @@ def ai_body(data, st, av, rows, w, h):
     else:
         rows_n = min(n, avail // 2 if pane and not side else avail)  # a screen too small for either: the list and the details share it
     rows_n = max(1, rows_n) if n else 0
-    out = [ai_title(rows, w)] + top
+    out = [ai_title(rows, w)] + work + top
     av.rows, av.top = max(1, rows_n), map_scroll(av.top, av.idx, n, rows_n) if n else 0
     note = f"{av.top + 1}-{min(n, av.top + rows_n)} of {n} · best first" if n > rows_n else "best first"
     block = [hsec("MODELS", fw, note), ai_header(lay)]
@@ -4564,10 +4730,19 @@ def ai_body(data, st, av, rows, w, h):
     return [clip(x, w) for x in out[:h]]
 
 
-def ai_footer(av, n, w):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
-    keys = [(1, "↑↓: move", "↑↓: move"), (5, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if av.details else "details"),
-                                                                                "Enter: " + ("hide" if av.details else "details")), (0, "a/Esc: back", "a: back")]
+def ai_footer(av, n, w, snap=None):
+    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first. The keys that act (AI on/off,
+    use the model, delete, delete all, cancel) are there unless [ai] web_actions = no locked them (snap says); a question that waits is the footer."""
+    if av.confirm:
+        ask = " " + av.confirm[2]
+        return clip(c("1;33", ask) + c(90, "  y: yes   any other key: no" if len(ask) + 27 <= w else "  [y/n]"), w)
+    acts = isinstance(snap, dict) and not snap.get("locked")
+    keys = [(1, "↑↓: move", "↑↓: move"), (7, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))]
+    if acts:
+        keys += [(3, "e: AI on/off", "e: on/off"), (3, "u: use model", "u: use"), (4, "x: delete", "x: del"), (6, "X: delete all", "X: all"), (5, "c: cancel", "c: cancel")]
+    keys.append((0, "a/Esc: back", "a: back"))
+    if acts:
+        keys.append((8, "questions: web page or nuc-console-ask", ""))
     pos = f"model {av.idx + 1}/{n}" if n else "no models"
     text = f" {pos}   " + "   ".join(k[1] for k in keys)
     keys = [k for k in keys if k[2]]
@@ -4581,8 +4756,9 @@ def ai_screen(data, pb, av, w, h, wait=0.0):
     """(the interactive AI screen as one frame: header, body, key help; its model rows): the live loop and --once."""
     rows = ai_rows(data["cat"])
     ai_sync(av, rows)
-    body = ai_body(data, ai_status(wait), av, rows, w, h - 2)
-    return frame(("AI", 1, 1, body), 0, 1, w, h, pb, foot=ai_footer(av, len(rows), w)), rows
+    st = ai_status(wait)
+    body = ai_body(data, st, av, rows, w, h - 2)
+    return frame(("AI", 1, 1, body), 0, 1, w, h, pb, foot=ai_footer(av, len(rows), w, st.get("snap"))), rows
 
 
 def ai_once(argv, w, h):
@@ -4973,7 +5149,7 @@ def main(argv):
             elif av is not None:  # the AI screen: the catalog comes from its short cache, a new frame at every key
                 try:
                     if now >= fresh:
-                        fresh, err = now + REFRESH_S, None
+                        fresh, err = now + (1.0 if ai_busy() else REFRESH_S), None  # while something runs (a download) it looks again every second
                         ad, pb = ai_state(smp)
                     if err is None:
                         screen, al = ai_screen(ad, pb, av, w, h)
@@ -5035,6 +5211,9 @@ def main(argv):
                         t0, av = t0 + time.time() - av.opened, None  # the rotation was paused: it goes on where it was
                         out.write("\x1b[2J")
                         break
+                    if act:  # a key that acts: the engine does it in the background, the screen shows what it says
+                        ai_do(av, act, al)
+                        fresh = 0.0
                 elif mv is not None:
                     mv.touched = time.time()
                     act = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
@@ -5071,6 +5250,11 @@ def main(argv):
         out.flush()
         if old:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        try:  # a model server this screen started ends with it (nothing happens when it started none)
+            import aiweb
+            aiweb.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":

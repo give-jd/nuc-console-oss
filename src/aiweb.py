@@ -223,8 +223,9 @@ class Engine(object):
             self._cancel = threading.Event()
             job = self.job
             self._job_thread = threading.Thread(target=self._run_job, args=(job, work), daemon=True)
+            ok = self._result(True, "started: %s" % job_text(job, False))  # before the thread runs: a job that ends at once must have the last word
             self._job_thread.start()
-        return self._result(True, "started: %s" % job_text(job, False))
+        return ok
 
     def _run_job(self, job, work):
         state, error = "done", ""
@@ -411,7 +412,7 @@ class Engine(object):
                 job["total"], job["phase"] = total, "downloading"
             for name, entry, path, mode, is_model in todo:
                 with self.lock:
-                    job["step"] = name
+                    job["step"], job["phase"] = name, "downloading"  # (the next file is not being checked just because the last one was)
                 aisetup.download(aisetup.model_url(entry) if is_model else entry["url"], path, entry["sha256"], entry["size"], mode=mode,
                                  allow_loopback_http=self.allow_loopback_http, progress=self._progress(job, base, total), cancel=self._cancel.is_set)
                 aisetup.record(d, path, entry["sha256"])
@@ -773,8 +774,9 @@ class Engine(object):
                 return self._result(False, "busy: an answer is being written; wait for it")
             self.pending = {"kind": kind, "q": label, "started": time.time()}
             self._chat_thread = threading.Thread(target=self._chat_run, args=(kind, label, work), daemon=True)
+            ok = self._result(True, "asking the model: the answer appears below (a small model on a slow CPU may need a minute)")
             self._chat_thread.start()
-        return self._result(True, "asking the model: the answer appears below (a small model on a slow CPU may need a minute)")
+        return ok
 
     def _chat_run(self, kind, label, work):
         res, error = None, ""
@@ -881,6 +883,9 @@ class Engine(object):
             self._demo_os = os_name
             self.demo_state = {"installed": set(st["installed"]), "runtime": bool(st["runtime"]["installed"]), "enabled": st["enabled"],
                                "model": st["active"] or "", "server": None, "web": {}, "start_probe": dict(st["probe"])}
+            if st["enabled"] and st["probe"]["state"] == "answering" and st["active"]:  # that machine has its server up, started from this page
+                self.demo_state["server"] = {"pid": 4242, "model": st["active"], "endpoint": aisetup.endpoint_for(aisetup.DEFAULT_PORT), "since": time.time() - 3600}
+                self.demo_state["web"] = {"enabled": True, "model": st["active"]}
 
     def _demo_has(self, model_id):
         return model_id in self._dstate()["installed"]

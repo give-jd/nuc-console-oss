@@ -19,6 +19,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import advisor  # noqa: E402
+import aiweb  # noqa: E402
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
@@ -97,6 +98,7 @@ class AiPage(unittest.TestCase):
         render.DEMO, render.DEMO_OS = True, None
         render.CFG["features"]["ai"] = True
         render._AI.clear()
+        aiweb.configure(demo=True)                                           # the demo's engine, fresh: what one test simulates, the next does not see
         self.srv.cache.clear()
         self.builds = []                                                     # the (demo, os) of every ai_build()
         real = render.ai_build
@@ -160,15 +162,15 @@ class AiPage(unittest.TestCase):
         self.assertEqual(st, 200)
         csp = h["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
-        self.assertNotIn("script-src", csp)                                  # unchanged: no script on this page
-        self.assertEqual(csp, web.CSP)
+        self.assertNotIn("script-src", csp)                                  # still no script on this page
+        self.assertEqual(csp, web.AI_CSP)                                    # the one difference: its forms may post to this server (and nowhere else)
+        self.assertEqual(csp, web.CSP.replace("form-action 'none'", "form-action 'self'"))
+        self.assertEqual(h["Referrer-Policy"], "same-origin")                # so that the browser's Origin on a post is the real one, not "null"
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
         self.assertNotIn("<script", body.lower())
-        self.assertNotIn("<form", body.lower())
-        self.assertNotIn("<input", body.lower())
         self.assertIsNone(re.search(r"\son[a-z]+=", body))                   # no inline event handler
         self.assertIn("demo-host │ AI", body)
-        self.assertIn('<meta http-equiv="refresh" content="2">', body)
+        self.assertNotIn('http-equiv="refresh"', body)                       # idle with forms: it does not reload by itself (a question being typed stays)
         self.assertIn("<title>demo-host · ai · nuc-console</title>", body)
         txt = plain(body)
         self.assertIn("what this machine can run · 12 models · ✔ 10 fit  ◐ 2 gpu+cpu", txt)
@@ -199,15 +201,32 @@ class AiPage(unittest.TestCase):
     def test_footer_links_keep_the_view(self):
         body = self.page("/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
         self.assertEqual(link(body, "dashboard"), "/?cols=100&zoom=125&refresh=5")
-        p = params(link(body, "pause"))
-        self.assertEqual((p["view"], p["sel"], p["zoom"], p["refresh"], p["cols"], p["pause"]), ("ai", "phi-4", 125, 5, 100, True))
-        self.assertTrue(link(body, "pause").endswith("#m-2"))                # the selected model stays in sight
+        p = params(link(body, "reload"))
+        self.assertEqual((p["view"], p["sel"], p["zoom"], p["refresh"], p["cols"], p["pause"]), ("ai", "phi-4", 125, 5, 100, False))
+        self.assertTrue(link(body, "reload").endswith("#m-2"))               # the selected model stays in sight
         self.assertEqual(params(link(body, "compact"))["cols"], 100)
         self.assertEqual(params(link(body, "wide"))["cols"], 200)
         self.assertEqual(params(link(body, "A+"))["zoom"], 150)
-        self.assertEqual(params(link(body, "+"))["refresh"], 6)
-        self.assertIn("read-only", body)
+        self.assertIsNone(link(body, "+"))                                   # no refresh interval: it reloads only while something runs
+        self.assertIn("reloads by itself while something runs", body)
+        self.assertNotIn("read-only", body)                                  # it has buttons
         self.assertIsNone(link(body, "map"))                                 # the bar of this page, not the dashboard's
+
+    def test_locked_by_config_ini_the_page_is_what_it_was_read_only_and_reloading(self):
+        render.CFG["ai"]["web_actions"] = False
+        st, h, body = get(self.srv, "/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
+        self.assertEqual(st, 200)
+        self.assertEqual(h["Content-Security-Policy"], web.CSP, "form-action 'none' again")
+        self.assertEqual(h["Referrer-Policy"], "no-referrer")
+        self.assertNotIn("<form", body)
+        self.assertNotIn("<input", body)
+        self.assertIn("locked by config.ini ([ai] web_actions = no)", body)
+        self.assertIn("read-only (locked by config.ini)", body)
+        self.assertIn('<meta http-equiv="refresh" content="5">', body)
+        p = params(link(body, "pause"))
+        self.assertEqual((p["view"], p["sel"], p["pause"]), ("ai", "phi-4", True))
+        self.assertEqual(params(link(body, "+"))["refresh"], 6)
+        self.assertEqual(len(rows_of(body)), 12, "everything is still shown")
 
     def test_hardware_follows_the_width_asked(self):
         def width(page):
@@ -263,7 +282,7 @@ class AiPage(unittest.TestCase):
         win = self.page("/?view=ai&sel=qwen3-8b")
         txt = plain(win)
         for word in ("Intel Core i7-10750H", "NVIDIA GeForce GTX 1650", "4.0 GB (free: ?)", "Intel(R) UHD Graphics · Vulkan", "unified memory: it shares the RAM",
-                     "nvidia-smi not found", "· off  ([ai] enabled = no in config.ini)", "! not installed", "run the commands in an administrator prompt",
+                     "nvidia-smi not found", "· off  (off: the AI switch turns it on)", "! not installed", "run the commands in an administrator prompt",
                      "nuc-console-ai setup qwen3-8b"):
             self.assertIn(word, txt)
         self.assertNotIn("sudo", txt)
@@ -284,7 +303,7 @@ class AiPage(unittest.TestCase):
         self.assertIn('<p class="hn r">', body)
         self.assertEqual(rows_of(body), [])
         self.assertNotIn("0 models", plain(body))
-        self.assertIn('<meta http-equiv="refresh"', body)                    # it may be there at the next reload
+        self.assertNotIn('http-equiv="refresh"', body)
 
     def test_an_empty_catalog_says_so(self):
         self.seed({"hw": demo.ai_catalog(None)["hw"], "models": []})
@@ -394,7 +413,10 @@ class AiPage(unittest.TestCase):
         evil_id = render.ai_rows(cat)[0]["id"]
         for path in ("/?view=ai", "/?view=ai&cols=100", "/?view=ai&cols=200", "/?view=ai&sel=" + quote(evil_id, safe=""), "/?view=ai&sel=qwen3-30b-a3b"):
             body = self.page(path)
-            self.assertEqual(re.findall(r"<script|<img|<iframe|<svg|<form|<object|<embed|<b>", body, re.I), [], path)
+            self.assertEqual(re.findall(r"<script|<img|<iframe|<svg|<object|<embed|<b>", body, re.I), [], path)
+            for form in re.findall(r"<form[^>]*>", body):                              # the forms are ours, with fixed actions: nothing hostile makes one
+                self.assertRegex(form, r'^<form class="f( ask)?"( id="ask")? method="post" action="/ai/(on|off|use|cancel|delete|delete-all|ask|advise)">$', path)
+            self.assertEqual(re.findall(r'<input type="hidden" name="model" value="[^"]*[<>"][^"]*">', body), [], path)
             self.assertIsNone(re.search(r"<[^>]*\son[a-z]+=", body), path)                 # no event handler inside any tag
             self.assertNotIn(ESC, body)
             self.assertNotIn(BEL, body)

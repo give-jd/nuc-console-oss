@@ -728,6 +728,11 @@ def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
     hw = hw if hw is not None else _hardware()
     if cfg is None:
         cfg = nuc_config.load(config_path())
+        try:  # the active model is the one the AI page chose, when it chose (web.json over config.ini)
+            import advisor
+            cfg = advisor.effective_cfg(cfg)
+        except Exception:  # noqa: BLE001 - config.ini's word then
+            pass
     rp = runtime_path(d, runtime, plat)
     out = []
     for m in models:

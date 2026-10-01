@@ -9,6 +9,9 @@ folder's parents are not always readable by others.
 """
 import contextlib
 import hashlib
+import html
+import http.client
+import io
 import json
 import os
 import shutil
@@ -16,10 +19,12 @@ import socket
 import subprocess
 import sys
 import tempfile
+import re
 import threading
 import time
 import unittest
 from unittest import mock
+from urllib.parse import urlencode
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
@@ -29,6 +34,8 @@ import advisor  # noqa: E402
 import aiweb  # noqa: E402
 import aisetup  # noqa: E402
 import nuc_config  # noqa: E402
+import render  # noqa: E402
+import web  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
 
@@ -81,7 +88,7 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.d = os.path.join(self.tmp, "ai")
+        self.d = os.path.join(self.tmp, "home", "ai")   # = aisetup.work_dir() with the NUC_CONSOLE_HOME below: the engine's folder is the catalog's and web.json's
         env = mock.patch.dict(os.environ, {"NUC_CONSOLE_HOME": os.path.join(self.tmp, "home"), "NUC_CONSOLE_CONFIG": os.path.join(self.tmp, "config.ini")})
         env.start()
         self.addCleanup(env.stop)
@@ -562,6 +569,19 @@ class Delete(Base):
         self.assertEqual(job["state"], "done")
         self.assertIn("nothing to delete", job["note"])
 
+    def test_a_job_that_ends_at_once_has_the_last_word_in_the_notice(self):
+        seen, real = [], self.eng._result
+        self.eng._result = lambda ok, text: (seen.append(text), real(ok, text))[1]
+        for _ in range(60):
+            seen.clear()
+            self.eng.delete("tiny")                      # nothing there: it is over before start() has returned to the caller
+            self.assertTrue(self.eng.wait(30))
+            self.assertEqual(len(seen), 2)
+            self.assertTrue(seen[0].startswith("started: "), seen)
+            self.assertIn("nothing to delete", seen[1])
+            self.assertIn("nothing to delete", self.notice())
+        self.eng._result = real
+
     def test_files_this_account_cannot_delete_name_the_command_to_run_instead(self):
         self.install()
         real = os.unlink
@@ -973,7 +993,7 @@ class Chat(Base):
         self.assertIn("no history yet", self.chat()["history"][-1]["error"])
 
     def test_a_bug_ends_the_answer_not_the_thread(self):
-        with mock.patch.object(advisor, "ask", side_effect=RuntimeError("secret detail")), contextlib.redirect_stderr(__import__("io").StringIO()):
+        with mock.patch.object(advisor, "ask", side_effect=RuntimeError("secret detail")), contextlib.redirect_stderr(io.StringIO()):
             self.eng.ask("boom?")
             e = self.chat()["history"][-1]
         self.assertIn("unexpected error: RuntimeError", e["error"])
@@ -1082,6 +1102,689 @@ class Demo(unittest.TestCase):
         eng = aiweb.Engine(demo=True, cfg_fn=lambda: {"ai": {"web_actions": False}})
         self.assertEqual(eng.use_model("qwen3-4b"), (False, aiweb.LOCKED))
         self.assertEqual(eng.turn_off(), (False, aiweb.LOCKED))
+
+
+# ----------------------------------------------------------------------------------------------------------------------- the web page
+
+TOKEN = "t" * 24
+ESC, BEL = chr(27), chr(7)
+
+
+class WebBase(Base):
+    """The web view on a loopback port, with this test's engine and catalog behind its AI page: the real page, the real POST handler."""
+
+    token = ""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.saved = (dict(render.CFG["features"]), dict(render.CFG["ai"]), render.DEMO, render.DEMO_OS, aiweb.set_engine(None), dict(aiweb._BIND))
+        self.addCleanup(self.restore)
+        render.DEMO, render.DEMO_OS = False, None
+        render.CFG["features"]["ai"] = True
+        render.CFG["ai"].clear()
+        render.CFG["ai"].update(self.cfg["ai"])
+        render._AI.clear()
+        render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
+        self.cfg = render.CFG                                     # the page and the engine read one config: a test changes render.CFG["ai"]
+        self.eng.cfg_fn = lambda: render.CFG
+        for target, value in ((aisetup, {"MODELS": self.models, "RUNTIME": self.runtime, "_hardware": lambda: self.hw}),):
+            for name, val in value.items():
+                p = mock.patch.object(target, name, val)
+                p.start()
+                self.addCleanup(p.stop)
+        cfg = dict(nuc_config.load()["web"], refresh_seconds=2)
+        self.srv = web.Server(("127.0.0.1", 0), cfg, self.token, demo=False)
+        aiweb.set_engine(self.eng)                               # the server made its own: this test's is the one behind the page
+        threading.Thread(target=self.srv.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True).start()
+        self.addCleanup(self.stop_server)
+        self.port = self.srv.server_address[1]
+
+    def stop_server(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def restore(self):
+        probe = render._AIPROBE.get("thread")
+        if probe is not None:
+            probe.join(10)                                      # a probe this test started must not write its answer into the next test's state
+        features, ai, render.DEMO, render.DEMO_OS, _old, bind = self.saved
+        render.CFG["features"].clear()
+        render.CFG["features"].update(features)
+        render.CFG["ai"].clear()
+        render.CFG["ai"].update(ai)
+        aiweb.set_engine(None)
+        aiweb._BIND.clear()
+        aiweb._BIND.update(bind)
+        render._AI.clear()
+        render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
+
+    # ---- http
+    def request(self, method, path, body=None, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        c.request(method, path, body=body, headers=headers or {})
+        r = c.getresponse()
+        data = r.read().decode("utf-8", "replace")
+        c.close()
+        return r.status, {k.title(): v for k, v in r.getheaders()}, data
+
+    def get(self, path="/?view=ai", headers=None):
+        return self.request("GET", path, None, headers)
+
+    def page(self, path="/?view=ai"):
+        st, _h, body = self.get(path)
+        self.assertEqual(st, 200, path)
+        self.assertNotIn("render error", body)
+        return body
+
+    def post(self, action, fields=None, csrf=True, headers=None, path=None, body=None):
+        """A browser's form post (same origin) -> (status, headers, body); csrf=True puts this server's token in, a string another one."""
+        data = dict(fields or {})
+        if csrf:
+            data["csrf"] = self.srv.csrf if csrf is True else csrf
+        h = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://127.0.0.1:%d" % self.port}
+        h.update(headers or {})
+        h = {k: v for k, v in h.items() if v is not None}
+        return self.request("POST", path or "/ai/" + action, urlencode(data) if body is None else body, h)
+
+    def raw(self, text):
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        s.sendall(text.encode("latin-1"))
+        out = b""
+        while True:
+            try:
+                chunk = s.recv(65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+        s.close()
+        return out.decode("utf-8", "replace")
+
+    def forms(self, body):
+        """[(action, {name: value})] of the forms of a page (the hidden fields; a button's own are not there)."""
+        out = []
+        for m in re.finditer(r'<form[^>]*action="/ai/([a-z-]+)">(.*?)</form>', body, re.S):
+            out.append((m.group(1), {n: html.unescape(v) for n, v in re.findall(r'<input type="hidden" name="([a-z]+)" value="([^"]*)">', m.group(2))}))
+        return out
+
+    def form(self, body, action, **has):
+        for a, f in self.forms(body):
+            if a == action and all(f.get(k) == v for k, v in has.items()):
+                return f
+        return None
+
+    def go(self, action, fields=None, **kw):
+        """Click: post the form with the page's own token, expect the redirect, return where it goes."""
+        st, h, body = self.post(action, fields, **kw)
+        self.assertEqual(st, 303, "%s: %s" % (action, body))
+        self.assertEqual(body, "")
+        return h["Location"]
+
+
+@unix_only
+class WebUse(WebBase):
+    """The page end to end, with the fake download server, the fake runtime and the fake model server behind it."""
+
+    def test_the_page_has_the_switch_the_chat_the_models_and_every_form_carries_the_token(self):
+        body = self.page()
+        self.assertIn('<span class="pl d big">OFF</span>', body)
+        self.assertEqual(self.form(body, "on")["csrf"], self.srv.csrf, "the token the server checks is the one in the page")
+        for action, f in self.forms(body):
+            self.assertEqual(f["csrf"], self.srv.csrf, action)
+            self.assertEqual(f["back"], "view=ai", action)
+        uses = {f["model"] for a, f in self.forms(body) if a == "use"}
+        self.assertEqual(uses, {"tiny", "other"}, "one button per model")
+        self.assertRegex(body, r'<input class="q" type="text" name="q" maxlength="500"[^>]* disabled>')   # the box wakes up when the AI is on
+        self.assertIn("turn AI on to ask", body)
+        self.assertIn("models are downloaded to", body)
+        self.assertIn(html.escape(self.d), body)
+        self.assertIn("nothing downloaded", body)
+        self.assertNotIn("<script", body.lower())
+
+    def test_one_click_on_a_model_sets_it_up_and_the_page_shows_it_working_and_then_on(self):
+        reached, release = threading.Event(), threading.Event()
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        where = self.go("use", {"model": "tiny", "back": "view=ai"})
+        self.assertEqual(where, "/?view=ai&sel=tiny")
+        self.assertTrue(reached.wait(30))
+        body = self.page(where)
+        self.assertIn('<span class="pl c big">WORKING</span>', body)
+        self.assertRegex(body, r'<progress max="100" value="\d+"></progress> \d+%')
+        self.assertIn("tiny: downloading the model", body)
+        self.assertIn('<meta http-equiv="refresh" content="2">', body, "while a job runs the page reloads by itself every 2 s")
+        self.assertIsNotNone(self.form(body, "cancel"), "and the button is Cancel")
+        self.assertIsNone(self.form(body, "on"))
+        self.assertRegex(body, r'<button class="bt use" type="submit"[^>]* disabled>use this model</button>', "the other buttons wait")
+        release.set()
+        self.assertEqual(self.job()["state"], "done")
+        body = self.page(where)
+        self.assertIn('<span class="pl g big">ON</span>', body)
+        self.assertIn("tiny runs here and answers at http://127.0.0.1:", body)
+        self.assertIsNotNone(self.form(body, "off"))
+        self.assertNotIn('http-equiv="refresh"', body, "idle again: no reload")
+        self.assertIn('<span class="g">● in use</span>', body)
+        self.assertNotRegex(body, r'<input class="q"[^>]* disabled>', "usable now: the server answers")
+        self.assertIn("tiny is in use", body)
+        self.assertIn("<code class=\"cmd\">%s</code>" % html.escape(self.d), body)
+
+    def test_the_chat_answers_and_what_the_model_writes_is_inert(self):
+        self.go("use", {"model": "tiny"})
+        self.assertEqual(self.job()["state"], "done")
+        model = ta.Fake()
+        self.addCleanup(model.stop)
+        self.cfg["ai"].update(endpoint=model.url, model="tiny-model", timeout_s=20)
+        self.eng._web(lambda st: st.update(endpoint=model.url, model="tiny-model"))   # the page's model server is the fake one from here
+        db = os.path.join(self.tmp, "history.db")
+        ta.make_db(db).close()
+        self.eng.history_fn = lambda: ta.ro(db)
+        advisor._reset_limits()
+        hostile = '<script>alert(1)</script> "><img src=x onerror=alert(1)> ' + ESC + "[2J" + BEL + " <b>bold</b>"
+        model.queue.append(ta.completion(hostile))
+        with mock.patch.object(advisor, "MIN_INTERVAL", 0.0):
+            where = self.go("ask", {"q": '<i>why</i> "slow"?\x07'})
+            self.assertTrue(where.endswith("#ask"))
+            self.assertTrue(self.eng.wait_chat(30))
+        body = self.page()
+        self.assertIn("&lt;i&gt;why&lt;/i&gt; &quot;slow&quot;?", body, "the question is escaped")
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body, "so is what the model wrote")
+        self.assertNotIn("<script", body.lower())
+        self.assertNotIn("<img", body.lower())
+        self.assertNotIn("<b>bold", body)
+        self.assertIsNone(re.search(r"<[^>]*\son[a-z]+=", body))
+        self.assertNotIn(ESC, body)
+        self.assertNotIn(BEL, body)
+        self.assertIn("ANSWER (AI, tiny-model)", body)
+        self.assertIn("check before acting", body)
+        # newest last: the second answer is after the first
+        model.queue.append(ta.completion("second answer"))
+        advisor._reset_limits()
+        with mock.patch.object(advisor, "MIN_INTERVAL", 0.0):
+            self.go("ask", {"q": "and now?"})
+            self.eng.wait_chat(30)
+        body = self.page()
+        self.assertLess(body.index("&lt;i&gt;why"), body.index("and now?"))
+        self.assertLess(body.index("&lt;script&gt;alert"), body.index("second answer"))
+        self.assertLess(body.index("second answer"), body.index('id="ask"'), "the box is after the answers")
+
+    def test_advice_now_and_its_errors(self):
+        self.go("use", {"model": "tiny"})
+        self.job()
+        model = ta.Fake()
+        self.addCleanup(model.stop)
+        self.cfg["ai"].update(endpoint=model.url, model="tiny-model", timeout_s=20)
+        self.eng._web(lambda st: st.update(endpoint=model.url, model="tiny-model"))
+        self.eng.report_fn = lambda days: ta.make_report()
+        model.queue.append(ta.completion("Check memory [oom:postgres]."))
+        advisor._reset_limits()
+        with mock.patch.object(advisor, "MIN_INTERVAL", 0.0):
+            self.assertEqual(self.go("advise", {"days": "7"}), "/?view=ai#ask")
+            self.eng.wait_chat(30)
+        body = self.page()
+        self.assertIn("advice on the last 7 days", body)
+        self.assertIn("ADVICE (AI, tiny-model)", body)
+        self.assertIn("cites: [oom:postgres]", body)
+        for days in ("x", "", "-1", "²", "99999999"):
+            st, _h, text = self.post("advise", {"days": days})
+            self.assertIn(st, (303, 400), days)
+        st, _h, text = self.post("advise", {"days": "x"})
+        self.assertEqual((st, text.strip()), (400, "a number of days is needed"))
+        self.go("advise", {"days": "5"})
+        self.assertIn("advice is for the last 1, 7, 30 days", self.get()[2].replace("&quot;", '"'))
+
+    def test_turn_off_and_on_again_and_the_buttons_follow(self):
+        self.go("use", {"model": "tiny"})
+        self.job()
+        info = self.eng.child_info
+        self.go("off")
+        self.assertTrue(info["gone"].wait(30))
+        body = self.page()
+        self.assertIn('<span class="pl d big">OFF</span>', body)
+        self.assertIsNotNone(self.form(body, "on"))
+        self.assertIn("turning it on uses <strong>Tiny test model</strong> (chosen on this page; installed here)", body)
+        n = len(self.httpd.requests)
+        self.go("on")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertIn('<span class="pl g big">ON</span>', self.page())
+        self.assertEqual(len(self.httpd.requests), n, "nothing fetched again")
+
+    def test_turn_on_with_nothing_chosen_asks_first_about_the_recommended_model_and_its_size(self):
+        hw = tas.hw_of(65536, 60000)
+        self.hw.update(hw)
+        with mock.patch.dict(sys.modules, {"aihw": tas.FakeAihw(hw)}):
+            body = self.page()
+            self.assertIn("no model is chosen yet: turning it on asks about the recommended one, <strong>Tiny test model</strong>", body)
+            where = self.go("on")
+            self.assertEqual(where, "/?view=ai&sel=tiny&confirm=on")
+            self.assertEqual(self.httpd.requests, [], "nothing is fetched before the answer")
+            body = self.page(where)
+            self.assertIn('<div class="cf" id="confirm">', body)
+            self.assertIn("Turn AI on with <strong>Tiny test model</strong>?", body)
+            self.assertIn("to download (the SHA-256 is checked)", body)
+            yes = self.form(body, "on", confirm="yes")
+            self.assertEqual((yes["model"], yes["csrf"]), ("tiny", self.srv.csrf))
+            self.assertIn('<a class="bt" href="/?view=ai&amp;sel=tiny">No</a>', body)
+            self.assertEqual(self.go("on", yes), "/?view=ai&sel=tiny")
+            self.assertEqual(self.job()["state"], "done")
+        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+        self.assertIn('<span class="pl g big">ON</span>', self.page())
+
+    def test_without_a_recommendation_there_is_nothing_to_ask_the_notice_says_so(self):
+        where = self.go("on")
+        self.assertEqual(where, "/?view=ai")
+        body = self.page(where)
+        self.assertIn("no model fits this machine comfortably: choose one from the list below", body)
+        self.assertIn("no model is chosen yet", body)
+        self.assertEqual(self.httpd.requests, [])
+
+    def test_delete_asks_first_and_then_deletes_one_model_or_everything(self):
+        self.install()
+        where = self.go("delete", {"model": "tiny", "back": "view=ai&zoom=125"})
+        self.assertEqual(where, "/?view=ai&sel=tiny&confirm=delete&zoom=125")
+        self.assertTrue(self.installed("tiny"), "asked, not done")
+        body = self.page(where)
+        self.assertIn("Delete the files of <strong>Tiny test model</strong>", body)
+        yes = self.form(body, "delete", confirm="yes")
+        self.assertEqual(yes["model"], "tiny")
+        self.assertEqual(self.go("delete", yes), "/?view=ai&sel=tiny&zoom=125", "the page's own view comes back, the question does not")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertFalse(self.installed("tiny"))
+        self.assertTrue(self.installed("other"))
+        self.assertNotIn('id="confirm"', self.page("/?view=ai&sel=tiny&confirm=delete"), "nothing there to delete: no question")
+        where = self.go("delete-all")
+        self.assertEqual(where, "/?view=ai&confirm=delete-all")
+        self.assertIn("Delete the runtime and every downloaded model", self.page(where))
+        self.assertTrue(self.installed("other"))
+        self.assertEqual(self.go("delete-all", {"confirm": "yes"}), "/?view=ai")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertFalse(self.installed("other"))
+        self.assertFalse(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
+        self.assertNotIn('id="confirm"', self.page(self.go("delete-all")), "nothing left: the question is not asked")
+
+    def test_cancel_over_http(self):
+        reached, release = threading.Event(), threading.Event()
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        self.go("use", {"model": "tiny"})
+        self.assertTrue(reached.wait(30))
+        self.go("cancel")
+        release.set()
+        self.assertEqual(self.job()["state"], "cancelled")
+        self.assertIn("cancelled", self.page())
+        self.assertFalse(self.installed("tiny"))
+
+    def test_a_failure_is_shown_in_red_with_its_reason(self):
+        self.httpd.files.pop("/tiny.gguf")
+        self.go("use", {"model": "tiny"})
+        self.job()
+        body = self.page()
+        self.assertRegex(body, r'<div class="note bad">[^<]*HTTP 404')
+        self.assertIn('<span class="pl d big">OFF</span>', body)
+
+
+class WebSecurity(WebBase):
+    """Who may post, from where, how much, and what happens to what they send."""
+
+    def state(self):
+        return (self.eng.snapshot()["job"], advisor.read_web_state(self.eng.web_path()), self.httpd.requests[:])
+
+    def assertRefused(self, resp, code, why=None):
+        st, _h, body = resp
+        self.assertEqual(st, code, body)
+        if why:
+            self.assertIn(why, body)
+        self.assertIsNone(self.eng.snapshot()["job"], "nothing was started")
+        self.assertEqual(advisor.read_web_state(self.eng.web_path()), {}, "nothing was written")
+        self.assertEqual(self.httpd.requests, [], "nothing was fetched")
+
+    def test_the_token_of_the_page_is_per_process_and_random(self):
+        self.assertGreaterEqual(len(self.srv.csrf), 24)
+        other = web.Server(("127.0.0.1", 0), dict(nuc_config.load()["web"]), "", demo=False)
+        self.addCleanup(other.server_close)
+        self.assertNotEqual(other.csrf, self.srv.csrf)
+        aiweb.set_engine(self.eng)
+
+    def test_a_post_without_the_token_or_with_another_is_refused_and_the_compare_is_constant_time(self):
+        self.assertRefused(self.post("use", {"model": "tiny"}, csrf=False), 403, "not from this page")
+        self.assertRefused(self.post("use", {"model": "tiny"}, csrf="x" * 32), 403)
+        self.assertRefused(self.post("use", {"model": "tiny"}, csrf=""), 403)
+        self.assertRefused(self.post("use", {"model": "tiny"}, csrf=self.srv.csrf + "x"), 403)
+        self.assertRefused(self.post("use", {"model": "tiny"}, csrf="é" * 5), 403)
+        with mock.patch.object(web.hmac, "compare_digest", wraps=web.hmac.compare_digest) as cmp:
+            self.post("use", {"model": "tiny"}, csrf="y" * 32)
+        self.assertTrue(any(c.args[1] == self.srv.csrf.encode() for c in cmp.call_args_list), "hmac.compare_digest")
+
+    def test_a_form_of_another_site_is_refused_by_origin_referer_or_fetch_metadata(self):
+        for h in ({"Origin": "http://evil.example"}, {"Origin": "http://127.0.0.1:1"}, {"Origin": "null"}, {"Origin": "http://127.0.0.1"},
+                  {"Origin": "http://127.0.0.1:%d.evil.example" % self.port}, {"Origin": "http://user@127.0.0.1:%d" % self.port},
+                  {"Origin": "ftp://127.0.0.1:%d" % self.port}, {"Origin": ""}, {"Origin": None, "Referer": "http://evil.example/ai"},
+                  {"Origin": None, "Referer": "http://localhost:%d/" % self.port}, {"Origin": None, "Referer": "javascript:alert(1)"},
+                  {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Sec-Fetch-Site": "bogus"},
+                  {"Origin": "http://127.0.0.1:%d" % self.port, "Referer": "http://evil.example/"}, {"Origin": "http://evil.example", "Referer": "http://127.0.0.1:%d/" % self.port}):
+            with self.subTest(h):
+                self.assertRefused(self.post("use", {"model": "tiny"}, headers=h), 403, "another site")
+
+    def test_the_forms_of_this_page_are_accepted_whatever_the_browser_sends(self):
+        for h in ({}, {"Origin": None}, {"Origin": None, "Referer": "http://127.0.0.1:%d/?view=ai&sel=tiny" % self.port},
+                  {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Site": "none"}, {"Origin": "HTTP://127.0.0.1:%d" % self.port},
+                  {"Origin": "https://127.0.0.1:%d" % self.port}):  # (https: a proxy that terminates TLS and keeps the Host)
+            with self.subTest(h):
+                st, _h, body = self.post("on", headers=h)
+                self.assertEqual(st, 303, body)
+
+    def test_body_and_headers_of_a_post(self):
+        self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": "application/json"}), 415)
+        self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": "text/plain"}), 415)
+        self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": None}), 415)
+        too_big = urlencode({"csrf": self.srv.csrf, "model": "tiny", "pad": "x" * web.POST_MAX})
+        self.assertRefused(self.post("use", body=too_big), 413)
+        just = urlencode({"csrf": self.srv.csrf, "pad": "x"})
+        just += "&p=" + "y" * (web.POST_MAX - len(just) - 3)
+        self.assertEqual(len(just), web.POST_MAX)
+        self.assertRefused(self.post("use", body=just + "z"), 413)
+        many = urlencode([("csrf", self.srv.csrf)] + [("k%d" % i, "v") for i in range(40)])
+        self.assertRefused(self.post("use", body=many), 400)
+        self.assertRefused(self.post("use", body=b"csrf=%s&model=\xff\xfe" % self.srv.csrf.encode()), 400, "not a form")
+        self.assertEqual(self.post("cancel", body=just)[0], 303, "4 KB is allowed")
+        st, _h, _b = self.post("cancel", headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"})
+        self.assertEqual(st, 303)
+
+    def test_raw_requests_with_no_length_a_wrong_one_or_chunked(self):
+        head = "POST /ai/off HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nOrigin: http://127.0.0.1:%d\r\nContent-Type: application/x-www-form-urlencoded\r\n" % (self.port, self.port)
+        for extra, want in (("\r\n", "400"), ("Content-Length: abc\r\n\r\n", "400"), ("Content-Length: -5\r\n\r\n", "400"), ("Content-Length: ²\r\n\r\n", "400"),
+                            ("Content-Length: 99999999999\r\n\r\n", "400"), ("Content-Length: 5000\r\n\r\n" + "x" * 5000, "413"),
+                            ("Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n", "400")):
+            with self.subTest(extra[:40]):
+                self.assertTrue(self.raw(head + extra).startswith("HTTP/1.0 " + want), extra[:40])
+        self.assertIsNone(self.eng.snapshot()["job"])
+
+    def test_only_the_known_actions_post_and_only_on_ai_paths(self):
+        self.assertEqual(self.post("x", path="/")[0], 405, "everything else stays GET-only")
+        self.assertEqual(self.post("x", path="/healthz")[0], 405)
+        self.assertEqual(self.post("x", path="/ai")[0], 405)
+        self.assertEqual(self.post("x", path="/ai/on?x=1")[0], 405, "no query on a post")
+        self.assertEqual(self.post("x", path="/ai/")[0], 404)
+        self.assertEqual(self.post("x", path="/ai/nope")[0], 404)
+        self.assertEqual(self.post("x", path="/ai/on/")[0], 404)
+        self.assertEqual(self.post("x", path="/ai/../on")[0], 404)
+        for m in ("PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
+            st, h, _b = self.request(m, "/ai/on")
+            self.assertEqual((st, h["Allow"]), (405, "GET"), m)
+        st, h, _b = self.request("GET", "/ai/on")
+        self.assertEqual((st, h["Allow"]), (405, "POST"), "a GET of an action says what it takes")
+        self.assertEqual(self.request("GET", "/ai/nope")[0], 404)
+        self.assertEqual(self.get("/ai/use")[0], 405)
+
+    def test_a_model_id_is_the_catalogs_or_nothing_a_number_is_a_number(self):
+        for model in ("../../etc/passwd", "tiny; rm -rf /", "TINY", "tiny\n", "", "tiny" + "x" * 100, "$(id)", "\x00", "other/../tiny"):
+            for action in ("use", "delete"):
+                with self.subTest(model=model, action=action):
+                    st, _h, body = self.post(action, {"model": model})
+                    self.assertEqual(st, 400, body)
+                    self.assertIn(body.strip(), ("unknown model", "a model is needed"))
+        self.assertEqual(self.post("on", {"model": "../x", "confirm": "yes"})[0], 400)
+        self.assertEqual(self.state()[0], None)
+        self.assertEqual(self.httpd.requests, [])
+
+    def test_the_redirect_is_always_a_page_of_ours_whatever_back_says(self):
+        for back in ("http://evil.example/", "//evil.example/x", "view=map&open=aaaaaaaaaa&all=1", "view=ai&sel=%0d%0aSet-Cookie:x=1", "\r\nX: y", "x" * 300,
+                     "view=ai&cols=999999&zoom=-3&refresh=%C2%B2"):
+            with self.subTest(back=back[:30]):
+                st, h, _b = self.post("off", {"back": back})
+                self.assertEqual(st, 303)
+                where = h["Location"]
+                self.assertTrue(where.startswith("/?view=ai") or where == "/?", where)
+                self.assertNotIn("\r", where)
+                self.assertNotIn("\n", where)
+                self.assertNotIn("evil", where)
+        st, h, _b = self.post("off", {"back": "view=ai&cols=100&zoom=125&sel=tiny&pause=1"})
+        self.assertEqual(h["Location"], "/?view=ai&sel=tiny&cols=100&zoom=125", "the view comes back, a pause does not (the progress must show)")
+
+    def test_the_lock_refuses_the_post_the_page_shows_no_form_and_nothing_changes(self):
+        render.CFG["ai"]["web_actions"] = False
+        self.assertRefused(self.post("on"), 403, "locked by config.ini ([ai] web_actions = no)")
+        self.assertRefused(self.post("use", {"model": "tiny"}), 403)
+        self.assertRefused(self.post("ask", {"q": "hi"}), 403)
+        self.assertRefused(self.post("delete-all", {"confirm": "yes"}), 403)
+        self.assertRefused(self.post("on", csrf=False), 403)
+        body = self.page()
+        self.assertNotIn("<form", body)
+        self.assertIn("locked by config.ini ([ai] web_actions = no)", body)
+
+    def test_the_feature_off_the_post_is_404(self):
+        render.CFG["features"]["ai"] = False
+        self.assertRefused(self.post("on"), 404)
+
+    def test_no_token_needs_a_known_host_name_like_the_pages(self):
+        self.assertRefused(self.post("on", headers={"Host": "evil.example", "Origin": "http://evil.example"}), 421)
+        st, _h, _b = self.post("on", headers={"Host": "localhost:%d" % self.port, "Origin": "http://localhost:%d" % self.port})
+        self.assertEqual(st, 303)
+
+    def test_a_page_is_never_cached_between_viewers_and_the_post_clears_what_was_cached(self):
+        before = self.page()
+        self.assertIn('<span class="pl d big">OFF</span>', before)
+        self.go("use", {"model": "other"})
+        self.job()
+        self.assertIn('<span class="pl g big">ON</span>', self.page(), "the page after a post shows what it did, not the cached one")
+
+
+class WebToken(WebBase):
+    token = TOKEN
+
+    def test_the_token_is_needed_for_a_post_as_for_a_view_and_the_csrf_token_besides(self):
+        st, _h, _b = self.post("off")
+        self.assertEqual(st, 401, "no token")
+        self.assertEqual(self.post("off", headers={"Cookie": "nuc_token=" + "x" * 24})[0], 401)
+        self.assertEqual(self.post("off", headers={"Authorization": "Bearer nope"})[0], 401)
+        self.assertEqual(self.post("off", headers={"Cookie": "nuc_token=" + TOKEN}, csrf=False)[0], 403, "the token of the page too")
+        self.assertEqual(self.post("off", headers={"Cookie": "nuc_token=" + TOKEN})[0], 303)
+        self.assertEqual(self.post("off", headers={"Authorization": "Bearer " + TOKEN})[0], 303)
+        self.assertEqual(self.post("off", headers={"Authorization": "Bearer " + TOKEN}, path="/ai/off?token=" + TOKEN)[0], 405, "never in the URL")
+        self.assertEqual(self.get("/?view=ai")[0], 401)
+        st, _h, body = self.get("/?view=ai", {"Authorization": "Bearer " + TOKEN})
+        self.assertEqual(st, 200)
+        self.assertIn(self.srv.csrf, body)
+
+    def test_the_host_name_is_not_what_lets_a_token_post_in_but_the_token(self):
+        h = {"Host": "other.example:%d" % self.port, "Origin": "http://other.example:%d" % self.port, "Authorization": "Bearer " + TOKEN}
+        self.assertEqual(self.post("off", headers=h)[0], 303)
+
+
+class WebHttpHeaders(WebBase):
+    def test_the_responses_carry_the_policy_of_the_page_that_made_them(self):
+        st, h, _b = self.get()
+        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.AI_CSP, "same-origin"))
+        st, h, _b = self.post("off")
+        self.assertEqual((st, h["Referrer-Policy"], h["Cache-Control"]), (303, "same-origin", "no-store"))
+        self.assertIn("form-action 'none'", h["Content-Security-Policy"], "a redirect has no form: the strict one")
+        self.assertEqual(self.get("/?view=health")[1]["Content-Security-Policy"], web.CSP, "every other page keeps form-action 'none'")
+        self.assertEqual(self.get("/")[1]["Content-Security-Policy"], web.CSP)
+        self.assertEqual(self.get("/")[1]["Referrer-Policy"], "no-referrer")
+        self.assertIn("form-action 'none'", web.CSP)
+
+    def test_the_page_reloads_only_while_something_runs_or_when_locked(self):
+        self.assertNotIn("http-equiv", self.page())
+        self.eng.pending = {"kind": "ask", "q": "slow?", "started": time.time()}   # an answer is being written
+        self.srv.cache.clear()
+        body = self.page()
+        self.assertIn('<meta http-equiv="refresh" content="2">', body)
+        self.assertIn("slow?", body)
+        self.assertIn("the model is writing the answer", body)
+        self.eng.pending = None
+        self.srv.cache.clear()
+        render.CFG["ai"]["web_actions"] = False
+        self.assertIn('<meta http-equiv="refresh" content="2">', self.page(), "locked: it reloads at the refresh interval, as the other pages")
+        self.srv.cache.clear()
+        self.eng.pending = {"kind": "ask", "q": "slow?", "started": time.time()}
+        self.assertIn('content="2"', self.page("/?view=ai&pause=1") + 'content="2"')
+        self.assertNotIn("http-equiv", self.page("/?view=ai&pause=1"), "paused: never")
+
+
+# ------------------------------------------------------------------------------------------------------------------- the console
+
+@unix_only
+class ConsoleKeys(WebBase):
+    """The AI screen's keys on a real engine (the fake download server, runtime and catalog behind it): e, u, x, X, c and the questions they ask."""
+
+    def view(self):
+        render._AI.clear()
+        data = render.ai_data()
+        rows = render.ai_rows(data["cat"])
+        av = render.AiView()
+        render.ai_sync(av, rows)
+        return data, av, rows
+
+    def press(self, av, rows, key):
+        """What main() does with a key: ai_key, then ai_do for an action."""
+        act = render.ai_key(av, key, rows)
+        if act and act != "back":
+            render.ai_do(av, act, rows)
+        return act
+
+    def screen(self, av, data, cols=120, rows=33):
+        s, _r = render.ai_screen(data, [], av, cols - 1, rows)
+        return render.ANSI.sub("", s)
+
+    def select(self, av, rows, name):
+        av.idx = next(i for i, r in enumerate(rows) if r["id"] == name)
+        av.cur = name
+
+    def test_u_uses_the_selected_model_with_everything_it_takes(self):
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        self.assertEqual(self.press(av, rows, "u"), "use")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertTrue(self.installed("tiny"))
+        snap = self.eng.snapshot()
+        self.assertEqual((snap["state"][0], snap["server"]["model"], snap["switch"]["on"]), ("running", "tiny", True))
+        data, av, rows = self.view()
+        txt = self.screen(av, data)
+        self.assertIn("● ON", txt)
+        self.assertIn("tiny runs here and answers at http://127.0.0.1:", txt)
+        self.assertIn("tiny is in use", txt, "the answer to the key is on the screen")
+        self.assertIn("folder %s" % self.d, txt)
+        self.assertRegex(txt, r"folder .* · \d+ MB downloaded · [\d.]+ [GM]B free on that disk")
+
+    def test_e_with_a_chosen_model_turns_on_and_off_without_asking(self):
+        self.eng._web(lambda st: st.update(model="other"))
+        data, av, rows = self.view()
+        self.press(av, rows, "e")
+        self.assertIsNone(av.confirm)
+        self.assertEqual(self.job()["state"], "done")
+        self.assertEqual(self.eng.snapshot()["server"]["model"], "other")
+        info = self.eng.child_info
+        self.press(av, rows, "e")
+        self.assertTrue(info["gone"].wait(30))
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+        data, av, rows = self.view()
+        self.assertIn("○ OFF", self.screen(av, data))
+        self.assertIn("AI is off", self.screen(av, data))
+
+    def test_e_with_nothing_chosen_asks_about_the_recommended_model_and_its_size_first(self):
+        hw = tas.hw_of(65536, 60000)
+        self.hw.update(hw)
+        with mock.patch.dict(sys.modules, {"aihw": tas.FakeAihw(hw)}):
+            data, av, rows = self.view()
+            self.press(av, rows, "e")
+            self.assertEqual(av.confirm[:2], ("on", "tiny"))
+            total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
+            self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % render.ai_mb(total / 2 ** 20))
+            self.assertIn("Turn AI on with Tiny test model", self.screen(av, data).splitlines()[-1])
+            self.assertEqual(self.httpd.requests, [], "nothing is fetched before the y")
+            self.assertEqual(self.press(av, rows, "n"), "")
+            self.assertIsNone(av.confirm)
+            self.assertIsNone(self.eng.snapshot()["job"])
+            self.press(av, rows, "e")
+            self.assertEqual(self.press(av, rows, "y"), "yes")
+            self.assertIsNone(av.confirm)
+            self.assertEqual(self.job()["state"], "done")
+        self.assertEqual(self.eng.snapshot()["state"][0], "running")
+        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+
+    def test_the_screen_shows_the_progress_and_c_cancels(self):
+        reached, release = threading.Event(), threading.Event()
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        self.press(av, rows, "u")
+        self.assertTrue(reached.wait(30))
+        txt = self.screen(av, data)
+        self.assertIn("◐ WORKING", txt)
+        self.assertRegex(txt, r"tiny: downloading the model, \d+%, [\d.]+ [MK]B of [\d.]+ MB")
+        self.assertRegex(txt, r"[█░]{14}")
+        self.assertIn("(c: cancel)", txt)
+        self.assertIn("c: cancel", txt.splitlines()[-1])
+        self.press(av, rows, "c")
+        release.set()
+        self.assertEqual(self.job()["state"], "cancelled")
+        data, av, rows = self.view()
+        txt = self.screen(av, data)
+        self.assertIn("○ OFF", txt)
+        self.assertIn("cancelled", txt)
+
+    def test_x_and_X_ask_first_and_y_deletes(self):
+        self.install()
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        self.press(av, rows, "x")
+        self.assertEqual(av.confirm[:2], ("delete", "tiny"))
+        self.assertTrue(av.confirm[2].startswith("Delete the files of Tiny test model ("))
+        self.assertTrue(self.installed("tiny"), "asked, not done")
+        self.press(av, rows, "z")
+        self.assertIsNone(av.confirm)
+        self.assertTrue(self.installed("tiny"))
+        self.press(av, rows, "x")
+        self.press(av, rows, "y")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertFalse(self.installed("tiny"))
+        self.assertTrue(self.installed("other"))
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        self.press(av, rows, "x")
+        self.assertIsNone(av.confirm)
+        self.assertEqual(av.msg[0], "warn")
+        self.assertIn("not installed: nothing to delete", self.screen(av, data))
+        self.press(av, rows, "X")
+        self.assertEqual(av.confirm[:2], ("delete-all", None))
+        self.assertTrue(av.confirm[2].startswith("Delete the runtime and every downloaded model ("))
+        self.press(av, rows, "y")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertFalse(self.installed("other"))
+        data, av, rows = self.view()
+        self.press(av, rows, "X")
+        self.assertIsNone(av.confirm)
+        self.assertEqual(av.msg, ("warn", "nothing is downloaded: nothing to delete"))
+
+    def test_a_failure_is_a_line_and_the_screen_goes_on(self):
+        self.httpd.files.pop("/tiny.gguf")
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        self.press(av, rows, "u")
+        self.assertEqual(self.job()["state"], "failed")
+        data, av, rows = self.view()
+        self.assertRegex(self.screen(av, data), r"setting up tiny failed: .*HTTP 404")
+
+    def test_locked_by_config_ini_a_key_is_a_line_and_nothing_else(self):
+        data, av, rows = self.view()
+        self.select(av, rows, "tiny")
+        render.CFG["ai"]["web_actions"] = False
+        for key in "euxXc":
+            self.press(av, rows, key)
+            self.assertEqual(av.msg, ("err", aiweb.LOCKED), key)
+            self.assertIsNone(av.confirm)
+        self.assertIsNone(self.eng.snapshot()["job"])
+        self.assertEqual(self.httpd.requests, [])
+        data, av, rows = self.view()
+        self.assertNotIn("e: AI on/off", self.screen(av, data, 200))
+        self.assertIn("locked by config.ini ([ai] web_actions = no): this screen only shows", self.screen(av, data, 200, 40))
+
+    def test_ai_do_never_raises(self):
+        data, av, rows = self.view()
+        with mock.patch.object(render, "ai_engine", side_effect=RuntimeError("boom")):
+            render.ai_do(av, "toggle", rows)
+        self.assertEqual(av.msg[0], "err")
+        self.assertIn("could not do that", av.msg[1])
+        render.ai_do(av, "use", [])
+        render.ai_do(av, "yes", rows)
 
 
 class Module(unittest.TestCase):
