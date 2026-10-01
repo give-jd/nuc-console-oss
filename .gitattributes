@@ -3,5 +3,6 @@
 *.sh text eol=lf
 bin/nuc-console-accept text eol=lf
 bin/nuc-console-problems text eol=lf
+bin/nuc-console-update text eol=lf
 bin/nuc-console-ai text eol=lf
 bin/nuc-console-ask text eol=lf
