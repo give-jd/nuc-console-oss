@@ -1,6 +1,7 @@
 """Configuration shared by collector and renderer (stdlib only, Python 3.8+).
 
-File: $NUC_CONSOLE_CONFIG, else /etc/nuc-console/config.ini (Windows: %ProgramData%\\nuc-console\\config.ini).
+File: $NUC_CONSOLE_CONFIG, else /etc/nuc-console/config.ini (Windows: %ProgramData%\\nuc-console\\config.ini;
+portable run: $NUC_CONSOLE_HOME/config.ini, with the state and the baseline in that folder too).
 A missing file means defaults (everything on).
 A broken file never stops the dashboard: the problem goes to stderr and defaults apply for the bad keys.
 """
@@ -11,7 +12,12 @@ import sys
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
 OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
-if WINDOWS:  # one root for config, state and logs; install-windows.ps1 restricts writing to SYSTEM and Administrators
+VERSION = "1.4.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
+PORTABLE = os.environ.get("NUC_CONSOLE_HOME", "")  # portable run (run.sh / run.cmd): config, state and baseline in that folder
+if PORTABLE:
+    BASE_DIR = os.path.abspath(PORTABLE)
+    ETC_DIR, RUN_DIR, LIB_DIR = BASE_DIR, os.path.join(BASE_DIR, "run"), os.path.join(BASE_DIR, "lib")
+elif WINDOWS:  # one root for config, state and logs; install-windows.ps1 restricts writing to SYSTEM and Administrators
     BASE_DIR = os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData", "nuc-console")
     ETC_DIR, RUN_DIR, LIB_DIR = BASE_DIR, os.path.join(BASE_DIR, "run"), os.path.join(BASE_DIR, "lib")
 else:  # macOS uses the Linux paths, except the runtime directory (no /run there)
