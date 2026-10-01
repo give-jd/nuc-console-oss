@@ -1521,7 +1521,7 @@ class RunPs1(unittest.TestCase):
             self.assertNotIn("Traceback", r.stderr)
             data = os.path.join(d, "data")
             for sub in ("run", "lib", "logs"):
-                self.assertTrue(os.path.isdir(os.path.join(data, sub)), sub)
+                self.assertTrue(os.path.isdir(os.path.join(data, sub)), (sub, r.stdout + r.stderr))
             self.assertEqual(read(os.path.join(data, "config.ini")), read(os.path.join(ROOT, "config", "config.ini")))
             write(os.path.join(data, "config.ini"), "[features]\nmap = no\n")
             subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)

@@ -38,6 +38,17 @@ param([switch]$Check, [switch]$Yes, [switch]$Installed, [switch]$Elevated)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
+# Windows PowerShell started from a PowerShell 7 window through cmd.exe (run.cmd, install-windows.cmd) or another program inherits
+# PowerShell 7's module folders in PSModulePath, ahead of its own: its Microsoft.PowerShell.Utility and .Security would be loaded
+# from there, and they do not work here (Get-FileHash, Get-Acl, Get-AuthenticodeSignature: "not recognized"). PowerShell 7 leaves
+# them out only for a powershell.exe it starts itself; here they go before any module is loaded, for this script and all it starts:
+# a folder next to a pwsh.exe (PowerShell 7's own modules) and the ...\PowerShell\Modules ones (its modules for a user, for all).
+if ($PSVersionTable.PSEdition -eq 'Desktop' -and $env:PSModulePath) {
+    $env:PSModulePath = @($env:PSModulePath.Split(';') | Where-Object {
+        $_ -and $_.TrimEnd('\') -notmatch '\\PowerShell\\Modules$' -and -not [IO.File]::Exists($_.TrimEnd('\') + '\..\pwsh.exe')
+    }) -join ';'
+}
+
 $Api = 'https://api.github.com/repos/give-jd/nuc-console-oss/releases/latest'
 $Here = $PSScriptRoot
 $Root = Split-Path -Parent $Here

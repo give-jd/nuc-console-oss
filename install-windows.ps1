@@ -45,6 +45,17 @@ param([switch]$Uninstall, [ValidateSet('browser', 'fullscreen', 'kiosk', 'none')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
+# Windows PowerShell started from a PowerShell 7 window through cmd.exe (run.cmd, install-windows.cmd) or another program inherits
+# PowerShell 7's module folders in PSModulePath, ahead of its own: its Microsoft.PowerShell.Utility and .Security would be loaded
+# from there, and they do not work here (Get-FileHash, Get-Acl, Get-AuthenticodeSignature: "not recognized"). PowerShell 7 leaves
+# them out only for a powershell.exe it starts itself; here they go before any module is loaded, for this script and all it starts:
+# a folder next to a pwsh.exe (PowerShell 7's own modules) and the ...\PowerShell\Modules ones (its modules for a user, for all).
+if ($PSVersionTable.PSEdition -eq 'Desktop' -and $env:PSModulePath) {
+    $env:PSModulePath = @($env:PSModulePath.Split(';') | Where-Object {
+        $_ -and $_.TrimEnd('\') -notmatch '\\PowerShell\\Modules$' -and -not [IO.File]::Exists($_.TrimEnd('\') + '\..\pwsh.exe')
+    }) -join ';'
+}
+
 $PyVersion = '3.14.8'
 $PyBuilds = @{  # SHA-256 of the python.org files (verified against their Sigstore signatures when pinned)
     'AMD64' = @{ file = "python-$PyVersion-embed-amd64.zip"; sha256 = 'a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310' }

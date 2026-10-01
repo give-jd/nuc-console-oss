@@ -104,14 +104,14 @@ def powershell():
     return None
 
 
-def ps_run(script, *args):
+def ps_run(script, *args, env=None):
     """Runs a PowerShell script (text) from a file; -> CompletedProcess."""
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "t.ps1")
         with open(path, "w", encoding="utf-8") as f:
             f.write(script)
         cmd = [powershell(), "-NoProfile", "-NonInteractive"] + (["-ExecutionPolicy", "Bypass"] if os.name == "nt" else []) + ["-File", path] + list(args)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
 
 def ps_q(text):
@@ -127,9 +127,62 @@ class WindowsInstallerPowerShell(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
+# what install-windows.ps1, run.ps1 and bin\nuc-console-update.ps1 do first: PowerShell 7's module folders out of PSModulePath
+MODULE_PATH_BLOCK = r"(?ms)^if \(\$PSVersionTable\.PSEdition -eq 'Desktop'.*?^\}$"
+WINDOWS_SCRIPTS = (INSTALL_WINDOWS, os.path.join(ROOT, "run.ps1"), os.path.join(ROOT, "bin", "nuc-console-update.ps1"))
+
+
+class WindowsPowerShellModulePath(unittest.TestCase):
+    """Windows PowerShell started from a PowerShell 7 window through cmd.exe (run.cmd, install-windows.cmd) inherits PowerShell 7's
+    module folders first in PSModulePath: Get-FileHash, Get-Acl and Get-AuthenticodeSignature were "not recognized"."""
+
+    def test_the_three_scripts_drop_them_before_anything_else(self):
+        block = re.search(MODULE_PATH_BLOCK, read_text(INSTALL_WINDOWS)).group(0)
+        for path in WINDOWS_SCRIPTS:
+            text = read_text(path)
+            self.assertEqual(text.count(block), 1, path)  # the same lines in the three
+            before = [line for line in re.sub(r"(?s)<#.*?#>", "", text[:text.index(block)]).splitlines()
+                      if line.strip() and not line.lstrip().startswith("#")]
+            # nothing that loads a module comes first: the help, param(), and the two settings of the language
+            self.assertEqual(before[-2:], ["$ErrorActionPreference = 'Stop'", "Set-StrictMode -Version 2"], path)
+            self.assertRegex(" ".join(before[:-2]), r"^param\(.*\)$", path)
+
+    @unittest.skipUnless(os.name == "nt" and powershell(), "Windows PowerShell (powershell.exe) runs on Windows only")
+    def test_powershell_7_folders_go_the_others_stay_and_the_modules_load(self):
+        block = re.search(MODULE_PATH_BLOCK, read_text(INSTALL_WINDOWS)).group(0)
+        with tempfile.TemporaryDirectory() as d:
+            ps7 = os.path.join(d, "pwsh7")                                                   # a PowerShell 7 installed anywhere
+            mine, everyone = os.path.join(d, "Documents", "PowerShell", "Modules"), os.path.join(d, "Program Files", "PowerShell", "Modules")
+            keep = [os.path.join(d, "Documents", "WindowsPowerShell", "Modules"), os.path.join(d, "tools", "Modules")]
+            os.makedirs(os.path.join(ps7, "Modules", "Microsoft.PowerShell.Utility"))
+            open(os.path.join(ps7, "pwsh.exe"), "wb").close()
+            for p in [mine, everyone] + keep:
+                os.makedirs(p)
+            # first, as PowerShell 7 puts its own; then what this process has (in CI: the PowerShell 7 that runs the step, for real)
+            inherited = [os.path.join(ps7, "Modules"), mine + "\\", everyone, keep[0], "", keep[1]] + os.environ.get("PSModulePath", "").split(";")
+            script = ("param([string]$File)\n$ErrorActionPreference = 'Stop'\nSet-StrictMode -Version 2\n" + block + "\n"
+                      "Write-Output ('PATH=' + $env:PSModulePath)\n"
+                      "Write-Output ('SHA256=' + (Get-FileHash -Algorithm SHA256 -LiteralPath $File).Hash)\n"
+                      "Write-Output ('ACES=' + @((Get-Acl -LiteralPath $File).Access).Count)\n")
+            env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}  # os.environ has it as PSMODULEPATH on Windows
+            env["PSModulePath"] = ";".join(inherited)
+            r = ps_run(script, INSTALL_WINDOWS, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = dict(line.rstrip("\r").split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+        entries = [os.path.normcase(os.path.normpath(p)) for p in out["PATH"].split(";") if p]
+        for gone in (os.path.join(ps7, "Modules"), mine, everyone):
+            self.assertNotIn(os.path.normcase(gone), entries)
+        for stays in keep:
+            self.assertIn(os.path.normcase(stays), entries)
+        with open(INSTALL_WINDOWS, "rb") as f:
+            self.assertEqual(out["SHA256"].lower(), hashlib.sha256(f.read()).hexdigest())   # Microsoft.PowerShell.Utility: its own
+        self.assertGreater(int(out["ACES"]), 0)                                                  # Microsoft.PowerShell.Security too
+
+
 HARNESS = r"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
+@MODULEPATH@
 $PyVersion = '3.99.1'
 $arch = 'AMD64'
 $Here = @HERE@
@@ -166,6 +219,7 @@ class WindowsPythonZipLookup(unittest.TestCase):
         for d in (os.path.join(self.here, "python"), self.cache):
             os.makedirs(d)
         src = read_text(INSTALL_WINDOWS)
+        self.module_path = re.search(MODULE_PATH_BLOCK, src).group(0)  # what the script does first: here too, before anything loads
         self.functions = "\n".join(re.search(pattern, src).group(0) for pattern in (
             r"(?m)^function Get-Sha256.*$", r"(?ms)^function Get-PythonZip \{.*?^\}$"))
 
@@ -177,7 +231,8 @@ class WindowsPythonZipLookup(unittest.TestCase):
 
     def run_ps(self, pyzip="", served=None):
         served_file = self.put(("served.bin",), self.GOOD if served is None else served)
-        script = (HARNESS.replace("@HERE@", ps_q(self.here)).replace("@CACHE@", ps_q(self.cache)).replace("@PYZIP@", ps_q(pyzip))
+        script = (HARNESS.replace("@MODULEPATH@", self.module_path)
+                  .replace("@HERE@", ps_q(self.here)).replace("@CACHE@", ps_q(self.cache)).replace("@PYZIP@", ps_q(pyzip))
                   .replace("@SHA@", ps_q(hashlib.sha256(self.GOOD).hexdigest())).replace("@SERVED@", ps_q(served_file))
                   .replace("@FUNCTIONS@", self.functions))
         r = ps_run(script)
