@@ -15,13 +15,15 @@
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
        and the read-only web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser;
        at every logon the dashboard opens: in a normal browser window ([display] mode = browser, the default) or full screen
-       (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen);
+       (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen); and the optional Telegram notifier (LOCAL SERVICE,
+       outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md);
     4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
        %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
     5. waits for the first collector snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 .PARAMETER Uninstall
   Removes the tasks, the program folder and the PATH entry. %ProgramData%\nuc-console (config, baseline) is left in place.
+  The Telegram notifier's folder (%ProgramData%\nuc-console\notify, with the bot token) is deleted.
 
 .PARAMETER Display
   browser (default): at every logon the dashboard opens in a normal window of your browser. fullscreen (or kiosk): it opens
@@ -88,6 +90,7 @@ if ($Uninstall) {
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
+    if (Test-Path "$Data\notify") { Remove-Item -Recurse -Force "$Data\notify" }  # the Telegram bot token is in there
     Say "removed ($Data with config.ini and the baseline is left in place)"
     exit 0
 }
@@ -136,6 +139,11 @@ foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs")) { New-Item -Ite
 & icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
 & icacls.exe "$Data\logs" /grant '*S-1-5-19:(OI)(CI)M' | Out-Null
+# the Telegram notifier's folder (bot token, paired chat, status): NOT readable by users (the token is in there); SYSTEM and
+# Administrators full control, LOCAL SERVICE (the notifier) modify
+New-Item -ItemType Directory -Force -Path "$Data\notify" | Out-Null
+& icacls.exe "$Data\notify" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify" }
 $cfg = Join-Path $Data 'config.ini'
 if (-not (Test-Path $cfg)) { Copy-Item (Join-Path $Here 'config\config.ini') $cfg }  # never overwrite the admin's edits
 Copy-Item (Join-Path $Here 'config\config.ini') (Join-Path $Data 'config.ini.dist') -Force  # diff it to see new options
@@ -168,6 +176,11 @@ if ($web) {
     Start-ScheduledTask -TaskPath $TaskPath -TaskName 'web'
     Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
 } elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
+
+# the Telegram notifier: always registered; it exits at once (and stays idle) unless [telegram] enabled = yes and the chat is paired.
+# Outbound HTTPS to api.telegram.org only, as LOCAL SERVICE; its folder (token, chat) is the one locked above
+Register-Service 'notify' 'notify.py' 'S-1-5-19' 'notify.log' 'nuc-console Telegram notifier: outbound only'
+Start-ScheduledTask -TaskPath $TaskPath -TaskName 'notify'
 
 if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a full-screen one (--kiosk)
     $arg = @{ browser = '--open'; fullscreen = '--kiosk' }[$mode]
