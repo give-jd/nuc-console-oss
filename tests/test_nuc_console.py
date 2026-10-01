@@ -1200,9 +1200,16 @@ class DetailPages(unittest.TestCase):
         render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(2)}
         render.page_overview(self.sm, CONT, NET, BOOT, 226, 60)
         self.assertNotIn("webapps", render.TRUNC)                           # 2 declared apps plus the ones found fit the 12-row cap: nothing to detail for them
-        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}
+        render.CFG["webapps"] = {"app%03d" % i: [9000 + i] for i in range(80)}
         render.page_overview(self.sm, CONT, NET, BOOT, 226, 60)
-        self.assertIn("webapps", render.TRUNC)
+        self.assertIn("webapps", render.TRUNC)                             # 80 apps cannot fit: the Details pages will show them
+
+    def test_free_space_lifts_the_caps_before_anything_goes_to_details(self):
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(15)}       # over the 12-row cap, but there is room at 226x60
+        sl = render.slides(self.sm, CONT, NET, 226, 58, BOOT, False, mode="overview")
+        txt = render.ANSI.sub("", "\n".join(sl[0][3]))
+        self.assertTrue(all("app%02d" % i in txt for i in range(15)), "caps must lift when the layout still fits")
+        self.assertEqual([x[0] for x in sl].count("Details"), 0)
 
     def test_rotation_gives_the_overview_longer_and_cycles(self):
         sl = [("Overview", 1, 1, []), ("Details", 1, 2, []), ("Details", 2, 2, [])]

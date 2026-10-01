@@ -79,11 +79,12 @@ def kv(label, value, lw=13):
 
 FULL = False   # True while the detail pages / full view are built: no section hides items
 TRUNC = set()  # sections that hid items in the last overview ("… +N more"): the detail pages show them in full
+EXPAND = set()  # sections whose caps are lifted because the free space allows it (see page_overview)
 
 
 def lim(seq, n, section):
     """seq[:n] unless FULL; remembers that `section` hides items so the detail pages can show everything."""
-    if FULL or len(seq) <= n:
+    if FULL or section in EXPAND or len(seq) <= n:
         return seq
     TRUNC.add(section)
     return seq[:n]
@@ -91,7 +92,7 @@ def lim(seq, n, section):
 
 def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
     """Compact list over several lines without splitting items; beyond max_lines the last line ends with '… +N'."""
-    if FULL:
+    if FULL or (section and section in EXPAND):
         max_lines = None
     rows, cur = [], []
     for it in items:
@@ -1328,7 +1329,7 @@ def firewall_block(net, w, max_rules=None):
                   c(1, "   " + pad("TO", 28) + pad("ACTION", 14) + "FROM")]
         open_all = lambda r: (r["action"].startswith(("ALLOW", "LIMIT")) and r["from"].startswith("Anywhere")
                               and not r["to"].startswith("Anywhere"))  # exposes the port to the world: must be seen first
-        shown = rules_in if (max_rules is None or FULL) else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
+        shown = rules_in if (max_rules is None or FULL or "firewall" in EXPAND) else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
         if len(shown) < len(rules_in):
             TRUNC.add("firewall")
         for r in shown:  # no cap: all of them, and the page splits by itself if they do not fit
@@ -1543,7 +1544,7 @@ def ov_esposizione(net, cont, w, k, new=None):
 def ov_firewall(net, w, k):
     if k < 0 and net is not None:
         # enough room: with the rule list (capped at the intermediate level, most exposed first)
-        return firewall_block(net, w, None if k <= -2 else 10)
+        return firewall_block(net, w, None if (k <= -2 or "firewall" in EXPAND) else 10)
     lines = [section("FIREWALL", w)]
     if net is None:
         return lines + [msg("err", "network collector not running")]
@@ -1702,7 +1703,7 @@ def ov_webapp(net, cont, w, k):
     declared = bool(CFG["webapps"])
     nw = max(8, min(22, w - 47))
     cap = 12 if k <= 0 else 6 if k <= 2 else 4
-    if FULL:
+    if FULL or "webapps" in EXPAND:
         cap = len(rows)
     elif len(rows) > cap:
         TRUNC.add("webapps")
@@ -1855,6 +1856,41 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         last = i == len(levels) - 1
         lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, [""] if spaced else [])  # last level: no limit (the page splits)
         if lines is not None:
+            if not last:
+                # the caps ("… +N more") are not about space: lift each one if the layout still fits, so a free corner of the
+                # screen is used before anything is pushed to the Details pages. Section order = priority. If something stays
+                # cut, try once more without the air under the titles: complete content beats spacing.
+                def expand(first_lines):
+                    ls = first_lines
+                    try:
+                        for name in [n for n, _ in make_cand(k) if n in set(TRUNC)]:
+                            EXPAND.add(name)
+                            TRUNC.clear()
+                            try_lines = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
+                            if try_lines is None:
+                                EXPAND.discard(name)
+                            else:
+                                ls = try_lines
+                        TRUNC.clear()
+                        ls = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else []) or ls
+                        return ls, set(TRUNC)
+                    finally:
+                        EXPAND.clear()
+                        TRUNC.clear()
+                lines, left = expand(lines)
+                if left and CFG["spacing"]:
+                    saved_spacing = CFG["spacing"]
+                    CFG["spacing"] = 0
+                    try:
+                        TRUNC.clear()
+                        tight = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
+                        tight_lines, tight_left = expand(tight) if tight is not None else (None, left)
+                    finally:
+                        CFG["spacing"] = saved_spacing
+                    if tight_lines is not None and len(tight_left) < len(left):
+                        lines, left = tight_lines, tight_left
+                TRUNC.clear()
+                TRUNC.update(left)
             if details is not None and CFG["details"] and TRUNC:
                 details.extend(detail_pages(set(TRUNC)))
             return lines  # the last level has a 10**6 limit: we always return here
