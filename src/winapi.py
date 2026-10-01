@@ -312,3 +312,141 @@ def enable_vt():
     mode = c_uint32(0)
     if h and k.GetConsoleMode(c_void_p(h), ctypes.byref(mode)):
         k.SetConsoleMode(c_void_p(h), mode.value | 0x0004)
+
+
+# ---- processes (renderer, unprivileged: the CPU screen's process list) ---------------------------------------------------
+
+TH32CS_SNAPPROCESS = 0x2
+ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER = 5, 87  # OpenProcess: not allowed / no such process (any more)
+STILL_ACTIVE = 259
+FILETIME_UNIX_EPOCH = 116444736000000000  # 1970-01-01 in 100 ns units since 1601-01-01
+
+
+class ProcessEntry32W(ctypes.Structure):  # PROCESSENTRY32W: 568 bytes on 64-bit Windows, 556 on 32-bit
+    _fields_ = [("size", c_uint32), ("usage", c_uint32), ("pid", c_uint32), ("heap_id", ctypes.c_size_t),
+                ("module_id", c_uint32), ("threads", c_uint32), ("ppid", c_uint32), ("pri_base", ctypes.c_int32),
+                ("flags", c_uint32), ("exe", c_uint16 * 260)]
+
+
+class MemCounters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS (SIZE_T: pointer-sized): 72 bytes on 64-bit, 40 on 32-bit
+    _fields_ = [("cb", c_uint32), ("page_faults", c_uint32), ("peak_working_set", ctypes.c_size_t),
+                ("working_set", ctypes.c_size_t), ("quota_peak_paged", ctypes.c_size_t), ("quota_paged", ctypes.c_size_t),
+                ("quota_peak_nonpaged", ctypes.c_size_t), ("quota_nonpaged", ctypes.c_size_t),
+                ("pagefile", ctypes.c_size_t), ("peak_pagefile", ctypes.c_size_t)]
+
+
+def filetime_epoch(ft):
+    """FILETIME as one integer (100 ns since 1601-01-01 UTC) -> Unix epoch seconds; None for 0 (not set)."""
+    return (ft - FILETIME_UNIX_EPOCH) / 1e7 if ft else None
+
+
+def parse_process_entry(entry):
+    """PROCESSENTRY32W -> {'pid', 'ppid', 'threads', 'pri', 'name'}. szExeFile is the image file name ('svchost.exe'),
+    never the command line; pcPriClassBase the base priority of its threads (8 normal, 13 high, 4 idle, 24 realtime)."""
+    name = bytes(entry.exe).decode("utf-16-le", errors="replace").split("\0", 1)[0]
+    return {"pid": entry.pid, "ppid": entry.ppid, "threads": entry.threads, "pri": entry.pri_base, "name": name}
+
+
+_PROC_API = []
+
+
+def _proc_api():
+    """kernel32 and advapi32 with the prototypes of the process calls (handles are pointer-sized), loaded once: the CPU
+    screen lists every process at every refresh."""
+    if not _PROC_API:
+        k, a = _dll("kernel32"), _dll("advapi32")
+        h, p, dw = c_void_p, c_void_p, c_uint32
+        k.CreateToolhelp32Snapshot.restype, k.CreateToolhelp32Snapshot.argtypes = h, [dw, dw]
+        k.Process32FirstW.argtypes = k.Process32NextW.argtypes = [h, p]
+        k.OpenProcess.restype, k.OpenProcess.argtypes = h, [dw, c_int, dw]
+        k.GetProcessTimes.argtypes = [h, p, p, p, p]
+        k.GetExitCodeProcess.argtypes = [h, p]
+        k.K32GetProcessMemoryInfo.argtypes = [h, p, dw]
+        k.CloseHandle.argtypes = [h]
+        k.LocalFree.restype, k.LocalFree.argtypes = c_void_p, [c_void_p]
+        a.OpenProcessToken.argtypes = [h, dw, p]
+        a.GetTokenInformation.argtypes = [h, c_int, p, dw, p]
+        a.ConvertSidToStringSidW.argtypes = [c_void_p, p]
+        a.ConvertStringSidToSidW.argtypes = [ctypes.c_wchar_p, p]
+        a.LookupAccountSidW.argtypes = [ctypes.c_wchar_p, c_void_p, ctypes.c_wchar_p, p, ctypes.c_wchar_p, p, p]
+        _PROC_API.extend((k, a))
+    return _PROC_API
+
+
+def process_list():
+    """[{'pid', 'ppid', 'threads', 'pri', 'name'}] of every process (CreateToolhelp32Snapshot: no privilege needed)."""
+    k, _ = _proc_api()
+    snap = k.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snap or snap == c_void_p(-1).value:  # INVALID_HANDLE_VALUE
+        raise _fail("CreateToolhelp32Snapshot")
+    try:
+        e = ProcessEntry32W(size=ctypes.sizeof(ProcessEntry32W))
+        out, ok = [], k.Process32FirstW(snap, ctypes.byref(e))
+        while ok:
+            out.append(parse_process_entry(e))
+            ok = k.Process32NextW(snap, ctypes.byref(e))
+        return out
+    finally:
+        k.CloseHandle(snap)
+
+
+def _token_sid(k, a, h):
+    tok = c_void_p()
+    if not a.OpenProcessToken(h, 0x0008, ctypes.byref(tok)):  # TOKEN_QUERY
+        return None
+    try:
+        buf, n = ctypes.create_string_buffer(256), c_uint32(0)
+        if not a.GetTokenInformation(tok, 1, buf, len(buf), ctypes.byref(n)):  # TokenUser: SID_AND_ATTRIBUTES first
+            return None
+        text = ctypes.c_wchar_p()
+        if not a.ConvertSidToStringSidW(c_void_p.from_buffer(buf).value, ctypes.byref(text)):
+            return None
+        try:
+            return text.value
+        finally:
+            k.LocalFree(text)
+    finally:
+        k.CloseHandle(tok)
+
+
+def process_stats(pid, user=True):
+    """{'created': FILETIME, 'exited': bool, 'cpu': kernel + user time in 100 ns, 'rss': working set bytes, 'sid': owner SID}
+    of a process opened with PROCESS_QUERY_LIMITED_INFORMATION (enough for each call here on Windows 8.1+). A value Windows
+    refuses is None (the SID too when user=False). Raises OSError when the process cannot be opened: errno 5
+    (ERROR_ACCESS_DENIED: protected, or another account's as LOCAL SERVICE), 87 (ERROR_INVALID_PARAMETER: gone)."""
+    k, a = _proc_api()
+    h = k.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        raise _fail("OpenProcess")
+    try:
+        out = {"created": None, "exited": False, "cpu": None, "rss": None, "sid": None}
+        created, exited, kernel, usr, code = c_uint64(), c_uint64(), c_uint64(), c_uint64(), c_uint32(0)
+        if k.GetProcessTimes(h, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(usr)):
+            out["created"], out["cpu"] = created.value or None, kernel.value + usr.value
+        if k.GetExitCodeProcess(h, ctypes.byref(code)):  # the exit time is undefined while it runs: ask the exit code
+            out["exited"] = code.value != STILL_ACTIVE
+        mc = MemCounters(cb=ctypes.sizeof(MemCounters))
+        if k.K32GetProcessMemoryInfo(h, ctypes.byref(mc), mc.cb):
+            out["rss"] = mc.working_set
+        if user:
+            out["sid"] = _token_sid(k, a, h)
+        return out
+    finally:
+        k.CloseHandle(h)
+
+
+def account_name(sid):
+    """'alice', 'SYSTEM', 'LOCAL SERVICE'... for a SID string (LookupAccountSidW: the name as Windows shows it, possibly
+    translated: displayed, never parsed). None when Windows cannot resolve it (deleted account, unreachable domain)."""
+    k, a = _proc_api()
+    psid = c_void_p()
+    if not a.ConvertStringSidToSidW(sid, ctypes.byref(psid)):
+        return None
+    try:
+        name, domain = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+        n, dn, use = c_uint32(len(name)), c_uint32(len(domain)), c_uint32(0)
+        if not a.LookupAccountSidW(None, psid, name, ctypes.byref(n), domain, ctypes.byref(dn), ctypes.byref(use)):
+            return None
+        return name.value or None
+    finally:
+        k.LocalFree(psid)

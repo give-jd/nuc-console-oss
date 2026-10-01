@@ -310,3 +310,17 @@ def screen_size():
         return winapi.screen_size() if WINDOWS else _mac_screen() if MACOS else None
     except (OSError, AttributeError):
         return None
+
+
+def mac_exe_paths(pids):
+    """{pid: path of the executable} (proc_pidpath, libproc). The path is the kernel's (the image file), never argv, so a
+    process cannot put its arguments there. Not verified on every macOS version: xnu may refuse other users' processes
+    without root (then they are left out, like gone ones, and the caller keeps ps's own short name)."""
+    lib = _libsystem()
+    lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    buf, out = ctypes.create_string_buffer(4096), {}  # PROC_PIDPATHINFO_MAXSIZE
+    for pid in pids:
+        n = lib.proc_pidpath(pid, buf, len(buf))
+        if n > 0:
+            out[pid] = buf.raw[:n].decode("utf-8", errors="replace")
+    return out

@@ -26,6 +26,7 @@ import demo  # noqa: E402
 import hostinfo  # noqa: E402
 import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
+import procs  # noqa: E402
 import render  # noqa: E402
 import winapi  # noqa: E402
 
@@ -841,6 +842,29 @@ def check_sensors(tc, d, os_name):
     tc.assertTrue(cpu["source"] or d["errors"] or d["absent"], d)
     return d
 
+def sample_real_procs(test):
+    """Two samples of the real process list around a CPU burst, with a child whose command line holds a (runtime) secret:
+    -> (second sample indexed by pid, the child's pid, the JSON of the sample, seconds one sample took)."""
+    secret = "tok" + os.urandom(6).hex()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "--token=" + secret])
+    try:
+        s = procs.ProcSampler()
+        s.sample()
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            sum(i * i for i in range(1000))
+        t = time.perf_counter()
+        out = s.sample()
+        took = time.perf_counter() - t
+    finally:
+        child.kill()
+        child.wait()
+    test.assertNotIn(secret, json.dumps(out))  # names only, never arguments
+    test.assertEqual(set(out), {"procs", "total", "notes"})
+    test.assertEqual(set(out["total"]), {"count", "running", "threads", "unreadable"})
+    test.assertEqual(out["total"]["count"], len(out["procs"]))
+    test.assertLessEqual(out["total"]["unreadable"], out["total"]["count"])
+    return {p["pid"]: p for p in out["procs"]}, child.pid, took
 
 @unittest.skipUnless(sys.platform == "win32", "Windows")
 class OnWindows(unittest.TestCase):
@@ -869,6 +893,21 @@ class OnWindows(unittest.TestCase):
         d = check_sensors(self, collector.collect_sensors(), "windows")                    # a runner has no sensors: absent, not a crash
         self.assertEqual((d["cpu"]["pressure"], d["cpu"]["clusters"]), (None, []))
 
+    def test_process_list(self):
+        by, child, took = sample_real_procs(self)
+        me = by[os.getpid()]
+        self.assertTrue(me["name"].lower().startswith("python"), me["name"])
+        self.assertGreater(me["mem"], 0)
+        self.assertTrue(me["user"])
+        self.assertGreater(me["cpu"], 10)  # busy for 0.3 s of the interval
+        self.assertGreater(me["threads"], 0)
+        self.assertLessEqual(me["start"], time.time())
+        self.assertIn(child, by)
+        self.assertIn(4, by)  # System: listed, whatever we may read of it
+        self.assertNotIn(0, by)  # Idle
+        self.assertIsNone(me["state"])  # Windows has no process states
+        self.assertLess(took, 2.0)  # ~50 ms for 200 processes; generous for CI
+
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS")
 class OnMacOS(unittest.TestCase):
@@ -894,6 +933,18 @@ class OnMacOS(unittest.TestCase):
             self.assertNotEqual(d["cpu"]["source"], "powermetrics")
         elif "powermetrics" not in d["errors"]:
             self.assertIsNotNone(d["cpu"]["pressure"])                                       # thermal is a sampler of every Mac
+
+    def test_process_list(self):
+        by, child, took = sample_real_procs(self)
+        me = by[os.getpid()]
+        self.assertTrue(me["name"])
+        self.assertGreater(me["mem"], 0)
+        self.assertEqual(me["user"], procs.pwd.getpwuid(os.getuid()).pw_name)
+        self.assertGreater(me["cpu"], 10)  # busy for 0.3 s of the interval
+        self.assertIn(child, by)
+        self.assertEqual(by[1]["name"], "launchd")
+        self.assertLessEqual(me["start"], time.time())
+        self.assertLess(took, 2.0)  # ~100 ms for 500 processes; generous for CI
 
 
 if __name__ == "__main__":
