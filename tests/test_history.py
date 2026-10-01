@@ -5,6 +5,7 @@ tests/test_platforms.py (OnWindows, OnMacOS) and in OnLinux below. Addresses are
 runtime so that no real-looking secret is committed.
 """
 import contextlib
+import gc
 import io
 import json
 import os
@@ -1298,6 +1299,7 @@ class Loop(TmpDir):
 
     def test_the_real_job_in_the_real_loop(self):
         db = os.path.join(self.dir, "lib", "history.db")
+        gc.collect()  # what other tests left to the garbage collector warns now, not inside the stderr captured below
         with mock.patch.object(history, "PATH", db), mock.patch.object(collector.HistoryJob, "sources", lambda self: []):
             sleeps, err = self.run_loop(None, 2)
         self.assertEqual(err, "")

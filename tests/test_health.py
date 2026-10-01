@@ -47,6 +47,9 @@ class DB(object):
                 self.host(h)
                 self.app(h, "idle", cpu_s=10, rss=50 * MB)
 
+    def __del__(self):  # each test makes several: closed when dropped, not left to the garbage collector (Python 3.13+ warns)
+        self.conn.close()
+
     def host(self, hour, **kw):
         v = dict(HOST, **kw)
         cols = ("hour",) + tuple(v)
@@ -211,6 +214,7 @@ class Coverage(unittest.TestCase):
 
     def test_missing_tables_and_schema_are_notes_not_errors(self):
         conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
         r = health.report(conn, now=NOW)
         self.assertEqual(r["findings"], [])
         self.assertTrue(any("history incomplete" in n for n in r["notes"]), r["notes"])

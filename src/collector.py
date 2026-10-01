@@ -1648,19 +1648,24 @@ def history_loop(make=None, sleep=time.sleep, stop=None, mono=time.monotonic):
     """The history thread. It must never die: whatever goes wrong (a full disk, a locked file, a bug) is printed once and tried
     again a minute later; the database is opened here, not at import, so `--once` and a disabled feature never create it."""
     job, last = None, None
-    while not (stop and stop()):
-        t0 = mono()
-        try:
-            if job is None:
-                job = make() if make else HistoryJob(history.Store())
-            job.step()
-            last = None
-        except Exception as e:  # noqa: BLE001
-            msg = repr(e)[:200]
-            if msg != last:  # the same failure every minute would fill the log
-                print("history:", msg, file=sys.stderr)
-                last = msg
-        sleep(max(1.0, HIST_SAMPLE_S - (mono() - t0)))
+    try:
+        while not (stop and stop()):
+            t0 = mono()
+            try:
+                if job is None:
+                    job = make() if make else HistoryJob(history.Store())
+                job.step()
+                last = None
+            except Exception as e:  # noqa: BLE001
+                msg = repr(e)[:200]
+                if msg != last:  # the same failure every minute would fill the log
+                    print("history:", msg, file=sys.stderr)
+                    last = msg
+            sleep(max(1.0, HIST_SAMPLE_S - (mono() - t0)))
+    finally:  # stopped (tests): the file is closed, not left to the garbage collector
+        store = getattr(job, "store", None)
+        if store is not None and hasattr(store, "close"):
+            store.close()
 
 
 def sensors_loop():
