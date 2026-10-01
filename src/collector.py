@@ -18,7 +18,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import nuc_config  # noqa: E402  (same directory)
+import history  # noqa: E402  (same directory)
+import nuc_config  # noqa: E402
 
 CFG = nuc_config.load()
 OFF = {k for k, v in CFG["features"].items() if not v}
@@ -1243,6 +1244,345 @@ def boot_loop():
         time.sleep(BOOT_INTERVAL_S)
 
 
+# ---- history ([features] health): the SQLite store (history.py), filled by a thread of its own ----------------------------
+# Every minute: processes and host figures into memory; every 5 minutes: flushed to the hour rows (one transaction), and the
+# events since the last look (journal / Event Log / crash reports, Docker) with their cursors; once a day: disks, retention.
+# Each source fails alone (the error goes to meta last_errors), and nothing here may stop the thread.
+HIST_SAMPLE_S, HIST_FLUSH_S, HIST_EVENTS_S = 60, 300, 300
+HIST_CALL_S = 25  # a stuck network mount must not stop the history
+
+
+def call_with_timeout(fn, seconds):
+    """fn() in a helper thread; TimeoutError if it does not return in time (the thread is abandoned: statvfs on a dead mount
+    can block for minutes)."""
+    box = {}
+
+    def work():
+        try:
+            box["v"] = fn()
+        except BaseException as e:  # noqa: BLE001 - handed to the caller
+            box["e"] = e
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise TimeoutError("no answer in %d s" % seconds)
+    if "e" in box:
+        raise box["e"]
+    return box["v"]
+
+
+def hist_meminfo():
+    """{'MemTotal', 'MemAvailable', 'SwapTotal', 'SwapFree'} in bytes, on any OS."""
+    if LINUX:
+        with open("/proc/meminfo") as f:
+            return history.parse_meminfo(f.read())
+    import hostinfo
+    return hostinfo.meminfo()
+
+
+def hist_sensors():
+    """sensors.json (macOS/Windows collector thread) or None: absent, unreadable or not there yet."""
+    try:
+        with open(os.path.join(nuc_config.RUN_DIR, "sensors.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def disk_rows():
+    """[{'mount', 'used', 'total'}] of every real filesystem (the same filter as the DISKS section)."""
+    if LINUX:
+        with open("/proc/mounts") as f:
+            mounts = history.parse_mounts(f.read())
+        rows = []
+        for mp in mounts:
+            try:
+                st = os.statvfs(mp)
+            except OSError:
+                continue
+            total = st.f_blocks * st.f_frsize
+            if total:
+                rows.append({"mount": mp, "used": (st.f_blocks - st.f_bfree) * st.f_frsize, "total": total})
+        return rows
+    import hostinfo
+    return hostinfo.filesystems()
+
+
+class HistoryJob(object):
+    """One step per minute of what the history thread does. `procs` and `cpu` are the renderer's samplers (procs.py,
+    cpuinfo.py): created here, in the collector's own thread, and only read by it."""
+
+    def __init__(self, store, procs=None, cpu=None, wall=time.time, mono=time.monotonic):
+        self.store, self.procs, self.cpu, self.wall, self.mono = store, procs, cpu, wall, mono
+        self.account, self.window = history.ProcAccount(), history.Window()
+        self.errors = {}          # source -> short text of its last failure (meta last_errors)
+        self.t_flush, self.t_events = mono(), None
+        self.throttle_prev = None
+        self.boot_seen = None
+        self.cores = None
+        self.samplers_tried = procs is not None and cpu is not None
+
+    # -- bookkeeping --
+
+    def fail(self, name, e):
+        self.errors[name] = (e if isinstance(e, str) else repr(e))[:120]
+
+    def make_samplers(self):
+        if self.samplers_tried:
+            return
+        self.samplers_tried = True
+        try:
+            import procs as procs_mod
+            self.procs = self.procs or procs_mod.ProcSampler()
+        except Exception as e:  # noqa: BLE001
+            self.fail("procs", e)
+        try:
+            import cpuinfo
+            self.cpu = self.cpu or cpuinfo.CpuSampler()
+        except Exception as e:  # noqa: BLE001
+            self.fail("cpu", e)
+
+    def step(self):
+        """Runs what is due; every source on its own, so one failure leaves the others."""
+        self.make_samplers()
+        self.sample()
+        if self.mono() - self.t_flush >= HIST_FLUSH_S:
+            self.flush()
+        if self.t_events is None or self.mono() - self.t_events >= HIST_EVENTS_S:
+            self.events()
+
+    # -- every minute --
+
+    def host_fields(self, c, now):
+        h = {"cpu": None, "mem": None, "swap": None, "load": None, "temp": None, "temp_high": None, "throttle": None}
+        c = c if isinstance(c, dict) else {}
+        threads = c.get("threads")
+        if isinstance(threads, int) and threads > 0 and threads != self.cores:  # cpuinfo knows the logical CPUs (online ones)
+            self.cores = threads
+            self.store.set_cores(threads)
+        busy = ((c.get("usage") or {}).get("total") or {}).get("busy")
+        if isinstance(busy, (int, float)):
+            h["cpu"] = float(busy)
+        load = c.get("load")
+        if isinstance(load, (list, tuple)) and load and isinstance(load[0], (int, float)):
+            h["load"] = float(load[0])
+        elif load is None and hasattr(os, "getloadavg"):
+            try:
+                h["load"] = os.getloadavg()[0]
+            except OSError:
+                pass
+        try:
+            h["mem"], h["swap"] = history.mem_percent(hist_meminfo())
+            self.errors.pop("memory", None)
+        except Exception as e:  # noqa: BLE001
+            self.fail("memory", e)
+        temps = c.get("temps") if isinstance(c.get("temps"), dict) else {}
+        h["temp"], h["temp_high"] = history.pick_temp(temps)
+        if h["temp"] is None:
+            h["temp"], _ = history.pick_temp({}, hist_sensors(), now)
+        count = history.throttle_count(c.get("throttle"))
+        if count is not None:
+            if self.throttle_prev is not None and count >= self.throttle_prev:
+                h["throttle"] = count - self.throttle_prev  # the counter restarts at boot: a drop is not a negative number
+            self.throttle_prev = count
+        return h
+
+    def sample(self):
+        now, mono = self.wall(), self.mono()
+        apps, c = {}, None
+        if self.procs is not None:
+            try:
+                apps = self.account.update(self.procs.sample().get("procs") or [], mono, now)
+                self.errors.pop("procs", None)
+            except Exception as e:  # noqa: BLE001
+                self.fail("procs", e)
+        if self.cpu is not None:
+            try:
+                c = self.cpu.sample()
+                self.errors.pop("cpu", None)
+            except Exception as e:  # noqa: BLE001
+                self.fail("cpu", e)
+        self.window.add(now, apps, self.host_fields(c, now))
+
+    def flush(self):
+        """The samples so far -> app_hour / host_hour, one transaction. A failed one keeps them for the next try."""
+        app_rows, host_rows = self.window.rows()
+        if app_rows or host_rows:
+            self.store.add_hours(app_rows, host_rows, {"last_errors": json.dumps(self.errors, sort_keys=True)})
+        self.window.clear()
+        self.t_flush = self.mono()
+
+    # -- every 5 minutes --
+
+    def sources(self):
+        out = []
+        if LINUX:
+            out.append(("journal", self.src_journal))
+        elif MACOS:
+            out += [("diag", self.src_diag), ("launchd", self.src_launchd)]
+        elif WINDOWS:
+            out.append(("eventlog", self.src_eventlog))
+        if "containers" not in OFF:
+            out.append(("docker", self.src_docker))
+        return out
+
+    def events(self):
+        """The events and log templates since the last look, then what is due once a day. Cursors move only together with the
+        rows they cover (one transaction per source)."""
+        for name, fn in self.sources():
+            self.errors.pop(name, None)
+            try:
+                evs, logs, meta = fn()
+                self.store.add_events(evs, logs, meta)
+            except Absent:
+                continue  # the tool is not installed: not an error
+            except Exception as e:  # noqa: BLE001
+                self.fail(name, e)
+        try:
+            self.boot()
+            self.errors.pop("boot", None)
+        except Exception as e:  # noqa: BLE001
+            self.fail("boot", e)
+        try:
+            self.daily()
+        except Exception as e:  # noqa: BLE001
+            self.fail("daily", e)
+        self.t_events = self.mono()
+        try:
+            self.store.set_meta("last_errors", json.dumps(self.errors, sort_keys=True))
+        except Exception as e:  # noqa: BLE001
+            print("history last_errors:", repr(e), file=sys.stderr)
+
+    def src_journal(self):
+        """journalctl, three fixed command lines (history.JOURNAL_SOURCES), each after its own cursor; the first look takes the
+        last hour. A cursor the journal no longer knows (vacuumed): from the time of the last entry instead."""
+        events, logs, meta, bad = [], [], {}, []
+        for name, extra in history.JOURNAL_SOURCES:
+            ckey, tkey = name + "_cursor", name + "_ts"
+            cursor, rounds = self.store.meta(ckey), 0
+            if cursor and not history.CURSOR.match(cursor):
+                cursor = None
+            while rounds < 4:  # a pass reads JOURNAL_CAP entries at most; a backlog is read in a few rounds
+                rounds += 1
+                base = ["-o", "json", "--no-pager", "--output-fields=" + history.JOURNAL_FIELDS] + list(extra)
+                where = ["--after-cursor=" + cursor] if cursor else ["--since=-1h"]
+                rc, out, err = run("journalctl", *(base + where), timeout=60)
+                if rc == 1 and not out.strip() and not err:
+                    rc = 0  # older systemd: "no entries" is exit status 1, with nothing said; a lost cursor says so on stderr
+                if rc != 0 and cursor:
+                    ts = (meta.get(tkey) or self.store.meta(tkey) or "")
+                    rc, out, err = run("journalctl", *(base + ["--since=@" + ts if ts.isdigit() else "--since=-1h"]), timeout=60)
+                if rc != 0:
+                    bad.append("%s: %s" % (name, err or "rc=%s" % rc))
+                    break
+                got = history.parse_journal_events(out, name, now=self.wall())
+                events += got["events"]
+                logs += got["logs"]
+                if got["cursor"]:
+                    cursor = meta[ckey] = got["cursor"]
+                    meta[tkey] = str(got["ts"])
+                if not got["capped"]:
+                    break
+        if bad:
+            self.fail("journal", "; ".join(bad))
+        return history.dedupe_crashes(history.merge_events(events)), logs, meta
+
+    def src_docker(self):
+        """Restarts, OOM kills and failed exits of containers: what changed in `docker inspect` since the last look (the
+        container list of collect() has no restart counter). The first look is only the baseline."""
+        rc, out, err = run("docker", "ps", "-a", "-q", "--no-trunc", timeout=20)
+        if rc != 0:
+            raise RuntimeError(err or "docker ps failed")
+        ids = [i for i in out.split() if history.CONTAINER_ID.match(i)][:300]
+        cur = {}
+        if ids:
+            rc, out, err = run("docker", "inspect", "--format", history.DOCKER_FORMAT, *ids, timeout=30)
+            if rc != 0:
+                raise RuntimeError(err or "docker inspect failed")
+            cur = history.parse_docker_state(out)
+        prev = history.json_meta(self.store, "docker_state")
+        evs = history.docker_events(prev if isinstance(prev, dict) else None, cur, self.wall())
+        text = json.dumps(cur, sort_keys=True, separators=(",", ":"))
+        return evs, [], {"docker_state": text} if text != self.store.meta("docker_state") else {}
+
+    def src_eventlog(self):
+        """Windows: Warning, Error and Critical events of System and Application since the last RecordId (collect_windows)."""
+        import collect_windows as cw
+        cur = {log: int(self.store.meta("eventlog_" + log) or 0) for log in ("System", "Application")}
+        got = cw.parse_events(cw.powershell(run, cw.events_script(cur), timeout=90), self.wall())
+        if got["errors"]:
+            self.fail("eventlog", "; ".join("%s: %s" % kv for kv in sorted(got["errors"].items())))
+        return got["events"], got["logs"], {"eventlog_" + log: str(rec) for log, rec in got["cursors"].items()}
+
+    def src_diag(self):
+        """macOS: crash, hang and Jetsam reports newer than the last one read (collect_darwin)."""
+        import collect_darwin as cm
+        now = self.wall()
+        try:
+            since = float(self.store.meta("diag_mtime") or 0)
+        except ValueError:
+            since = 0.0
+        evs, newest = cm.diag_events(since or now - cm.DIAG_FIRST_S, now=now)
+        return evs, [], {"diag_mtime": repr(float(newest))}
+
+    def src_launchd(self):
+        """macOS: third-party launch daemons that exited with an error since the last look."""
+        import collect_darwin as cm
+        failed = cm.daemons(run)[1]
+        prev = history.json_meta(self.store, "launchd_failed")
+        return (cm.new_failed_daemons(prev if isinstance(prev, list) else None, failed, self.wall()), [],
+                {"launchd_failed": json.dumps(sorted(failed))})
+
+    def boot(self):
+        """The boot time of the current boot, when boot.json (the boot thread) has it: each boot once."""
+        try:
+            with open(OUT_BOOT, encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            return
+        total = (d.get("analyze") or {}).get("total") if isinstance(d, dict) and isinstance(d.get("analyze"), dict) else None
+        if isinstance(total, (int, float)) and isinstance(d.get("btime"), (int, float)) and "%s:%s" % (d["btime"], total) != self.boot_seen:
+            self.store.put_boot(d["btime"], total, d.get("kernel"))
+            self.boot_seen = "%s:%s" % (d["btime"], total)
+
+    # -- once a day --
+
+    def daily(self):
+        now = self.wall()
+        day = int(now // 86400)
+        if self.store.meta("last_daily") == str(day):
+            return
+        try:
+            self.store.put_disks(day, call_with_timeout(disk_rows, HIST_CALL_S))
+            self.errors.pop("disks", None)
+        except Exception as e:  # noqa: BLE001
+            self.fail("disks", e)
+        self.store.prune(now)
+        self.store.vacuum_if_due(now)
+        self.store.set_meta("last_daily", str(day))
+
+
+def history_loop(make=None, sleep=time.sleep, stop=None, mono=time.monotonic):
+    """The history thread. It must never die: whatever goes wrong (a full disk, a locked file, a bug) is printed once and tried
+    again a minute later; the database is opened here, not at import, so `--once` and a disabled feature never create it."""
+    job, last = None, None
+    while not (stop and stop()):
+        t0 = mono()
+        try:
+            if job is None:
+                job = make() if make else HistoryJob(history.Store())
+            job.step()
+            last = None
+        except Exception as e:  # noqa: BLE001
+            msg = repr(e)[:200]
+            if msg != last:  # the same failure every minute would fill the log
+                print("history:", msg, file=sys.stderr)
+                last = msg
+        sleep(max(1.0, HIST_SAMPLE_S - (mono() - t0)))
+
+
 def main():
     if "--log" in sys.argv[:-1]:  # Windows scheduled task: no journal, the log goes to %ProgramData%\nuc-console\logs
         nuc_config.log_to(sys.argv[sys.argv.index("--log") + 1])
@@ -1256,6 +1596,8 @@ def main():
         threading.Thread(target=boot_loop, daemon=True).start()
     # separate thread: slow ufw/iptables/fail2ban must not stop the container refresh
     threading.Thread(target=net_loop, daemon=True).start()
+    if "health" not in OFF:  # the history: its own thread and file (history.db), never touched by --once
+        threading.Thread(target=history_loop, name="history", daemon=True).start()
     while True:
         try:
             data = collect()

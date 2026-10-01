@@ -318,3 +318,125 @@ def boot_sections(data):
     deps = {n: ([v] if isinstance(v, str) else [str(x) for x in v or []])[:20] for n, v in raw.items() if n in failed}
     return {"btime": int(data.get("boot") or time.time()), "analyze": analyze, "failed": failed, "deps": deps, "enabled": enabled,
             "journal": journal_from_events(data.get("events"))}
+
+
+# ---- history: warnings and errors of the System and Application logs since the last look -------------------------------------
+# The script is fixed text; the only variable parts are two integers (the last RecordId seen in each log), formatted with %d.
+# Per event it reads Id, ProviderName, LogName, RecordId, TimeCreated, Level and, for the few ids whose first insertion string
+# is a name (application, service), that one string. The message text (localised, may hold user names and paths) is never
+# read. The first look (no cursor) takes the last hour; a cursor above the newest record (the log was cleared) starts again.
+
+HISTORY_FIRST_S = 3600
+HISTORY_MAX_EVENTS = 2000
+PS_EVENTS_BODY = r"""
+$known = 1000, 1002, 7000, 7001, 7009, 7023, 7024, 7031, 7034
+$res = @{}
+$errs = @{}
+foreach ($log in 'System', 'Application') {
+  $last = [int64]$cur[$log]
+  $max = [int64]0
+  $rows = @()
+  try {
+    try { $max = [int64](Get-WinEvent -LogName $log -MaxEvents 1 -ErrorAction Stop).RecordId } catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }
+    if ($last -gt $max) { $last = [int64]0 }
+    if ($last -gt 0) { $xp = "*[System[(Level=1 or Level=2 or Level=3) and EventRecordID > $last and EventRecordID <= $max]]" }
+    else { $xp = "*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= $($first * 1000)]]]" }
+    if ($max -gt $last) {
+      $ev = @()
+      try { $ev = @(Get-WinEvent -LogName $log -FilterXPath $xp -MaxEvents %(max)d -ErrorAction Stop) } catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }
+      foreach ($e in $ev) {
+        $a0 = $null
+        if ($known -contains [int]$e.Id) { $p = $e.Properties; if ($p -and $p.Count -gt 0) { $a0 = [string]$p[0].Value } }
+        $t = [int64]0
+        if ($e.TimeCreated) { $t = ([DateTimeOffset]$e.TimeCreated).ToUnixTimeSeconds() }
+        $rows += @{ Id = [int]$e.Id; ProviderName = [string]$e.ProviderName; LogName = [string]$e.LogName; RecordId = [int64]$e.RecordId; TimeCreated = $t; Level = [int]$e.Level; Arg0 = $a0 }
+      }
+    }
+  } catch { $errs[$log] = [string]$_.FullyQualifiedErrorId }
+  $res[$log] = @{ max = $max; events = @($rows) }
+}
+@{ logs = $res; errors = $errs } | ConvertTo-Json -Depth 6 -Compress
+""" % {"max": HISTORY_MAX_EVENTS}
+
+
+def events_script(cursors=None, first_s=HISTORY_FIRST_S):
+    """The PowerShell script for powershell(): cursors = {'System': last RecordId, 'Application': last RecordId} (0 or missing:
+    the first look). Only integers are put into the text."""
+    cur = cursors or {}
+    return PS_PRELUDE + "$cur = @{ System = %d; Application = %d }\n$first = %d\n" % (
+        max(0, int(cur.get("System") or 0)), max(0, int(cur.get("Application") or 0)), int(first_s)) + PS_EVENTS_BODY
+
+
+# What each event means. ProviderName is the registered source name: it is not translated, unlike the message.
+SERVICE_CRASH = {7031, 7034}                         # Service Control Manager: a service terminated unexpectedly
+SERVICE_FAILED = {7000, 7001, 7009, 7023, 7024}      # ... failed to start / a dependency failed / timeout / error
+LEVEL_ERR = (1, 2)                                   # Critical, Error: also kept as a log template
+
+
+def _name(v, fallback="(unknown)"):
+    import history
+    return history.clean(v) or fallback
+
+
+def classify_event(e):
+    """One event dict (as the script returns it) -> (kind, subject, detail) or None. Details are fixed words or
+    '<provider> <id>': never message text."""
+    import history
+    try:
+        eid, prov = int(e.get("Id")), history.clean(e.get("ProviderName"))
+    except (TypeError, ValueError):
+        return None
+    arg = e.get("Arg0")
+    if eid == 1000 and prov == "Application Error":
+        return "crash", _name(arg), "Application Error 1000"
+    if eid == 1002 and prov == "Application Hang":
+        return "hang", _name(arg), "Application Hang 1002"
+    if prov == "Service Control Manager":
+        if eid in SERVICE_CRASH:
+            return "crash", _name(arg), "Service Control Manager %d" % eid
+        if eid in SERVICE_FAILED:
+            return "service_failed", _name(arg), "Service Control Manager %d" % eid
+    if eid == 41 and prov.endswith("Kernel-Power"):
+        return "unexpected_shutdown", "system", "Kernel-Power 41"
+    if "WHEA-Logger" in prov:
+        return "hw_error", "WHEA", "%s %d" % (prov[:48], eid)
+    if eid == 2004 and prov.endswith("Resource-Exhaustion-Detector"):
+        return "oom", "low virtual memory", "Resource-Exhaustion-Detector 2004"
+    return None
+
+
+def parse_events(data, now=None):
+    """The script's JSON -> {'events': [...], 'logs': [...], 'cursors': {log: newest RecordId}, 'errors': {log: id}}.
+    events are history.merge_events() rows (source 'eventlog'); logs are the Level 1-2 events as '<provider> <id>' templates.
+    A log that failed has no cursor: it is read again next time."""
+    import history
+    now = int(now if now is not None else time.time())
+    events, logs, cursors, errors = [], [], {}, {}
+    data = data if isinstance(data, dict) else {}
+    errs = data.get("errors") if isinstance(data.get("errors"), dict) else {}
+    for log, entry in (data.get("logs") if isinstance(data.get("logs"), dict) else {}).items():
+        if log in errs or not isinstance(entry, dict):
+            errors[str(log)[:32]] = history.clean(errs.get(log) or "unreadable", 80)
+            continue
+        try:
+            cursors[log] = int(entry.get("max") or 0)
+        except (TypeError, ValueError):
+            continue
+        rows = entry.get("events")
+        for e in [rows] if isinstance(rows, dict) else rows or []:
+            if not isinstance(e, dict):
+                continue
+            try:
+                ts = int(e.get("TimeCreated") or now)
+                eid, level = int(e.get("Id")), int(e.get("Level") or 0)
+            except (TypeError, ValueError):
+                continue
+            c = classify_event(e)
+            if c:
+                events.append({"ts": ts, "kind": c[0], "subject": c[1], "detail": c[2], "source": "eventlog", "n": 1})
+            prov = history.clean(e.get("ProviderName"))
+            if level in LEVEL_ERR and prov:
+                logs.append({"ts": ts, "source": "eventlog", "unit": prov, "template": "%s %d" % (prov, eid)})
+    for log, why in errs.items():
+        errors.setdefault(str(log)[:32], history.clean(why, 80))
+    return {"events": history.merge_events(events), "logs": logs, "cursors": cursors, "errors": errors}
