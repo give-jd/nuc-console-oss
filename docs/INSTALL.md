@@ -1,5 +1,15 @@
 # Installation guide
 
+One command on each system; re-run it to upgrade, add `--uninstall` / `-Uninstall` to remove it.
+
+| System | Command | The monitor shows |
+|---|---|---|
+| **Linux** (systemd) | `sudo ./install.sh` | the text console (a virtual terminal): sections 1–7 below |
+| **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | a full-screen browser at every login: [macOS](#macos) |
+| **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | a full-screen browser at every login: [Windows](#windows) |
+
+# Linux
+
 ## 1. Check the prerequisites
 
 ```bash
@@ -105,7 +115,7 @@ sudo ./install.sh --uninstall          # restore the login on the terminal
 
 Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want.
 
-## Troubleshooting
+## Troubleshooting (Linux)
 
 | Symptom | Check |
 |---|---|
@@ -116,3 +126,121 @@ Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console
 | Login prompt still visible | `systemctl is-enabled getty@tty1` must say `masked`; the VT in `local.conf` must match the one on the monitor |
 | Wrong layout | the real console size is logged: `journalctl -u nuc-console \| grep console` |
 | Time is in UTC | reinstall with `sudo NUC_CONSOLE_TZ=Your/Zone ./install.sh` (a re-install keeps the zone you chose; 1.1.0 had a bug that dropped it: upgrade to 1.1.1 first) |
+
+# macOS
+
+macOS has no text console to take over, so the same screen is shown **full screen in a browser** at every desktop login.
+The browser reads a local page rewritten every 2 seconds: no network port is opened.
+
+## Install
+
+```bash
+git clone <this repository> nuc-console && cd nuc-console
+python3 src/render.py --once --demo --demo-os darwin --cols 200 --rows 50   # optional preview (needs a python3)
+sudo ./install.sh                                                          # install, start, open the dashboard now
+```
+
+What it does (idempotent):
+
+1. **Python**: uses a Python 3.8+ owned by the system (a python.org install, or Apple's with the Command Line Tools). If
+   there is none it downloads the official python.org package (SHA-256 pinned, signature checked) and installs **only the
+   framework**: no apps, no `/usr/local/bin` links, no shell profile changes. Homebrew's Python is never used: its files
+   belong to a user, and the collector runs as root.
+2. Copies the code to `/opt/nuc-console`, `config.ini` to `/etc/nuc-console` (only if missing), and creates
+   `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog).
+3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
+   Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
+4. Installs a **LaunchAgent** that opens the dashboard at every login: Chrome, Edge, Brave or Chromium in kiosk mode if
+   installed, else Safari (press **Ctrl+Cmd+F** once for full screen). It opens it right away for the user at the screen.
+5. Stores the port baseline (only if missing). `[web] enabled = yes` also starts the web view as the hidden user `_nuc-console`.
+
+Options: `sudo NUC_CONSOLE_DISPLAY=no ./install.sh` for a Mac without a monitor (use `nuc-console-problems` or the web view).
+
+## A Mac used as a wall screen
+
+- *System Settings › Users & Groups › Automatically log in as…* (not available with FileVault on): the dashboard comes back after a power cut.
+- *System Settings › Lock Screen*: never turn the display off; *Energy*: prevent sleep.
+- **Cmd+Q** closes the dashboard until the next login.
+
+## Update, uninstall
+
+```bash
+git pull && sudo ./install.sh          # update (keeps config.ini and the baseline)
+sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
+```
+
+`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place.
+
+## What is different from Linux
+
+| | |
+|---|---|
+| Firewall | the **Application Firewall** works per program: a port is *open* when its program is allowed (Apple's own programs are, by default), *blocked* when it is blocked, `?` when macOS would ask or decide on the signature. With the firewall off every listener is open to the LAN. `pf` rules of your own are not interpreted (`?`) |
+| Docker | Docker Desktop / OrbStack: published ports belong to the Docker backend program, judged like any other; "who connects" inside the containers is not visible (they live in a VM) |
+| Boot | failed launch daemons and the third-party ones; no boot time, slowest units or system log |
+| Not available | thermal sensors and throttling, fail2ban, ufw/iptables |
+
+## Troubleshooting (macOS)
+
+| Symptom | Check |
+|---|---|
+| "collector not running" | `sudo launchctl print system/com.nuc-console.collector`; `/var/log/nuc-console/collector.log` |
+| No dashboard after login | `launchctl print gui/$(id -u)/com.nuc-console.display`; `~/Library/Application Support/nuc-console/display.log` |
+| Safari, not full screen | install Chrome/Edge, or set `[display] browser` to a browser's path |
+| Docker or Tailscale "not installed" | the collector looks in `/usr/local/bin`, `/opt/homebrew/bin` and the apps in `/Applications`; someone must be logged in at the console |
+
+# Windows
+
+Windows has no text console to take over, so the same screen is shown **full screen in Microsoft Edge** (kiosk mode) at
+every logon. Edge reads a local page rewritten every 2 seconds: no network port is opened.
+
+## Install
+
+1. Download the repository (*Code › Download ZIP*) and extract it, or `git clone` it.
+2. Double-click **`install-windows.cmd`** and accept the administrator prompt.
+   From an administrator prompt: `powershell -ExecutionPolicy Bypass -File install-windows.ps1`.
+
+What it does (idempotent):
+
+1. Puts a **private Python** (the official python.org *embeddable* build, SHA-256 pinned and checked for the Python
+   Software Foundation's signature) and the code in `%ProgramFiles%\nuc-console`. Nothing else on the system uses it or is changed by it.
+2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`): writable only by SYSTEM and
+   Administrators, readable by users.
+3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
+   `display` (every user, at logon) and, with `[web] enabled = yes`, `web` (LOCAL SERVICE).
+4. Adds `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`, `nuc-console-accept` (administrator prompt).
+5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
+
+Options: `install-windows.cmd -NoDisplay` (a machine without a monitor), `-PythonZip <file>` (offline: the
+`python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash).
+
+## A PC used as a wall screen
+
+- Automatic sign-in after a restart: Sysinternals **Autologon**; *Settings › Accounts › Sign-in options* to skip the lock screen.
+- *Settings › System › Power*: never turn off the screen, never sleep.
+- **Alt+F4** closes the dashboard until the next logon.
+
+## Update, uninstall
+
+Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place.
+
+## What is different from Linux
+
+| | |
+|---|---|
+| Firewall | **Windows Firewall** per network profile (Domain, Private, Public): for each listening port the collector (as SYSTEM, so it knows the program behind every socket) applies the enabled inbound rules: protocol, port, program, service; a block rule wins; `LocalSubnet` = open to the LAN. Port keywords (RPC…), rules bound to an interface or authenticated (IPsec) peers, and rules from Group Policy show as `?` (treated as open) |
+| Docker | Docker Desktop: published ports belong to `com.docker.backend`, judged like any other program; "who connects" inside the containers is not visible (they live in a VM) |
+| Boot | boot time (Diagnostics-Performance log), automatic services stopped with an error, System event log since boot |
+| Sessions | console and Remote Desktop users; ssh and RDP clients |
+| Not available | load average, thermal sensors and throttling, slowest units, fail2ban, ufw/iptables |
+
+## Troubleshooting (Windows)
+
+| Symptom | Check |
+|---|---|
+| "collector not running" | Task Scheduler › `nuc-console` › `collector` (Last Run Result); `%ProgramData%\nuc-console\logs\collector.log` |
+| No dashboard after logon | task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; Edge must be installed (or set `[display] browser`) |
+| Docker "not installed" or "not responding" | Docker Desktop must be running (it runs in a user's session) |
+| Many `?` in EXPOSURE | rules the evaluation cannot read with certainty: see the NOTE column; `Get-NetFirewallRule` shows them |
+

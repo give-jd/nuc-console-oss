@@ -1,13 +1,22 @@
 """Configuration shared by collector and renderer (stdlib only, Python 3.8+).
 
-File: $NUC_CONSOLE_CONFIG, else /etc/nuc-console/config.ini. A missing file means defaults (everything on).
+File: $NUC_CONSOLE_CONFIG, else /etc/nuc-console/config.ini (Windows: %ProgramData%\\nuc-console\\config.ini).
+A missing file means defaults (everything on).
 A broken file never stops the dashboard: the problem goes to stderr and defaults apply for the bad keys.
 """
 import configparser
 import os
 import sys
 
-DEFAULT_PATH = "/etc/nuc-console/config.ini"
+WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
+LINUX = not (WINDOWS or MACOS)
+OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
+if WINDOWS:  # one root for config, state and logs; install-windows.ps1 restricts writing to SYSTEM and Administrators
+    BASE_DIR = os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData", "nuc-console")
+    ETC_DIR, RUN_DIR, LIB_DIR = BASE_DIR, os.path.join(BASE_DIR, "run"), os.path.join(BASE_DIR, "lib")
+else:  # macOS uses the Linux paths, except the runtime directory (no /run there)
+    ETC_DIR, RUN_DIR, LIB_DIR = "/etc/nuc-console", "/var/run/nuc-console" if MACOS else "/run/nuc-console", "/var/lib/nuc-console"
+DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal")
 MODES = ("overview", "rotate")
@@ -22,10 +31,11 @@ def load(path=None):
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
-                   "refresh_seconds": 5, "allowed_hosts": []}}
+                   "refresh_seconds": 5, "allowed_hosts": []},
+           "display": {"browser": "auto"}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
     try:
-        if not cp.read(path):
+        if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
             return cfg
     except (configparser.Error, OSError, UnicodeDecodeError) as e:
         print(f"nuc-console: cannot read {path}: {e}", file=sys.stderr)
@@ -87,4 +97,20 @@ def load(path=None):
                 w[key] = max(lo, min(hi, cp.getint("web", key, fallback=w[key])))
             except ValueError:
                 print(f"nuc-console: {path}: [web] {key} must be an integer", file=sys.stderr)
+    if cp.has_section("display"):  # Windows/macOS: the monitor shows the screen in a full-screen browser (render.py --kiosk)
+        b = cp.get("display", "browser", fallback="auto").strip()
+        cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")
     return cfg
+
+
+def log_to(path, max_bytes=1 << 20):
+    """Send stdout/stderr to a log file (Windows scheduled tasks have no journal). Rotated once at start when over 1 MB."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        if os.path.getsize(path) > max_bytes:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+    f = open(path, "a", buffering=1, encoding="utf-8", errors="replace")
+    sys.stdout = sys.stderr = f
+    return f

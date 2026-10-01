@@ -1,0 +1,5 @@
+# Windows batch files need CRLF line endings; the shell scripts must keep LF even in a Windows checkout or ZIP
+*.cmd text eol=crlf
+*.sh text eol=lf
+bin/nuc-console-accept text eol=lf
+bin/nuc-console-problems text eol=lf

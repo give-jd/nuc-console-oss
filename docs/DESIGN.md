@@ -42,3 +42,34 @@ The overview keeps a fixed order, top-left to bottom-right, following the "most 
 | port served by `tailscale funnel` | public Internet |
 
 tailscaled installs a ts-input rule accepting tailscale0 traffic before ufw, so tailnet peers reach a listening service regardless of ufw. For the LAN ufw applies, but Docker-published ports bypass ufw (Docker inserts rules in nat/FORWARD before the ufw chains), so only a DOCKER-USER rule or a 127.0.0.1 bind really protects them. The collector flags every 0.0.0.0 container port not covered by DOCKER-USER.
+
+## macOS and Windows
+
+There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every
+socket) judges each listening port and writes the verdict next to it; the renderer uses it for both the LAN and the
+Tailscale column (the OS firewall filters the Tailscale interface too). Docker Desktop's port proxy is an ordinary program
+there, so the Linux "Docker bypasses ufw" problem does not exist.
+
+| Windows Firewall | Verdict |
+|---|---|
+| active profile off | open (no firewall) |
+| "block all incoming connections" | blocked |
+| default inbound allow | open |
+| an enabled block rule matching protocol, port, program, service | blocked (block wins) |
+| an enabled allow rule, remote `*` or `LocalSubnet` | open |
+| an allow rule limited to some addresses | filtered |
+| port keywords (RPC…), local address, interface (type), authenticated peers, a service with no process | unknown `?` |
+| no matching rule (default inbound block) | blocked; **unknown** if Group Policy rules exist (not in the local store) |
+| several active profiles (one per network) | the most exposed one |
+
+Rules Windows creates for Store apps (with an owner or a package) apply only inside that app's AppContainer; the Wi-Fi Direct
+and Teredo rule groups apply only to those interfaces.
+
+| macOS Application Firewall | Verdict |
+|---|---|
+| off | open (no firewall) |
+| "block all incoming connections" | blocked, except essential services (Bonjour, DHCP, IPsec) |
+| program listed as allowed / blocked | open / blocked |
+| Apple's own program, "automatically allow built-in software" on | open |
+| any other program | unknown `?` (macOS asks the user, or allows it if signed: not verified) |
+| `pf` enabled with rules of its own | what would be open becomes unknown `?` (not interpreted) |

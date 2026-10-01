@@ -19,43 +19,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import nuc_config
 import render
+from htmlview import CSS, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
-SGR = re.compile(r"\x1b\[([0-9;]*)m")
-ESC = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
-COLOR = {31: "r", 32: "g", 33: "y", 34: "b", 35: "m", 36: "c", 37: "w", 90: "d"}
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
 CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-CSS = ("html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
-       "pre{margin:0;overflow-x:auto}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}.m{color:#bc8cff}"
-       ".c{color:#39c5cf}.w{color:#f0f6fc}.d{color:#6e7681}.B{font-weight:700}footer{margin-top:10px;color:#6e7681;font:12px sans-serif}"
-       "a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}")
-
-
-def to_html(text):
-    """ANSI text -> HTML. Everything is escaped; only <span class> elements with fixed class names are produced."""
-    out, cls, bold, pos = [], "", False, 0
-    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)  # cursor/erase/OSC sequences (anything but SGR 'm')
-
-    def span(s):
-        if not s:
-            return ""
-        names = (cls + (" B" if bold else "")).strip()
-        return f'<span class="{names}">{html.escape(s)}</span>' if names else html.escape(s)
-    for m in SGR.finditer(text):
-        out.append(span(text[pos:m.start()]))
-        for code in (int(x) for x in (m.group(1) or "0").split(";") if x):
-            if code == 0:
-                cls, bold = "", False
-            elif code == 1:
-                bold = True
-            elif code in COLOR:
-                cls = COLOR[code]
-        pos = m.end()
-    out.append(span(ESC.sub("", text[pos:])))
-    return "".join(out)
 
 
 def is_loopback(bind):
@@ -73,10 +43,11 @@ def read_token(path):
         return ""
     with open(path) as f:
         st = os.fstat(f.fileno())
-        if st.st_mode & 0o077:
-            raise ValueError(f"{path} must not be readable by group/others (chmod 600)")
-        if st.st_uid not in (0, os.geteuid()):
-            raise ValueError(f"{path} must be owned by root or by the service user")
+        if not nuc_config.WINDOWS:  # Windows has no mode bits: install-windows.ps1 protects the folder with an ACL instead
+            if st.st_mode & 0o077:
+                raise ValueError(f"{path} must not be readable by group/others (chmod 600)")
+            if st.st_uid not in (0, os.geteuid()):
+                raise ValueError(f"{path} must be owned by root or by the service user")
         tok = f.read().strip()
     if not TOKEN_OK.fullmatch(tok):
         raise ValueError(f"token in {path} must be {MIN_TOKEN}+ characters from A-Z a-z 0-9 . _ ~ -")
@@ -172,6 +143,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = not nuc_config.WINDOWS  # on Windows SO_REUSEADDR lets another program bind the same port
 
     def __init__(self, addr, cfg, token="", demo=False):
         self.cfg, self.token = cfg, token
@@ -221,6 +193,8 @@ class Server(http.server.ThreadingHTTPServer):
 
 
 def main(argv):
+    if "--log" in argv[:-1]:  # Windows scheduled task: no journal
+        nuc_config.log_to(argv[argv.index("--log") + 1])
     cfg = nuc_config.load()["web"]
     demo = "--demo" in argv
     if "--enabled" in argv:  # used by install.sh

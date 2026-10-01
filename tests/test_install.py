@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -23,6 +24,7 @@ def old_values(local_conf, unit):
     return tuple(r.stdout.split("|"))
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "these lines run on Linux only (GNU sed); macOS: install-macos.sh, Windows: install-windows.ps1")
 class ReinstallKeepsChoices(unittest.TestCase):
     """A re-install must keep the time zone and the VT already chosen (a broken sed silently dropped them: the clock went UTC)."""
 

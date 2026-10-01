@@ -886,6 +886,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertNotIn("\x1b[2J", raw)
         self.assertNotIn("\x1bc", raw)
 
+    @unittest.skipUnless(nuc_config.LINUX, "loginctl + ss: the Linux session source (macOS/Windows: tests/test_platforms.py)")
     def test_review10_sessions(self):
         sess = render.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 manager - no -\n", "")
         self.assertEqual(sess["local"], [{"user": "alice", "tty": "pts/0"}])           # 'manager' is not a session
@@ -946,6 +947,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertNotIn("gone0", smp.net_hist)                                          # interface gone: history dropped
         self.assertEqual(render.parse_netdev("h1\nh2\n  eth0: x y z\n"), {})            # line with too few fields: ignored
 
+    @unittest.skipUnless(nuc_config.LINUX, "the Linux tool set; macOS/Windows read sockets natively (tests/test_platforms.py)")
     def test_portability_missing_tools_are_absent_not_errors(self):
         """On a server without Docker, ufw, Tailscale, fail2ban, systemd...: no errors, no crashes, no alarms."""
         orig = collector.SBIN
@@ -1056,9 +1058,11 @@ class Config(unittest.TestCase):
         self.assertTrue(all(self._load("this is not ini\n\x00")["features"].values()))
 
     def test_configuration_reference_documents_every_key(self):
-        doc = open(os.path.join(os.path.dirname(__file__), "..", "docs", "CONFIGURATION.md")).read()
+        with open(os.path.join(os.path.dirname(__file__), "..", "docs", "CONFIGURATION.md"), encoding="utf-8") as f:
+            doc = f.read()
         keys = list(nuc_config.FEATURES) + ["mode", "sections", "columns", "rows", "spacing", "details", "overview_seconds",
-                                            "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds"]
+                                            "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds",
+                                            "browser"]
         self.assertEqual([k for k in keys if "`%s`" % k not in doc], [])
         for name in nuc_config.SECTIONS:
             self.assertIn(name, doc)
@@ -1067,7 +1071,9 @@ class Config(unittest.TestCase):
         path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")
         cfg = nuc_config.load(path)
         self.assertTrue(all(cfg["features"].values()))
-        text = open(path).read()
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("[display]", text)
         for f in nuc_config.FEATURES:
             self.assertIn(f + " ", text, f"feature {f} undocumented in config/config.ini")
 
@@ -1091,9 +1097,10 @@ class Config(unittest.TestCase):
             d = collector.collect_net()
         finally:
             collector.run, collector.OFF = orig_run, orig_off
-        for tool in ("ufw", "iptables", "tailscale", "ss", "docker", "journalctl"):
+        for tool in ("ufw", "iptables", "tailscale", "ss", "docker", "journalctl", "powershell", "socketfilterfw", "lsof"):
             self.assertNotIn(tool, calls)
-        self.assertEqual(set(d["disabled"]), {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b"})
+        expected = {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b"}
+        self.assertEqual(set(d["disabled"]), expected if nuc_config.LINUX else expected | {"firewall"})
         self.assertEqual(d["errors"], {})
 
     def test_collector_containers_off_never_calls_docker(self):
@@ -1270,7 +1277,8 @@ class WebAppsAndProblems(unittest.TestCase):
 
     def test_every_problem_id_is_in_the_catalog(self):
         import re as _re
-        src = open(render.__file__).read()
+        with open(render.__file__, encoding="utf-8") as f:
+            src = f.read()
         ids = set(_re.findall(r'out\.append\(\(\d, .*?, "([a-z-]+)"\)\)', src))
         self.assertTrue(ids)
         self.assertFalse(ids - set(render.CATALOG), ids - set(render.CATALOG))
@@ -1302,7 +1310,8 @@ class WebAppsAndProblems(unittest.TestCase):
             self.assertTrue(rec["accepted"] and "\x1b" not in rec["reason"] and rec["fix"])
             self.assertEqual(render.accept_problem("journal-errors", forget=True), 0)
             self.assertTrue(any("errors in this boot" in t for t in texts(118)))
-            self.assertEqual(os.stat(render.ACCEPTED_PATH).st_mode & 0o777, 0o644)
+            if os.name == "posix":  # Windows has no mode bits: the folder ACL protects the file
+                self.assertEqual(os.stat(render.ACCEPTED_PATH).st_mode & 0o777, 0o644)
 
     def test_acceptance_does_not_hide_a_worse_situation(self):
         import tempfile
