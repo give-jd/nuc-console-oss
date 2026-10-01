@@ -51,6 +51,10 @@ function Test-Admin {
 
 if (-not $Installed -and (Test-Path -LiteralPath (Join-Path $Root 'run.cmd')) -and (Test-Path -LiteralPath (Join-Path $Root 'src\update.py'))) {
     $mode = 'portable'
+    $git = Join-Path $Root '.git'  # a clone is updated by git: this would overwrite the files it tracks
+    if ([IO.Directory]::Exists($git) -or [IO.File]::Exists($git)) {
+        throw "$Root is a git checkout: update it with git pull (this replaces the files of an extracted release; -Installed updates the installed nuc-console)"
+    }
     $app = Join-Path $Root 'src'
     $cache = Join-Path $Root 'cache'
     $python = @(& (Join-Path $Root 'run.ps1') -WhichPython)[-1]  # the Python of the folder: the bundled one (unpacked once), else this machine's

@@ -590,6 +590,31 @@ class Flow(unittest.TestCase):
                 self.portable(world)
             self.unchanged()
 
+    def test_a_git_checkout_is_never_overwritten(self):
+        # a clone has run.sh and src/ too: the files of the release would replace the ones git tracks
+        for kind in ("folder", "file"):  # a worktree has a .git file
+            git = os.path.join(self.root, ".git")
+            if kind == "folder":
+                os.mkdir(git)
+            else:
+                shutil.rmtree(git)
+                write(git, "gitdir: /somewhere/else\n")
+            for check in (False, True):
+                world = World()
+                with self.assertRaises(update.UpdateError) as ctx:
+                    self.portable(world, check=check)
+                self.assertIn("git pull", str(ctx.exception))
+                self.assertEqual(world.net.urls, [])
+                self.assertFalse(os.path.exists(self.cache))
+                self.unchanged()
+        os.remove(os.path.join(self.root, ".git"))
+        self.assertEqual(self.portable(World()), 0)  # without it, the same folder is updated
+        installed = os.path.join(self.tmp.name, "installed")  # an installed copy is not a clone, whatever sits beside it
+        old_tree(installed)
+        os.mkdir(os.path.join(installed, ".git"))
+        self.assertEqual(World().run(os.path.join(installed, "src"), os.path.join(self.tmp.name, "cache2"), "installed",
+                                     stage_file=os.path.join(self.tmp.name, "stage")), 0)
+
     def test_not_confirmed_does_nothing(self):
         world = World()
         asked = []
@@ -880,6 +905,17 @@ class Files(unittest.TestCase):
             text = read(os.path.join(ROOT, rel))
             self.assertIn("powershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0" + ps1 + "\"", text, rel)
             self.assertNotRegex(text, r"(?i)set-executionpolicy", rel)
+
+    def test_the_update_cmd_reads_nothing_of_itself_once_powershell_runs(self):
+        # the update replaces bin\\nuc-console-update.cmd while cmd.exe runs it, and cmd reads a batch file line by line, from where
+        # it stopped: whatever follows the PowerShell line would be read from the new file at the old offset
+        lines = read(os.path.join(ROOT, "bin", "nuc-console-update.cmd")).splitlines()
+        self.assertTrue(lines[-1].startswith("powershell ") and lines[-1].endswith(" & exit /b"), lines[-1])
+        elevated = lines[lines.index("if defined ELEV ("):]
+        self.assertEqual(elevated[-2], ")")  # the elevated copy is one block, read whole before it runs
+        self.assertEqual([i for i, l in enumerate(lines) if l.lstrip().startswith("powershell ") and "-ExecutionPolicy Bypass -File" in l and i < len(lines) - 1],
+                         [lines.index("if defined ELEV (") + 1])
+        self.assertNotIn("%errorlevel%", "\n".join(elevated))
 
     def test_the_updater_asks_the_same_address_everywhere(self):
         for rel in ("bin/nuc-console-update", "bin/nuc-console-update.ps1"):
@@ -1348,6 +1384,19 @@ cp "$src" "$out"
         self.assertEqual(self.asked(), [update.API])
         self.assertFalse(os.path.exists(os.path.join(self.dir, "cache")))
         self.assertEqual(self.current(), VERSION)
+
+    def test_a_git_checkout_is_not_updated(self):
+        for make in (lambda p: os.mkdir(p), lambda p: write(p, "gitdir: /somewhere/else\n")):
+            git = os.path.join(self.dir, ".git")
+            if os.path.isdir(git):
+                os.rmdir(git)
+            make(git)
+            r = self.update("--yes")
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("git pull", r.stderr)
+            self.assertEqual(self.asked(), [])  # GitHub was not even asked
+            self.assertEqual(self.current(), VERSION)
+            self.assertFalse(os.path.exists(os.path.join(self.dir, "cache")))
 
     def test_without_yes_and_without_a_terminal_it_does_not_guess(self):
         r = self.update()

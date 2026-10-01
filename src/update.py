@@ -14,9 +14,10 @@ latest release (curl, Invoke-RestMethod: HTTPS only), save the answer and call t
     gh is installed and logged in (a failure stops; without gh, or without a login, it says that provenance was not checked);
   * the archive is extracted into a fresh folder of the cache (members that could escape it are refused), and its VERSION must be
     the release's;
-  * --mode portable: replaces src/, bin/, docs/ ... of --root with the new ones; data/ and cache/ stay. --mode installed: the
-    folder is written to --stage-file and the wrapper runs that release's installer (it keeps config.ini, the baseline, ...):
-    on Windows the installer replaces the very Python that runs this file, so it cannot be started from here.
+  * --mode portable: replaces src/, bin/, docs/ ... of --root with the new ones; data/ and cache/ stay (a git checkout is refused:
+    git pull). --mode installed: the folder is written to --stage-file and the wrapper runs that release's installer (it keeps
+    config.ini, the baseline, ...): on Windows the installer replaces the very Python that runs this file, so it cannot be
+    started from here.
 """
 import argparse
 import hashlib
@@ -419,6 +420,8 @@ def run_update(release, app, cache, mode="installed", root="", os_name=None, arc
     """-> exit code. Raises UpdateError for what stops an update (the message says why)."""
     if release.get("draft") or release.get("prerelease"):
         raise UpdateError("the release is a draft or a pre-release: ignored")
+    if mode == "portable" and os.path.lexists(os.path.join(root, ".git")):  # a clone is updated by git; this would overwrite tracked files
+        raise UpdateError("%s is a git checkout: update it with git pull (this replaces the files of an extracted release)" % root)
     current, latest = read_version(app), release_version(release)
     if not newer(latest, current):
         say("already at %s" % current + ("" if parse_version(current) == parse_version(latest)

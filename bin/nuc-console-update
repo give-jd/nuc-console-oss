@@ -7,8 +7,9 @@
 #   --installed                     the installed nuc-console (/opt/nuc-console), even when run from an extracted folder
 #
 # Run from the bin/ of an extracted folder that has run.sh (the portable mode) it updates that folder: src/, bin/, docs/ ...
-# are replaced, ./data (config, baseline) and ./cache stay. Otherwise it updates the installed one: that needs root, and it runs
-# the new release's installer, which keeps /etc/nuc-console/config.ini and the baseline.
+# are replaced, ./data (config, baseline) and ./cache stay (a git clone is not updated: git pull). Otherwise it updates the
+# installed one: that needs root, and it runs the new release's installer, which keeps /etc/nuc-console/config.ini and the
+# baseline.
 # What it does: asks api.github.com (HTTPS) for the latest release; if it is newer, downloads this OS's archive and SHA256SUMS
 # into the cache (Linux /var/cache/nuc-console, macOS /Library/Caches/nuc-console, portable ./cache; a file whose SHA-256 is
 # already right is not downloaded again), checks the archive's SHA-256, runs `gh attestation verify` when gh is installed (a
@@ -47,6 +48,8 @@ main() {
         APP=$ROOT/src
         UPDATE_PY=$APP/update.py
         CACHE=$ROOT/cache
+        # a clone is updated by git: this would overwrite the files it tracks
+        [ ! -e "$ROOT/.git" ] || die "$ROOT is a git checkout: update it with git pull (this replaces the files of an extracted release; --installed updates the installed nuc-console)"
         PY=$("$ROOT/run.sh" --which-python) || exit 1
         # as root, only in a folder that root owns: a user's folder must not be written by root (links, swapped files)
         if [ "$(id -u)" -eq 0 ] && [ -z "$(find "$ROOT" -maxdepth 0 -user root)" ]; then

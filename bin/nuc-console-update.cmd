@@ -36,10 +36,13 @@ if not exist "%~dp0nuc-console-update.ps1" (
     if defined ELEV pause
     exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0nuc-console-update.ps1" %*
-set rc=%errorlevel%
+rem An update replaces this very file while cmd runs it, and cmd reads a batch file line by line from where it stopped, so
+rem nothing of this file may be read after PowerShell starts: the elevated copy is one block, which cmd reads whole before
+rem it runs it, and the plain one ends with exit /b chained to the PowerShell line. The exit code stays PowerShell's.
 if defined ELEV (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0nuc-console-update.ps1" %*
     echo.
     pause
+    exit /b
 )
-exit /b %rc%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0nuc-console-update.ps1" %* & exit /b
