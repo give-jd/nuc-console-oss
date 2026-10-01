@@ -135,6 +135,45 @@ function Find-SystemPython {
 if (-not (Test-Path -LiteralPath (Join-Path $Src 'collector.py') -PathType Leaf)) {
     throw 'src\collector.py not found next to run.ps1: run it from the extracted folder'
 }
+
+# ---- as administrator: only a folder that ordinary users cannot write to ---------------------------------------------------------
+# (the same rule as run.sh as root) With administrator rights this folder's code is run and its data written: a folder that
+# Everyone, Users or Authenticated Users can write to (C:\ itself, a shared folder), or one with a link in it, could be turned
+# against the administrator. Nothing is run or written there; the message says what to do.
+
+# $true when Everyone, Users or Authenticated Users are allowed to create, change or delete things in $path, or to change who can
+function Test-WritableByUsers([string]$path) {
+    # WriteData 2, AppendData 4, DeleteSubdirectoriesAndFiles 64, Delete 65536, ChangePermissions 262144, TakeOwnership 524288,
+    # and the generic GenericAll 268435456 and GenericWrite 1073741824
+    $mask = 2 -bor 4 -bor 64 -bor 65536 -bor 262144 -bor 524288 -bor 268435456 -bor 1073741824
+    $users = @('S-1-1-0', 'S-1-5-32-545', 'S-1-5-11')  # Everyone, BUILTIN\Users, Authenticated Users
+    $acl = $null
+    try { $acl = Get-Acl -LiteralPath $path } catch { return $true }  # who can write is not known: not trusted
+    foreach ($ace in $acl.Access) {
+        if ("$($ace.AccessControlType)" -ne 'Allow') { continue }
+        $sid = ''
+        try { $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { continue }
+        if (($users -contains $sid) -and (([int]$ace.FileSystemRights -band $mask) -ne 0)) { return $true }
+    }
+    return $false
+}
+
+function Test-ReparsePoint([string]$path) {  # a link or a junction
+    return ((([int](Get-Item -LiteralPath $path -Force).Attributes) -band 1024) -ne 0)
+}
+
+if (Test-Admin) {
+    foreach ($d in @($Here, $Src, $PyDir, $Data, (Join-Path $Data 'run'), (Join-Path $Data 'lib'), $Logs)) {
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        if (Test-ReparsePoint $d) {
+            throw "$d is a link: with administrator rights nothing is run or written there. Remove the link, or run without administrator rights"
+        }
+        if (Test-WritableByUsers $d) {
+            throw "$d can be changed by ordinary users (Everyone, Users or Authenticated Users have write access): with administrator rights nothing is run or written there. Move this folder where only administrators can write (for example under C:\Program Files), or run it without administrator rights"
+        }
+    }
+}
+
 $python = Get-BundledPython
 if (-not $python) { $python = Find-SystemPython }
 if (-not $python) { throw 'Python 3.8 or newer not found (the release ZIP carries one in python\; else install it from python.org)' }

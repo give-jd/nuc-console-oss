@@ -936,6 +936,16 @@ class Files(unittest.TestCase):
         imports = set(re.findall(r"^(?:from|import) (\w+)", read(os.path.join(ROOT, "src", "update.py")), re.M))
         self.assertLessEqual(imports, set(sys.stdlib_module_names))
 
+    def test_run_ps1_refuses_a_folder_ordinary_users_can_write_as_administrator(self):
+        text = read(os.path.join(ROOT, "run.ps1"))
+        check = text.index("if (Test-Admin) {\n    foreach ($d in @($Here, $Src")
+        self.assertLess(check, text.index("$python = Get-BundledPython"))  # before anything is unpacked or run as administrator
+        for sid in ("S-1-1-0", "S-1-5-32-545", "S-1-5-11"):  # Everyone, Users, Authenticated Users
+            self.assertIn("'%s'" % sid, text)
+        for name in ("$Here", "$Src", "$PyDir", "$Data", "$Logs"):
+            self.assertIn(name, text[check:text.index("$python = Get-BundledPython")])
+        self.assertIn("Test-ReparsePoint", text)
+
     def test_powershell_parses(self):
         ps = powershell()
         if not ps:
