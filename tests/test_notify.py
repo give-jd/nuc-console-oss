@@ -24,10 +24,12 @@ _TMP = tempfile.mkdtemp(prefix="nuc-notify-test-")
 os.environ["NUC_CONSOLE_CONFIG"] = os.path.join(_TMP, "config.ini")  # hermetic: never the host's config.ini or notifier folder
 os.environ["NUC_CONSOLE_NOTIFY_DIR"] = os.path.join(_TMP, "notify")
 import demo  # noqa: E402
+import nuc_config  # noqa: E402
 import notify  # noqa: E402
 import render  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+REAL_SERVICE_CONTROL = notify.service_control  # Base replaces it in every test: this is the real one
 SECRET = "Zq9" * 12  # the secret half of the fake token: it must never show up anywhere
 TOKEN = "123456789:" + SECRET
 CHAT_ID = 4242424242
@@ -114,9 +116,9 @@ class Base(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.cfg_path, "NUC_CONSOLE_NOTIFY_DIR": self.dir})
         env.start()
         self.addCleanup(env.stop)
-        what = mock.patch.object(notify, "NOTIFY_DIR", self.dir)
-        what.start()
-        self.addCleanup(what.stop)
+        for what in (mock.patch.object(notify, "NOTIFY_DIR", self.dir), mock.patch.object(notify, "service_control", return_value=(True, ""))):
+            what.start()
+            self.addCleanup(what.stop)
 
     def config(self, **kw):
         with open(self.cfg_path, "w", encoding="utf-8") as f:
@@ -155,7 +157,8 @@ class Keys(unittest.TestCase):
         self.assertEqual(notify.problem_key(temp(85)), notify.problem_key(temp(86)))
         j1, j2 = rec("journal-errors", 1, "118 errors in this boot's journal"), rec("journal-errors", 1, "120 errors in this boot's journal")
         self.assertEqual(notify.problem_key(j1), notify.problem_key(j2))
-        t1, t2 = rec("throttling", 1, "CPU thermal throttling: 3 events in the last minute"), rec("throttling", 1, "CPU thermal throttling: 9 events in the last minute")
+        t1 = rec("throttling", 1, "CPU thermal throttling: 3 events in the last minute")
+        t2 = rec("throttling", 1, "CPU thermal throttling: 9 events in the last minute")
         self.assertEqual(notify.problem_key(t1), notify.problem_key(t2))
 
     def test_a_worse_severity_is_a_new_problem(self):
@@ -502,6 +505,14 @@ class Service(Base):
             send_only(method, {})
         self.assertEqual(inner.methods, ["sendMessage", "getMe"])
 
+    def test_getupdates_exists_only_in_the_pairing_code(self):
+        tree = ast.parse(slurp(ROOT, "src", "notify.py"))
+        users = set()
+        for node in tree.body:
+            if any(isinstance(n, ast.Constant) and n.value == "getUpdates" for n in ast.walk(node)):
+                users.add(node.name if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else node.targets[0].id)
+        self.assertEqual(users, {"pair", "METHODS"})  # the list of the methods the transport knows, and the pairing
+
     def test_sending_goes_to_the_paired_chat_in_plain_text(self):
         self.pair_files()
         rc, fake, out = self.serve([[], []])
@@ -717,7 +728,7 @@ class Connection(unittest.TestCase):
         src = slurp(ROOT, "src", "notify.py")
         for word in (".listen(", ".bind(", "http.server", "socketserver", "setWebhook", "http://", "ProxyHandler", "shell=True"):
             self.assertNotIn(word, src)
-        self.assertEqual(sorted(set(re.findall(r"https://([^/\s\"'{]+|\{API_HOST\})", src))), ["{API_HOST}"])
+        self.assertEqual(sorted(set(re.findall(r"https://([^/\s\"'{]+|\{API_HOST\})", src))), ["t.me", "{API_HOST}"])
 
     def test_the_source_is_python_3_8(self):
         ast.parse(slurp(ROOT, "src", "notify.py"), feature_version=(3, 8))
@@ -822,21 +833,335 @@ class Token(Base):
 
 # ---- pairing -----------------------------------------------------------------------------------------------------------------
 
+class Pairing(unittest.TestCase):
+    CODE = "Kq8_-Zx1"
+
+    def polls(self, *batches):
+        """A transport that answers the getUpdates calls with these batches, then with nothing; every call moves the clock."""
+        clock, queue = Clock(), list(batches)
+
+        class Poll(Fake):
+            def __call__(self, method, payload):
+                Fake.__call__(self, method, payload)  # records it
+                clock.t += payload.get("timeout", 0)
+                return {"ok": True, "result": queue.pop(0) if queue else []}
+        return Poll(), clock
+
+    def test_only_the_right_code_from_the_right_person_in_a_private_chat_pairs(self):
+        wrong = [update(1, "/start " + self.CODE + "x"), update(2, "/start"), update(3, "hello"), update(4, "/start " + self.CODE, user="mallory"),
+                 update(5, "/start " + self.CODE, user=None), update(6, "/start " + self.CODE, kind="group", chat_id=-1001, from_id=777),
+                 update(7, "/start " + self.CODE, kind="supergroup", chat_id=-1002, from_id=777), update(8, "/start " + self.CODE, kind="channel"),
+                 update(9, "/start " + self.CODE, is_bot=True), update(10, "/start  " + self.CODE), update(11, " /start " + self.CODE),
+                 update(12, "/start " + self.CODE, from_id=778), {"update_id": 13, "edited_message": {}}, {"update_id": 14}, "junk", None]
+        fake, clock = self.polls(wrong, [update(20, "/start " + self.CODE, user="Alice", chat_id=777)])
+        self.assertEqual(notify.pair(fake, self.CODE, "alice", clock, clock.sleep), {"chat_id": 777, "username": "alice"})
+
+    def test_everything_else_is_ignored_until_the_time_is_up(self):
+        fake, clock = self.polls([update(1, "/start " + self.CODE, user="mallory")], [update(2, "/start nope")])
+        self.assertIsNone(notify.pair(fake, self.CODE, "alice", clock, clock.sleep, wait=100))
+        self.assertGreaterEqual(clock.t - 1_000_000.0, 100)
+
+    def test_the_offset_advances_and_the_consumed_updates_are_confirmed(self):
+        fake, clock = self.polls([update(5, "x"), update(7, "y")], [update(9, "/start " + self.CODE)])
+        self.assertIsNotNone(notify.pair(fake, self.CODE, "alice", clock, clock.sleep))
+        polls = [p for m, p in fake.calls]
+        self.assertEqual({m for m, _ in fake.calls}, {"getUpdates"})
+        self.assertNotIn("offset", polls[0])
+        self.assertEqual(polls[1]["offset"], 8)
+        self.assertEqual(polls[-1], {"offset": 10, "timeout": 0, "limit": 1})  # the confirmation
+        self.assertTrue(all(p["allowed_updates"] == ["message"] for p in polls[:-1]))
+        self.assertTrue(all(p["timeout"] <= notify.POLL_S for p in polls))
+
+    def test_a_webhook_or_a_bad_token_stops_it_with_a_clear_error(self):
+        clock = Clock()
+        fake = Fake([down(409, "HTTP 409: Conflict: can't use getUpdates method while webhook is active")])
+        with self.assertRaises(notify.TelegramError) as ctx:
+            notify.pair(fake, self.CODE, "alice", clock, clock.sleep)
+        self.assertEqual(ctx.exception.status, 409)
+        fake = Fake([down(None)] * 5)
+        with self.assertRaises(notify.TelegramError):
+            notify.pair(fake, self.CODE, "alice", clock, clock.sleep)
+
+    def test_a_dropped_connection_is_tried_again(self):
+        fake, clock = Fake([down(None)]), Clock()
+        fake.script.append({"ok": True, "result": [update(1, "/start " + self.CODE)]})
+        self.assertEqual(notify.pair(fake, self.CODE, "alice", clock, clock.sleep)["chat_id"], 777)
+
+
+class FakeTerm:
+    def __init__(self, secret=TOKEN, answers=("alice",)):
+        self.lines, self.answers, self.token = [], list(answers), secret
+
+    def say(self, text=""):
+        self.lines.append(text)
+
+    def ask(self, prompt):
+        self.lines.append(prompt)
+        return self.answers.pop(0) if self.answers else ""
+
+    def secret(self, prompt):
+        self.lines.append(prompt)
+        return self.token
+
+    @property
+    def text(self):
+        return "\n".join(self.lines)
+
+
+class Setup(Base):
+    def run_setup(self, term=None, press=True, user="alice", script=(), wait=60):
+        """--setup with a fake Telegram: the person presses Start (the code is read from the link the program printed)."""
+        term = term or FakeTerm()
+        clock = Clock()
+
+        class Telegram(Fake):
+            def __call__(me, method, payload):
+                r = Fake.__call__(me, method, payload)
+                if method == "getUpdates":
+                    clock.t += payload.get("timeout", 0)
+                    code = re.search(r"start=([A-Za-z0-9_-]+)", term.text)
+                    if press and code and payload.get("timeout"):
+                        return {"ok": True, "result": [update(1, "/start " + code.group(1), user=user)]}
+                    return {"ok": True, "result": []}
+                return r
+        fake = Telegram(script)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = notify.setup(term, lambda token: fake, self.dir, clock=clock, sleep=clock.sleep, wait=wait)
+        return rc, fake, term
+
+    def test_it_pairs_one_username_and_turns_the_notifier_on(self):
+        with open(self.cfg_path, "w") as f:
+            f.write("# my settings\n[features]\nmap = no\n\n[telegram]\nenabled = no\ndetail = full\n")
+        rc, fake, term = self.run_setup()
+        self.assertEqual(rc, 0, term.text)
+        self.assertEqual(fake.methods, ["getMe", "getUpdates", "getUpdates", "sendMessage"])
+        self.assertEqual(notify.read_token(self.dir), TOKEN)
+        chat = notify.read_chat(self.dir)
+        self.assertEqual((chat["chat_id"], chat["username"], chat["bot"]), (777, "alice", "my_bot"))
+        self.assertEqual(set(chat), {"chat_id", "username", "bot", "paired_ts"})
+        cfg = slurp(self.cfg_path)
+        self.assertIn("# my settings", cfg)
+        self.assertIn("map = no", cfg)
+        self.assertEqual(nuc_config.load()["telegram"], {"enabled": True, "username": "alice", "detail": "full", "resolved": True})
+        self.assertIn("username = @alice", cfg)
+        (method, payload), = [c for c in fake.calls if c[0] == "sendMessage"]
+        self.assertEqual(payload["chat_id"], 777)
+        self.assertIn("paired. You will receive the ATTENTION changes of this machine; it never reads your messages.", payload["text"])
+        notify.service_control.assert_called_once_with("restart")
+        self.assertIn("bot @my_bot found", term.text)
+        self.assertIn("https://t.me/my_bot?start=", term.text)
+        self.assertIn("/setjoingroups", term.text)
+        if POSIX:
+            for name in ("token", "chat.json"):
+                self.assertEqual(os.stat(os.path.join(self.dir, name)).st_mode & 0o777, 0o600)
+
+    def test_the_token_is_never_printed_and_the_code_is_url_safe(self):
+        rc, fake, term = self.run_setup()
+        self.assertNotIn(SECRET, term.text)
+        self.assertNotIn("Zq9Zq9", term.text)
+        (code,) = re.findall(r"start=(\S+)", term.text)
+        self.assertRegex(code, r"^[A-Za-z0-9_-]{16,64}$")
+
+    def test_the_username_defaults_to_the_one_in_config_ini(self):
+        rc, fake, term = self.run_setup(FakeTerm(answers=[""]))
+        self.assertEqual(rc, 0, term.text)
+        self.assertEqual(notify.read_chat(self.dir)["username"], "alice")
+        rc, fake, term = self.run_setup(FakeTerm(answers=["@Bob_99"]), user="bob_99")
+        self.assertEqual((rc, notify.read_chat(self.dir)["username"]), (0, "bob_99"))
+        self.assertIn("username = @bob_99", slurp(self.cfg_path))
+
+    def test_somebody_else_pressing_start_does_not_pair(self):
+        rc, fake, term = self.run_setup(user="mallory", wait=60)
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing was paired", term.text)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "chat.json")))
+        self.assertNotIn("sendMessage", fake.methods)
+        self.assertIn("enabled = yes", slurp(self.cfg_path))  # untouched: it was already yes
+        self.assertIn("username = @alice", slurp(self.cfg_path))
+
+    def test_nobody_pressing_start_leaves_the_config_alone(self):
+        self.config(enabled="no")
+        rc, fake, term = self.run_setup(press=False, wait=60)
+        self.assertEqual(rc, 1)
+        self.assertEqual(slurp(self.cfg_path), "[telegram]\nenabled = no\n")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))
+        notify.service_control.assert_not_called()
+
+    def test_a_new_pairing_forgets_the_old_chat_first(self):
+        self.pair_files(user="old_user")
+        rc, fake, term = self.run_setup(press=False, wait=30)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "chat.json")))
+
+    def test_a_wrong_token_is_stopped_before_anything_is_written(self):
+        rc, fake, term = self.run_setup(FakeTerm(secret="not a token"))
+        self.assertEqual((rc, fake.calls), (2, []))
+        rc, fake, term = self.run_setup(script=[{"ok": False, "error_code": 401, "description": "Unauthorized"}])
+        self.assertEqual((rc, fake.methods), (1, ["getMe"]))
+        self.assertIn("Unauthorized", term.text)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_username_that_cannot_be_one_is_refused(self):
+        for bad in ("abc", "no spaces here", "a" * 40, "ali-ce"):
+            rc, fake, term = self.run_setup(FakeTerm(answers=[bad]))
+            self.assertEqual((rc, fake.methods), (2, ["getMe"]))
+            self.assertEqual(os.listdir(self.dir), [])
+
+    def test_it_needs_root_or_an_administrator(self):
+        env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_NOTIFY_DIR"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(notify, "is_admin", return_value=False):
+            rc, fake, term = self.run_setup()
+        self.assertEqual((rc, fake.calls, os.listdir(self.dir)), (2, [], []))
+        self.assertIn("root" if POSIX else "administrator", term.text)
+
+    def test_a_config_that_cannot_be_written_is_said_not_hidden(self):
+        with mock.patch.object(nuc_config, "set_key", side_effect=PermissionError("denied")):
+            rc, fake, term = self.run_setup()
+        self.assertEqual(rc, 1)
+        self.assertIn("Set it by hand: [telegram] enabled = yes", term.text)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "chat.json")))
+
+    def test_a_service_that_cannot_be_started_is_reported_not_fatal(self):
+        notify.service_control.return_value = (False, "Unit nuc-console-notify.service not found")
+        rc, fake, term = self.run_setup()
+        self.assertEqual(rc, 0)
+        self.assertIn("could not restart the notifier service (Unit nuc-console-notify.service not found)", term.text)
+
+    def test_piped_input_is_read_line_by_line_and_the_token_is_not_echoed_on_a_terminal(self):
+        term = notify.Terminal()
+        with mock.patch.object(sys, "stdin", io.StringIO(TOKEN + "\nalice\n")), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual((term.secret("t: "), term.ask("u: "), term.ask("more: ")), (TOKEN, "alice", ""))
+        tty = mock.Mock()
+        tty.isatty.return_value = True
+        with mock.patch.object(sys, "stdin", tty), mock.patch.object(notify.getpass, "getpass", return_value=TOKEN) as gp:
+            self.assertEqual(term.secret("t: "), TOKEN)
+        gp.assert_called_once()
+
+
 # ---- the other commands ------------------------------------------------------------------------------------------------------
 
-class Cli(Base):
+class Commands(Base):
     def run_main(self, *args):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = notify.main(["notify.py", *args])
         return rc, out.getvalue(), err.getvalue()
 
+    def test_help(self):
+        rc, out, _ = self.run_main("--help")
+        self.assertEqual(rc, 0)
+        for flag in ("--setup", "--test", "--status", "--on", "--off", "--forget", "--preview", "--enabled"):
+            self.assertIn(flag, out)
+        self.assertIn("never reads your messages", out)
+
     def test_nonsense_arguments_print_the_help_and_exit_2(self):
         for args in (("--nope",), ("--setup", "--test"), ("--json",), ("--demo",), ("--status", "--demo"), ("--demo-os",), ("--preview", "--demo-os", "plan9"),
                      ("stray",)):
             rc, out, err = self.run_main(*args)
             self.assertEqual((rc, out), (2, ""), args)
-            self.assertIn("--preview", err)
+            self.assertIn("--setup", err)
+
+    def test_on_and_off_edit_the_config_and_drive_the_service(self):
+        self.config(enabled="no", username="@alice", detail="full")
+        self.pair_files()
+        self.assertEqual(self.run_main("--on")[0], 0)
+        self.assertTrue(nuc_config.load()["telegram"]["enabled"])
+        notify.service_control.assert_called_with("restart")
+        self.assertEqual(nuc_config.load()["telegram"]["detail"], "full")
+        self.assertEqual(self.run_main("--off")[0], 0)
+        self.assertFalse(nuc_config.load()["telegram"]["enabled"])
+        notify.service_control.assert_called_with("stop")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))  # --off keeps the pairing
+
+    def test_on_without_a_pairing_says_so(self):
+        rc, out, _ = self.run_main("--on")
+        self.assertEqual(rc, 0)
+        self.assertIn("not paired yet", out)
+
+    def test_forget_deletes_the_token_and_the_pairing_and_turns_it_off(self):
+        self.pair_files()
+        notify.put(self.dir, "sent.json", '{"keys": {}}', 0o600)
+        rc, out, _ = self.run_main("--forget")
+        self.assertEqual(rc, 0)
+        self.assertEqual(os.listdir(self.dir), ["status.json"])
+        self.assertFalse(nuc_config.load()["telegram"]["enabled"])
+        notify.service_control.assert_called_with("stop")
+        st = self.status()
+        self.assertEqual((st["enabled"], st["paired"]), (False, False))
+        self.assertEqual(self.run_main("--forget")[0], 0)  # nothing left: still fine
+
+    def test_these_need_root(self):
+        env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_NOTIFY_DIR"}
+        self.pair_files()
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(notify, "is_admin", return_value=False):
+            for flag in ("--on", "--off", "--forget", "--setup"):
+                self.assertEqual(self.run_main(flag)[0], 2, flag)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "token")))
+        self.assertTrue(nuc_config.load()["telegram"]["enabled"])
+        notify.service_control.assert_not_called()
+
+    def test_test_message(self):
+        self.pair_files()
+        fake = Fake()
+        term = FakeTerm()
+        self.assertEqual(notify.send_test(term, lambda token: fake, self.dir), 0)
+        (method, payload), = fake.calls
+        self.assertEqual((method, payload["chat_id"]), ("sendMessage", CHAT_ID))
+        self.assertIn("test message", payload["text"])
+        self.assertIn("@alice", term.text)
+        fake = Fake([down(403, "HTTP 403: Forbidden")])
+        term = FakeTerm()
+        self.assertEqual(notify.send_test(term, lambda token: fake, self.dir), 1)
+        self.assertIn("HTTP 403", term.text)
+        self.assertEqual(notify.send_test(FakeTerm(), lambda token: Fake(), os.path.join(self.dir, "nowhere")), 1)
+
+    def test_status_json_has_no_secret(self):
+        self.pair_files()
+        clock = Clock(1_000_000.0)
+        with mock.patch("time.time", clock):
+            notify.write_status(self.dir, notify.status_dict(clock(), True, True, "alice", 999_000, "HTTP 502: Bad Gateway", 999_500))
+            rc, out, _ = self.run_main("--status", "--json")
+        self.assertEqual(rc, 0)
+        for secret in (SECRET, TOKEN, str(CHAT_ID)):
+            self.assertNotIn(secret, out)
+        d = json.loads(out)
+        self.assertEqual((d["enabled"], d["username"], d["paired"], d["running"], d["bot"]), (True, "alice", True, True, "my_bot"))
+        self.assertEqual((d["last_sent_ts"], d["last_error"], d["failing_since"]), (999_000, "HTTP 502: Bad Gateway", 999_500))
+
+    def test_status_in_words(self):
+        self.pair_files()
+        now = 2_000_000.0
+        notify.write_status(self.dir, notify.status_dict(now - 20, True, True, "alice", now - 3600, "HTTP 502: Bad Gateway", now - 600))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), mock.patch("time.time", Clock(now)):
+            self.assertEqual(notify.main(["notify.py", "--status"]), 0)
+        text = out.getvalue()
+        for line in ("Telegram notifications: on", "username:    @alice", "paired:      yes (bot @my_bot)", "running (status 20 s old)", "(60 min ago)",
+                     "last error:  HTTP 502: Bad Gateway (failing since"):
+            self.assertIn(line, text)
+        for secret in (SECRET, str(CHAT_ID)):
+            self.assertNotIn(secret, text)
+        notify.write_status(self.dir, notify.status_dict(now - 20, True, False, "alice", None, "not paired: run nuc-console-telegram --setup", None))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), mock.patch("time.time", Clock(now)):
+            notify.main(["notify.py", "--status"])
+        self.assertIn("paired:      no: run nuc-console-telegram --setup", out.getvalue())
+
+    def test_status_says_not_running_when_the_status_is_old(self):
+        notify.write_status(self.dir, notify.status_dict(1000, True, True, "alice", None, None, None))
+        d = json.loads(self.run_main("--status", "--json")[1])
+        self.assertIs(d["running"], False)
+        rc, out, _ = self.run_main("--status")
+        self.assertEqual(rc, 0)
+        self.assertIn("not running", out)
+        self.assertIn("@alice", out)
+
+    def test_status_with_nothing_there_does_not_fail(self):
+        os.rmdir(self.dir)
+        rc, out, _ = self.run_main("--status")
+        self.assertEqual(rc, 0)
+        self.assertIn("not running", out)
+        d = json.loads(self.run_main("--status", "--json")[1])
+        self.assertEqual((d["paired"], d["ts"], d["running"]), (None, None, False))
 
     def test_preview_prints_the_message_and_sends_nothing(self):
         with mock.patch.object(notify, "HttpsTransport", side_effect=AssertionError("preview never sends")), \
@@ -850,6 +1175,69 @@ class Cli(Base):
             self.config(enabled="yes", username="@alice", detail="full")
             rc, out, _ = self.run_main("--preview", "--demo")
             self.assertIn("Database/broker open on the LAN: 1 DB/broker open on LAN", out)
+
+    def test_service_control_uses_fixed_command_lines(self):
+        for os_name, table in notify.SERVICE.items():
+            for action, steps in table.items():
+                for argv in steps:
+                    self.assertTrue(all(isinstance(a, str) for a in argv))
+        self.assertEqual(notify.SERVICE["linux"]["restart"], [["systemctl", "restart", "nuc-console-notify"]])
+        self.assertEqual(notify.SERVICE["linux"]["stop"], [["systemctl", "stop", "nuc-console-notify"]])
+        self.assertEqual(notify.SERVICE["darwin"]["restart"], [["launchctl", "kickstart", "-k", "system/com.nuc-console.notify"]])
+        self.assertEqual(notify.SERVICE["darwin"]["stop"], [["launchctl", "kill", "TERM", "system/com.nuc-console.notify"]])
+        self.assertEqual(notify.SERVICE["windows"]["restart"][-1], ["schtasks", "/Run", "/TN", "\\nuc-console\\notify"])
+        self.assertEqual(notify.SERVICE["windows"]["stop"], [["schtasks", "/End", "/TN", "\\nuc-console\\notify"]])
+
+    def test_service_control_runs_without_a_shell_and_reports_failures(self):
+        ran = []
+
+        def fake_run(argv, **kw):
+            ran.append((argv, kw))
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch.object(nuc_config, "OS_NAME", "linux"), mock.patch.object(notify, "POSIX", True):
+            with mock.patch.object(notify.subprocess, "run", fake_run):
+                self.assertEqual(REAL_SERVICE_CONTROL("restart"), (True, ""))
+            self.assertEqual(ran[0][0], ["systemctl", "restart", "nuc-console-notify"])
+            self.assertNotIn("shell", ran[0][1])
+            self.assertEqual(ran[0][1]["env"]["PATH"], "/usr/sbin:/usr/bin:/sbin:/bin")
+            with mock.patch.object(notify.subprocess, "run", side_effect=FileNotFoundError("systemctl")):
+                ok, why = REAL_SERVICE_CONTROL("stop")
+            self.assertFalse(ok)
+            self.assertIn("systemctl", why)
+            with mock.patch.object(notify.subprocess, "run", return_value=mock.Mock(returncode=5, stdout="", stderr="Unit not found\n")):
+                self.assertEqual(REAL_SERVICE_CONTROL("stop"), (False, "Unit not found"))
+
+
+# ---- the commands in bin/ ----------------------------------------------------------------------------------------------------
+
+class Wrappers(unittest.TestCase):
+    def read(self, name):
+        with open(os.path.join(ROOT, name), encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def test_the_shell_wrapper_runs_the_installed_code_with_a_clean_environment(self):
+        s = self.read("bin/nuc-console-telegram")
+        self.assertTrue(s.startswith("#!/bin/sh\n"))
+        self.assertIn("exec env -u NUC_CONSOLE_CONFIG -u NUC_CONSOLE_NOTIFY_DIR", s)
+        for var in ("NUC_CONSOLE_BASELINE", "NUC_CONSOLE_NET", "NUC_CONSOLE_STATE", "NUC_CONSOLE_BOOT", "NUC_CONSOLE_ACCEPTED"):
+            self.assertIn(f"-u {var}", s)
+        self.assertIn('/usr/bin/python3 /opt/nuc-console/notify.py "$@"', s)  # the two paths install-macos.sh rewrites
+        self.assertNotIn("\r", s)
+        if POSIX:
+            self.assertTrue(os.access(os.path.join(ROOT, "bin", "nuc-console-telegram"), os.X_OK))
+
+    def test_the_windows_wrapper_clears_the_redirect_variables(self):
+        s = self.read("bin/nuc-console-telegram.cmd")
+        for var in ("NUC_CONSOLE_CONFIG", "NUC_CONSOLE_NOTIFY_DIR", "NUC_CONSOLE_BASELINE", "NUC_CONSOLE_NET", "NUC_CONSOLE_STATE", "NUC_CONSOLE_BOOT",
+                    "NUC_CONSOLE_ACCEPTED"):
+            self.assertIn(f"set {var}=", s)
+        self.assertIn(r'"%~dp0..\python\python.exe" -B "%~dp0..\app\notify.py" %*', s)
+        self.assertIn("exit /b %errorlevel%", s)
+
+    def test_line_endings_are_pinned(self):
+        attrs = self.read(".gitattributes")
+        self.assertIn("bin/nuc-console-telegram text eol=lf", attrs)
+        self.assertIn("*.cmd text eol=crlf", attrs)
 
 
 if __name__ == "__main__":

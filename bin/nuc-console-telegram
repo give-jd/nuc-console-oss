@@ -1,0 +1,11 @@
+#!/bin/sh
+# Telegram notifications of the ATTENTION list. The machine only sends: it never reads your messages and listens on no port.
+#   sudo nuc-console-telegram --setup     pair: your own bot's token and your @username, then press Start in Telegram
+#   nuc-console-telegram --status         is it on, paired, running (--json for scripts)
+#   nuc-console-telegram --test           send a test message
+#   nuc-console-telegram --preview        print what the current problems would send (nothing is sent)
+#   sudo nuc-console-telegram --on | --off | --forget     --help for all of it
+# env -u: NUC_CONSOLE_* variables must not be able to redirect what root writes (the token, config.ini), e.g. with sudo -E
+exec env -u NUC_CONSOLE_CONFIG -u NUC_CONSOLE_NOTIFY_DIR -u NUC_CONSOLE_BASELINE -u NUC_CONSOLE_NET -u NUC_CONSOLE_STATE \
+    -u NUC_CONSOLE_BOOT -u NUC_CONSOLE_ACCEPTED \
+    /usr/bin/python3 /opt/nuc-console/notify.py "$@"
