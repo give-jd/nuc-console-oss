@@ -1,42 +1,116 @@
-# Portable mode and updating
+# Portable run
 
-Two things for people who do not want (or do not yet want) an installation: run nuc-console from the extracted folder, and
-update it when a new release is out. Neither installs a service, neither runs by itself.
+Run nuc-console from the extracted folder, without installing it. No service and no scheduled task is created, no system
+setting changes, nothing listens beyond `127.0.0.1`, and everything it writes is in `data/` of that folder. It runs when you start
+it and stops when you quit it. To install it instead: [INSTALL.md](INSTALL.md). To update a folder: [Update a portable folder](#update-a-portable-folder).
 
-## Run it without installing
+## Run it
 
-Extract the archive of your system from the [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest) (or `git clone`
-the repository) and run, in that folder:
+Download the archive of your system from the [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest)
+([which one, and how to check it](INSTALL.md#download-a-release)) and extract it, or `git clone` the repository. In that folder:
 
 | System | Command | What you get |
 |---|---|---|
 | Linux | `./run.sh` | the dashboard in this terminal (`q` or Ctrl+C quits) |
-| Linux, no terminal screen | `./run.sh --web` | the dashboard in your browser (it opens it when there is a desktop) |
+| Linux, in a browser | `./run.sh --web` | the dashboard in your browser (it opens it when there is a desktop, else it prints the address) |
 | macOS | `./run.sh` | the dashboard in your browser (`./run.sh --console` for the terminal) |
 | Windows | double-click `run.cmd` | the dashboard in your default browser |
 
-Options: `--port N` (`-Port N` on Windows) picks the port of the browser view, a free one by default; `--no-open` (`-NoOpen`) only
-prints the address. Ctrl+C, `q` in the terminal view, or closing the window stops **everything** it started: no process is left.
-Only one copy runs per folder.
+Options (Windows: `run.cmd` takes the PowerShell spelling):
 
-What it does, and does not do:
+| `run.sh` | `run.cmd` | |
+|---|---|---|
+| `--console` | | the dashboard in this terminal: the default on Linux; needs a terminal (`--console needs a terminal: use --web`) |
+| `--web` | (always) | the dashboard in your browser, the default on macOS and Windows |
+| `--port N` | `-Port N` | the port of the browser view; a free one by default. The address is printed: `dashboard on http://127.0.0.1:PORT/?fit=1` |
+| `--no-open` | `-NoOpen` | only print the address, do not open a browser |
+| `--accept` | `-Accept` | accept the ports exposed now as the baseline of the port alarms, then exit: [Port alarms](#port-alarms) |
+| `-h`, `--help` | | the usage |
 
-- Everything it writes is in `data/` of that folder: `config.ini` (copied from `config/` the first time; your edits are never
-  overwritten, `config.ini.dist` always has the newest defaults to diff against), the state, the port-alarm baseline, `logs/`.
-  Nothing is written anywhere else, nothing is installed, no service or scheduled task is created, no system setting changes.
-- It starts the collector in the background, as **you**, and the browser view on `127.0.0.1` only, with no token (nothing but this
-  machine can connect). `[web] bind` in `config.ini` is ignored in portable mode.
-- Without root (Windows: without Administrator) it still runs: the sections that need more (firewall, containers, other
-  users' processes, ...) show what is missing. `sudo ./run.sh` (Windows: right-click `run.cmd`, *Run as administrator*) shows everything,
-  and then every part runs with those rights, so keep that folder yours alone (as root, `run.sh` refuses a folder others can write to).
-- **Python**: Linux and macOS use the system's Python 3.8+ (`PYTHON=/path/to/python3 ./run.sh` to choose one). The Windows ZIP carries the
-  official embeddable Python in `python\`: the first run checks its SHA-256 against the pin in `install-windows.ps1` and its
-  signature, unpacks it once into `python\`, and reuses it afterwards; a source checkout without it uses `py -3` / `python`.
-- **Port alarms**: the baseline is created on the first complete snapshot of the collector. A collector without root cannot see
-  everything, so it may refuse (it tries for a couple of minutes): then run `./run.sh --accept` (`run.cmd -Accept`) from another terminal,
-  or start it as root once. `./run.sh --accept --problem ID --reason "why"` accepts a known item of the ATTENTION list.
+Only one copy runs per folder: a second start says `already running` and exits. On Linux and macOS, `PYTHON=/path/to/python3 ./run.sh`
+chooses the Python.
 
-## Update
+## What it does, and where
+
+It starts, as **you**:
+
+1. the collector (`src/collector.py`), in the background: it writes its snapshots to `data/run/`;
+2. the view: the terminal screen (`src/render.py`), or the browser view (`src/web.py --local`) on `127.0.0.1`, with no token (nothing but
+   this machine can connect), and opens your default browser on it (`open` on macOS, `xdg-open` on Linux when there is a desktop, `Start-Process` on Windows);
+3. until the baseline of the port alarms exists, a small helper that tries to create it ([Port alarms](#port-alarms)).
+
+Everything it writes:
+
+| Where | What |
+|---|---|
+| `data/config.ini` | your configuration: copied from `config/config.ini` the first time, never overwritten |
+| `data/config.ini.dist` | the newest defaults, refreshed at every start: `diff data/config.ini data/config.ini.dist` lists the options added by a newer version |
+| `data/run/` | the collector's snapshots (`net.json`, `containers.json`, `boot.json`, and `sensors.json` on macOS and Windows) |
+| `data/lib/` | `baseline.json` (the port alarms) and `accepted.json` (the problems you accepted) |
+| `data/logs/` | `collector.log`, `web.log` (the view in the browser), `baseline.log`; a `collector.log` over 1 MB is kept once as `.1` at the next start |
+| `data/portable.pid` | the process ID of the running copy; removed when it stops |
+| `python\` (Windows ZIP) | the Python, unpacked once on the first run (see [Python](#python)) |
+| `cache/` | what `nuc-console-update` downloaded; only exists once you used it |
+
+On Linux and macOS `data/` is private to you (mode 0700, files 0600): the snapshots hold your topology. On Windows it has the
+permissions of the folder it is in.
+
+Nothing is installed and nothing is written outside this folder, apart from what the programs it starts do on their own: your browser,
+and the temporary files of the system and of PowerShell. Python runs with `-B`: no `__pycache__` is written. The launcher does this by setting
+`NUC_CONSOLE_HOME` to `data/`: the collector, the screen and the web view keep their config, state and baseline there
+([CONFIGURATION.md](CONFIGURATION.md#portable-run)).
+
+## Without root, with root
+
+As a normal user (Windows: without *Run as administrator*) it still runs; what needs more rights shows less, and the screen says so: the
+firewall, containers, other users' processes and services. Start `sudo ./run.sh` (Windows: right-click `run.cmd` › *Run as administrator*)
+to see everything. Then **every** part runs with those rights, so keep that folder yours alone:
+
+- Linux and macOS: as root, `run.sh` refuses a `src/`, `data/` (or one of its folders) that is a link or writable by others, and says what to fix.
+- Windows: `run.ps1` does not check this. Run it as Administrator only from a folder that only Administrators can write.
+- `data/` created by a `sudo` run belongs to root: a later run as yourself says `data is not writable by you`, and `sudo chown -R "$USER" data` fixes it.
+
+## Python
+
+- **Linux and macOS**: Python 3.8 or newer, standard library only; nothing is downloaded. `$PYTHON` if you set it; else on macOS the newest
+  python.org Python, then Apple's `/usr/bin/python3` (only when the Command Line Tools are installed); on Linux `/usr/bin/python3`; then the
+  first `python3` on the PATH.
+- **Windows ZIP**: the official embeddable Python is in `python\` (the x64 ZIP carries the x64 one, the ARM64 ZIP the ARM64 one). The first run checks its
+  SHA-256 against the pin in `install-windows.ps1` and python.exe's signature (Python Software Foundation), unpacks it once into `python\`, and reuses it afterwards. If it
+  cannot be used (`warning: ... not used`), or in a source checkout that has none, the run falls back to a Python 3.8+ of the machine (`py -3`, `python`, `python3`).
+
+## Port alarms
+
+The baseline of the exposed ports is created once the collector has written its first **complete** snapshot. A collector without root
+(Windows: Administrator) cannot see everything, so the snapshot may be incomplete and the baseline refused (`baseline not created`, in
+`data/logs/baseline.log`). It is tried every few seconds for a couple of minutes; after that either start it as root once, or from another
+terminal accept the state of right now:
+
+```bash
+./run.sh --accept                                          # Windows: run.cmd -Accept
+./run.sh --accept --problem ID --reason "why it is fine"   # a known item of the ATTENTION list
+./run.sh --accept --forget ID                              # undo it
+```
+
+`--accept` refuses stale or incomplete data. Port changes are accepted with the baseline, not with `--problem`. `nuc-console-accept` and
+`nuc-console-problems` in `bin/` belong to an installation (they read `/opt/nuc-console`), not to this folder. To list the ids of the ATTENTION items of a portable run:
+`NUC_CONSOLE_HOME=data python3 src/render.py --problems` (Windows, in `cmd`: `set NUC_CONSOLE_HOME=data` and `python\python.exe -B src\render.py --problems`).
+
+## Configuration
+
+Edit `data/config.ini` ([CONFIGURATION.md](CONFIGURATION.md) lists every key), then quit and start it again. Everything applies except the
+parts that decide how an installation shows itself: `[web] enabled`, `bind`, `port` and `token_file` are ignored (the view is always on
+`127.0.0.1`, on the port you give or a free one, with no token) and so are `[display] mode` and `browser` (the script opens your default browser itself;
+`--no-open` stops it). `[display] zoom` still sets the text size.
+
+## Stopping
+
+Ctrl+C, `q` in the terminal view, or closing the terminal or the window stops **everything** it started. On Windows the collector and
+the web view are in a job object, so Windows ends them with the window even when it is closed hard. A copy that is killed without
+a chance to clean up (`kill -9`, a power cut) leaves `data/portable.pid` behind. The next start ignores it unless a process with that
+ID exists; if it says `already running` and nothing runs, delete the file.
+
+## Update a portable folder
 
 ```bash
 bin/nuc-console-update --check        # only say whether a newer release exists
@@ -44,38 +118,36 @@ bin/nuc-console-update                # ask, then update
 bin/nuc-console-update --yes          # do not ask
 ```
 
-Windows: `bin\nuc-console-update.cmd` with `-Check`, `-Yes`. Run it when you decide to; there is no timer, no service, no check at
-start-up, and nothing else in nuc-console talks to the Internet.
+Windows: `bin\nuc-console-update.cmd`, with `-Check` and `-Yes`. It needs no rights: run it as the user who owns the folder (as root, on
+Linux and macOS, it refuses a folder root does not own). It refuses while a copy is running from the folder: quit it first. Run it when you decide to; it is never automatic.
 
-It reads the version of what you have, asks `api.github.com` (HTTPS only) for the latest release and compares the numbers
-(`1.10.0` is newer than `1.9.9`). When you are up to date it says `already at X.Y.Z` and stops. When there is a newer release:
+It downloads and checks the archive of your system as described in [Update](INSTALL.md#update), into `cache/` of this folder (a file
+already there with the right SHA-256 is not downloaded again), and then:
 
-1. it downloads the archive of this system (Windows: x64 or ARM64) and `SHA256SUMS` into the **cache**;
-2. a file already in the cache whose SHA-256 is right is **not downloaded again** (a corrupt or half file is replaced);
-3. the archive's SHA-256 must be the one in `SHA256SUMS`, else it is deleted and nothing is installed;
-4. if `gh` (GitHub CLI) is installed and logged in it runs `gh attestation verify <archive> --repo give-jd/nuc-console-oss`, and
-   **refuses on failure**; without `gh`, or without a login, it says that the provenance was not checked, and goes on;
-5. it unpacks into a temporary folder of the cache (links, devices and paths that escape are refused; the version inside must be
-   the release's) and installs from there.
+- replaces the files the new release ships: `src/`, `bin/`, `docs/`, `config/`, `scripts/`, the launchers, installers, `README.md`...; a file the new
+  release no longer has is deleted from those folders; on Windows, when the release has another Python, its zip replaces the old one in `python\` and is unpacked at the next run.
+  The files are first written next to their targets and then renamed over them, so a full disk stops it before anything is replaced;
+- keeps `data/` (your config, state, baseline, accepted problems, logs) and `cache/`, untouched. `data/config.ini` is never replaced; the
+  next start refreshes `config.ini.dist`;
+- says `updated to X.Y.Z: start it again with run.sh / run.cmd`.
 
-| Mode | Which one | Needs | What is replaced | Cache |
-|---|---|---|---|---|
-| Portable | the `bin/` of an extracted folder that has `run.sh` / `run.cmd` | nothing (stop it first) | `src/`, `bin/`, `docs/`, `config/`, ... of that folder; **`data/` (your config, baseline, logs) and `cache/` stay** | `<folder>/cache` |
-| Installed, Linux | `/opt/nuc-console` | `sudo` | the new release's `install.sh` runs: it keeps `/etc/nuc-console/config.ini`, the baseline, the VT and the time zone | `/var/cache/nuc-console` |
-| Installed, macOS | `/opt/nuc-console` | `sudo` | the same, through `install-macos.sh` | `/Library/Caches/nuc-console` |
-| Installed, Windows | `%ProgramFiles%\nuc-console` | Administrator: `nuc-console-update.cmd` asks for it, like `install-windows.cmd` | `install-windows.ps1` of the new release: it keeps `%ProgramData%\nuc-console\config.ini` and the baseline | `%ProgramData%\nuc-console\cache` |
+Files you changed outside `data/` are overwritten, and files you added are left alone. A `git clone` updates with `git pull`: run the
+updater only in a folder extracted from an archive. To update an *installed* nuc-console from an extracted folder: `sudo ./bin/nuc-console-update --installed`.
 
-`--installed` (`-Installed`) updates the installed one even when you run the command from an extracted folder:
-`sudo ./bin/nuc-console-update --installed`. The updater never calls `sudo` itself: if it needs root it says so.
-The caches are root's (Windows: SYSTEM and Administrators) and are checked again before use; only the archive of the newest release is
-kept. Delete a cache folder whenever you like.
+## Troubleshooting
+
+| Message or symptom | What to do |
+|---|---|
+| `already running (pid N): quit it first` | a copy runs from this folder; if it does not, delete `data/portable.pid` |
+| `--console needs a terminal: use --web` | there is no terminal (a script, a pipe): use `./run.sh --web` |
+| `Python 3.8 or newer not found` | Linux: install `python3`; macOS: python.org or `xcode-select --install`; Windows: use the release ZIP, which carries one |
+| `the web view did not start` | the end of `data/logs/web.log` is printed; if you gave `--port`, that port may be taken: try without it |
+| the screen says the collector is not running, or the data is old | `data/logs/collector.log` (Windows: `the collector stopped (see ...)` is printed) |
+| `baseline not created` | [Port alarms](#port-alarms): `./run.sh --accept`, or start it as root once |
+| a section shows less than on an installation | it needs root or Administrator: [Without root, with root](#without-root-with-root) |
 
 ## Security notes
 
-- The logic of the updater is `src/update.py` (standard library only); the shell and PowerShell wrappers only ask GitHub and start the
-  installer after the Python that checked the archive has ended. It is the same code on every system and it is tested without a network.
-- It trusts GitHub's release for the file list and the hashes, and the build attestation (`gh`) for who built it: `SHA256SUMS`
-  protects against a damaged or swapped download, not against a release that was published by someone else; for that, install `gh`
-  or check the attestation yourself ([SECURITY.md](../SECURITY.md#verifying-a-release)).
-- Downloads: HTTPS only (redirects too), `github.com` assets only, size-limited. Nothing is run from the network.
-- As root, the updater refuses a cache folder that is not root's, runs `gh` only when root owns it, and ignores `PYTHON*` variables.
+Nothing in this mode runs with more rights than you give it, and it opens no listener beyond `127.0.0.1`. The updater only runs when you start
+it; it checks what it downloads against `SHA256SUMS` and, when `gh` is installed and logged in, against the build attestation: what that proves and
+what it does not is in [SECURITY.md](../SECURITY.md#verifying-a-release).

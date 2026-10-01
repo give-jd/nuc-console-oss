@@ -4,10 +4,21 @@ Everything is optional: a missing file, a missing key or a broken value means th
 
 | | |
 |---|---|
-| File | Linux and macOS: `/etc/nuc-console/config.ini` · Windows: `%ProgramData%\nuc-console\config.ini` (created on first install, **never overwritten**; UTF-8) |
-| Reference copy | `config.ini.dist` next to it, refreshed on every install: `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied it |
-| Apply | Linux: `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web` · macOS: run `sudo ./install.sh` again · Windows: run `install-windows.cmd` again (the installers restart everything and keep `config.ini`) |
-| Override | `NUC_CONSOLE_CONFIG=<path>` (config file), `NUC_CONSOLE_MODE` (`overview`/`rotate`) |
+| File | Linux and macOS: `/etc/nuc-console/config.ini` · Windows: `%ProgramData%\nuc-console\config.ini` (created on first install, **never overwritten**; UTF-8) · [portable run](PORTABLE.md): `data/config.ini` in the extracted folder (copied from `config/config.ini` the first time, never overwritten) |
+| Reference copy | `config.ini.dist` next to it, refreshed on every install, update and portable start: `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied it |
+| Apply | Linux: `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web` · macOS: run `sudo ./install.sh` again · Windows: run `install-windows.cmd` again (the installers restart everything and keep `config.ini`) · portable: quit (Ctrl+C) and start `run.sh` / `run.cmd` again. `nuc-console-update` keeps your `config.ini` |
+| Override | `NUC_CONSOLE_CONFIG=<path>` (config file), `NUC_CONSOLE_MODE` (`overview`/`rotate`), `NUC_CONSOLE_HOME=<folder>` ([portable run](#portable-run)) |
+
+## Portable run
+
+`run.sh` and `run.cmd` (see [PORTABLE.md](PORTABLE.md)) set `NUC_CONSOLE_HOME` to the `data/` folder next to them, and the collector, the screen and the web view
+then keep everything there: the config as `data/config.ini`, the collector's snapshots in `data/run/`, the baseline and the accepted problems in `data/lib/`.
+You do not normally set it yourself (set by hand, it also makes the web view always local, see below). `NUC_CONSOLE_CONFIG`, if set, wins over the file in that
+folder; the launchers clear it, and the other `NUC_CONSOLE_*` path overrides (state, baseline, ...).
+
+Every key applies as on an installation except the ones that decide how an installation shows itself: `[web] enabled`, `bind`, `port` and `token_file` are ignored (the
+web view is on `127.0.0.1`, on the port you give with `--port` / `-Port` or a free one, with no token) and so are `[display] mode` and `browser`
+(the launcher opens your default browser itself; `--no-open` / `-NoOpen` prints the address instead). `[display] zoom` still sets the text size.
 
 ## `[features]` — switch sections on or off
 
@@ -77,7 +88,7 @@ admin-console = 9443
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | The only network listener of the project (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`). Details and threat model: [WEB.md](WEB.md) |
+| `enabled` | `no` | The only network listener of the project (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`; a portable run always runs it on 127.0.0.1 and ignores this section's `enabled`, `bind`, `port` and `token_file`). Details and threat model: [WEB.md](WEB.md) |
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
@@ -88,9 +99,12 @@ admin-console = 9443
 ## Commands
 
 Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept`; they are on the system PATH after the install.
+In a portable folder `nuc-console-accept` and `nuc-console-problems` are not used (they read an installation): `./run.sh --accept` (`run.cmd -Accept`) does the accepting.
 
 | Command | |
 |---|---|
+| `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
+| `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root) |
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |

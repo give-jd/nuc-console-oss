@@ -107,3 +107,6 @@ non-loopback `bind`) to reach it from other devices as described above, then run
 with `[web] enabled = no` runs no web view at all.
 Windows has no mode bits: keep `token_file` inside `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write
 (and limit who can read the file with an ACL if other people use the machine).
+
+A portable run ([PORTABLE.md](PORTABLE.md): `./run.sh --web` (the default on macOS) or `run.cmd`) starts the web view the same way on any system: 127.0.0.1 only, no
+token, a free port (or `--port`), whatever `[web]` says; it stops with the run.

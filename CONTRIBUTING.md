@@ -9,7 +9,7 @@ git clone <this repository> && cd nuc-console
 python3 -m unittest discover -s tests            # must pass on Python 3.8+, on Linux, macOS and Windows (CI runs all three)
 python3 src/render.py --once --demo --cols 200 --rows 50
 python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
-shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
+shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-update   # if you touch shell
 ```
 
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
@@ -19,6 +19,9 @@ shellcheck install.sh scripts/*.sh bin/*         # if you touch shell
   parsers are pure functions with fixtures, so they are tested on every OS; the classes `OnWindows` / `OnMacOS` in
   `tests/test_platforms.py` exercise the real system calls on their own OS. Text output of system tools is localised on Windows:
   use the API or PowerShell objects (`ConvertTo-Json`), never `netstat`/`netsh` text.
+- The portable run (`run.sh`, `run.cmd` + `run.ps1`) and the updater (`bin/nuc-console-update` and its `.cmd` / `.ps1`) are thin wrappers: the logic that can be
+  wrong (versions, choosing the asset, `SHA256SUMS`, the cache, unpacking, replacing a portable folder) is `src/update.py`, pure functions tested without a network in
+  `tests/test_portable.py`. They are never started by anything but the user: no timer, nothing at start-up.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view has none except `src/graphjs.py` (the MAP's graph view). Keep it that way; `tests/test_graphjs.py` lists
@@ -38,18 +41,32 @@ Small, focused, with tests. Describe the *why*. Do not include secrets, real hos
 
 ## Releasing
 
-1. Set `VERSION` in `src/nuc_config.py` (X.Y.Z), commit, push.
-2. Optional dry run: *Actions › release › Run workflow* on that branch with the tag you are about to create. It runs the checks and builds
-   the archives, which you can download from the run; it signs and publishes nothing.
-3. `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. The `release` workflow refuses a tag that is not `VERSION`, runs the
-   tests, downloads the two embeddable Pythons (checked against the SHA-256 pinned in `install-windows.ps1`), builds the four archives and
-   `SHA256SUMS` with `tools/build_release.py`, checks that a second build is byte-identical, attests every archive and creates the release.
-4. Locally: `python3 tools/build_release.py --version X.Y.Z --out dist [--python-zips DIR]` (`--list-python` prints what to download).
-   What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script; the rules (what is for
-   development only, what belongs to one OS) are in the docstring of `tools/build_release.py` and tested in `tests/test_release.py`.
+A release is a tag. Everything else is done by `.github/workflows/release.yml`, so nobody builds or uploads archives by hand.
 
-The Python the Windows installer uses is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, the build
-script and the workflow all read it from there.
+1. **Version.** Set `VERSION` in `src/nuc_config.py` to `X.Y.Z` (the number the tag will have, without the `v`), commit and push. It is the only place
+   the number lives: the workflow, `tools/build_release.py` and `nuc-console-update` (which compares it with the latest release) read it from there.
+2. **Dry run (optional).** *Actions › release › Run workflow*: choose the branch (or tag) to build and type the tag you are about to create (`vX.Y.Z`).
+   It runs the same checks and builds the same archives, which you can download from the run for seven days; it signs no provenance and creates no release.
+3. **Tag.** `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. Only tags of the form `vX.Y.Z` work (no `-rc1`). The workflow then:
+   - **refuses a tag that is not `VERSION`** (and one that is not `vX.Y.Z`);
+   - runs the unit tests;
+   - downloads the two embeddable Pythons for the Windows archives and checks them against the SHA-256 pinned in `install-windows.ps1`;
+   - builds the four archives and `SHA256SUMS` with `tools/build_release.py`, builds them again and checks that the second build is byte-identical and
+     that `SHA256SUMS` matches;
+   - attests every archive and `SHA256SUMS` (build provenance), and creates the release `nuc-console X.Y.Z` with them, with generated notes.
+   The release is public as soon as the workflow ends, and from then on it is the *latest* one that `nuc-console-update` offers.
+4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist [--python-zips DIR]`. Without `--python-zips` only
+   the Linux and macOS archives are built (it says so); `--list-python` prints the file, SHA-256 and URL of the Pythons to download for the Windows ones.
+   The version must be `VERSION`, and the build warns when the tree has uncommitted changes (the archives are of the files git tracks).
+
+What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script: everything except `tests/`, `tools/`,
+`CONTRIBUTING.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
+`*.ps1` only in the Windows ones, shell scripts and `scripts/` not in the Windows ones. Name and place a new file accordingly. The rules are in the docstring of
+`tools/build_release.py` and tested in `tests/test_release.py`.
+
+The Python the Windows installer uses is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, `run.ps1`, the build script and the
+workflow all read it from there. Changing it is a normal commit; the next release carries the new Python. The actions of the workflow are pinned by commit SHA: to
+update one, change the SHA and the version in the comment together.
 
 ## Regenerating the README screenshots
 

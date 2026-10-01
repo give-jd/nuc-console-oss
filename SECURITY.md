@@ -22,7 +22,7 @@ On **macOS** and **Windows** the split is the same:
 | `collector.py` | macOS: root (LaunchDaemon) · Windows: SYSTEM (scheduled task) | Apple's tools run as root only from SIP-protected folders (this includes `/usr/bin/powermetrics` for the CPU temperature); third-party tools (`docker`, `tailscale`, and `smctemp` / `osx-cpu-temp` when installed) run **as the user who owns them** or the user at the console, never as root (a user-writable binary must not become root code). On Windows only `%SystemRoot%` and `%ProgramFiles%` are searched, never the working directory |
 | `web.py` | macOS: `_nuc-console` · Windows: LOCAL SERVICE | **on by default there, on 127.0.0.1 only** (`--local`): it is how the dashboard is shown. Not reachable from the network; any local user or program can read it, like the state files. `[display] mode = none` and `[web] enabled = no` turn it off. With `[web] enabled = yes` it runs as configured there, as on Linux |
 | `render.py --open` / `--kiosk` | the logged-in user | at login: opens that page in the default browser, or full screen in a browser window with a profile of its own |
-| Python | macOS: a root-owned python.org or Command Line Tools Python (never Homebrew's) · Windows: a private embeddable Python in `%ProgramFiles%` | the installers pin the python.org files by SHA-256 and check their signature; the Windows `._pth` file makes it ignore `PYTHONPATH` and see only its own library and the code |
+| Python | macOS: a root-owned python.org or Command Line Tools Python (never Homebrew's) · Windows: a private embeddable Python in `%ProgramFiles%` (a portable run: in the `python\` folder of the extracted ZIP) | the installers pin the python.org files by SHA-256 and check their signature; the Windows `._pth` file makes it ignore `PYTHONPATH` and see only its own library and the code. [The Python in the Windows archives](#the-python-in-the-windows-archives) |
 | State | macOS: `/var/run/nuc-console` · Windows: `%ProgramData%\nuc-console` | Windows: the installer replaces the inherited ACL so only SYSTEM and Administrators can write (a user could otherwise fake the state or edit what SYSTEM reads) |
 
 Design rules you can audit in the code:
@@ -53,33 +53,74 @@ Things to be aware of (by design):
 
 ## Verifying a release
 
-Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed: it checks that the tag is `VERSION` in
-`src/nuc_config.py`, runs the tests, builds the archives with `tools/build_release.py` and signs a build provenance for each one
-(GitHub artifact attestation, minted by the workflow itself: no signing key is stored anywhere). The only secret it uses is the
-built-in `GITHUB_TOKEN`. The Windows archives carry the python.org embeddable Python, checked against the same SHA-256 the installer pins.
+Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed, and by nothing else. On a fresh runner it:
+
+1. checks that the tag is `vX.Y.Z` and that it is `VERSION` in `src/nuc_config.py`;
+2. runs the unit tests;
+3. downloads the two python.org embeddable Pythons (Windows x64 and ARM64) and checks each against the SHA-256 pinned in `install-windows.ps1`;
+4. builds the archives with `tools/build_release.py`, builds them a second time and compares the two byte for byte, and checks `SHA256SUMS`;
+5. signs a build provenance for every archive and for `SHA256SUMS` (a GitHub artifact attestation, SLSA build provenance minted by the workflow
+   itself: no signing key is stored anywhere);
+6. creates the GitHub release with the archives and `SHA256SUMS`.
+
+What it is allowed to do: the only secret it uses is the built-in `GITHUB_TOKEN` (no personal token, no signing key, no upload credential). The
+token is read-only (`contents: read`) except for the one job, which also gets `contents: write` (to create the release), `id-token: write` and
+`attestations: write` (for the provenance), and nothing more. Every action it uses is pinned by commit SHA, with the release it stands for in a comment
+(`tests.yml`, which only runs the tests with read-only rights and no secret, uses version tags). Started by hand (*Actions › release › Run
+workflow*) it is a dry run: the same checks and archives, kept as a workflow artifact for seven days, with no provenance signed and no release created.
 
 ```bash
-sha256sum -c SHA256SUMS                                                  # the archives are the ones listed (macOS: shasum -a 256 -c)
-gh attestation verify nuc-console-X.Y.Z-linux.tar.gz --repo give-jd/nuc-console-oss   # built by that workflow, from that repository
+sha256sum --ignore-missing -c SHA256SUMS      # the archives are the ones listed (macOS: grep the line of your archive | shasum -a 256 -c -)
+gh attestation verify nuc-console-X.Y.Z-linux.tar.gz --repo give-jd/nuc-console-oss   # built by a workflow of that repository
 ```
+
+`SHA256SUMS` says the file is whole and is the one listed; it comes from the same release, so it does not protect against a release published by
+someone who can publish releases on this repository. The attestation says that a workflow of this repository produced exactly this file, which is
+what protects against a swapped archive. Neither is a signature by a person, and nothing in the archives is code-signed (no Authenticode,
+no notarization): the scripts are only as trustworthy as these two checks and the repository itself. `SHA256SUMS` can be verified with `gh attestation verify` too.
 
 The Linux and macOS archives are reproducible: `python3 tools/build_release.py --version X.Y.Z --out dist` on the tag gives the same
 bytes (sorted entries, the commit time as modification time, no user names; the compressed stream also depends on the zlib of the Python
 that builds it, 3.12 in CI). The Windows archives need the two Python zips: `--python-zips DIR`, see `--list-python`.
 
-The installers keep what they download and trust it only after checking it again: Windows `%ProgramData%\nuc-console\cache` (write access
+### The Python in the Windows archives
+
+The Windows archives carry the official embeddable Python from python.org (`python\python-<version>-embed-<arch>.zip`), so the install works
+offline. Which file, and its SHA-256, is pinned in one place: `$PyVersion` and `$PyBuilds` in `install-windows.ps1` (the hashes were checked against python.org's
+Sigstore signatures when they were pinned). The workflow checks the downloaded file against that pin before it builds, `tools/build_release.py`
+refuses a zip with another hash, and `install-windows.ps1` and `run.ps1` check it again before they unpack it and accept `python.exe` only if it has a valid Authenticode
+signature of the Python Software Foundation. Changing the Python means changing that one pin in a reviewed commit; the next release then
+carries the new one. It is unpacked into its own folder, nothing else on the system uses it, and its `._pth` file makes it ignore `PYTHONPATH` and see only its own
+library and the code.
+
+### Download caches
+
+The installers and the updater keep what they download and trust it only after checking it again: Windows `%ProgramData%\nuc-console\cache` (write access
 only for SYSTEM and Administrators, like the rest of that folder), macOS `/Library/Caches/nuc-console` (root-owned: a copy that is not root's
-0644 file in a root-owned 0755 folder is replaced, never used). Both compare the SHA-256 pinned in the script; macOS also checks the signature.
+0644 file in a root-owned 0755 folder is replaced, never used), Linux `/var/cache/nuc-console` (the updater only; root-owned). The installers compare the SHA-256
+pinned in the script; macOS also checks the signature. The updater compares the SHA-256 that `SHA256SUMS` lists.
 
 The repository is scanned with `gitleaks` (history + tree), `trufflehog` and `semgrep`; the test-suite includes checks that secrets in container environments are never emitted. Run the same tools yourself before trusting any build.
 
 ## Portable mode and the updater
 
 `run.sh` / `run.cmd` run everything as the user who starts them (as root only if you use `sudo` / *Run as administrator*: then keep the folder
-yours alone; `run.sh` refuses a folder others can write to), write only inside `./data`, and listen on `127.0.0.1` with no token: nothing but
-the same machine can connect. `nuc-console-update` runs only when you start it. It talks to `api.github.com` and `github.com` over HTTPS
-only, checks the archive against `SHA256SUMS` (a mismatch deletes it), runs `gh attestation verify` when `gh` is installed and logged in
-(a failure stops the update; without `gh` it says the provenance was not checked), refuses archive members that are links or escape the folder,
-and keeps its cache in a folder only root (Windows: SYSTEM and Administrators) can write. `SHA256SUMS` comes from the same release, so
-it protects against a damaged or swapped download, not against a malicious release: the attestation is what says who built it.
-Details: [docs/PORTABLE.md](docs/PORTABLE.md).
+yours alone; `run.sh` refuses a folder others can write to, `run.ps1` does not check), write only inside `./data`, and listen on `127.0.0.1` with no token: nothing but
+the same machine can connect (`[web]` settings are ignored there).
+
+`nuc-console-update` runs only when you start it (the program itself never downloads anything; the only other downloads are an installer's one-time Python). What it does and checks:
+
+- it talks to `api.github.com` and to the assets of the release on `github.com`, over HTTPS only (a redirect too), with a size limit; it runs nothing it
+  downloaded before the checks below have passed;
+- the archive must have the SHA-256 that `SHA256SUMS` of the same release lists: a mismatch deletes it and stops;
+- when `gh` is installed and logged in it runs `gh attestation verify` on the archive (`--repo give-jd/nuc-console-oss`) and a failure stops the update;
+  without `gh`, or without a login, it says that the provenance was not checked and goes on. It does not verify the attestation of `SHA256SUMS` itself;
+- the `VERSION` inside the archive must be the release's; a member with an absolute path or `..` is refused, and so is a link or a device in a `.tar.gz`
+  (tar members are unpacked as 0755 or 0644 only: no setuid);
+- as root it refuses a cache folder that is not root's alone, runs `gh` only when root owns it and nobody else can write it, and starts Python with `-I`
+  (the `PYTHON*` variables and the user's site are ignored); in a portable folder it refuses to run as root unless root owns the folder;
+- an installed one is then updated by the installer of that release, exactly as if you ran it yourself (`sudo`, or an administrator prompt: the updater never calls `sudo`);
+  a portable folder has its code replaced and keeps `data/` and `cache/`.
+
+As with any `SHA256SUMS`, this protects against a damaged or swapped download, not against a malicious release: the attestation, which `gh` checks, is what says who
+built it. Details: [docs/PORTABLE.md](docs/PORTABLE.md), [docs/INSTALL.md](docs/INSTALL.md#update).
