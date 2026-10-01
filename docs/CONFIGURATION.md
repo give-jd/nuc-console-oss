@@ -59,6 +59,56 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 
 Sections fill the columns in the given order and never back-fill, so a line more or less in one block does not move the others. Per-core CPU bars are always one per core, except on tiny consoles (the last two fitting levels).
 
+## `[ui]` — look and layout of the new interface (being built)
+
+> **Not in use yet.** The new interface (a web view made of cards, and a tab bar and KPI row on the console) is being built, and this section is what it will
+> read. Today the console and the web view do **not use it**: they ignore every key here (and `web = classic` keeps today's pages), so changing it has no visible
+> effect. The keys are parsed and checked already: a wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
+
+Every key is optional. A key left out, blank or wrong means the default, **except** that `hidden =` left blank means "nothing is hidden".
+
+| Key | Default | Meaning |
+|---|---|---|
+| `web` | `classic` | Which web interface is served: `classic` (today's pages) or `app` (the new one, when it exists). The switch that keeps the current pages until the new interface is finished |
+| `theme` | `auto` | `auto` (follows the browser's light or dark setting; the console keeps its usual colours), `dark`, `light` or `high-contrast` |
+| `density` | `desk` | `wall` (big text for a monitor across the room, the least detail), `desk` or `compact` (small text, the most on one screen) |
+| `start_view` | `overview` | The screen that opens first: `overview`, `map`, `cpu`, `health` or `ai` |
+| `preset` | `default` | A ready-made layout, KPIs and hidden cards, see below: `default`, `security`, `server` or `desktop`. `kpis`, `layout` and `hidden` below override the preset's own |
+| `order` | `severity` | `severity`: the cards that need attention move up. `fixed`: every card stays where `layout` puts it |
+| `kpis` | the preset's | The row of numbers under the title bar: up to 8 of `problems`, `internet`, `lan`, `beyond` (services past the reach you declared in `[expose]`), `db_lan`, `firewall`, `cpu`, `ram`, `disk`, `temp`, `load`, `containers`, `unhealthy`, `failed_units`, `ssh`, `tailnet`, `rx`, `tx`, `uptime`, `health`, `ai`, in the order written. One whose data is missing shows `?` |
+| `layout` | the preset's | The cards that show, in order, each `name` or `name:width`: the width is 1 to 4 columns on the web (no suffix: 1; the console ignores it). Names are the sections of `[dashboard] sections`: `attention`, `exposure`, `webapps`, `firewall`, `system`, `containers`, `databases`, `boot`, `network_traffic`, `sessions`, `tailscale`, `docker_disk`, `disks`. Cards you leave out of both `layout` and `hidden` are **appended** in their default order, so a card added by an upgrade shows up at the end. A card whose `[features]` switch is off is never drawn |
+| `hidden` | the preset's | Cards that are not shown, as in `layout`. A card in both lists is hidden |
+
+```ini
+[ui]
+theme = dark
+density = wall
+preset = server
+kpis = problems, internet, lan, cpu, ram, disk, temp
+layout = attention:2, exposure:2, webapps, firewall, system, containers:2
+hidden = sessions, docker_disk
+```
+
+Values are not case sensitive; lists are separated by commas (or semicolons, or blanks, and may continue on indented lines). An unknown name, a repeat, a width
+outside 1-4 or more than 8 KPIs is reported on stderr and that item is skipped (a width is held to 1-4; the first 8 KPIs are used). If nothing valid is left in
+`kpis` or `layout`, the preset's own is used.
+
+**Presets.** A preset is a layout, a KPI row and some hidden cards (`hidden` empty: all are shown):
+
+| Preset | `layout` | `kpis` | `hidden` |
+|---|---|---|---|
+| `default` | attention:2, exposure:2, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks | problems, internet, lan, beyond, cpu, ram, disk, temp | — |
+| `security` | attention:2, exposure:2, firewall, webapps, databases, sessions, tailscale, containers, system, boot, disks, network_traffic, docker_disk | problems, internet, lan, beyond, containers, health | — |
+| `server` | attention:2, system:2, containers, databases, disks, docker_disk, boot, exposure:2, webapps, firewall, network_traffic, sessions, tailscale | problems, cpu, ram, disk, temp, containers, load, health | — |
+| `desktop` | attention:2, system:2, disks, network_traffic, sessions, exposure:2, firewall, boot | problems, cpu, ram, disk, temp, ai | containers, databases, webapps, tailscale, docker_disk |
+
+The order of the `default` layout is the one of `[dashboard] sections`, so a `config.ini` that already sets it keeps its order with no `[ui]` section at all. The
+other presets bring their own order, and `[dashboard] sections` does not change them; an explicit `[ui] layout` overrides any of them.
+
+**Who wins.** For each key, the first of these that sets it: a `?ui=` value in one URL (a bookmark, a kiosk link), the `nuc_ui` cookie of that browser (set by the
+settings page of the new web interface, which also shows where every value comes from), this section, the preset, the built-in default. The server never writes
+the browser's choices anywhere. The settings page has an **Export** button that gives you a `[ui]` block like the one above, to paste here.
+
 ## `[display]` — the dashboard on macOS and Windows
 
 macOS and Windows have no text console to take over. The installers start the read-only web view on **127.0.0.1 only**

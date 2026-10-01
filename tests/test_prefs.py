@@ -928,5 +928,67 @@ class LoadConfig(unittest.TestCase):
         self.assertEqual(sorted(imports), ["nuc_config", "re"])
 
 
+class Docs(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(ROOT, "docs", "CONFIGURATION.md"), encoding="utf-8") as f:
+            doc = f.read()
+        cls.doc = doc[doc.index("## `[ui]`"):].split("\n## ")[0]
+        with open(os.path.join(ROOT, "config", "config.ini"), encoding="utf-8") as f:
+            cls.ini = f.read()
+
+    def test_every_key_and_value_is_documented(self):
+        for key in prefs.UI_KEYS:
+            self.assertIn("| `%s` |" % key, self.doc, key)
+        words = (prefs.WEB_MODES + prefs.THEMES + prefs.DENSITIES + prefs.VIEWS + prefs.PRESETS + prefs.ORDERS + prefs.KPI_IDS + prefs.CARDS)
+        for w in words:
+            self.assertIn("`%s`" % w, self.doc, w)
+
+    def test_the_documented_defaults_are_the_codes(self):
+        rows = {m.group(1): m.group(2) for m in re.finditer(r"(?m)^\| `([a-z_]+)` \| `?([^|`]*)`? \|", self.doc)}
+        self.assertEqual(rows["web"], "classic")
+        for key in ("theme", "density", "start_view", "preset", "order"):
+            self.assertEqual(rows[key], prefs.DEFAULTS[key], key)
+        self.assertIn("up to %d" % prefs.MAX_KPIS, self.doc)
+
+    def test_the_presets_are_documented_as_coded(self):
+        for name in prefs.PRESETS:
+            p = prefs.preset_prefs(name)
+            rows = [ln for ln in self.doc.splitlines() if ln.startswith("| `%s` |" % name)]
+            self.assertEqual(len(rows), 1, name)
+            row = rows[0]
+            self.assertIn(", ".join(p["kpis"]), row, name)
+            self.assertIn(", ".join(c if w == 1 else "%s:%d" % (c, w) for c, w in p["layout"]), row, name)
+            for c in p["hidden"]:
+                self.assertIn(c, row)
+
+    def test_it_says_the_new_interface_is_not_built_yet(self):
+        low = self.doc.lower()
+        self.assertIn("being built", low)
+        self.assertIn("not use", low)
+
+    def test_the_shipped_config_has_a_commented_ui_block_that_works(self):
+        block = self.ini[self.ini.index("\n[ui]\n") + 1:].split("\n[")[0]
+        ui, warns = prefs.parse_ui(ini_section(block), ALL)
+        self.assertEqual((ui, warns), ({"web": "classic", "sections": ALL}, []), "shipped as a commented example")
+        example = re.sub(r"(?m)^# (%s)(\s*=)" % "|".join(prefs.UI_KEYS), r"\1\2", block)
+        self.assertNotEqual(example, block)
+        ui, warns = prefs.parse_ui(ini_section(example), ALL)
+        self.assertEqual(warns, [])
+        self.assertEqual(set(ui) - {"sections"}, set(prefs.UI_KEYS), "every key of [ui] has an example line")
+        p, src = prefs.effective(ui)
+        for field in ("theme", "density", "start_view", "preset", "order"):
+            self.assertEqual(p[field], prefs.DEFAULTS[field], "the example shows the defaults")
+        self.assertEqual(ui["web"], "classic")
+        self.assertLessEqual(len(ui["kpis"]), prefs.MAX_KPIS)
+
+    def test_the_shipped_config_is_strict_and_loads(self):
+        cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
+        cp.read_string(self.ini)
+        self.assertIn("ui", cp.sections())
+        cfg, err = load_ini(self.ini)
+        self.assertEqual((cfg["ui"], err), ({"web": "classic", "sections": ALL}, ""))
+
+
 if __name__ == "__main__":
     unittest.main()
