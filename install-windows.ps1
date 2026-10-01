@@ -13,7 +13,8 @@
     2. creates %ProgramData%\nuc-console (config.ini only if missing, run\, lib\, logs\), writable only by SYSTEM and
        Administrators, readable by users;
     3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops),
-       the full-screen dashboard (every user, at logon: Microsoft Edge in kiosk mode on a local page, no network port)
+       the full-screen dashboard (every user, at logon: a full-screen Edge window on a local page, no network port;
+       Alt+F4 closes it, F11 leaves full screen)
        and, only if [web] enabled = yes in config.ini, the read-only web view (LOCAL SERVICE);
     4. adds %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
     5. waits for the first collector snapshot, stores the port baseline (only if missing) and opens the dashboard.
@@ -156,7 +157,7 @@ if (-not $NoDisplay) {
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $principal = New-ScheduledTaskPrincipal -GroupId (Account 'S-1-5-32-545') -RunLevel Limited
     Register-ScheduledTask -TaskPath $TaskPath -TaskName 'display' -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
-        -Settings $settings -Principal $principal -Description 'nuc-console dashboard, full screen at logon (Alt+F4 closes it)' -Force | Out-Null
+        -Settings $settings -Principal $principal -Description 'nuc-console dashboard, full screen at logon (Alt+F4 closes it, F11 leaves full screen)' -Force | Out-Null
 }
 
 # ---- 4. first snapshot, baseline, dashboard ----------------------------------------------------------------------------

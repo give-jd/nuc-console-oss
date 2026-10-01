@@ -539,10 +539,14 @@ class Kiosk(unittest.TestCase):
             render.CFG.clear()
             render.CFG.update(saved)
         edge = render.browser_command(r"C:\Edge\msedge.exe", "file:///x.html", r"C:\p")
-        self.assertEqual(edge[:3], [r"C:\Edge\msedge.exe", "--kiosk", "file:///x.html"])
-        self.assertIn("--edge-kiosk-type=fullscreen", edge)
+        self.assertEqual(edge[:3], [r"C:\Edge\msedge.exe", "--app=file:///x.html", "--start-fullscreen"])
+        self.assertFalse([a for a in edge if "kiosk" in a])                                         # locked kiosk: Alt+F4 would not close it
         self.assertIn("--user-data-dir=C:\\p", edge)                                                # never the user's own profile
-        self.assertEqual(render.browser_command("/usr/bin/firefox", "file:///x.html", "/p"), ["/usr/bin/firefox", "--kiosk", "file:///x.html"])
+        self.assertEqual(render.browser_command("/usr/bin/firefox", "file:///x.html", "/p"), ["/usr/bin/firefox", "--new-window", "file:///x.html"])
+        for n in (1, 3):  # the footer says how to get out, and never runs past the screen
+            foot = render.ANSI.sub("", render.frame(("Overview", 1, 1, []), 0, n, 99, 10, keys=False, hint=render.KIOSK_HINT).split("\r\n")[-1])
+            self.assertIn("closes", foot)
+            self.assertLessEqual(len(foot), 99)
         self.assertIsNone(render.find_browser("none"))
         self.assertEqual(render.find_browser("/opt/my/chrome"), "/opt/my/chrome")
 

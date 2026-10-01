@@ -51,7 +51,8 @@ macOS and Windows have no text console to take over: at every login the dashboar
 
 The grid is `[dashboard] columns` × `rows` when set; otherwise 64 rows and as many columns as the monitor's shape allows
 (16:9 → 237 columns, the 3-column layout). The page scales its font to fill the screen. The browser runs with a profile of its own
-(never your tabs or logins); closing it (Alt+F4, Cmd+Q) ends the dashboard until the next login.
+(never your tabs or logins) and as a plain full-screen window, not a locked kiosk: **Alt+F4** (Cmd+Q) closes it until the next
+login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows. The page has nothing to click: it rotates by itself.
 
 ## `[webapps]` — the web apps you expect
 

@@ -9,8 +9,8 @@
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
 #   3. starts the collector as a LaunchDaemon (root) and, if [web] enabled = yes, the web view as user _nuc-console;
-#   4. installs a LaunchAgent that opens the dashboard full screen at every desktop login (Chrome/Edge/Brave in kiosk
-#      mode if installed, else Safari: press Ctrl+Cmd+F once), and opens it now for the user at the console.
+#   4. installs a LaunchAgent that opens the dashboard full screen at every desktop login (a Chrome/Edge/Brave window if
+#      installed, else Safari: press Ctrl+Cmd+F once), and opens it now for the user at the console.
 # Options (environment): NUC_CONSOLE_DISPLAY=no   no dashboard at login (a Mac without a monitor)
 set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "this installer is for macOS; on Linux use install.sh" >&2; exit 1; }
