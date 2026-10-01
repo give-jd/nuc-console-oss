@@ -43,6 +43,36 @@ The overview keeps a fixed order, top-left to bottom-right, following the "most 
 
 tailscaled installs a ts-input rule accepting tailscale0 traffic before ufw, so tailnet peers reach a listening service regardless of ufw. For the LAN ufw applies, but Docker-published ports bypass ufw (Docker inserts rules in nat/FORWARD before the ufw chains), so only a DOCKER-USER rule or a 127.0.0.1 bind really protects them. The collector flags every 0.0.0.0 container port not covered by DOCKER-USER.
 
+## Map
+
+The MAP answers the question the exposure matrix leaves open: *what is behind* a reachable port. It is a tree, not a
+node-and-arrow drawing: on a text console seen from a distance, edges that cross in box-drawing characters stop being
+readable after a handful of nodes, while an indented path (`LAN → :8080 → shop-web-1 → shop-api-1 → shop-db-1`) reads
+the same at 80 and at 226 columns. A node reached by two paths appears twice: that it can be reached from two sides is
+the information.
+
+| Root | Walks | Question |
+|------|-------|----------|
+| INTERNET, LAN, TAILNET, LOCAL | entry port → its process or container → what that one uses, and so on | who can reach what, and through what? |
+| IMPACT | a container that is down or unhealthy, a failed unit, a declared web app not listening → **who depends on it** | what breaks if this is down? |
+| STACKS | compose project → containers → what they use | how is each project wired? |
+| OUTBOUND | a service → the remote addresses it connects to | who talks to other hosts? |
+
+Every edge carries its evidence, and the evidence is drawn, never hidden behind one kind of arrow:
+
+| Edge | Evidence | Glyph |
+|------|----------|-------|
+| seen | a live TCP connection observed: inside the container's network namespace (Linux), or on the host's sockets | `━━►` |
+| declared | compose `depends_on`, a container's environment naming the other one as a host (only the match is kept, never the value), a systemd/Windows service dependency | `╌╌►` |
+| possible | same docker network as a database, nothing else known | `┄┄►` |
+| connected to it | an address seen connected to the entry (`◄━━`) | `◄━━` |
+
+Connections are sampled every 30 s and remembered for 24 h, so a nightly job still shows up the next morning; a connection
+shorter than the sample is not seen, and the map says so. On macOS and Windows the containers live in Docker Desktop's
+VM: their own connections are out of reach, the map says that too and shows the declared and same-network links only.
+State propagates along `seen` and `declared` edges: a database that is down turns what depends on it yellow, all the way
+up to the entry the LAN uses to reach it.
+
 ## macOS and Windows
 
 There the firewall decides per **program**, so the collector (root / SYSTEM, the only one that sees the program behind every
