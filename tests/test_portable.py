@@ -444,6 +444,17 @@ class Cache(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(d)), ["SHA256SUMS", "nuc-console-1.5.0-linux.tar.gz", "python-3.14.8-embed-amd64.zip",
                                                      "python-3.14.8-macos11.pkg"])
 
+    def test_the_archives_of_every_processor_are_old_archives_too(self):
+        with tempfile.TemporaryDirectory() as d:
+            for suffix in SUFFIXES:
+                write(os.path.join(d, "nuc-console-1.4.9-" + suffix), b"x")
+                write(os.path.join(d, "nuc-console-1.5.0-" + suffix + ".part"), b"x")
+            write(os.path.join(d, "nuc-console-1.5.0-linux-x86_64.tar.gz"), b"x")
+            write(os.path.join(d, "cpython-3.13.5+20250708-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"), b"not ours")
+            update.prune_cache(d, "nuc-console-1.5.0-linux-x86_64.tar.gz")
+            self.assertEqual(sorted(os.listdir(d)), ["cpython-3.13.5+20250708-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+                                                     "nuc-console-1.5.0-linux-x86_64.tar.gz"])
+
 
 class Attestation(unittest.TestCase):
     def go(self, which, run=None):
