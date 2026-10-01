@@ -11,7 +11,8 @@ python3 src/render.py --once --demo --cols 200 --rows 50
 python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
 python3 src/render.py --once --demo --view ai --cols 200 --rows 50           # the AI screen: three invented machines (--demo-os windows|darwin for the others)
 python3 src/render.py --once --demo --view ai --select qwen3-8b --details    # the details of one model: why, licence, the commands
-python3 -m unittest tests.test_golden            # every screen and page, byte for byte (see "Golden outputs")
+python3 -m unittest tests.test_golden            # every screen and page, byte for byte (see "Golden outputs and the render benchmark")
+python3 tools/bench_render.py                    # the CPU a frame costs, per view and size (--json, --compare before.json)
 shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
 ```
 
@@ -35,7 +36,7 @@ shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{acce
   what that script may not do (build markup, eval, network, globals...). Its hash goes into the page's CSP automatically.
 - Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`. The MAP screen: `--view map` (with `--expand all|fit|N`, `--select TEXT`, `--details`, `--only`). The CPU screen: `--view cpu` (with `--sort cpu|mem|time|pid|user`, `--select NAME|PID`, `--details`). The HEALTH screen: `--view health` (with `--period 1|7|30`, `--select TEXT`, `--details`; `--demo-health little|none` for a machine with 5 hours of history or none). The AI screen: `--view ai` (with `--select TEXT`, `--details`; the demo has an NVIDIA box, a small Windows laptop and an Apple-silicon Mac). `--demo-os windows|darwin` for their data.
 
-## Golden outputs
+## Golden outputs and the render benchmark
 
 `tests/golden/` holds what every screen writes, byte for byte, so that a refactor that is meant to change nothing can prove it. The console files are
 `render.py --once --demo --color` raw (the ANSI colours and the `ESC[K CR LF` that ends each line of a frame included): the overview at 79x24, 120x33,
@@ -61,6 +62,17 @@ git diff tests/golden                                        # this is the chang
 Commit the regenerated files with the code and say in the message why they changed; the reviewer reads the diff too. Never regenerate just to turn a
 red test green. A new screen, size or option is a new case in `_cases()` of `tests/golden.py`. The files are `-text` in `.gitattributes` (a frame ends its
 lines with CR LF on purpose): do not let an editor or a checkout convert them.
+
+`tools/bench_render.py` times the same renders: the CPU milliseconds one frame costs (`time.process_time`, the fastest of a few batches) for the overview
+at the four sizes, MAP, CPU, HEALTH, AI and the web pages. The console redraws every second or two on a machine that is meant to idle, so a refactor stays
+within 1.2 times of the baseline:
+
+```bash
+python3 tools/bench_render.py --json > before.json    # on the commit before your change
+python3 tools/bench_render.py --compare before.json   # after it: the ratios; exit status 1 if one view is more than 1.2 times slower
+```
+
+Compare runs on one machine and one Python, one after the other: the figures do not travel, and `before.json` is not committed.
 
 ## Most wanted
 
