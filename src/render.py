@@ -52,8 +52,10 @@ elif MACOS:
 else:
     ACCEPT_CMD = "sudo nuc-console-accept"
     CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"}
+PROBLEMS_CMD = "nuc-console-problems"
 if nuc_config.PORTABLE:  # run.sh / run.cmd: no nuc-console-accept on the PATH, no service to restart: the advice says what exists
     ACCEPT_CMD = "run.cmd -Accept" if WINDOWS else "./run.sh --accept"
+    PROBLEMS_CMD = "run.cmd -Problems" if WINDOWS else "./run.sh --problems"
     CMD = {"restart": "quit it (Ctrl+C) and start it again", "logs": os.path.join(nuc_config.BASE_DIR, "logs", "collector.log")}
 MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]  # overview = a single screen, no rotation
 
@@ -1260,6 +1262,14 @@ OS_CATALOG = {
 CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 if nuc_config.PORTABLE:
     CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}
+    # the collector is part of the run, not a service: no systemctl, launchctl or scheduled task, and its log is a file
+    _again = CMD["restart"] + "; log: " + CMD["logs"]
+    CATALOG.update({k: (CATALOG[k][0], CATALOG[k][1], a) for k, a in {
+        "collector-containers": _again, "collector-net": _again, "collector-boot": _again,
+        "stale-containers": _again, "stale-net": _again,
+        "net-sections": CMD["logs"] + "; the section name is in the message",
+        "ufw-unreadable": "sudo ufw status verbose; log: " + CMD["logs"],
+    }.items()})
 
 
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
@@ -1314,7 +1324,7 @@ def accept_problem(pid, reason="", forget=False, path=None, now=None, records=No
             return 2
         reason = CTRL.sub(" ", reason).strip()
         if not reason:
-            print("--reason is required: write why this is acceptable (it is shown in `nuc-console-problems`)", file=sys.stderr)
+            print(f"--reason is required: write why this is acceptable (it is shown in `{PROBLEMS_CMD}`)", file=sys.stderr)
             return 2
         recs = current_problem_records() if records is None else records
         rec = next((r for r in recs if r["id"] == pid), None)
@@ -2074,7 +2084,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         rows = [msg("err" if sev >= 2 else "warn", t) for sev, t in shown]
         extra = [c(90, f"   … +{len(pb) - len(rows)} more")] if len(pb) > len(rows) else []
         acc = getattr(pb, "accepted", 0)
-        known = [c(90, f"   · {acc} accepted as known (nuc-console-problems)")] if acc else []
+        known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
         return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
 
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1

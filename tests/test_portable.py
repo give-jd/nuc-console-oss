@@ -830,6 +830,22 @@ class Files(unittest.TestCase):
         for rel in ("run.sh", "bin/nuc-console-update", "bin/nuc-console-accept", "bin/nuc-console-problems"):
             self.assertTrue(os.stat(os.path.join(ROOT, rel)).st_mode & stat.S_IXUSR, rel)
 
+    @unittest.skipIf(WINDOWS, "the sh helpers")
+    def test_the_installed_helpers_point_a_portable_folder_to_run_sh(self):
+        if os.path.exists("/opt/nuc-console/render.py"):
+            self.skipTest("nuc-console is installed on this machine")
+        for helper, option in (("nuc-console-problems", "--problems"), ("nuc-console-accept", "--accept")):
+            r = subprocess.run([os.path.join(ROOT, "bin", helper)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 1, helper)
+            self.assertIn("./run.sh " + option, r.stderr, helper)
+            self.assertNotIn("Traceback", r.stderr)
+        for rel, option in (("bin/nuc-console-problems.cmd", "run.cmd -Problems"), ("bin/nuc-console-accept.cmd", "run.cmd -Accept")):
+            text = read(os.path.join(ROOT, rel))
+            self.assertIn(r'if not exist "%~dp0..\app\render.py"', text, rel)
+            self.assertIn(option, text, rel)
+        self.assertIn("[switch]$Problems", read(os.path.join(ROOT, "run.ps1")))
+        self.assertIn("-Problems", read(os.path.join(ROOT, "run.cmd")))
+
     def test_git_records_the_exec_bit(self):
         if not shutil.which("git") or not os.path.isdir(os.path.join(ROOT, ".git")) and not os.path.isfile(os.path.join(ROOT, ".git")):
             self.skipTest("not a git checkout")
@@ -955,6 +971,20 @@ class RunSh(unittest.TestCase):
         r = self.sh("--which-python")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("Python 3.8", r.stderr)
+
+    def test_problems_name_the_commands_of_a_portable_folder(self):
+        # nothing is collected yet: the collectors are reported, with advice that exists here (no systemctl, no nuc-console-accept)
+        r = self.sh("--problems", stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("collector-net", r.stdout)
+        self.assertIn("./run.sh --accept --problem collector-net --reason", r.stdout)
+        self.assertIn(os.path.join(self.dir, "data", "logs", "collector.log"), r.stdout)
+        self.assertNotRegex(r.stdout, r"systemctl|journalctl -u nuc|nuc-console-accept|nuc-console-problems")
+        records = json.loads(self.sh("--problems", "--json", stdin=subprocess.DEVNULL).stdout)
+        self.assertIn("collector-net", [x["id"] for x in records])
+        self.assertFalse([x for x in records if "systemctl" in x["fix"]])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.dir, "data"))), ["config.ini", "config.ini.dist", "lib", "logs", "run"])
+        self.assertIn("--problems", self.sh("--help").stdout)
 
     def test_bad_options(self):
         self.assertEqual(self.sh("--bogus").returncode, 2)
@@ -1444,7 +1474,7 @@ class PortableAdvice(unittest.TestCase):
 
     def advice(self, home):
         code = ("import render, json; print(json.dumps([render.ACCEPT_CMD, render.CMD['restart'], render.CMD['logs'], "
-                "[v[2] for v in render.CATALOG.values()]]))")
+                "{k: v[2] for k, v in render.CATALOG.items()}, render.PROBLEMS_CMD]))")
         env = {k: v for k, v in os.environ.items() if not k.startswith("NUC_CONSOLE_")}
         if home:
             env["NUC_CONSOLE_HOME"] = home
@@ -1454,19 +1484,46 @@ class PortableAdvice(unittest.TestCase):
 
     def test_portable(self):
         with tempfile.TemporaryDirectory() as tmp:
-            accept, restart, logs, advice = self.advice(tmp)
+            accept, restart, logs, catalog, problems = self.advice(tmp)
+            advice = list(catalog.values())
             self.assertEqual(accept, "run.cmd -Accept" if WINDOWS else "./run.sh --accept")
+            self.assertEqual(problems, "run.cmd -Problems" if WINDOWS else "./run.sh --problems")
             self.assertEqual(logs, os.path.join(os.path.abspath(tmp), "logs", "collector.log"))
             self.assertNotIn("systemctl", restart + logs)
             self.assertNotIn("launchctl", restart)
             self.assertTrue(any(accept in a for a in advice))  # the baseline items say how to accept
             self.assertFalse([a for a in advice if "nuc-console-accept" in a], "advice that does not exist here")
 
+    def test_portable_advice_names_no_service(self):
+        # a portable run has no systemd unit, LaunchDaemon or scheduled task: restarting is quitting and starting it again
+        with tempfile.TemporaryDirectory() as tmp:
+            _accept, restart, logs, catalog, _problems = self.advice(tmp)
+            for pid in ("collector-containers", "collector-net", "collector-boot", "stale-containers", "stale-net", "net-sections",
+                        "ufw-unreadable"):
+                self.assertIn(logs, catalog[pid], pid)
+            for pid in ("collector-net", "collector-boot", "stale-containers", "stale-net"):
+                self.assertIn(restart, catalog[pid], pid)
+            bad = {pid: a for pid, a in catalog.items()
+                   if re.search(r"systemctl (restart|status) nuc-console|journalctl -u nuc-console|system/com\.nuc-console|\\nuc-console\\", a)}
+            self.assertEqual(bad, {})
+
     @unittest.skipIf(WINDOWS, "the Linux words")
     def test_installed_is_as_before(self):
-        accept, _restart, _logs, advice = self.advice("")
-        self.assertEqual(accept, "sudo nuc-console-accept")
-        self.assertTrue([a for a in advice if "nuc-console-accept" in a])
+        accept, restart, logs, catalog, problems = self.advice("")
+        self.assertEqual((accept, problems), ("sudo nuc-console-accept", "nuc-console-problems"))
+        self.assertEqual(catalog["stale-net"], "sudo systemctl restart nuc-console-collector")
+        self.assertEqual(catalog["collector-containers"], "sudo systemctl status nuc-console-collector; journalctl -u nuc-console-collector")
+        self.assertTrue([a for a in catalog.values() if "nuc-console-accept" in a])
+
+    def test_the_screen_and_the_message_name_the_portable_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("NUC_CONSOLE_")}
+            env["NUC_CONSOLE_HOME"] = tmp
+            r = subprocess.run([sys.executable, "-B", os.path.join(ROOT, "src", "render.py"), "--accept", "--problem", "failed-units"],
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 2, r.stderr)  # no reason given: it says where the reasons are shown
+            self.assertIn("run.cmd -Problems" if WINDOWS else "./run.sh --problems", r.stderr)
+            self.assertNotIn("nuc-console-problems", r.stderr)
 
 
 class CollectorPortable(unittest.TestCase):

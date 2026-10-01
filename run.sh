@@ -6,6 +6,7 @@
 #   ./run.sh --console             in this terminal (q or Ctrl+C quits)
 #   ./run.sh --web [--port N]      on http://127.0.0.1:N (a free port if N is left out) and opens your browser; Ctrl+C quits
 #   ./run.sh --no-open             with --web: print the address, do not open a browser
+#   ./run.sh --problems [--json]   what needs attention now, why it matters and how to fix it (while it runs in another terminal)
 #   ./run.sh --accept              accept the ports exposed right now as the alarm baseline (while it runs in another terminal);
 #                                  also ./run.sh --accept --problem ID --reason "why" (a known ATTENTION item) | --forget ID
 #
@@ -18,17 +19,18 @@ die() { echo "nuc-console: $*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-usage: ./run.sh [--console | --web] [--port N] [--no-open] | --accept [--problem ID --reason TEXT | --forget ID]
+usage: ./run.sh [--console | --web] [--port N] [--no-open] | --problems [--json] | --accept [--problem ID --reason TEXT | --forget ID]
   --console   the dashboard in this terminal (default on Linux); q or Ctrl+C quits
   --web       the dashboard in your browser (default on macOS), on 127.0.0.1 only; Ctrl+C quits
   --port N    with --web: the port (default: a free one)
   --no-open   with --web: only print the address
+  --problems  list what needs attention now: why it matters and how to fix it (--json: for scripts)
   --accept    accept the ports exposed now as the baseline of the port alarms (or a known problem: --problem ID --reason TEXT)
 Everything it writes is in ./data. sudo ./run.sh shows more.
 EOF
 }
 
-VIEW="" PORT=0 OPEN=1 ACCEPT=0 WHICH=0
+VIEW="" PORT=0 OPEN=1 ACCEPT=0 PROBLEMS=0 WHICH=0
 while [ $# -gt 0 ]; do
     case $1 in
         --console) VIEW=console ;;
@@ -37,6 +39,7 @@ while [ $# -gt 0 ]; do
         --port=*) PORT=${1#--port=} ;;
         --no-open) OPEN=0 ;;
         --accept) ACCEPT=1; shift; break ;;  # what follows (--problem ID --reason ... | --forget ID) is for render.py
+        --problems) PROBLEMS=1; shift; break ;;  # and --json
         --which-python) WHICH=1 ;;  # for bin/nuc-console-update: the Python this folder runs with
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
@@ -47,7 +50,7 @@ case $PORT in ''|*[!0-9]*) die "invalid port: $PORT" ;; esac
 [ "$PORT" -le 65535 ] || die "invalid port: $PORT"
 OS=$(uname -s)
 if [ -z "$VIEW" ]; then if [ "$OS" = Darwin ]; then VIEW=web; else VIEW=console; fi; fi
-if [ "$VIEW" = console ] && [ "$ACCEPT" = 0 ] && [ "$WHICH" = 0 ]; then
+if [ "$VIEW" = console ] && [ "$ACCEPT" = 0 ] && [ "$PROBLEMS" = 0 ] && [ "$WHICH" = 0 ]; then
     [ -t 0 ] && [ -t 1 ] || die "--console needs a terminal: use --web"
 fi
 
@@ -105,6 +108,9 @@ unset NUC_CONSOLE_CONFIG NUC_CONSOLE_STATE NUC_CONSOLE_NET NUC_CONSOLE_BOOT NUC_
 
 if [ "$ACCEPT" = 1 ]; then
     exec "$PY" -B "$HERE/src/render.py" --accept "$@"
+fi
+if [ "$PROBLEMS" = 1 ]; then
+    exec "$PY" -B "$HERE/src/render.py" --problems "$@"
 fi
 
 # one instance per folder: two collectors would write the same files

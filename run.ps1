@@ -8,6 +8,7 @@
     run.cmd                       the dashboard in your browser, on http://127.0.0.1:<a free port>
     run.cmd -Port 8787            a port of your choice
     run.cmd -NoOpen               only print the address
+    run.cmd -Problems             what needs attention now, why it matters and how to fix it (-Problems --json: for scripts)
     run.cmd -Accept               accept the ports exposed right now as the baseline of the port alarms
     run.cmd -Accept --problem ID --reason "why"      a known ATTENTION item (--forget ID undoes it)
 
@@ -29,6 +30,10 @@
 .PARAMETER NoOpen
   Do not open the browser; the address is printed.
 
+.PARAMETER Problems
+  List what needs attention now, why it matters and how to fix it (run it while another window runs run.cmd), then exit.
+  Followed by --json it prints JSON.
+
 .PARAMETER Accept
   Accept the ports exposed now as the baseline of the port alarms (run it while another window runs run.cmd), then exit.
   Followed by --problem ID --reason "why" it accepts a known ATTENTION item instead (--forget ID undoes it).
@@ -36,7 +41,7 @@
 .PARAMETER WhichPython
   Print the Python this folder runs with and exit (used by bin\nuc-console-update.ps1).
 #>
-param([ValidateRange(0, 65535)][int]$Port = 0, [switch]$NoOpen, [switch]$Accept, [switch]$WhichPython,
+param([ValidateRange(0, 65535)][int]$Port = 0, [switch]$NoOpen, [switch]$Accept, [switch]$Problems, [switch]$WhichPython,
       [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest = @())
 
 $ErrorActionPreference = 'Stop'
@@ -147,6 +152,10 @@ foreach ($n in 'NUC_CONSOLE_CONFIG', 'NUC_CONSOLE_STATE', 'NUC_CONSOLE_NET', 'NU
 
 if ($Accept) {
     & $python -B (Join-Path $Src 'render.py') --accept @Rest
+    exit $LASTEXITCODE
+}
+if ($Problems) {
+    & $python -B (Join-Path $Src 'render.py') --problems @Rest
     exit $LASTEXITCODE
 }
 
