@@ -666,7 +666,7 @@ def serve_argv(d, model, port=DEFAULT_PORT, threads=None, ctx=DEFAULT_CTX, runti
     runtime = runtime or RUNTIME
     exe = runtime_path(d, runtime, plat)
     args = ["--server", "--host", LOOPBACK, "--port", str(int(port)), "-m", model_path(d, model, plat), "-a", model["id"],
-            "-t", str(int(threads if threads is not None else default_threads())), "-c", str(int(ctx)), "--nobrowser"]
+            "-t", str(int(threads if threads is not None else default_threads())), "-c", str(int(ctx))]  # (--server opens no browser; 0.10 refuses --nobrowser)
     args += list(runtime.get("args", []))
     gpu_layers = int(gpu_layers or 0)
     if gpu_layers < 0:

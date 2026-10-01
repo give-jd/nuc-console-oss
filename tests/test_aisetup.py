@@ -414,7 +414,7 @@ class ServeCommandTests(unittest.TestCase):
         self.assertEqual(argv.count("--host"), 1)
         self.assertEqual(argv[argv.index("--port") + 1], "8080")
         self.assertIn("--server", argv)
-        self.assertIn("--nobrowser", argv)
+        self.assertNotIn("--nobrowser", argv)  # llamafile 0.10: "invalid argument"
         self.assertEqual(argv[argv.index("-t") + 1], "2")
         self.assertEqual(argv[argv.index("-c") + 1], str(aisetup.DEFAULT_CTX))
         self.assertEqual(argv[argv.index("-a") + 1], "qwen3-4b")
