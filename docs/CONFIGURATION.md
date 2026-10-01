@@ -83,6 +83,27 @@ admin-console = 9443
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
+## `[telegram]` — alerts on your phone (off by default)
+
+```ini
+[telegram]
+enabled = no
+username = your_telegram_name
+detail = titles
+resolved = yes
+```
+
+New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you create yourself (free). It only sends: no listener, no webhook, it never reads messages, no commands. Set-up in three steps, what leaves the machine and the threat model: [TELEGRAM.md](TELEGRAM.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `no` | Switch it on or off with `sudo nuc-console-telegram --on` / `--off` (they edit this line and start or stop the service). Nothing is sent until the chat is paired (`--setup`) |
+| `username` | empty | Your Telegram `@username` (5–32 letters, digits, `_`; the `@` is optional): the only person who gets the messages. `sudo nuc-console-telegram --setup` asks for it and writes it here |
+| `detail` | `titles` | `titles`: only the title of each problem and the host name leave the machine ("Container unhealthy"). `full`: the text too, with container names and ports; it is then stored by Telegram |
+| `resolved` | `yes` | Also send a message when a problem goes away |
+
+The bot **token** is never in `config.ini` (it is world-readable): it lives in the notifier's own folder (`/var/lib/nuc-console-notify`, Windows `%ProgramData%\nuc-console\notify`), readable only by the service account.
+
 ## Commands
 
 Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept`; they are on the system PATH after the install.
@@ -93,6 +114,10 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
+| `sudo nuc-console-telegram --setup` | pair the Telegram notifier: asks the bot token (from @BotFather) and your @username, prints a `t.me/…` link to open on the phone (Windows: `nuc-console-telegram.cmd`, administrator prompt) |
+| `sudo nuc-console-telegram --on` / `--off` | switch the notifications on or off (`[telegram] enabled`) |
+| `nuc-console-telegram --status [--json]` | on or off, paired or not, last message sent, last error (no root on Linux and macOS; Windows: administrator prompt) |
+| `sudo nuc-console-telegram --test` / `--forget` | send a test message / forget the token and the paired chat |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
 | `render.py --once --view map` / `--view cpu` | the MAP or the CPU screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`) |
 | `render.py --open` | the dashboard in a normal window of the default browser (what `browser` mode runs at login) |

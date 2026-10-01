@@ -95,6 +95,7 @@ thermal = no
 ## 5. Port alarms and problems
 
 `nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
+Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
 
 ### Port baseline
 
@@ -113,7 +114,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT 
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
-Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want.
+Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console` user; remove them by hand if you want. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -163,6 +164,8 @@ What it does (idempotent):
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
 4. Starts the web view as the hidden user `_nuc-console`: on 127.0.0.1, or as configured in `[web]` if you enabled it there.
+   The optional Telegram notifier (`com.nuc-console.notify`, the same user, outbound only) is loaded too and idles until you run
+   `sudo nuc-console-telegram --setup` ([TELEGRAM.md](TELEGRAM.md)); its token lives in `/var/lib/nuc-console-notify` (0711).
 5. Adds `/Applications/nuc-console.webloc` and a **LaunchAgent** that opens the dashboard at every login, as the user: a normal
    window of the default browser (`browser`), or full screen (`fullscreen`: Chrome, Edge, Brave or Chromium if installed, else
    Safari: press Ctrl+Cmd+F once). It opens it right away for the user at the screen.
@@ -183,7 +186,7 @@ git pull && sudo ./install.sh          # update (keeps config.ini and the baseli
 sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
 ```
 
-`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place.
+`/etc/nuc-console`, `/var/lib/nuc-console`, `/var/log/nuc-console` and the `_nuc-console` user are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
 
 ## What is different from Linux
 
@@ -236,7 +239,9 @@ What it does (idempotent):
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
    `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
-   logon: opens the dashboard as that user, in the browser or full screen; not with `none`).
+   logon: opens the dashboard as that user, in the browser or full screen; not with `none`). The optional Telegram notifier is a
+   task too, `notify` (LOCAL SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
+   its token lives in `%ProgramData%\nuc-console\notify`, which only SYSTEM, Administrators and LOCAL SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
    `nuc-console-accept` (administrator prompt).
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
@@ -255,7 +260,7 @@ Python is downloaded only the first time: a re-install reuses it.
 ## Update, uninstall
 
 Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place.
+the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` is left in place, except its `notify` folder (the Telegram token), which is deleted.
 
 ## What is different from Linux
 

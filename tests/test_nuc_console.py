@@ -1062,7 +1062,7 @@ class Config(unittest.TestCase):
             doc = f.read()
         keys = list(nuc_config.FEATURES) + ["mode", "sections", "columns", "rows", "spacing", "details", "overview_seconds",
                                             "rotate_seconds", "enabled", "bind", "port", "token_file", "allowed_hosts", "refresh_seconds",
-                                            "browser", "zoom"]
+                                            "browser", "zoom", "username", "detail", "resolved"]
         self.assertEqual([k for k in keys if "`%s`" % k not in doc], [])
         for name in nuc_config.SECTIONS:
             self.assertIn(name, doc)
@@ -1525,6 +1525,12 @@ class TelegramProblems(unittest.TestCase):
         self.assertNotIn("telegram-failing", render.COUNT_MATTERS)
         self.assertEqual(render.fingerprint(1, "Telegram notifications failing for 12 min: x", "telegram-failing"),
                          render.fingerprint(1, "Telegram notifications failing for 45 min: x", "telegram-failing"))
+
+    def test_shipped_config_leaves_it_off_and_documents_it(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")
+        self.assertFalse(nuc_config.load(path)["telegram"]["enabled"])
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("[telegram]", f.read())
 
 
 class NoClipping(unittest.TestCase):
