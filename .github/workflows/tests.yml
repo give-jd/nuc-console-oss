@@ -46,6 +46,9 @@ jobs:
       - run: python3 -c "import json; d = json.load(open('/run/nuc-console/net.json')); assert d['os'] == 'linux' and d['listeners'], d"
       - run: nuc-console-problems
       - run: nuc-console-ask --help && sudo nuc-console-ai --help   # the optional AI commands are installed (nothing is downloaded or started)
+      - run: |   # the AI folder is the web view's and the console's to write (the AI page downloads the local model there), and nothing else of /var/lib is
+          test "$(stat -c %U /var/lib/nuc-console/ai)" = nuc-console && sudo -u nuc-console test -w /var/lib/nuc-console/ai/models
+          ! sudo -u nuc-console test -w /var/lib/nuc-console
       - run: sudo ./install.sh --uninstall
       - run: test ! -e /usr/local/sbin/nuc-console-ai && test ! -e /usr/local/bin/nuc-console-ask
 
@@ -57,6 +60,7 @@ jobs:
       - run: sudo cat /var/log/nuc-console/collector.log || true
       - run: /opt/nuc-console/bin/nuc-console-problems
       - run: /opt/nuc-console/bin/nuc-console-ask --help && /opt/nuc-console/bin/nuc-console-ai --help
+      - run: test "$(stat -f %Su "/Library/Application Support/nuc-console/ai")" = _nuc-console   # the AI page downloads the local model there, as the web view's user
       - run: |
           python3 - <<'PY'
           import json
@@ -84,6 +88,8 @@ jobs:
               & "$env:ProgramFiles\nuc-console\bin\$c.cmd" --help | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "$c.cmd --help failed" }
           }
+          $acl = (& icacls.exe "$env:ProgramData\nuc-console\ai") -join "`n"   # the AI page downloads the local model there, as LOCAL SERVICE
+          if ($acl -notmatch 'LOCAL SERVICE:\(OI\)\(CI\)\(M\)') { throw "LOCAL SERVICE may not write the AI folder: $acl" }
           $d = Get-Content "$env:ProgramData\nuc-console\run\net.json" -Raw | ConvertFrom-Json
           if ($d.os -ne 'windows' -or -not $d.listeners -or $d.firewall.kind -ne 'windows') { throw "unexpected net.json" }
           if (@($d.errors.PSObject.Properties).Count) { throw ("net errors: " + ($d.errors | ConvertTo-Json)) }
