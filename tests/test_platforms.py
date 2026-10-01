@@ -536,6 +536,32 @@ class NativeRenderer(unittest.TestCase):
         newer = dict(net, listeners=net["listeners"] + [lst(9999, "evil", fw=["open", 'rule "x" (Private)'])])
         self.assertEqual(render.new_ports(newer, cont, base), {"9999/t:LAN": "NEW"})
 
+    def test_expose_with_native_data(self):
+        import socket
+        for os_name in ("windows", "darwin"):
+            with self.subTest(os=os_name):
+                cont, net, boot, base = self.snap(os_name)
+                saved = (render.CFG["expose"], render.CFG["webapps"], render.DEMO_OS, socket.gethostname)  # demo_defaults() sets them all
+                render.CFG["expose"], render.DEMO_OS = {}, os_name
+                try:
+                    render.demo_defaults()                                                          # the demo's own [expose]: one within, two beyond
+                    expose = dict(render.CFG["expose"])
+                    pb = {pid: t for _, t, pid in render.problems_raw(net, cont, boot=boot, baseline=base)}
+                finally:
+                    render.CFG["expose"], render.CFG["webapps"], render.DEMO_OS, socket.gethostname = saved
+                self.assertEqual(expose, {"shop-web": "LAN", "shop-db": "LOCALE", "node": "TAILNET"})  # no systemd unit here: the Funnel's process
+                self.assertEqual(pb["over-exposed"], "2 services reach beyond config.ini: node :8444 Internet > tailnet, shop-db :5432 LAN > local")
+                self.assertNotIn("expose-unmatched", pb)
+                self.assertIn("db-open-lan", pb)
+                render.CFG["expose"] = expose
+                try:
+                    text = TEXT(render.exposure_block(net, cont, 120))
+                finally:
+                    render.CFG["expose"] = saved[0]
+                self.assertIn("beyond config.ini: tailnet", text)
+                self.assertIn("beyond config.ini: local", text)
+                self.assertIn("expected: LAN", text)
+
 
 # ---- kiosk, HTML, config ------------------------------------------------------------------------------------------------
 

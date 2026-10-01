@@ -73,6 +73,7 @@ class CpuCase(unittest.TestCase):
         self.saved_demo = {k: getattr(demo, k) for k in ("time", "cpu_sample", "proc_sample", "sensors")}
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["map_in_rotation"], cfg["cpu_in_rotation"])
+        self.saved_expose = cfg["expose"]
         self.tmp = tempfile.TemporaryDirectory()
         self.now = NOW
         self.on_sleep = self.pass_time
@@ -91,6 +92,7 @@ class CpuCase(unittest.TestCase):
         for k, v in self.saved_demo.items():
             setattr(demo, k, v)
         features, render.CFG["webapps"], render.CFG["map_in_rotation"], render.CFG["cpu_in_rotation"] = self.saved_cfg
+        render.CFG["expose"] = self.saved_expose
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         self.tmp.cleanup()

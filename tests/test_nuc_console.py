@@ -1466,6 +1466,244 @@ class WebAppsAndProblems(unittest.TestCase):
             self.assertIn(title, txt)
 
 
+class ExposeVsDeclared(unittest.TestCase):
+    """[expose]: the widest reach you intend, against the one the dashboard computes (ATTENTION, EXPOSURE matrix)."""
+
+    @staticmethod
+    def _ct(name, project, ports=(), state="running"):
+        return {"name": name, "status": "Up 3 days" if state == "running" else "Exited (0) 2 hours ago", "state": state,
+                "project": project, "ports": list(ports), "mem": 1}
+
+    @staticmethod
+    def _ls(addr, port, proc, unit=None, proto="tcp"):
+        return dict({"proto": proto, "addr": addr, "port": port, "proc": proc}, **({"unit": unit} if unit else {}))
+
+    def setUp(self):
+        self.saved = (render.CFG["expose"], dict(render.CFG["webapps"]), render.ACCEPTED_PATH)
+        render.CFG["expose"], render.CFG["webapps"] = {}, {}
+        ct, ls = self._ct, self._ls
+        self.cont = {"ts": time.time(), "containers": [
+            ct("shop-db-1", "shop", [{"p": 5432, "s": "*"}]), ct("shop-web-1", "shop", [{"p": 8080, "s": "*"}]),
+            ct("blog-db-1", "blog", [{"p": 5433, "s": "lo"}]), ct("old-job-1", "shop", state="exited")]}
+        self.net = dict(NET, listeners=[
+            ls("0.0.0.0", 22, "sshd", "ssh.service"), ls("0.0.0.0", 5432, "docker-proxy"), ls("0.0.0.0", 8080, "docker-proxy"),
+            ls("127.0.0.1", 5433, "docker-proxy"), ls("127.0.0.1", 5678, "node", "n8n.service"), ls("127.0.0.1", 3000, "node", "other.service"),
+            ls("100.64.0.1", 8444, "tailscaled", "tailscaled.service")],
+            links={"containers": [{"name": "shop-db-1", "project": "shop", "service": "db"},
+                                  {"name": "shop-web-1", "project": "shop", "service": "web"},
+                                  {"name": "blog-db-1", "project": "blog", "service": "db"}]},
+            dbs={"items": [{"name": "shop-db-1", "kind": "postgres", "project": "shop"},
+                           {"name": "blog-db-1", "kind": "postgres", "project": "blog"}]})
+
+    def tearDown(self):
+        render.CFG["expose"], render.CFG["webapps"], render.ACCEPTED_PATH = self.saved
+
+    def rows(self, expose, net=None, cont=None):
+        render.CFG["expose"] = expose
+        return {(r["port"], r["proto"]): r for r in render.expose_apply(render.exposure_rows(net or self.net, cont or self.cont), net or self.net,
+                                                                       cont or self.cont)}
+
+    def problem(self, pid, net=None, cont=None):
+        return [t for _, t, i in render.problems_raw(net or self.net, cont or self.cont) if i == pid]
+
+    def test_no_policy_touches_nothing(self):
+        rows = render.exposure_rows(self.net, self.cont)
+        self.assertEqual(render.expose_apply(rows, self.net, self.cont), rows)
+        self.assertFalse([r for r in rows if "want" in r])
+        self.assertEqual([i for _, _, i in render.problems_raw(self.net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
+
+    def test_over_and_within(self):
+        rows = self.rows({"shop-db": "LOCALE", "shop-web": "LAN", "blog-db": "LOCALE"})
+        self.assertTrue(render.expose_over(rows[5432, "tcp"]))                                 # LAN, meant local
+        self.assertFalse(render.expose_over(rows[8080, "tcp"]))                                # LAN, meant LAN
+        self.assertFalse(render.expose_over(rows[5433, "tcp"]))                                # local, meant local
+        self.assertIsNone(rows[22, "tcp"]["want"])                                             # nothing declared for sshd
+        self.assertFalse(render.expose_over(rows[22, "tcp"]))                                  # ...so never over
+        self.assertEqual(self.problem("over-exposed"), ["1 service reaches beyond config.ini: shop-db :5432 LAN > local"])
+        self.assertEqual(self.rows({"shop-db": "INTERNET"})[5432, "tcp"]["want"], "INTERNET")  # the widest word: nothing is beyond it
+        self.assertEqual(self.problem("over-exposed"), [])
+
+    def test_the_problem_is_an_error_listing_every_service_widest_first(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE", "n8n": "TAILNET", "shop-web": "TAILNET"}
+        self.net["serve"] = [{"port": 8444, "path": "/webhook", "target": "http://127.0.0.1:5678/webhook", "funnel": True}]
+        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "over-exposed"]
+        self.assertEqual(found, [(2, "3 services reach beyond config.ini: n8n :8444 Internet > tailnet, "
+                                     "shop-db :5432 LAN > local, shop-web :8080 LAN > tailnet")])
+
+    def test_most_restrictive_declaration_wins(self):
+        for expose in ({"shop-db": "LAN", "postgres": "LOCALE", "5432": "TAILNET"}, {"5432": "TAILNET", "postgres": "LOCALE", "shop-db": "LAN"}):
+            r = self.rows(expose)[5432, "tcp"]
+            self.assertEqual((r["want"], r["key"]), ("LOCALE", "postgres"))                    # whatever the order in the file
+        r = self.rows({"shop-db": "TAILNET", "5432": "TAILNET"})[5432, "tcp"]
+        self.assertEqual(r["key"], "shop-db")                                                  # same reach: the first key
+
+    def test_unknown_counts_as_open(self):
+        net = dict(self.net, docker_user=None)                                                # DOCKER-USER unreadable: the verdict is '?'
+        rows = self.rows({"shop-web": "TAILNET"}, net)
+        self.assertEqual(rows[8080, "tcp"]["lan"], 3)
+        self.assertTrue(render.expose_over(rows[8080, "tcp"]))
+        self.assertTrue(self.problem("over-exposed", net))
+
+    def test_port_keys(self):
+        net = dict(self.net, listeners=self.net["listeners"] + [self._ls("0.0.0.0", 8080, "dnsmasq", proto="udp")])
+        rows = self.rows({"8080": "LOCALE"}, net)
+        self.assertEqual((rows[8080, "tcp"]["want"], rows[8080, "udp"]["want"]), ("LOCALE", None))   # a bare port is tcp
+        rows = self.rows({"8080/udp": "LOCALE", "22/tcp": "LAN"}, net)
+        self.assertEqual((rows[8080, "tcp"]["want"], rows[8080, "udp"]["want"], rows[22, "tcp"]["want"]), (None, "LOCALE", "LAN"))
+        self.assertEqual(self.problem("over-exposed", net), ["1 service reaches beyond config.ini: dnsmasq :8080/udp tailnet > local"])
+
+    def test_container_replica_project_service_and_database_names(self):
+        for key, ports in (("shop-db", {5432}), ("shop-db-1", {5432}), ("db", {5432, 5433}), ("shop", {5432, 8080}),
+                           ("postgres", {5432, 5433}), ("blog", {5433}), ("sshd", {22}), ("ssh", {22}), ("ssh.service", {22}),
+                           ("shop_db", {5432}), ("shop-web", {8080}), ("nothing", set())):
+            got = {p for (p, _), r in self.rows({key: "LOCALE"}).items() if r["want"]}
+            self.assertEqual(got, ports, key)
+        cont = dict(self.cont, containers=[self._ct("shop_db_1", "shop", [{"p": 5432, "s": "*"}])])  # compose v1 names
+        self.assertTrue(self.rows({"shop_db": "LOCALE"}, self.net, cont)[5432, "tcp"]["want"])
+
+    def test_webapp_name_matches_its_ports(self):
+        render.CFG["webapps"] = {"storefront": [8080, 9443]}
+        self.assertEqual({p for (p, _), r in self.rows({"storefront": "LOCALE"}).items() if r["want"]}, {8080})
+
+    def test_funnel_is_declared_by_the_service_behind_it(self):
+        self.net["serve"] = [{"port": 8444, "path": "/webhook", "target": "http://127.0.0.1:5678/webhook", "funnel": True}]
+        for key in ("n8n", "n8n.service", "node"):                                             # the unit and the process behind the backend port
+            r = self.rows({key: "TAILNET"})[8444, "tcp"]
+            self.assertEqual((r["want"], render.group_of(r), render.expose_over(r)), ("TAILNET", "INTERNET", True), key)
+        self.assertIsNone(self.rows({"other": "LOCALE"})[8444, "tcp"]["want"])                 # the other node program is not behind it
+        self.assertIsNone(self.rows({"tailscaled": "LOCALE"})[8444, "tcp"]["want"])            # nor is tailscaled, the process that holds the port
+        render.CFG["expose"] = {"n8n": "TAILNET"}
+        self.assertIn("n8n :8444 Internet > tailnet", self.problem("over-exposed")[0])
+        self.net["serve"][0]["target"] = "http://10.0.0.9:5678/"                               # a backend on another host: not this machine's n8n
+        self.assertIsNone(self.rows({"n8n": "TAILNET"})[8444, "tcp"]["want"])
+
+    def test_funnel_to_a_container_and_to_a_webapp(self):
+        self.net["serve"] = [{"port": 8444, "path": "/", "target": "http://127.0.0.1:8080", "funnel": True}]
+        self.assertTrue(self.rows({"shop-web": "TAILNET"})[8444, "tcp"]["want"])
+        render.CFG["webapps"] = {"hook": [5678]}
+        self.net["serve"][0]["target"] = "http://localhost:5678"
+        self.assertEqual(self.rows({"hook": "LOCALE"})[8444, "tcp"]["want"], "LOCALE")
+
+    def test_unmatched_names_are_listed_and_port_keys_never(self):
+        render.CFG["webapps"] = {"storefront": [8080]}
+        render.CFG["expose"] = {"postgress": "LOCALE", "shop-db": "LOCALE", "old-job": "LOCALE", "postgres": "LOCALE", "n8n": "LOCALE",
+                                "storefront": "LOCALE", "9": "LOCALE", "4444/udp": "LOCALE", "db": "LOCALE", "ssh": "LOCALE", "n8nn": "LAN"}
+        self.assertEqual(render.expose_unmatched(self.net, self.cont), ["postgress", "n8nn"])  # a stopped container and a DB kind are known names
+        self.assertEqual(self.problem("expose-unmatched"), ["[expose] 'postgress', 'n8nn' match no service"])
+        render.CFG["expose"] = {"postgress": "LOCALE", "8888": "LAN"}
+        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "expose-unmatched"]
+        self.assertEqual(found, [(1, "[expose] 'postgress' matches no service")])
+        render.CFG["expose"] = {"8888": "LAN", "53/udp": "LOCALE"}                             # nothing listens there: fine
+        self.assertEqual(self.problem("expose-unmatched"), [])
+        boot = {"enabled": [{"unit": "nginx.service", "state": "inactive"}], "failed": ["backup.service"]}
+        self.assertEqual(render.expose_unmatched(self.net, self.cont, boot, {"nginx": "LOCALE", "backup": "LOCALE", "nope": "LAN"}), ["nope"])
+
+    def test_unmatched_is_not_said_while_the_container_list_is_missing(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE"}
+        self.assertEqual(self.problem("expose-unmatched", self.net, None), [])                 # collector-containers says that already
+        self.assertEqual(render.expose_unmatched(self.net, self.cont), [])
+
+    def test_nothing_is_said_without_the_listeners(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE"}
+        net = dict(self.net, listeners=None)
+        self.assertEqual([i for _, _, i in render.problems_raw(net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
+
+    def test_other_alarms_are_never_silenced(self):
+        before = [(t, i) for _, t, i in render.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
+        self.assertEqual({i for _, i in before}, {"db-open-lan", "docker-bypass"})
+        render.CFG["expose"] = {"shop-db": "LAN", "shop-web": "LAN", "5432": "INTERNET"}       # everything within reach
+        after = [(t, i) for _, t, i in render.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
+        self.assertEqual(after, before)
+        self.assertEqual(self.problem("over-exposed"), [])
+
+    def test_accepting_over_exposed_does_not_hide_a_new_service(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN", "blog-db": "LOCALE"}
+            self.assertEqual(render.accept_problem("over-exposed", "known", records=render.problem_records(self.net, self.cont)), 0)
+            self.assertFalse([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t])      # accepted: dimmed
+            self.assertEqual(render.problems(self.net, self.cont).accepted, 1)
+            render.CFG["expose"]["shop-web"] = "LOCALE"                                        # a second service now goes beyond
+            shown = [t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t]
+            self.assertEqual(len(shown), 1, "the accepted problem must not hide a worse one")
+            self.assertIn("2 services", shown[0])
+            render.CFG["expose"].update({"shop-web": "LAN", "shop-db": "TAILNET"})              # same count, a different port: also new
+            self.assertEqual(len([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t]), 1)
+            render.CFG["expose"]["shop-db"] = "LOCALE"                                         # back to what was accepted
+            self.assertFalse([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t])
+
+    def test_fingerprint_keeps_the_numbers_of_over_exposed_only(self):
+        self.assertIn("over-exposed", render.COUNT_MATTERS)
+        a, b = "2|1 service reaches beyond config.ini: x :5432 LAN > local", "2|1 service reaches beyond config.ini: x :5433 LAN > local"
+        self.assertNotEqual(render.fingerprint(2, a[2:], "over-exposed"), render.fingerprint(2, b[2:], "over-exposed"))
+        self.assertEqual(render.fingerprint(1, "[expose] 'a1' matches no service", "expose-unmatched"),
+                         render.fingerprint(1, "[expose] 'a2' matches no service", "expose-unmatched"))     # a lint, not a count
+
+    def test_both_problems_are_catalogued_and_in_the_json(self):
+        import contextlib
+        import io
+        import json as _json
+        render.CFG["expose"] = {"shop-db": "LOCALE", "postgress": "LOCALE"}
+        for pid in ("over-exposed", "expose-unmatched"):
+            title, why, fix = render.CATALOG[pid]
+            self.assertTrue(title and why and fix, pid)
+            self.assertNotIn(pid, render.NOT_ACCEPTABLE)
+        orig = render.current_problem_records
+        render.current_problem_records = lambda: render.problem_records(self.net, self.cont)
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                render.print_problems(["--json"])
+        finally:
+            render.current_problem_records = orig
+        recs = {r["id"]: r for r in _json.loads(out.getvalue())}
+        self.assertEqual((recs["over-exposed"]["severity"], recs["expose-unmatched"]["severity"]), ("error", "warning"))
+        self.assertTrue(recs["over-exposed"]["acceptable"] and recs["over-exposed"]["fix"])
+
+    def test_the_matrix_says_beyond_and_expected(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN"}
+        plain = lambda lines: [render.ANSI.sub("", ln) for ln in lines]
+        panel = plain(render.exposure_block(self.net, self.cont, 120))
+        db = next(ln for ln in panel if "shop-db-1" in ln)
+        web = next(ln for ln in panel if "shop-web-1" in ln)
+        self.assertIn("beyond config.ini: local", db)
+        self.assertNotIn("bypasses ufw", db)                                                   # it wins over the other notes
+        self.assertIn("expected: LAN", web)
+        self.assertIn("docker: bypasses ufw", web)                                             # within reach: the firewall note stays, after the marker
+        self.assertFalse([ln for ln in panel if "sshd" in ln and ("expected" in ln or "beyond" in ln)])
+        red = next(ln for ln in render.exposure_block(self.net, self.cont, 120) if "shop-db-1" in ln)
+        self.assertIn("\x1b[31mbeyond config.ini: local", red)
+        render.CFG["expose"] = {}
+        self.assertFalse([ln for ln in plain(render.exposure_block(self.net, self.cont, 120)) if "expected:" in ln or "beyond config.ini" in ln])
+
+    def test_the_matrix_fits_narrow_columns(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN"}
+        for w in (59, 79, 99):
+            for ln in render.exposure_block(self.net, self.cont, w):
+                self.assertLessEqual(render.vlen(ln), w, ln)
+
+    def test_the_compact_overview_carries_the_marker(self):
+        render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN", "n8n": "TAILNET"}
+        self.net["serve"] = [{"port": 8444, "path": "/webhook", "target": "http://127.0.0.1:5678/webhook", "funnel": True}]
+        for w in (80, 100, 120):
+            lines = [render.ANSI.sub("", ln) for ln in render.ov_esposizione(self.net, self.cont, w, 1)]
+            text = "\n".join(lines)
+            self.assertIn("beyond config.ini: tailnet", text)                                  # the Funnel line
+            self.assertIn("beyond config.ini: local", text)
+            self.assertIn("expected: LAN", text)
+            self.assertFalse([ln for ln in lines if len(ln) > w], w)
+            self.assertLess(text.index("shop-db-1"), text.index("shop-web-1"))                 # what goes beyond comes first (the list may be cut)
+
+    def test_a_long_attention_line_is_continued_not_cut(self):
+        text = "5 services reach beyond config.ini: " + ", ".join(f"service-{i} :{5000 + i} LAN > local" for i in range(5))
+        lines = render.msg_wrap("err", text, 73)
+        self.assertGreater(len(lines), 1)
+        self.assertTrue(all(render.vlen(ln) <= 73 for ln in lines), lines)
+        self.assertEqual(render.ANSI.sub("", " ".join(x.strip() for x in lines)).replace("✖ ", "", 1), text)
+        self.assertEqual(len(render.msg_wrap("err", "short", 73)), 1)
+
+
 class ChangedMessage(unittest.TestCase):
     def test_name_change_shows_the_difference_not_the_common_prefix(self):
         self.assertEqual(render.name_change("sshd", "evil"), "sshd → evil")
@@ -1490,14 +1728,15 @@ class NoClipping(unittest.TestCase):
         cont, net, boot, base = demo.snapshot()
         sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
         render.pack = spy
-        saved = dict(render.CFG["webapps"])
+        saved, saved_expose = dict(render.CFG["webapps"]), render.CFG["expose"]
         render.CFG["webapps"] = {"shop-web": [8080], "an-expected-app-with-a-long-name": [9443]}  # one up, one DOWN row
+        render.CFG["expose"] = {"shop-web": "LAN", "shop-db": "LOCALE", "n8n": "TAILNET"}  # one within, two beyond: the markers and the long ATTENTION line
         try:
             for w, h in ((118, 33), (199, 50), (200, 40), (224, 50), (225, 50), (234, 60), (239, 67)):
                 render.slides(sm, cont, net, w, h - 2, boot, base, mode="overview")
         finally:
             render.pack = orig
-            render.CFG["webapps"] = saved
+            render.CFG["webapps"], render.CFG["expose"] = saved, saved_expose
         self.assertEqual(wide, [])
 
     def test_fit_join_drops_trailing_items(self):

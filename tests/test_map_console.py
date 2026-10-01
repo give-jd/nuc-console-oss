@@ -102,6 +102,7 @@ class MapCase(unittest.TestCase):
         self.saved_time = (graph.time, demo.time)
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["map_in_rotation"])
+        self.saved_expose = cfg["expose"]
         self.tmp = tempfile.TemporaryDirectory()
         self.now = NOW
         self.on_sleep = self.pass_time
@@ -118,6 +119,7 @@ class MapCase(unittest.TestCase):
             setattr(render, k, v)
         graph.time, demo.time = self.saved_time
         features, render.CFG["webapps"], render.CFG["map_in_rotation"] = self.saved_cfg
+        render.CFG["expose"] = self.saved_expose
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         self.tmp.cleanup()
