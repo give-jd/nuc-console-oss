@@ -446,8 +446,9 @@ def main(argv):
     demo = "--demo" in argv
     if "--enabled" in argv:  # used by install.sh
         return 0 if cfg["enabled"] else 1
-    if "--local" in argv and not cfg["enabled"]:
-        # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says
+    if nuc_config.PORTABLE or ("--local" in argv and not cfg["enabled"]):
+        # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says.
+        # A portable run (run.sh / run.ps1, NUC_CONSOLE_HOME) is always like that: nothing listens beyond 127.0.0.1, no token
         cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="")
     if not cfg["enabled"] and not demo:
         print("nuc-console web view is disabled ([web] enabled = no in config.ini)")

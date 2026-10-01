@@ -63,3 +63,14 @@ only for SYSTEM and Administrators, like the rest of that folder), macOS `/Libra
 0644 file in a root-owned 0755 folder is replaced, never used). Both compare the SHA-256 pinned in the script; macOS also checks the signature.
 
 The repository is scanned with `gitleaks` (history + tree), `trufflehog` and `semgrep`; the test-suite includes checks that secrets in container environments are never emitted. Run the same tools yourself before trusting any build.
+
+## Portable mode and the updater
+
+`run.sh` / `run.cmd` run everything as the user who starts them (as root only if you use `sudo` / *Run as administrator*: then keep the folder
+yours alone; `run.sh` refuses a folder others can write to), write only inside `./data`, and listen on `127.0.0.1` with no token: nothing but
+the same machine can connect. `nuc-console-update` runs only when you start it. It talks to `api.github.com` and `github.com` over HTTPS
+only, checks the archive against `SHA256SUMS` (a mismatch deletes it), runs `gh attestation verify` when `gh` is installed and logged in
+(a failure stops the update; without `gh` it says the provenance was not checked), refuses archive members that are links or escape the folder,
+and keeps its cache in a folder only root (Windows: SYSTEM and Administrators) can write. `SHA256SUMS` comes from the same release, so
+it protects against a damaged or swapped download, not against a malicious release: the attestation is what says who built it.
+Details: [docs/PORTABLE.md](docs/PORTABLE.md).

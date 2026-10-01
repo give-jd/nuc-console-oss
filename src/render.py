@@ -48,6 +48,9 @@ elif MACOS:
 else:
     ACCEPT_CMD = "sudo nuc-console-accept"
     CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"}
+if nuc_config.PORTABLE:  # run.sh / run.cmd: no nuc-console-accept on the PATH, no service to restart: the advice says what exists
+    ACCEPT_CMD = "run.cmd -Accept" if WINDOWS else "./run.sh --accept"
+    CMD = {"restart": "quit it (Ctrl+C) and start it again", "logs": os.path.join(nuc_config.BASE_DIR, "logs", "collector.log")}
 MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]  # overview = a single screen, no rotation
 
 
@@ -1251,6 +1254,8 @@ OS_CATALOG = {
     },
 }
 CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
+if nuc_config.PORTABLE:
+    CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}
 
 
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
@@ -2244,6 +2249,8 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=N
     head = clip(head, w)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
     mk = "   m: map" if (keys if mapkey is None else mapkey) and on("map") else ""
+    if keys and nuc_config.PORTABLE:  # run.sh in a terminal
+        mk += "   q: quit"
     if foot is None:
         foot = c(90, (f" single screen{mk}   console {size}" if n == 1 else
                       f" screen {idx + 1}/{n}{mk}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
@@ -2952,6 +2959,8 @@ def main(argv):
                     mv, fresh = MapView(), 0.0
                     out.write("\x1b[2J")
                     break
+                elif k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
+                    return 0
                 elif len(k) == 1 and k in "123456789" and int(k) <= len(PAGES):
                     held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
                     out.write("\x1b[2J")
@@ -2965,6 +2974,8 @@ def main(argv):
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv))  # --accept must be able to fail: install.sh and the user's script check the exit code
+    except KeyboardInterrupt:  # Ctrl+C in a terminal (run.sh): the terminal is already restored, no traceback
+        sys.exit(130)
     except PermissionError as e:  # --accept as a normal user: say what to do instead of a traceback
         print(f"permission denied: {e.filename or e}: run it as " + ("administrator" if WINDOWS else "root (sudo)"), file=sys.stderr)
         sys.exit(1)

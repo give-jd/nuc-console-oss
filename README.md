@@ -100,6 +100,10 @@ Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `--demo-os 
 
 Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
+Not ready to install? Run it from the extracted folder, nothing is installed and everything stays in `./data`: `./run.sh` (Linux: in the
+terminal; macOS: in the browser) or double-click `run.cmd` (Windows). `bin/nuc-console-update` updates a portable folder or an
+installed one when *you* run it (SHA-256 and, with `gh`, build provenance checked). See **[docs/PORTABLE.md](docs/PORTABLE.md)**.
+
 ## Configuration
 
 `/etc/nuc-console/config.ini` (created on first install, never overwritten). Everything defaults to *on*:
