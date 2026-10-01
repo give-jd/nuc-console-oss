@@ -37,6 +37,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `details` | `yes` | The overview cuts a list only when it really does not fit; those sections then get **Details** pages showing everything, rotating on the monitor (it has no keyboard). `no`: never rotate |
 | `overview_seconds` | `45` | How long the overview stays before the Details pages (10-600) |
 | `rotate_seconds` | `15` | How long each page stays in `rotate` mode and each Details page (3-600) |
+| `refresh_seconds` | `2` | Seconds between two redraws, **1–10** (smaller or larger values are clamped): the console, the full-screen window and the browser pages, where the **− / +** links next to "refresh every" change it while you look. Faster = livelier CPU and traffic bars, a little more CPU |
 
 Sections fill the columns in the given order and never back-fill, so a line more or less in one block does not move the others. Per-core CPU bars are always one per core, except on tiny consoles (the last two fitting levels).
 
@@ -54,7 +55,7 @@ macOS and Windows have no text console to take over. The installers start the re
 The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
 **Alt+F4** (Cmd+Q) closes it until the next login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows.
 Its grid follows the monitor's shape (64 rows; 16:9 → the 3-column layout) or `[dashboard] columns` × `rows` when set.
-The page has nothing to click but A− / A+ and the views: it refreshes and rotates by itself.
+The page has nothing to click but A− / A+, the refresh − / + and the views: it refreshes and rotates by itself.
 
 ## `[webapps]` — the web apps you expect
 
@@ -76,7 +77,7 @@ admin-console = 9443
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
-| `refresh_seconds` | `5` | Page auto-refresh |
+| `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
 ## Commands
 

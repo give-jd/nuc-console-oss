@@ -128,9 +128,9 @@ class Web(unittest.TestCase):
     def test_text_size_and_fit(self):
         q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("zoom=133")["zoom"], 125)                                                 # snapped to a step
-        self.assertEqual((q("zoom=9999")["zoom"], q("zoom=1")["zoom"], q("zoom=x")["zoom"]), (200, 50, 100))
+        self.assertEqual((q("zoom=9999")["zoom"], q("zoom=1")["zoom"], q("zoom=x")["zoom"]), (200, 50, 0))  # 0 = [display] zoom
         self.assertEqual((q("rows=7")["rows"], q("rows=999")["rows"], q("cols=133")["cols"]), (20, 120, 140))
-        self.assertEqual(web.view_params({}, 150)["zoom"], 150)                                      # [display] zoom is the default
+        self.assertIn("font-size:14.0px", get(self.open, "/")[2])                                    # [display] zoom (100) by default
         _, _, big = get(self.open, "/?fit=1&zoom=150")
         _, _, small = get(self.open, "/?fit=1&zoom=75")
         self.assertIn("calc(98vw /", big)                                                            # the text fills the width
@@ -161,6 +161,21 @@ class Web(unittest.TestCase):
         finally:
             web.Server = saved
         self.assertEqual((seen["addr"][0], seen["token"]), ("127.0.0.1", ""))
+
+    def test_refresh_interval_between_1_and_10_seconds(self):
+        q = lambda s: web.view_params(web.parse_qs(s))["refresh"]  # noqa: E731
+        self.assertEqual((q(""), q("refresh=0"), q("refresh=1"), q("refresh=7"), q("refresh=99"), q("refresh=x")), (0, 0, 1, 7, 10, 0))
+        _, _, page = get(self.open, "/?refresh=1")
+        self.assertIn('<meta http-equiv="refresh" content="1">', page)
+        self.assertIn('href="/?refresh=2">+</a>', page)                                             # + = less often
+        self.assertIn('href="/?zoom=110&amp;refresh=1">A+', page)                                   # the size links keep it
+        self.assertNotIn('refresh=0', page)                                                          # never under 1 s
+        _, _, slow = get(self.open, "/?refresh=10&zoom=150")
+        self.assertIn('content="10"', slow)
+        self.assertIn('href="/?zoom=150&amp;refresh=9">−</a> 10s +', slow)                          # never over 10 s
+        _, _, default = get(self.open, "/")
+        self.assertIn('content="2"', default)                                                        # the config's value
+        self.assertIn('href="/?refresh=1">−</a> 2s <a href="/?refresh=3">+</a>', default)
 
     def test_wide_is_the_two_column_layout_with_every_section(self):
         _, _, wide = get(self.open, "/?cols=200")
@@ -227,7 +242,7 @@ class Safety(unittest.TestCase):
             w = nuc_config.load(f.name)["web"]
         finally:
             os.unlink(f.name)
-        self.assertEqual((w["enabled"], w["port"], w["columns"], w["refresh_seconds"]), (True, 65535, 60, 5))
+        self.assertEqual((w["enabled"], w["port"], w["columns"], w["refresh_seconds"]), (True, 65535, 60, 2))  # bad: the default
 
     def test_disabled_by_default_exits_cleanly(self):
         self.assertEqual(web.main(["web.py"]), 0)

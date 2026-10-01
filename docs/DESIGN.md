@@ -21,7 +21,7 @@ was not verified (search snippets only).
 ## Gaps (no source found)
 
 Optimal density for distance reading, refresh rate and anti-flicker on a tty, contrast of the 16 ANSI colors at a distance.
-Choices made here **without a source**: 2 s refresh, redraw without `clear`, ~100 content columns per table.
+Choices made here **without a source**: 2 s refresh (configurable 1–10 s: `[dashboard] refresh_seconds`), redraw without `clear`, ~100 content columns per table.
 
 ## Not yet applied
 
