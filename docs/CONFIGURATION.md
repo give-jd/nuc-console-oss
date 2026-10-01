@@ -40,19 +40,21 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 
 Sections fill the columns in the given order and never back-fill, so a line more or less in one block does not move the others. Per-core CPU bars are always one per core, except on tiny consoles (the last two fitting levels).
 
-## `[display]` — the monitor on macOS and Windows
+## `[display]` — the dashboard on macOS and Windows
 
-macOS and Windows have no text console to take over: at every login the dashboard opens full screen in a browser
-(`render.py --kiosk`). It reads a local HTML page rewritten every 2 s: no network port is opened. Linux ignores this section.
+macOS and Windows have no text console to take over. The installers start the read-only web view on **127.0.0.1 only**
+(not reachable from the network) and show it the way you choose. Linux ignores this section (it uses the console).
 
 | Key | Default | Meaning |
 |---|---|---|
-| `browser` | `auto` | `auto`: Microsoft Edge, then Google Chrome (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). `none`: only write the page (`%LOCALAPPDATA%\nuc-console\display.html`, `~/Library/Application Support/nuc-console/display.html`). Or the full path of a Chromium-based browser or Firefox |
+| `mode` | `browser` | `browser`: a **nuc-console** shortcut (Windows Start menu, macOS Applications) opens it in your normal browser; nothing opens by itself. `fullscreen` (or `kiosk`): a full-screen window at every login, overview and Details pages taking turns. `none`: nothing (a machine without a monitor). The installers apply it: run them again after a change, or choose with `install-windows.cmd -Display fullscreen` / `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (that writes this key) |
+| `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). The **A− / A+** links at the bottom of the page change it while you look |
+| `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
 
-The grid is `[dashboard] columns` × `rows` when set; otherwise 64 rows and as many columns as the monitor's shape allows
-(16:9 → 237 columns, the 3-column layout). The page scales its font to fill the screen. The browser runs with a profile of its own
-(never your tabs or logins) and as a plain full-screen window, not a locked kiosk: **Alt+F4** (Cmd+Q) closes it until the next
-login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows. The page has nothing to click: it rotates by itself.
+The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
+**Alt+F4** (Cmd+Q) closes it until the next login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows.
+Its grid follows the monitor's shape (64 rows; 16:9 → the 3-column layout) or `[dashboard] columns` × `rows` when set.
+The page has nothing to click but A− / A+ and the views: it refreshes and rotates by itself.
 
 ## `[webapps]` — the web apps you expect
 
@@ -68,7 +70,7 @@ admin-console = 9443
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | The only network listener of the project. Details and threat model: [WEB.md](WEB.md) |
+| `enabled` | `no` | The only network listener of the project (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`). Details and threat model: [WEB.md](WEB.md) |
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
@@ -87,7 +89,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
-| `render.py --kiosk [--no-browser] [--html FILE]` | the full-screen browser dashboard (macOS/Windows; also works on a Linux desktop) |
+| `render.py --kiosk` | the full-screen window on the local web view (macOS/Windows; `--file` writes a local page instead, also on a Linux desktop: `--html FILE`, `--no-browser`) |
 
 Install-time options: Linux `install.sh` reads `NUC_CONSOLE_VT` (virtual terminal, default 1) and `NUC_CONSOLE_TZ` (time zone), and a re-install keeps them.
-macOS: `NUC_CONSOLE_DISPLAY=no` (no dashboard at login). Windows: `install-windows.cmd -NoDisplay`, `-PythonZip <file>` (offline), `-Uninstall`.
+macOS: `NUC_CONSOLE_DISPLAY=browser|fullscreen|none`. Windows: `install-windows.cmd -Display browser|fullscreen|none` (`-NoDisplay` = `none`), `-PythonZip <file>` (offline), `-Uninstall`.

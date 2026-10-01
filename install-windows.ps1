@@ -12,23 +12,28 @@
        the code in %ProgramFiles%\nuc-console; nothing else on the system uses or changes it;
     2. creates %ProgramData%\nuc-console (config.ini only if missing, run\, lib\, logs\), writable only by SYSTEM and
        Administrators, readable by users;
-    3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops),
-       the full-screen dashboard (every user, at logon: a full-screen Edge window on a local page, no network port;
-       Alt+F4 closes it, F11 leaves full screen)
-       and, only if [web] enabled = yes in config.ini, the read-only web view (LOCAL SERVICE);
-    4. adds %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
+    3. registers scheduled tasks in the folder \nuc-console\: the collector (SYSTEM, at startup, restarted if it stops)
+       and the read-only web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser;
+       with [display] mode = fullscreen also a full-screen window at every logon (Alt+F4 closes it, F11 leaves full screen);
+    4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
+       %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept);
     5. waits for the first collector snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 .PARAMETER Uninstall
   Removes the tasks, the program folder and the PATH entry. %ProgramData%\nuc-console (config, baseline) is left in place.
 
+.PARAMETER Display
+  browser (default): the Start menu shortcut opens it in your browser. fullscreen (or kiosk): a full-screen window at every
+  logon. none: nothing (a machine without a monitor). Written to [display] mode in config.ini; without it, config.ini decides.
+
 .PARAMETER NoDisplay
-  Do not open the dashboard at logon (a machine without a monitor: use nuc-console-problems or the web view).
+  Same as -Display none.
 
 .PARAMETER PythonZip
   Path of an already downloaded python-3.14.8-embed-<arch>.zip (offline install); it is checked against the same hash.
 #>
-param([switch]$Uninstall, [switch]$NoDisplay, [string]$PythonZip = '')
+param([switch]$Uninstall, [ValidateSet('browser', 'fullscreen', 'kiosk', 'none')][string]$Display, [switch]$NoDisplay,
+      [string]$PythonZip = '')
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
@@ -43,6 +48,8 @@ $App, $Py, $Bin = (Join-Path $Dest 'app'), (Join-Path $Dest 'python'), (Join-Pat
 $Data = Join-Path $env:ProgramData 'nuc-console'
 $TaskPath = '\nuc-console\'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\nuc-console.url'
+if ($NoDisplay) { $Display = 'none' }
 
 function Say($text) { Write-Host "nuc-console: $text" }
 
@@ -77,6 +84,7 @@ if ($Uninstall) {
     Remove-Tasks
     try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\').DeleteFolder('nuc-console', 0) } catch { }
     Set-MachinePath $false
+    if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
     Say "removed ($Data with config.ini and the baseline is left in place)"
     exit 0
@@ -129,11 +137,15 @@ if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data" }
 $cfg = Join-Path $Data 'config.ini'
 if (-not (Test-Path $cfg)) { Copy-Item (Join-Path $Here 'config\config.ini') $cfg }  # never overwrite the admin's edits
 Copy-Item (Join-Path $Here 'config\config.ini') (Join-Path $Data 'config.ini.dist') -Force  # diff it to see new options
+if ($Display) { & $python -B (Join-Path $App 'nuc_config.py') --set $cfg display mode $Display }  # only that line changes
+$mode = (& $python -B (Join-Path $App 'nuc_config.py') --get display mode).Trim()
+$port = (& $python -B (Join-Path $App 'nuc_config.py') --get web port).Trim()
+$url = "http://127.0.0.1:$port/?fit=1"
 Set-MachinePath $true
 
 # ---- 3. scheduled tasks ------------------------------------------------------------------------------------------------
-function Register-Service($name, $script, $sid, $log, $description) {
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\$script`" --log `"$Data\logs\$log`"" -WorkingDirectory $App
+function Register-Service($name, $script, $sid, $log, $description, $extra = '') {
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\$script`" --log `"$Data\logs\$log`" $extra".TrimEnd() -WorkingDirectory $App
     # at startup, and every 5 minutes: if it stopped, it starts again (IgnoreNew: never two at once)
     $triggers = @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)))
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable `
@@ -146,13 +158,16 @@ Register-Service 'collector' 'collector.py' 'S-1-5-18' 'collector.log' 'nuc-cons
 $t0 = Get-Date
 Start-ScheduledTask -TaskPath $TaskPath -TaskName 'collector'
 
+# the web view: as configured in [web] if enabled there; else, for this machine's own browser, on 127.0.0.1 only (--local)
 & $python -B (Join-Path $App 'web.py') --enabled
-if ($LASTEXITCODE -eq 0) {
-    Register-Service 'web' 'web.py' 'S-1-5-19' 'web.log' 'nuc-console read-only web view (LOCAL SERVICE)'
+$web = ($LASTEXITCODE -eq 0) -or ($mode -ne 'none')
+if ($web) {
+    Register-Service 'web' 'web.py' 'S-1-5-19' 'web.log' 'nuc-console read-only web view (LOCAL SERVICE)' '--local'
     Start-ScheduledTask -TaskPath $TaskPath -TaskName 'web'
-}
+    Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
+} elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
 
-if (-not $NoDisplay) {
+if ($mode -eq 'fullscreen') {
     $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\render.py`" --kiosk" -WorkingDirectory $App
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $principal = New-ScheduledTaskPrincipal -GroupId (Account 'S-1-5-32-545') -RunLevel Limited
@@ -168,9 +183,18 @@ for ($i = 0; $i -lt 90; $i++) {
 }
 & $python -B (Join-Path $App 'render.py') --accept --if-missing
 if ($LASTEXITCODE -ne 0) { Say 'warning: baseline not created (collector not ready yet): run nuc-console-accept from an administrator prompt' }
-if (-not $NoDisplay) {
+if ($web) {  # the web view starts in a moment: wait for it before opening anything
+    for ($i = 0; $i -lt 20; $i++) {
+        try { if ((Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:$port/healthz").StatusCode -eq 200) { break } } catch { }
+        Start-Sleep -Seconds 1
+    }
+}
+if ($mode -eq 'fullscreen') {
     try { Start-ScheduledTask -TaskPath $TaskPath -TaskName 'display' } catch { Say 'the dashboard opens at the next logon' }
+} elseif ($mode -eq 'browser') {
+    Start-Process explorer.exe $url  # through Explorer: the browser opens as the user, not as administrator
 }
 
-Say "ok: collector running as SYSTEM; dashboard $(if ($NoDisplay) { 'not opened (-NoDisplay)' } else { 'opens full screen at every logon (Alt+F4 closes it)' })"
+$how = @{ browser = "in your browser: Start menu > nuc-console, or $url"; fullscreen = "full screen at every logon (Alt+F4 closes it, F11 leaves full screen); also Start menu > nuc-console"; none = 'not shown (-Display none)' }[$mode]
+Say "ok: collector running as SYSTEM; dashboard $how. Text size: A- / A+ at the bottom of the page"
 Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept (open a new prompt for the PATH)"

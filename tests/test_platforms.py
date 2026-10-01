@@ -118,7 +118,9 @@ class WindowsFirewall(unittest.TestCase):
         self.assertEqual(verdict(fw([rule("smb", app="System")]), port=445, pid=4, path="System")[0], "open")
         self.assertEqual(verdict(fw([rule("rdp", svc="TermService")]), port=3389, pid=900, path=r"C:\Windows\System32\svchost.exe")[0], "open")
         self.assertEqual(verdict(fw([rule("rdp", svc="TermService")]), port=3389, pid=901, path=r"C:\Windows\System32\svchost.exe")[0], "blocked")
-        self.assertEqual(verdict(fw([rule("svc", svc="NoSuchService")]))[0], "unknown")          # service not running: cannot tell
+        self.assertEqual(verdict(fw([rule("svc", svc="StoppedService")]))[0], "blocked")          # not running: no process to match
+        no_services = dict(fw([rule("svc", svc="TermService")]), services=[])
+        self.assertEqual(verdict(no_services)[0], "unknown")                                       # services unreadable: cannot tell
 
     def test_block_wins_and_sources(self):
         self.assertEqual(verdict(fw([rule("allow"), rule("deny", a=0)]))[0], "blocked")
@@ -442,6 +444,25 @@ class NativeRenderer(unittest.TestCase):
         r = render.exposure_rows(net, None)[0]
         self.assertEqual((r["lan"], r["note"]), (1, "rule y"))
 
+    def test_shared_discovery_ports_and_desktop_noise(self):
+        cont, net, _, _ = self.snap("windows")
+        mdns = lambda *procs: [lst(5353, p, proto="udp", fw=["open", 'rule "mDNS" (Private)']) for p in procs]  # noqa: E731
+        base = {"ts": 0, "ports": render.exposure_keys(dict(net, listeners=net["listeners"] + mdns("msedge")), cont)}
+        for procs in (("chrome",), ("chrome", "msedge"), ("msedge", "chrome")):                   # whoever holds it: no alarm
+            now = dict(net, listeners=net["listeners"] + mdns(*procs))
+            self.assertEqual(render.new_ports(now, cont, base), {}, procs)
+        legacy = {"ts": 0, "ports": dict(base["ports"], **{"5353/u:LAN": {"name": "msedge", "lan": 1}})}  # recorded before the stable name
+        self.assertEqual(render.new_ports(dict(net, listeners=net["listeners"] + mdns("chrome")), cont, legacy), {})
+        row = next(r for r in render.exposure_rows(dict(net, listeners=net["listeners"] + mdns("msedge", "chrome")), cont) if r["port"] == 5353)
+        self.assertEqual(row["name"], "mDNS (chrome, msedge)")
+        desk = dict(net, listeners=net["listeners"] + [lst(53325, "Code", addr="127.0.0.1", fw=["open", "local"])])
+        self.assertNotIn("Code", [r["name"] for r in render.webapp_rows(desk, cont)])               # local desktop apps are noise
+        relay = dict(net, listeners=[lst(38261, "wslrelay", addr="127.0.0.1", fw=["open", "local"])])
+        self.assertEqual(next(r["name"] for r in render.exposure_rows(relay, cont) if r["port"] == 38261), "wslrelay")  # WSL, not a container
+        why = cwin.fw_verdict(fw([rule("Wi-Fi Direct Spooler Use (In)", pr=256, svc="TermService", g="@FirewallAPI.dll,-36851")]),
+                              {"proto": "tcp", "port": 49674, "pid": 900, "path": r"C:\Windows\System32\svchost.exe"}, {"termservice": {900}}, ENV)
+        self.assertEqual(why, ("unknown", 'rule "Wi-Fi Direct Spooler Use (In)" not understood (Private)'))
+
     def test_problems_speak_of_the_os_firewall(self):
         cont, net, boot, base = self.snap("windows")
         ids = lambda n: {pid for _, _, pid in render.problems_raw(n, cont, boot=boot, baseline=base)}  # noqa: E731
@@ -570,7 +591,7 @@ class Kiosk(unittest.TestCase):
             real_time = render.time.time
             render.time.time = lambda: real_time() + clock[0]
             try:
-                self.assertEqual(render.kiosk(["render.py", "--kiosk", "--html", path, "--log", os.path.join(d, "k.log")]), 0)
+                self.assertEqual(render.kiosk(["render.py", "--kiosk", "--file", "--html", path, "--log", os.path.join(d, "k.log")]), 0)
             finally:
                 render.subprocess.Popen, render.time.sleep, render.user_dir, render.find_browser = saved
                 render.time.time = real_time
@@ -580,14 +601,40 @@ class Kiosk(unittest.TestCase):
             self.assertIn("<pre>", page)
             self.assertIn("nuc-console", page)
 
+    def test_kiosk_opens_the_local_web_view_full_screen(self):
+        started, saved = [], (render.web_up, render.find_browser, render.subprocess.Popen, render.user_dir)
+        with tempfile.TemporaryDirectory() as d:
+            render.web_up = lambda port, wait: True
+            render.find_browser = lambda choice=None: "/opt/browser"
+            render.subprocess.Popen = lambda cmd, **kw: started.append(cmd)
+            render.user_dir = lambda: d
+            try:
+                self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
+            finally:
+                render.web_up, render.find_browser, render.subprocess.Popen, render.user_dir = saved
+                sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
+        cmd = started[0]
+        self.assertTrue(cmd[1].startswith("--app=http://127.0.0.1:8787/?fit=1&cols="))
+        for part in ("rows=", "rotate=1", "kiosk=1"):
+            self.assertIn(part, cmd[1])
+        self.assertIn("--start-fullscreen", cmd)
+
     def test_display_section_and_paths(self):
         with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
-            f.write("[display]\nbrowser = none\n")
+            f.write("[display]\nbrowser = none\nmode = kiosk\nzoom = 900\n")
         try:
-            self.assertEqual(nuc_config.load(f.name)["display"]["browser"], "none")
+            d = nuc_config.load(f.name)["display"]
+            self.assertEqual((d["browser"], d["mode"], d["zoom"]), ("none", "fullscreen", 200))      # kiosk = fullscreen; zoom clamped
         finally:
             os.unlink(f.name)
-        self.assertEqual(nuc_config.load("/nonexistent")["display"]["browser"], "auto")
+        self.assertEqual(nuc_config.load("/nonexistent")["display"], {"browser": "auto", "mode": "browser", "zoom": 100})
+        for bad, expected in (("mode = blink", "browser"), ("mode = NONE", "none"), ("mode = no", "none")):
+            with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
+                f.write("[display]\n" + bad + "\n")
+            try:
+                self.assertEqual(nuc_config.load(f.name)["display"]["mode"], expected)
+            finally:
+                os.unlink(f.name)
         state_paths = {"STATE": nuc_config.RUN_DIR, "NET_STATE": nuc_config.RUN_DIR, "BOOT_STATE": nuc_config.RUN_DIR,
                        "BASELINE": nuc_config.LIB_DIR, "ACCEPTED_PATH": nuc_config.LIB_DIR}
         for name, folder in state_paths.items():  # every state file of this OS lives in its folders (no Linux path left on Windows)
@@ -612,6 +659,35 @@ class Kiosk(unittest.TestCase):
                 os.unlink(f.name)
             self.assertEqual(cfg["webapps"], {"caffè": [8080]})
             self.assertFalse(cfg["features"]["thermal"])
+
+    def test_set_key_changes_one_line_and_keeps_the_rest(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "config.ini")
+            shutil.copy(os.path.join(ROOT, "config", "config.ini"), p)
+            with open(p, encoding="utf-8") as f:
+                before = f.read().splitlines()
+            nuc_config.set_key(p, "display", "mode", "fullscreen")
+            with open(p, encoding="utf-8") as f:
+                after = f.read().splitlines()
+            changed = [(a, b) for a, b in zip(before, after) if a != b]
+            self.assertEqual(changed, [("mode = browser", "mode = fullscreen")])                     # comments and order kept
+            self.assertEqual(nuc_config.load(p)["display"]["mode"], "fullscreen")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("[features]\nthermal = no\n\n[display]\n# mode = fullscreen\nbrowser = auto\n\n[web]\nport = 9\n")
+            nuc_config.set_key(p, "display", "mode", "none")                                         # a commented key is not the key
+            nuc_config.set_key(p, "extra", "k", "v")
+            with open(p, encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("[display]\n# mode = fullscreen\nbrowser = auto\nmode = none\n\n[web]", text)
+            self.assertTrue(text.endswith("[extra]\nk = v\n"))
+            cfg = nuc_config.load(p)
+            self.assertEqual((cfg["display"]["mode"], cfg["web"]["port"], cfg["features"]["thermal"]), ("none", 9, False))
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "src", "nuc_config.py"), "--set", p, "display", "zoom", "125"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "src", "nuc_config.py"), "--get", "display", "zoom"],
+                               capture_output=True, text=True, env=dict(os.environ, NUC_CONSOLE_CONFIG=p))
+            self.assertEqual(r.stdout.strip(), "125")
 
     def test_log_file_rotates_once_over_the_limit(self):
         with tempfile.TemporaryDirectory() as d:
@@ -656,13 +732,23 @@ class Installers(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_launchd_plists(self):
+        pls = {}
         for name in ("collector", "web", "display"):
             with open(os.path.join(ROOT, "launchd", f"com.nuc-console.{name}.plist"), "rb") as f:
-                pl = plistlib.load(f)
-            self.assertEqual(pl["Label"], f"com.nuc-console.{name}")
-            self.assertEqual(pl["ProgramArguments"][0], "@PYTHON@")
-        with open(os.path.join(ROOT, "launchd", "com.nuc-console.web.plist"), "rb") as f:
-            self.assertEqual(plistlib.load(f)["UserName"], "_nuc-console")                         # never root
+                pls[name] = plistlib.load(f)
+            self.assertEqual(pls[name]["Label"], f"com.nuc-console.{name}")
+            self.assertEqual(pls[name]["ProgramArguments"][0], "@PYTHON@")
+        self.assertEqual(pls["web"]["UserName"], "_nuc-console")                                    # never root
+        self.assertEqual(pls["web"]["ProgramArguments"][-1], "--local")                             # 127.0.0.1 unless [web] says otherwise
+        self.assertTrue(pls["display"]["AbandonProcessGroup"])                                      # the browser outlives its launcher
+
+    def test_display_choice_in_both_installers(self):
+        ps, mac = self.read("install-windows.ps1"), self.read("install-macos.sh")
+        self.assertIn("[ValidateSet('browser', 'fullscreen', 'kiosk', 'none')][string]$Display", ps)
+        self.assertIn("--set $cfg display mode $Display", ps)
+        self.assertIn("Start Menu\\Programs\\nuc-console.url", ps)
+        self.assertIn("browser|fullscreen|kiosk|none|no)", mac)
+        self.assertIn("/Applications/nuc-console.webloc", mac)
 
     @unittest.skipUnless(shutil.which("pwsh") or (sys.platform == "win32" and shutil.which("powershell")), "PowerShell")
     def test_windows_installer_parses(self):

@@ -51,7 +51,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo NUC_CONSOLE_DISPLAY=no ./install.sh
+      - run: sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
       - run: sudo cat /var/log/nuc-console/collector.log || true
       - run: /opt/nuc-console/bin/nuc-console-problems
       - run: |
@@ -63,6 +63,7 @@ jobs:
           b = json.load(open("/var/run/nuc-console/boot.json"))
           assert not b["errors"], b["errors"]
           PY
+      - run: curl -fsS http://127.0.0.1:8787/healthz && curl -fsS "http://127.0.0.1:8787/?fit=1&zoom=150" | grep -q "A+"
       - run: sudo ./install.sh --uninstall
 
   install-windows:
@@ -70,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -NoDisplay
+        run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Display browser
       - shell: powershell
         run: |
           Get-Content "$env:ProgramData\nuc-console\logs\collector.log" -ErrorAction SilentlyContinue
@@ -79,5 +80,8 @@ jobs:
           if ($d.os -ne 'windows' -or -not $d.listeners -or $d.firewall.kind -ne 'windows') { throw "unexpected net.json" }
           if (@($d.errors.PSObject.Properties).Count) { throw ("net errors: " + ($d.errors | ConvertTo-Json)) }
           if (-not (Test-Path "$env:ProgramData\nuc-console\lib\baseline.json")) { throw "no baseline" }
+          $page = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8787/?fit=1&zoom=150"
+          if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'A\+') { throw "local web view not serving the dashboard" }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\nuc-console.url")) { throw "no Start menu shortcut" }
       - shell: powershell
         run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Uninstall

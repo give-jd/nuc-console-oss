@@ -5,8 +5,8 @@ One command on each system; re-run it to upgrade, add `--uninstall` / `-Uninstal
 | System | Command | The monitor shows |
 |---|---|---|
 | **Linux** (systemd) | `sudo ./install.sh` | the text console (a virtual terminal): sections 1–7 below |
-| **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | a full-screen browser at every login: [macOS](#macos) |
-| **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | a full-screen browser at every login: [Windows](#windows) |
+| **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | your browser, or a full-screen window at login: [macOS](#macos) |
+| **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | your browser, or a full-screen window at login: [Windows](#windows) |
 
 # Linux
 
@@ -129,8 +129,16 @@ Uninstall leaves `/etc/nuc-console`, `/var/lib/nuc-console` and the `nuc-console
 
 # macOS
 
-macOS has no text console to take over, so the same screen is shown **full screen in a browser** at every desktop login.
-The browser reads a local page rewritten every 2 seconds: no network port is opened.
+macOS has no text console to take over, so the same screen is shown in a browser, from the read-only web view that the
+installer runs on **127.0.0.1 only** (not reachable from the network). You choose how ([display] `mode`):
+
+| `NUC_CONSOLE_DISPLAY=` | |
+|---|---|
+| `browser` (default) | **Applications › nuc-console** (or Spotlight) opens it in your normal browser: http://127.0.0.1:8787 |
+| `fullscreen` (or `kiosk`) | a full-screen window at every login, overview and Details pages taking turns. **Cmd+Q** closes it, **Ctrl+Cmd+F** leaves full screen |
+| `none` | nothing (a Mac without a monitor: `nuc-console-problems`) |
+
+**Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
 
 ## Install
 
@@ -150,17 +158,18 @@ What it does (idempotent):
    `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog).
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
-4. Installs a **LaunchAgent** that opens the dashboard at every login: a full-screen Chrome, Edge, Brave or Chromium window
-   if installed, else Safari (press **Ctrl+Cmd+F** once for full screen). It opens it right away for the user at the screen.
-5. Stores the port baseline (only if missing). `[web] enabled = yes` also starts the web view as the hidden user `_nuc-console`.
+4. Starts the web view as the hidden user `_nuc-console`: on 127.0.0.1, or as configured in `[web]` if you enabled it there.
+5. `browser`: adds `/Applications/nuc-console.webloc` and opens the page now. `fullscreen`: installs a **LaunchAgent** that opens a
+   full-screen Chrome, Edge, Brave or Chromium window at every login (else Safari: press Ctrl+Cmd+F once), and opens it now.
+6. Stores the port baseline (only if missing).
 
-Options: `sudo NUC_CONSOLE_DISPLAY=no ./install.sh` for a Mac without a monitor (use `nuc-console-problems` or the web view).
+Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is written to `config.ini`; without it the file decides).
 
 ## A Mac used as a wall screen
 
 - *System Settings › Users & Groups › Automatically log in as…* (not available with FileVault on): the dashboard comes back after a power cut.
 - *System Settings › Lock Screen*: never turn the display off; *Energy*: prevent sleep.
-- **Cmd+Q** closes the dashboard until the next login; **Ctrl+Cmd+F** leaves full screen. The page has nothing to click: it rotates by itself.
+- `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh`. **Cmd+Q** closes the window until the next login; **Ctrl+Cmd+F** leaves full screen.
 
 ## Update, uninstall
 
@@ -185,14 +194,23 @@ sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launch
 | Symptom | Check |
 |---|---|
 | "collector not running" | `sudo launchctl print system/com.nuc-console.collector`; `/var/log/nuc-console/collector.log` |
-| No dashboard after login | `launchctl print gui/$(id -u)/com.nuc-console.display`; `~/Library/Application Support/nuc-console/display.log` |
+| The page does not open | `curl http://127.0.0.1:8787/healthz`; `sudo launchctl print system/com.nuc-console.web`; `/var/log/nuc-console/web.log` |
+| No full-screen window after login | `[display] mode = fullscreen`?; `launchctl print gui/$(id -u)/com.nuc-console.display`; `~/Library/Application Support/nuc-console/display.log` |
 | Safari, not full screen | install Chrome/Edge, or set `[display] browser` to a browser's path |
 | Docker or Tailscale "not installed" | the collector looks in `/usr/local/bin`, `/opt/homebrew/bin` and the apps in `/Applications`; someone must be logged in at the console |
 
 # Windows
 
-Windows has no text console to take over, so the same screen is shown **full screen in a Microsoft Edge window** at
-every logon. Edge reads a local page rewritten every 2 seconds: no network port is opened.
+Windows has no text console to take over, so the same screen is shown in a browser, from the read-only web view that the
+installer runs on **127.0.0.1 only** (not reachable from the network). You choose how ([display] `mode`):
+
+| `install-windows.cmd -Display` | |
+|---|---|
+| `browser` (default) | **Start › nuc-console** opens it in your normal browser: http://127.0.0.1:8787 |
+| `fullscreen` (or `kiosk`) | a full-screen Edge window at every logon, overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
+| `none` | nothing (a machine without a monitor: `nuc-console-problems`) |
+
+**Text size**: the **A− / A+** links at the bottom of the page (bigger text = fewer columns, re-laid out); the default is `[display] zoom`.
 
 ## Install
 
@@ -207,19 +225,22 @@ What it does (idempotent):
 2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`): writable only by SYSTEM and
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
-   `display` (every user, at logon) and, with `[web] enabled = yes`, `web` (LOCAL SERVICE).
-4. Adds `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`, `nuc-console-accept` (administrator prompt).
+   `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and, in `fullscreen` mode,
+   `display` (every user, at logon).
+4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
+   `nuc-console-accept` (administrator prompt).
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
-Options: `install-windows.cmd -NoDisplay` (a machine without a monitor), `-PythonZip <file>` (offline: the
-`python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash).
+Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),
+`-PythonZip <file>` (offline: the `python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash).
+Python is downloaded only the first time: a re-install reuses it.
 
 ## A PC used as a wall screen
 
 - Automatic sign-in after a restart: Sysinternals **Autologon**; *Settings › Accounts › Sign-in options* to skip the lock screen.
 - *Settings › System › Power*: never turn off the screen, never sleep.
-- **Alt+F4** closes the dashboard until the next logon; **F11** leaves full screen; Alt+Tab reaches the other windows.
-  The page has nothing to click: it rotates by itself. Never open it again at logon: `install-windows.cmd -NoDisplay`.
+- `install-windows.cmd -Display fullscreen`. **Alt+F4** closes the window until the next logon; **F11** leaves full screen;
+  Alt+Tab reaches the other windows. Back to the browser only: `install-windows.cmd -Display browser`.
 
 ## Update, uninstall
 
@@ -241,7 +262,8 @@ the tasks, `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-c
 | Symptom | Check |
 |---|---|
 | "collector not running" | Task Scheduler › `nuc-console` › `collector` (Last Run Result); `%ProgramData%\nuc-console\logs\collector.log` |
-| No dashboard after logon | task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; Edge must be installed (or set `[display] browser`) |
+| The page does not open | task `web`; `%ProgramData%\nuc-console\logs\web.log`; http://127.0.0.1:8787/healthz must answer `ok` |
+| No full-screen window after logon | `[display] mode = fullscreen`?; task `display`; `%LOCALAPPDATA%\nuc-console\display.log`; Edge must be installed (or set `[display] browser`) |
 | Docker "not installed" or "not responding" | Docker Desktop must be running (it runs in a user's session) |
 | Many `?` in EXPOSURE | rules the evaluation cannot read with certainty: see the NOTE column; `Get-NetFirewallRule` shows them |
 

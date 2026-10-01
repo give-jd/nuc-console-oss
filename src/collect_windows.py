@@ -10,7 +10,7 @@ Rules of the evaluation (Windows Firewall semantics, simplified on the safe side
   - otherwise an enabled inbound rule must match protocol, port, program and service; a matching BLOCK rule wins
     over any ALLOW rule; RemoteAddresses '*' or 'LocalSubnet' means open to the LAN, a list of addresses = filtered;
   - anything that cannot be matched with certainty (port keywords like RPC, a rule bound to an interface type or a local
-    address, a service with no process found) makes the verdict 'unknown' = treated as open, never 'blocked';
+    address, running services unreadable) makes the verdict 'unknown' = treated as open, never 'blocked';
   - with rules coming from Group Policy (not visible in the local store) a 'blocked' becomes 'unknown';
   - several active profiles (one per network): the most exposed verdict wins.
 """
@@ -35,6 +35,9 @@ DYNAMIC_UDP = 49152  # UDP sockets from here up are client sockets (browsers, Te
 # Wi-Fi Direct (WlanSvc applies them to WFD links: they allow the kernel process 'System' on every TCP/UDP port, so if they
 # applied to the LAN, SMB would be open on every public network, which it is not by default) and Teredo (tunnel only).
 IFACE_ONLY_GROUPS = {"@wlansvc.dll,-36864", "@wlansvc.dll,-36865", "@firewallapi.dll,-32752"}
+# "Wi-Fi Direct Network Discovery" (spooler, scanner, dashost on any port): meant for Wi-Fi Direct links too, but without the
+# same proof: 'unknown', with the rule's name in the note, rather than a guess either way
+IFACE_UNSURE_GROUPS = {"@firewallapi.dll,-36851"}
 
 PS_PRELUDE = "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
 
@@ -108,6 +111,8 @@ def rule_match(r, l, svc_pids, env):
         return False
     if (r.get("g") or "").lower() in IFACE_ONLY_GROUPS:
         return False
+    if (r.get("g") or "").lower() in IFACE_UNSURE_GROUPS:
+        return None if rule_match(dict(r, g=""), l, svc_pids, env) is not False else False
     if r.get("pkg") or r.get("owner"):
         tok = l.get("token")
         if tok is None:  # token unreadable (protected process): a program outside the Store app folders is not a Store app
@@ -127,8 +132,10 @@ def rule_match(r, l, svc_pids, env):
             verdicts.append(expand(app, env) == expand(l["path"], env))
     svc = (r.get("svc") or "").strip()
     if svc:
-        pids = svc_pids.get(svc.lower()) if svc != "*" else None
-        verdicts.append(None if pids is None else l.get("pid") in pids)
+        if svc == "*" or not svc_pids:  # any service / the list of running services could not be read
+            verdicts.append(None)
+        else:  # a service that is not running has no process: its rule cannot be about this socket
+            verdicts.append(l.get("pid") in (svc_pids.get(svc.lower()) or ()))
     # bound to a local address, an interface (type), authenticated peers or IPsec: cannot be resolved for "the LAN"
     if (r.get("la") or "*") != "*" or (r.get("it") or "All") != "All" or r.get("ifs") or r.get("auth") or r.get("sf"):
         verdicts.append(None)
@@ -144,7 +151,7 @@ def profile_verdict(prof, bit, name, rules, l, svc_pids, env):
         return "blocked", f"block all incoming ({name})"
     if prof.get("inbound") == 1:
         return "open", f"default allow ({name})"
-    blocked, allow_any, allow_some, block_some, unknown = None, None, [], [], False
+    blocked, allow_any, allow_some, block_some, unknown = None, None, [], [], None
     for r in rules:
         pf = r.get("pf", 0x7FFFFFFF)
         if not pf & bit:
@@ -153,7 +160,8 @@ def profile_verdict(prof, bit, name, rules, l, svc_pids, env):
         if m is False:
             continue
         if m is None:
-            unknown = unknown or r.get("a") == 1  # an unreadable ALLOW might open it; an unreadable BLOCK cannot make it worse
+            if r.get("a") == 1 and unknown is None:  # an unreadable ALLOW might open it; an unreadable BLOCK cannot make it worse
+                unknown = r
             continue
         everyone = (r.get("ra") or "*") in ("*", "LocalSubnet")
         if r.get("a") == 0:
@@ -174,7 +182,7 @@ def profile_verdict(prof, bit, name, rules, l, svc_pids, env):
     if allow_some:
         return "filtered", "only " + ", ".join(dict.fromkeys(allow_some))[:30]
     if unknown:
-        return "unknown", f"rule not understood ({name})"
+        return "unknown", f"rule \"{unknown.get('n', '?')}\" not understood ({name})"
     return "blocked", f"default block ({name})"
 
 

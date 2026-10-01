@@ -123,6 +123,37 @@ class Web(unittest.TestCase):
         self.assertEqual(get(self.open, "/?cols=5")[0], 200)
         self.assertEqual(get(self.open, "/?cols=99999")[0], 200)
 
+    def test_text_size_and_fit(self):
+        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        self.assertEqual(q("zoom=133")["zoom"], 125)                                                 # snapped to a step
+        self.assertEqual((q("zoom=9999")["zoom"], q("zoom=1")["zoom"], q("zoom=x")["zoom"]), (200, 50, 100))
+        self.assertEqual((q("rows=7")["rows"], q("rows=999")["rows"], q("cols=133")["cols"]), (20, 120, 140))
+        self.assertEqual(web.view_params({}, 150)["zoom"], 150)                                      # [display] zoom is the default
+        _, _, big = get(self.open, "/?fit=1&zoom=150")
+        _, _, small = get(self.open, "/?fit=1&zoom=75")
+        self.assertIn("calc(98vw /", big)                                                            # the text fills the width
+        self.assertIn("console 133x40", big)                                                         # bigger text = a smaller grid
+        self.assertIn("console 267x80", small)
+        self.assertIn('href="/?zoom=125&amp;fit=1">A−</a> 150% <a href="/?zoom=175&amp;fit=1">A+', big)
+        self.assertIn('href="/?cols=100&amp;zoom=150&amp;fit=1">compact', big)                    # the other links keep the size
+        _, _, kiosk = get(self.open, "/?fit=1&cols=220&rows=64&rotate=1&kiosk=1")
+        self.assertIn("calc(93vh /", kiosk)                                                          # full screen: the height too
+        self.assertIn("closes", kiosk)                                                               # how to get out of it
+        self.assertNotIn("keys 1-", kiosk)                                                           # no keyboard on a web page
+        _, _, plain = get(self.open, "/?zoom=150")
+        self.assertIn("font-size:21.0px", plain)                                                     # without fit: the font grows
+        self.assertNotIn("<script", (big + kiosk + plain).lower())
+
+    def test_local_mode_serves_loopback_only_when_web_is_off(self):
+        seen = {}
+        saved = web.Server
+        web.Server = lambda addr, cfg, token, demo, zoom=100: seen.update(addr=addr, cfg=cfg, token=token) or (_ for _ in ()).throw(OSError("stop"))
+        try:
+            self.assertEqual(web.main(["web.py", "--local"]), 2)                                     # the fake Server stops it
+        finally:
+            web.Server = saved
+        self.assertEqual((seen["addr"][0], seen["token"]), ("127.0.0.1", ""))
+
     def test_html_escapes_everything(self):
         out = web.to_html("\x1b[31m<img src=x onerror=1>\x1b[0m & \x1b[2J\x1b[H\x1b[1;36mok\x1b[0m")
         self.assertNotIn("<img", out)

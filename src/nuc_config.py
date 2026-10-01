@@ -20,6 +20,8 @@ DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal")
 MODES = ("overview", "rotate")
+# macOS/Windows: how the dashboard is shown ([display] mode). 'kiosk' is accepted for the full-screen window.
+DISPLAY_MODES = {"browser": "browser", "fullscreen": "fullscreen", "kiosk": "fullscreen", "none": "none", "no": "none", "off": "none"}
 # Fixed on-screen order of the overview sections (most important first: what needs action, then security posture,
 # then resources, workloads, history, then detail panels). Overridable with [dashboard] sections.
 SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
@@ -32,7 +34,7 @@ def load(path=None):
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 5, "allowed_hosts": []},
-           "display": {"browser": "auto"}}
+           "display": {"browser": "auto", "mode": "browser", "zoom": 100}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -97,10 +99,62 @@ def load(path=None):
                 w[key] = max(lo, min(hi, cp.getint("web", key, fallback=w[key])))
             except ValueError:
                 print(f"nuc-console: {path}: [web] {key} must be an integer", file=sys.stderr)
-    if cp.has_section("display"):  # Windows/macOS: the monitor shows the screen in a full-screen browser (render.py --kiosk)
+    if cp.has_section("display"):  # Windows/macOS: the dashboard in a browser tab or a full-screen window
         b = cp.get("display", "browser", fallback="auto").strip()
         cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")
+        mode = cp.get("display", "mode", fallback="browser").strip().lower()
+        if mode in DISPLAY_MODES:
+            cfg["display"]["mode"] = DISPLAY_MODES[mode]
+        else:
+            print(f"nuc-console: {path}: [display] mode must be browser, fullscreen or none: kept browser", file=sys.stderr)
+        try:
+            cfg["display"]["zoom"] = max(50, min(200, cp.getint("display", "zoom", fallback=100)))
+        except ValueError:
+            print(f"nuc-console: {path}: [display] zoom must be an integer (percent)", file=sys.stderr)
     return cfg
+
+
+def set_key(path, section, key, value):
+    """Writes `key = value` in [section] of an ini file, keeping every comment and every other line; adds what is missing.
+    Used by the installers' --display option: the admin's other edits are never touched."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        lines = []
+    header = lambda ln: ln.strip()[1:ln.strip().index("]")].strip().lower() if ln.strip().startswith("[") and "]" in ln else None  # noqa: E731
+    is_key = lambda ln: ln.split("=", 1)[0].strip().lower() == key.lower() and "=" in ln and not ln.lstrip().startswith(("#", ";"))  # noqa: E731
+    out, inside, done = [], False, False
+    for ln in lines:
+        h = header(ln)
+        if h is not None:
+            if inside and not done:  # leaving the section without the key: add it after its last non-empty line
+                at = len(out)
+                while at and not out[at - 1].strip():
+                    at -= 1
+                out.insert(at, f"{key} = {value}")
+                done = True
+            inside = h == section.lower()
+        elif inside and not done and is_key(ln):
+            ln, done = f"{key} = {value}", True
+        out.append(ln)
+    if inside and not done:
+        out.append(f"{key} = {value}")
+    elif not done:
+        out += ["", f"[{section}]", f"{key} = {value}"]
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    os.replace(tmp, path)
+
+
+if __name__ == "__main__":  # for the installers: --get SECTION KEY (the value in force) | --set FILE SECTION KEY VALUE
+    if sys.argv[1:2] == ["--get"] and len(sys.argv) == 4:
+        print(load()[sys.argv[2]][sys.argv[3]])
+    elif sys.argv[1:2] == ["--set"] and len(sys.argv) == 6:
+        set_key(*sys.argv[2:6])
+    else:
+        sys.exit("usage: nuc_config.py --get SECTION KEY | --set FILE SECTION KEY VALUE")
 
 
 def log_to(path, max_bytes=1 << 20):
