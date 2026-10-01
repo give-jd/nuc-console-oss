@@ -13,9 +13,13 @@ The macOS Application Firewall works per program, not per port:
 pf (the packet filter) is off by default; when it is on with rules of its own those rules are not interpreted, so a verdict
 that would say "reachable" becomes 'unknown'.
 """
+import glob
+import json
 import os
 import plistlib
 import re
+import stat
+import time
 
 APPLE_DIRS = ("/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/")
 ESSENTIAL = {"mDNSResponder", "configd", "racoon", "launchd"}  # allowed even with "block all incoming"
@@ -147,6 +151,7 @@ def fw_summary(alf, pf):
 
 # ---- sections (run = collector.run) ------------------------------------------------------------------------------------
 
+
 def _ok(rc, err, what, allowed=(0,)):
     if rc not in allowed:
         raise RuntimeError(err or f"{what} failed")
@@ -246,6 +251,104 @@ def daemons(run, plist_dir="/Library/LaunchDaemons"):
     failed = sorted(lbl for lbl, (pid, st) in jobs.items() if not pid and failed_status(st) and not lbl.startswith("com.apple."))
     return enabled, failed
 
+
+# ---- history: crash, hang and memory-pressure reports since the last look -----------------------------------------------------
+# macOS writes one report file per crash (.ips since Monterey, .crash before), hang (.hang) and Jetsam kill (JetsamEvent-*.ips)
+# into DiagnosticReports. Only the head of each file is read (the JSON header line of an .ips, the "Process:" line of the old
+# format): a name and a number, never the body (stacks, paths, user data). The directories of the users belong to the users: a
+# file that is not a plain file (a link) is never opened.
+
+DIAG_DIRS = ("/Library/Logs/DiagnosticReports", "/Users/*/Library/Logs/DiagnosticReports")
+DIAG_SUFFIXES = (".ips", ".crash", ".hang")
+DIAG_HEAD = 4096        # bytes read from a report
+DIAG_CAP = 200          # files per pass; the rest comes next pass
+DIAG_FIRST_S = 30 * 86400
+CRASH_TYPES, HANG_TYPES = {"309"}, {"298", "211"}
+PROCESS_LINE = re.compile(r"^Process:\s+(.+?)\s+\[\d+\]\s*$")
+
+
+def parse_report_head(head, filename):
+    """The first bytes of a report + its file name -> (kind, subject, detail), or None for what is not a crash, hang or
+    memory-pressure report. JetsamEvent -> oom ('memory pressure'); .hang, bug_type 298/211 -> hang; .crash, bug_type 309 ->
+    crash. Anything else (stackshots, panics...) is not an app trouble report."""
+    import history
+    text = head.decode("utf-8", "replace") if isinstance(head, (bytes, bytearray)) else str(head)
+    lines = text.splitlines()
+    base = os.path.basename(filename)
+    name, bug, jetsam = "", "", base.startswith("JetsamEvent")
+    first = lines[0].strip() if lines else ""
+    if first.startswith("{"):
+        try:
+            h = json.loads(first)
+        except ValueError:
+            h = None
+        if isinstance(h, dict):
+            name = history.clean(h.get("app_name") or h.get("name"))
+            bug = str(h.get("bug_type") or "")
+            jetsam = jetsam or "JetsamEvent" in (str(h.get("name")), str(h.get("app_name")))
+    if jetsam:
+        return "oom", "memory pressure", "Jetsam report"
+    if not name:  # the old format: a "Process:  name [pid]" line near the top
+        name = next((history.clean(m.group(1)) for m in (PROCESS_LINE.match(ln) for ln in lines[:40]) if m), "")
+    if not name:
+        return None
+    if base.endswith(".hang") or bug in HANG_TYPES:
+        return "hang", name, "hang report"
+    if base.endswith(".crash") or bug in CRASH_TYPES:
+        return "crash", name, "crash report" + (" (bug_type %s)" % history.clean(bug, 8) if bug else "")
+    return None
+
+
+def diag_events(since, cap=DIAG_CAP, dirs=DIAG_DIRS, now=None):
+    """Reports newer than `since` (an mtime) -> (events, newest mtime read). Oldest first, at most `cap` files: the returned
+    cursor is the mtime of the last file read, so a larger backlog is read over the next passes. events are
+    history.merge_events() rows (source 'diag')."""
+    import history
+    now = int(now if now is not None else time.time())
+    found = []
+    for pattern in dirs:
+        for d in glob.glob(pattern):
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            for fn in names:
+                if not fn.endswith(DIAG_SUFFIXES):
+                    continue
+                path = os.path.join(d, fn)
+                try:
+                    st = os.lstat(path)
+                except OSError:
+                    continue
+                if stat.S_ISREG(st.st_mode) and st.st_mtime > since:
+                    found.append((st.st_mtime, path, fn))
+    found.sort()
+    events, newest = [], since
+    for mtime, path, fn in found[:cap]:
+        newest = max(newest, mtime)
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            fd = os.open(path, flags)
+            try:
+                head = os.read(fd, DIAG_HEAD)
+            finally:
+                os.close(fd)
+        except OSError:
+            continue
+        got = parse_report_head(head, fn)
+        if got:
+            events.append({"ts": int(mtime), "kind": got[0], "subject": got[1], "detail": got[2], "source": "diag", "n": 1})
+    return history.merge_events(events), newest
+
+
+def new_failed_daemons(prev, failed, now):
+    """Third-party launch daemons that exited with an error since the last look (prev: the previous list, None the first
+    time: only a baseline) -> service_failed events."""
+    if prev is None:
+        return []
+    import history
+    return [{"ts": int(now), "kind": "service_failed", "subject": history.clean(lbl), "detail": "launchd job exited with an error",
+             "source": "launchd", "n": 1} for lbl in sorted(set(failed) - set(prev))]
 
 # ---- CPU sensors (sensors.json) ----------------------------------------------------------------------------------------
 

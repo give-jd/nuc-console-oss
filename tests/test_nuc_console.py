@@ -393,8 +393,8 @@ class Render(unittest.TestCase):
         d = tempfile.mkdtemp()
         net, state, bl = os.path.join(d, "net.json"), os.path.join(d, "c.json"), os.path.join(d, "sub", "baseline.json")
         import json
-        json.dump(NET, open(net, "w"))
-        json.dump(CONT, open(state, "w"))
+        json.dump(dict(NET, ts=time.time()), open(net, "w"))   # fresh now: the fixtures date from the import, minutes ago on a slow runner
+        json.dump(dict(CONT, ts=time.time()), open(state, "w"))
         old = (render.NET_STATE, render.STATE)
         render.NET_STATE, render.STATE = net, state
         try:
@@ -869,8 +869,8 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         import tempfile
         d = tempfile.mkdtemp()
         net, state = os.path.join(d, "net.json"), os.path.join(d, "c.json")
-        json.dump(dict(NET, errors={"ts_peers": "x"}), open(net, "w"))
-        json.dump(CONT, open(state, "w"))
+        json.dump(dict(NET, ts=time.time(), errors={"ts_peers": "x"}), open(net, "w"))
+        json.dump(dict(CONT, ts=time.time()), open(state, "w"))
         old = (render.NET_STATE, render.STATE)
         render.NET_STATE, render.STATE = net, state
         try:

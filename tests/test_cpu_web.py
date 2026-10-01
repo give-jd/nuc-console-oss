@@ -108,7 +108,7 @@ class CpuPageCase(unittest.TestCase):
 class Page(CpuPageCase):
     def test_a_cpu_link_sits_next_to_map_in_the_bottom_bar_when_the_feature_is_on(self):
         body = self.page("/")
-        self.assertIn(f'">map</a> · <a href="/?view=cpu">cpu</a> · read-only', body)
+        self.assertIn('">map</a> · <a href="/?view=cpu">cpu</a> · <a href="/?view=health">health</a> · read-only', body)
         wide = self.page("/?cols=100&zoom=150")
         self.assertIn('<a href="/?view=cpu&amp;cols=100&amp;zoom=150">cpu</a>', wide)            # the other links' size and layout are kept
         render.CFG["features"]["cpu"] = False
