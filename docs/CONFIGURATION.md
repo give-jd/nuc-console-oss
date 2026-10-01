@@ -96,6 +96,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
+| `render.py --once --view map` / `--view cpu` | the MAP or the CPU screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`) |
 | `render.py --open` | the dashboard in a normal window of the default browser (what `browser` mode runs at login) |
 | `render.py --kiosk` | the full-screen window on the local web view (macOS/Windows; `--file` writes a local page instead, also on a Linux desktop: `--html FILE`, `--no-browser`) |
 
