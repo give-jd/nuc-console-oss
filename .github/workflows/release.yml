@@ -140,7 +140,7 @@ jobs:
           - { archive: linux-arm64, runner: ubuntu-24.04-arm }   # free for public repositories
           - { archive: macos-arm64, runner: macos-latest }        # Apple silicon
           # The last Intel image GitHub hosts (macos-13 is gone), announced until August 2027. When it goes there is no hosted Intel Mac:
-          # remove this entry, and test/CONTRIBUTING say then that macos-x86_64 is not run here (tests/test_release.py names the entry).
+          # remove this entry, and say in CONTRIBUTING.md that macos-x86_64 is not run in CI (tests/test_release.py names the entry).
           - { archive: macos-x86_64, runner: macos-15-intel }
     env:
       ARCHIVE: ${{ matrix.archive }}
