@@ -43,6 +43,7 @@ def _run(*args, timeout=3):
 
 # ---- macOS: parsers (pure) ---------------------------------------------------------------------------------------------
 
+
 def parse_vm_stat(text):
     """`vm_stat` -> ({'free': pages, 'inactive': ..., 'file_backed': ...}, page_size)."""
     m = re.search(r"page size of (\d+) bytes", text)
@@ -137,6 +138,7 @@ def parse_netstat_established(text, ports=(22,)):
 
 # ---- macOS: system calls -------------------------------------------------------------------------------------------------
 
+
 def _libsystem():
     lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
     lib.mach_host_self.restype = ctypes.c_uint32
@@ -225,6 +227,7 @@ def _mac_screen():
 
 
 # ---- public API ---------------------------------------------------------------------------------------------------------
+
 
 def cpu_times():
     if WINDOWS:
@@ -324,3 +327,42 @@ def mac_exe_paths(pids):
         if n > 0:
             out[pid] = buf.raw[:n].decode("utf-8", errors="replace")
     return out
+
+# ---- CPU screen (cpuinfo.py): raw sysctl values and per-core ticks, parsed there ----------------------------------------
+
+_LIBSYSTEM = []
+
+
+def _libsystem_once():
+    """libSystem loaded once: the CPU screen reads it at every refresh."""
+    if not _LIBSYSTEM:
+        lib = _libsystem()
+        lib.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p,
+                                     ctypes.c_size_t]
+        _LIBSYSTEM.append(lib)
+    return _LIBSYSTEM[0]
+
+
+def mac_sysctl(name):
+    """Raw bytes of a sysctl (sysctlbyname); None when this Mac has no such name (hw.cpufrequency on Apple Silicon...)."""
+    lib = _libsystem_once()
+    size = ctypes.c_size_t(0)
+    if lib.sysctlbyname(name.encode(), None, ctypes.byref(size), None, 0) != 0 or not size.value:
+        return None
+    buf = ctypes.create_string_buffer(size.value)
+    if lib.sysctlbyname(name.encode(), buf, ctypes.byref(size), None, 0) != 0:
+        return None
+    return buf.raw[:size.value]
+
+
+def mac_cpu_ticks():
+    """[(user, system, idle, nice)] ticks of each logical CPU since boot (host_processor_info, PROCESSOR_CPU_LOAD_INFO)."""
+    lib = _libsystem_once()
+    count, info, info_cnt = ctypes.c_uint32(0), ctypes.POINTER(ctypes.c_uint32)(), ctypes.c_uint32(0)
+    if lib.host_processor_info(lib.mach_host_self(), 2, ctypes.byref(count), ctypes.byref(info), ctypes.byref(info_cnt)) != 0:
+        raise OSError("host_processor_info failed")
+    try:
+        return [tuple(info[i * 4 + j] for j in range(4)) for i in range(count.value)]
+    finally:
+        task = ctypes.c_uint32.in_dll(lib, "mach_task_self_")
+        lib.vm_deallocate(task, ctypes.cast(info, ctypes.c_void_p), ctypes.c_size_t(info_cnt.value * 4))

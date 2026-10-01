@@ -450,3 +450,157 @@ def account_name(sid):
         return name.value or None
     finally:
         k.LocalFree(psid)
+
+# ---- CPU screen (cpuinfo.py): raw buffers, parsed there ----------------------------------------------------------------
+
+STATUS_INFO_LENGTH_MISMATCH = 0xC0000004
+RELATION_ALL = 0xFFFF
+PDH_MORE_DATA = 0x800007D2
+PDH_FMT_DOUBLE, PDH_FMT_NOCAP100 = 0x00000200, 0x00008000
+
+
+class PowerInfo(ctypes.Structure):  # PROCESSOR_POWER_INFORMATION, 24 bytes
+    _fields_ = [("number", c_uint32), ("max_mhz", c_uint32), ("current_mhz", c_uint32), ("mhz_limit", c_uint32),
+                ("max_idle", c_uint32), ("current_idle", c_uint32)]
+
+
+class PdhValue(ctypes.Structure):  # PDH_FMT_COUNTERVALUE with a double
+    _fields_ = [("status", c_uint32), ("value", ctypes.c_double)]
+
+
+class PdhItem(ctypes.Structure):  # PDH_FMT_COUNTERVALUE_ITEM_W
+    _fields_ = [("name", c_void_p), ("fmt", PdhValue)]
+
+
+def _nt_fail(what, status):
+    return OSError(status, f"{what} failed (status {status & 0xFFFFFFFF:#x})")
+
+
+def processor_groups():
+    """[(group, active logical CPUs)]: one group up to 64 CPUs, bigger machines have several."""
+    k = _dll("kernel32")
+    n = k.GetActiveProcessorGroupCount() & 0xFFFF
+    return [(g, k.GetActiveProcessorCount(g)) for g in range(n)] or [(0, os.cpu_count() or 1)]
+
+
+def cpu_perf():
+    """([(first logical id, raw SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION array)], complete).
+
+    One NtQuerySystemInformation call with room for every CPU. Where it answers for the caller's processor group only
+    (machines with more than 64 CPUs), each group is read with NtQuerySystemInformationEx; if that fails too, the first
+    group is returned and `complete` is False."""
+    nt = _dll("ntdll")
+    try:
+        groups = processor_groups()
+    except (OSError, AttributeError):
+        groups = [(0, os.cpu_count() or 1)]
+    total = sum(n for _, n in groups)
+    buf, ret = (CpuPerf * total)(), c_uint32(0)
+    st = nt.NtQuerySystemInformation(8, buf, ctypes.sizeof(buf), ctypes.byref(ret))
+    if st != 0:
+        raise _nt_fail("NtQuerySystemInformation", st)
+    got = ret.value // ctypes.sizeof(CpuPerf)
+    if got >= total or len(groups) < 2:
+        return [(0, bytes(buf)[:ret.value])], got >= total
+    try:
+        out, first = [], 0
+        for g, n in groups:
+            gbuf, gret, grp = (CpuPerf * n)(), c_uint32(0), c_uint16(g)
+            st = nt.NtQuerySystemInformationEx(8, ctypes.byref(grp), 2, gbuf, ctypes.sizeof(gbuf), ctypes.byref(gret))
+            if st != 0 or gret.value // ctypes.sizeof(CpuPerf) < n:
+                raise _nt_fail("NtQuerySystemInformationEx", st)
+            out.append((first, bytes(gbuf)[:gret.value]))
+            first += n
+        return out, True
+    except (OSError, AttributeError):
+        return [(0, bytes(buf)[:ret.value])], False
+
+
+def logical_processor_info():
+    """Raw GetLogicalProcessorInformationEx(RelationAll) buffer: cores (with their EfficiencyClass), caches, packages, groups."""
+    k = _dll("kernel32")
+    size = c_uint32(0)
+    for _ in range(4):  # first call: the size; the buffer can grow in between (a CPU added)
+        buf = ctypes.create_string_buffer(max(size.value, 1))
+        if k.GetLogicalProcessorInformationEx(RELATION_ALL, buf, ctypes.byref(size)):
+            return buf.raw[:size.value]
+        if ctypes.get_last_error() != ERROR_INSUFFICIENT_BUFFER:
+            raise _fail("GetLogicalProcessorInformationEx")
+    raise OSError(ERROR_INSUFFICIENT_BUFFER, "GetLogicalProcessorInformationEx kept growing")
+
+
+def power_info(n=None):
+    """Raw CallNtPowerInformation(ProcessorInformation) buffer: one PROCESSOR_POWER_INFORMATION per logical CPU."""
+    p = _dll("powrprof")
+    buf = (PowerInfo * (n or os.cpu_count() or 1))()
+    st = p.CallNtPowerInformation(11, None, 0, buf, ctypes.sizeof(buf))
+    if st != 0:
+        raise _nt_fail("CallNtPowerInformation", st)
+    return bytes(buf)
+
+
+def system_performance_info():
+    """Raw NtQuerySystemInformation(SystemPerformanceInformation) buffer. Its first 312 bytes have kept their layout since
+    NT 4 (later versions append fields): ContextSwitches is the ULONG at offset 296."""
+    nt = _dll("ntdll")
+    size = 1024
+    for _ in range(4):
+        buf, ret = ctypes.create_string_buffer(size), c_uint32(0)
+        st = nt.NtQuerySystemInformation(2, buf, size, ctypes.byref(ret)) & 0xFFFFFFFF
+        if st == 0:
+            return buf.raw[:ret.value or size]
+        if st != STATUS_INFO_LENGTH_MISMATCH:
+            raise _nt_fail("NtQuerySystemInformation", st)
+        size = max(ret.value, size * 2)
+    raise OSError(STATUS_INFO_LENGTH_MISMATCH, "SystemPerformanceInformation kept growing")
+
+
+def processor_registry():
+    """{'name', 'vendor', 'mhz'} of CPU 0 from HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0 (None if absent)."""
+    import winreg  # Windows only
+    out = {}
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+        for value, field in (("ProcessorNameString", "name"), ("VendorIdentifier", "vendor"), ("~MHz", "mhz")):
+            try:
+                out[field] = winreg.QueryValueEx(key, value)[0]
+            except OSError:
+                out[field] = None
+    return out
+
+
+class PdhCounter(object):
+    """One PDH counter with all its instances, by its English path (PdhAddEnglishCounterW: the same on every Windows
+    language). Rate counters need two collections: values() measures since the previous call (or the creation)."""
+
+    def __init__(self, path):
+        self.pdh = _dll("pdh")
+        self.query, self.counter = c_void_p(), c_void_p()
+        st = self.pdh.PdhOpenQueryW(None, None, ctypes.byref(self.query))
+        if st != 0:
+            raise _nt_fail("PdhOpenQuery", st)
+        st = self.pdh.PdhAddEnglishCounterW(self.query, ctypes.c_wchar_p(path), None, ctypes.byref(self.counter))
+        if st != 0:
+            self.close()
+            raise _nt_fail("PdhAddEnglishCounter", st)
+        self.pdh.PdhCollectQueryData(self.query)
+
+    def values(self):
+        """{instance: value} of the instances with valid data."""
+        st = self.pdh.PdhCollectQueryData(self.query)
+        if st != 0:
+            raise _nt_fail("PdhCollectQueryData", st)
+        fmt, size, count = PDH_FMT_DOUBLE | PDH_FMT_NOCAP100, c_uint32(0), c_uint32(0)
+        st = self.pdh.PdhGetFormattedCounterArrayW(self.counter, fmt, ctypes.byref(size), ctypes.byref(count), None)
+        if st & 0xFFFFFFFF != PDH_MORE_DATA:
+            raise _nt_fail("PdhGetFormattedCounterArray", st)
+        buf = ctypes.create_string_buffer(size.value)
+        st = self.pdh.PdhGetFormattedCounterArrayW(self.counter, fmt, ctypes.byref(size), ctypes.byref(count), buf)
+        if st != 0:
+            raise _nt_fail("PdhGetFormattedCounterArray", st)
+        items = (PdhItem * count.value).from_buffer(buf)  # the names point into the same buffer, after the items
+        return {ctypes.wstring_at(it.name): it.fmt.value for it in items if it.name and it.fmt.status in (0, 1)}
+
+    def close(self):
+        if self.query:
+            self.pdh.PdhCloseQuery(self.query)
+            self.query = c_void_p()
