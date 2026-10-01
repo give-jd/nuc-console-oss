@@ -120,6 +120,14 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   and `expose-unmatched` for a name that matches nothing. The EXPOSURE matrix marks each declared row `expected: …` or
   `beyond config.ini: …`; the MAP shows the declared reach on the port nodes. It never silences another alarm.
 
+**Telegram alerts** (optional, off by default)
+
+- `nuc-console-telegram --setup` pairs a Telegram bot of your own (free, made with @BotFather) with your **@username**: you tap the link it
+  prints and press Start, no number to type. New and resolved ATTENTION problems then reach your phone: titles only unless
+  `detail = full`, two checks in a row before a message, at most 20 an hour, a summary on the first run. `--on`, `--off`, `--test`,
+  `--status`, `--preview`, `--forget`. New `[telegram]` section: `enabled`, `username`, `detail`, `resolved`. Documentation:
+  [docs/TELEGRAM.md](docs/TELEGRAM.md). A portable run does not start it.
+
 **Releases**
 
 - Archives per system, built by CI on a version tag and attested: `nuc-console-X.Y.Z-linux.tar.gz`, `-macos.tar.gz`,
@@ -164,8 +172,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   `[ai] allow_remote = yes`; the model sees the findings as compact data, never raw logs, and answers questions only through a fixed set of
   read-only queries with validated arguments; its text is sanitised and capped; no command is ever run. Downloads are HTTPS only and pinned
   (size, SHA-256, and a Hugging Face commit for models).
-- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, and an installer that
-  has to fetch a Python.
+- The Telegram notifier (off until you run `--setup`) is HTTPS **out** to `api.telegram.org` only: no listener, no webhook, no commands; the
+  service never reads a message (only `--setup` reads the one `/start` that carries its one-time code). The bot token is never in
+  `config.ini`: it is in `/var/lib/nuc-console-notify` (0600, Linux user `nuc-console-notify`, not the web view's) or, on Windows,
+  `%ProgramData%\nuc-console\notify\private` (SYSTEM, Administrators, NETWORK SERVICE). The uninstallers delete it.
+- Nothing connects to the Internet by itself. Only what you run does: `nuc-console-ai setup`, `nuc-console-update`, an installer that
+  has to fetch a Python, and the Telegram notifier once you have set it up.
 - Releases: built from the tag on a CI runner with only the built-in `GITHUB_TOKEN`, actions pinned by commit SHA, build provenance
   attested for every archive (`gh attestation verify`). `SHA256SUMS` shows a file is whole; the attestation shows this repository's
   workflow built it. Neither is a signature by a person, and nothing in the archives is code-signed.
