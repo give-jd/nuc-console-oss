@@ -1091,6 +1091,42 @@ exec "%s" "$@"
                 p.wait()
             p.stdout.close()
 
+    def test_a_baseline_attempt_in_progress_does_not_hold_up_the_stop(self):
+        # an attempt is a command of the waiter: if it ran in the foreground the waiter's trap would wait for it to end,
+        # and with a slow machine quitting would take as long as the attempt
+        marker = os.path.join(self.tmp.name, "attempt-started")
+        fake = os.path.join(self.tmp.name, "python-stand-in")
+        write(fake, """#!/bin/sh
+case " $* " in
+    *" --accept --if-missing "*) : > "%s"; exec sleep 40 ;;
+esac
+exec "%s" "$@"
+""" % (marker, sys.executable), 0o755)
+        self.env["PYTHON"] = fake
+        p = subprocess.Popen([os.path.join(self.dir, "run.sh"), "--web", "--no-open"], cwd=self.dir, env=self.env, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+                             preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        try:
+            deadline = time.time() + 60
+            while time.time() < deadline and not os.path.exists(marker):
+                self.assertIsNone(p.poll(), "run.sh ended early")
+                time.sleep(0.2)
+            self.assertTrue(os.path.exists(marker), "the baseline was never tried")
+            kids = self.descendants(p.pid)
+            started = time.time()
+            os.kill(p.pid, signal.SIGTERM)
+            p.wait(timeout=20)  # it was 40 s: the length of the attempt
+            self.assertLess(time.time() - started, 15)
+            deadline = time.time() + 10
+            while time.time() < deadline and any(self.alive(k) for k in kids):
+                time.sleep(0.1)
+            self.assertEqual([k for k in kids if self.alive(k)], [], "orphans left")
+        finally:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+            p.stdout.close()
+
     def test_an_existing_baseline_is_never_asked_for_again(self):
         data = os.path.join(self.dir, "data")
         write(os.path.join(data, "lib", "baseline.json"), '{"ports": [1]}')
@@ -1115,6 +1151,92 @@ exec "%s" "$@"
 
     def test_web_run_stops_everything_on_terminate(self):
         self.run_and_stop(signal.SIGTERM)
+
+    def run_console_and_stop(self, stop, status):
+        """--console in a pseudo-terminal, stopped by `stop(master fd, pid)`: it must end with `status`, put the terminal back,
+        and leave no process and no pid file."""
+        import fcntl
+        import pty
+        import select
+        import struct
+        import termios
+        pid, fd = pty.fork()
+        if pid == 0:  # the child: run.sh, with the pseudo-terminal as its keyboard and screen
+            try:
+                for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):  # a test run in the background (nohup, `&`) ignores some,
+                    signal.signal(sig, signal.SIG_DFL)  # and a shell cannot trap a signal that was ignored when it started
+                os.chdir(self.dir)
+                os.execve(os.path.join(self.dir, "run.sh"), ["run.sh", "--console"], dict(self.env, TERM="xterm-256color"))
+            finally:
+                os._exit(127)
+        # a size, as a real terminal has: a pseudo-terminal of 0x0 columns draws nothing on Python 3.8 (shutil.get_terminal_size
+        # answers 0 there, the fallback only from 3.11)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
+        screen, kids, code, stopped = b"", set(), None, None
+        deadline = time.time() + 90
+        try:
+            while time.time() < deadline and code is None:
+                if select.select([fd], [], [], 0.2)[0]:
+                    try:
+                        screen += os.read(fd, 65536)
+                    except OSError:  # the other end is gone: run.sh has ended
+                        pass
+                done, st = os.waitpid(pid, os.WNOHANG)
+                if done:
+                    code = os.WEXITSTATUS(st) if os.WIFEXITED(st) else -os.WTERMSIG(st)
+                    break
+                kids |= self.descendants(pid)
+                if stopped is None and b"q: quit" in screen and len(kids) >= 2:  # drawn: the keyboard is being read
+                    stopped = time.time()
+                    stop(fd, pid)
+                elif stopped is not None and time.time() - stopped > 30:
+                    self.fail("run.sh --console did not stop within 30 s of the stop request")
+            for _ in range(50):  # what it wrote last may still be in the pseudo-terminal
+                if not select.select([fd], [], [], 0.3)[0]:
+                    break
+                try:
+                    data = os.read(fd, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                screen += data
+            self.assertIsNotNone(stopped, "the dashboard never came up: " + screen.decode("utf-8", "replace")[-500:])
+            self.assertEqual(code, status)
+            self.assertNotIn(b"Traceback", screen)
+            self.assertTrue(screen.rstrip().endswith(b"\x1b[?25h\x1b[0m"), "the cursor and the colours are not restored")
+            deadline = time.time() + 10
+            while time.time() < deadline and any(self.alive(k) for k in kids):
+                time.sleep(0.1)
+            self.assertEqual([k for k in kids if self.alive(k)], [], "orphans left")
+            self.assertFalse(os.path.exists(os.path.join(self.dir, "data", "portable.pid")))
+        finally:
+            for k in kids | {pid}:  # whatever a failed assertion left running
+                if code is None or k != pid:
+                    try:
+                        os.kill(k, signal.SIGKILL)
+                    except OSError:
+                        pass
+            if code is None:
+                try:
+                    os.waitpid(pid, 0)
+                except OSError:
+                    pass
+            os.close(fd)
+
+    def test_console_q_quits_and_stops_everything(self):
+        self.run_console_and_stop(lambda fd, pid: os.write(fd, b"q"), 0)
+
+    def test_console_ctrl_c_stops_everything(self):
+        self.run_console_and_stop(lambda fd, pid: os.write(fd, b"\x03"), 130)
+
+    def test_console_stops_when_only_run_sh_is_told_to(self):
+        # kill / timeout reach the shell and not the dashboard: a shell runs its trap only after a foreground command ends,
+        # so the dashboard must not be one
+        self.run_console_and_stop(lambda fd, pid: os.kill(pid, signal.SIGTERM), 143)
+
+    def test_console_stops_on_hangup(self):
+        self.run_console_and_stop(lambda fd, pid: os.kill(pid, signal.SIGHUP), 129)
 
 
 @unittest.skipIf(WINDOWS, "the sh wrapper: Linux and macOS")

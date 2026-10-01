@@ -145,15 +145,17 @@ PIDS="$PIDS $!"
 # the baseline of the port alarms: created once the collector has written its first complete snapshot (a normal user's one is
 # incomplete: it is tried for a few minutes, then ./run.sh --accept or sudo ./run.sh)
 if [ ! -e "$DATA/lib/baseline.json" ]; then
-    (
+    (  # every command runs in the background and is waited for: a trap would wait for a foreground one to end
         trap - EXIT
-        sl="" n=0
-        trap '[ -z "$sl" ] || kill "$sl" 2>/dev/null; exit 0' TERM
+        job="" n=0
+        trap '[ -z "$job" ] || kill "$job" 2>/dev/null; exit 0' TERM
         while [ "$n" -lt 30 ] && kill -0 "$$" 2>/dev/null; do
             sleep 4 &
-            sl=$!
-            wait "$sl" || true
-            "$PY" -B "$HERE/src/render.py" --accept --if-missing >"$LOGS/baseline.log" 2>&1 && exit 0
+            job=$!
+            wait "$job" || true
+            "$PY" -B "$HERE/src/render.py" --accept --if-missing >"$LOGS/baseline.log" 2>&1 &
+            job=$!
+            if wait "$job"; then exit 0; fi
             n=$((n + 1))
         done
     ) &
@@ -162,7 +164,15 @@ fi
 
 rc=0
 if [ "$VIEW" = console ]; then
-    "$PY" -B "$HERE/src/render.py" || rc=$?
+    # In the background, and this shell waits for it: a trap runs only once a foreground command has ended, so a kill (or
+    # timeout) that reaches this shell alone would otherwise leave the dashboard on the screen. Ctrl+C reaches the shell too
+    # (an asynchronous command ignores it): the trap stops the dashboard, which restores the terminal on SIGTERM. The
+    # keyboard is passed on explicitly: an asynchronous command gets /dev/null as its input otherwise.
+    exec 3<&0
+    "$PY" -B "$HERE/src/render.py" <&3 3<&- &
+    RENDER=$!
+    PIDS="$PIDS $RENDER"
+    wait "$RENDER" || rc=$?
     exit "$rc"
 fi
 
