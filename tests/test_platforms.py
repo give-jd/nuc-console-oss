@@ -574,17 +574,17 @@ class Kiosk(unittest.TestCase):
     def test_kiosk_writes_the_page_and_stops_when_the_browser_closes(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "display.html")
-            saved = (render.subprocess.Popen, render.time.sleep, render.user_dir, render.find_browser)
+            saved = (render.launch, render.time.sleep, render.user_dir, render.find_browser)
 
             class Browser:
-                def __init__(self, cmd, **kw):
+                def __init__(self, cmd):
                     self.cmd, self.polls = cmd, 0
 
                 def poll(self):
                     self.polls += 1
                     return 0 if self.polls > 1 else None
             clock = [0.0]
-            render.subprocess.Popen = Browser
+            render.launch = Browser  # never subprocess.Popen itself: macOS reads its metrics with commands
             render.time.sleep = lambda s: clock.__setitem__(0, clock[0] + 30)
             render.user_dir = lambda: d
             render.find_browser = lambda choice=None: "/opt/browser"
@@ -593,7 +593,7 @@ class Kiosk(unittest.TestCase):
             try:
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--file", "--html", path, "--log", os.path.join(d, "k.log")]), 0)
             finally:
-                render.subprocess.Popen, render.time.sleep, render.user_dir, render.find_browser = saved
+                render.launch, render.time.sleep, render.user_dir, render.find_browser = saved
                 render.time.time = real_time
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
             with open(path, encoding="utf-8") as f:
@@ -602,16 +602,16 @@ class Kiosk(unittest.TestCase):
             self.assertIn("nuc-console", page)
 
     def test_kiosk_opens_the_local_web_view_full_screen(self):
-        started, saved = [], (render.web_up, render.find_browser, render.subprocess.Popen, render.user_dir)
+        started, saved = [], (render.web_up, render.find_browser, render.launch, render.user_dir)
         with tempfile.TemporaryDirectory() as d:
             render.web_up = lambda port, wait: True
             render.find_browser = lambda choice=None: "/opt/browser"
-            render.subprocess.Popen = lambda cmd, **kw: started.append(cmd)
+            render.launch = lambda cmd: started.append(cmd)
             render.user_dir = lambda: d
             try:
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
             finally:
-                render.web_up, render.find_browser, render.subprocess.Popen, render.user_dir = saved
+                render.web_up, render.find_browser, render.launch, render.user_dir = saved
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
         cmd = started[0]
         self.assertTrue(cmd[1].startswith("--app=http://127.0.0.1:8787/?fit=1&cols="))
@@ -641,6 +641,19 @@ class Kiosk(unittest.TestCase):
                 webbrowser.open = saved_wb
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
         self.assertEqual(opened, ["http://127.0.0.1:8787/?fit=1"])                                  # a plain tab: no kiosk, no grid
+
+    def test_a_long_host_name_never_hides_the_status(self):
+        saved = render.socket.gethostname
+        render.socket.gethostname = lambda: "sjc22-be107-89b7b6f4-ed34-423a-8d4e-79a8cba66531-BAC22B2659BA.local"
+        try:
+            for w in (79, 100, 120):
+                head = render.ANSI.sub("", render.frame(("System", 1, 1, []), 0, 1, w, 10, pb=[(2, "x")]).split("\r\n")[0])
+                self.assertIn("✖ 1 PROBLEMS", head, w)
+                self.assertIn("sjc22-", head)
+                self.assertEqual("…" in head, w < 110)                                               # cut only when it does not fit
+                self.assertLessEqual(len(head), w)
+        finally:
+            render.socket.gethostname = saved
 
     def test_display_section_and_paths(self):
         with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:

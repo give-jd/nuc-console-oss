@@ -2224,9 +2224,13 @@ def pick_slide(sl, t):
 def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False):
     """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1)."""
     name, part, parts, body = slide
-    left = (" " * (int(time.time() // 600) % 3) + f" {socket.gethostname()} │ {name}"  # every 10 min shift the header
-            + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}")
     text, code = status_pill(pb or [])
+    shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
+    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}"
+    host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
+    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+        host = host[:max(room - 1, 1)] + "…"
+    left = shift + f" {host}" + tail
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
@@ -2376,6 +2380,11 @@ def browser_command(exe, url, profile):
             "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
 
 
+def launch(cmd):
+    """Starts the browser, detached from our console (its output is not ours to show)."""
+    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def write_text_atomic(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:  # no CRLF translation on Windows
@@ -2453,7 +2462,7 @@ def kiosk(argv):
         if not cmd or "--no-browser" in argv:
             print("no browser started: open " + url, file=sys.stderr, flush=True)
             return 0 if "--no-browser" in argv else 1
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        launch(cmd)
         return 0
     return kiosk_file(argv, base, cols, rows)
 
@@ -2482,7 +2491,7 @@ def kiosk_file(argv, base, cols, rows):
             import pathlib
             cmd = browser_command(find_browser(), pathlib.Path(path).resolve().as_uri(), os.path.join(base, "browser"))
             if cmd:
-                browser, started = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), time.time()
+                browser, started = launch(cmd), time.time()
             else:
                 browser = False
                 print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
