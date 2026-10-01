@@ -105,7 +105,7 @@ def msg_wrap(level, text, w):
     """msg(), continued on the lines below (under the text) at the commas when it is wider than w: a long list is not cut."""
     lines, cur = [], ""
     for part in text.split(", "):
-        if cur and len(cur) + 2 + len(part) > w - 5:
+        if cur and len(cur) + 2 + len(part) > w - 6:  # -6: the comma that ends the line when it wraps
             lines.append(cur + ",")
             cur = part
         else:
@@ -1091,6 +1091,8 @@ def accept_baseline(if_missing=False, path=None, now=None):
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
+    if CFG.get("config_error"):  # config.ini exists but could not be read: nothing in it ([expose], [webapps]) is applied
+        out.append((2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)", "config-unreadable"))
     if not on("containers"):
         pass
     elif cont is None:
@@ -1187,7 +1189,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             over = expose_over_items(expose_apply(rows, net, cont))
             if over:
                 out.append((2, plural(len(over), "service") + (" reaches" if len(over) == 1 else " reach") + " beyond config.ini: " + ", ".join(over), "over-exposed"))
-            lost = expose_unmatched(net, cont, boot) if cont is not None else []  # without the container list every container name looks wrong
+            ok = (isinstance(cont, dict) and not any(cont.get(k) for k in ("error", "absent", "disabled")) and isinstance(boot, dict)
+                  and not {"links", "dbs"} & set(net.get("errors") or ()))  # with a source of names missing every name looks wrong
+            lost = expose_unmatched(net, cont, boot) if ok else []
             if lost:
                 out.append((1, "[expose] " + ", ".join(f"'{safe(k)}'" for k in lost) + (" matches" if len(lost) == 1 else " match") + " no service", "expose-unmatched"))
     return sorted(out, key=lambda x: -x[0])
@@ -1219,6 +1223,8 @@ CATALOG = {
                      "bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini"),
     "expose-unmatched": ("[expose] name matches no service", "a name that matches nothing (a typo, or a service that was removed) guards nothing",
                          "fix the name under [expose] in config.ini (container, compose service or project, process, unit, database, [webapps] name) or remove the line; ports are never checked"),
+    "config-unreadable": ("config.ini unreadable", "the file exists but could not be read, so the defaults are in use: [expose] and [webapps] are not applied and nothing is checked against them",
+                          "check config.ini for a key starting with ':' (write ports as 8080) or a section without a header; the exact error is in the service logs / stderr; restart the services after fixing it"),
     "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
     "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "sudo nuc-console-accept"),
     "port-compare-suspended": ("Port comparison suspended", "network sections were unreadable", "see net-sections"),
@@ -1284,6 +1290,7 @@ CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
+COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 
 
 def fingerprint(sev, text, pid):
@@ -2037,14 +2044,18 @@ def expose_apply(rows, net, cont, policy=None, webapps=None):
                         names |= _unit_names(ln["unit"])
         if r["proto"] == "tcp":
             names |= {n.lower() for n, ps in webapps.items() if ports & set(ps)}
-        hit = [(REACH_ORDER.index(g), -i, k) for i, (k, pk, g) in enumerate(pol) if (pk == (r["port"], r["proto"]) if pk else k in names)]
+        hit = [(REACH_ORDER.index(g), -i, k) for i, (k, pk, g) in enumerate(pol) if (((pk[1] == r["proto"] == "tcp" and pk[0] in ports) or pk == (r["port"], r["proto"])) if pk else k in names)]
         r["want"], r["key"] = (REACH_ORDER[max(hit)[0]], max(hit)[2]) if hit else (None, None)  # the highest index is the narrowest reach
     return rows
 
 
+def _expose_reach(r):
+    return "INTERNET" if r["net"] == 3 else group_of(r)  # Funnel status unreadable (net 3): unknown is treated as open
+
+
 def expose_over(r):
     """True when an exposure row (after expose_apply) reaches further than [expose] says. A row no key matches never does."""
-    return bool(r.get("want")) and REACH_ORDER.index(group_of(r)) < REACH_ORDER.index(r["want"])
+    return bool(r.get("want")) and REACH_ORDER.index(_expose_reach(r)) < REACH_ORDER.index(r["want"])
 
 
 def expose_note(r):
@@ -2059,10 +2070,12 @@ def expose_over_items(rows):
     items = {}
     for r in rows:
         if expose_over(r):
-            who = r["name"] if nuc_config.expose_port(r["key"]) else r["key"]  # a port key says nothing about who: name what listens there
+            pk = nuc_config.expose_port(r["key"])
             udp = "/udp" if r["proto"] == "udp" else ""
-            items.setdefault((REACH_ORDER.index(group_of(r)), who, r["port"], r["proto"]),
-                             f"{safe(who)} :{r['port']}{udp} {EXPOSE_LABEL[group_of(r)]} > {EXPOSE_LABEL[r['want']]}")
+            who = f"port {pk[0]}" + ("/udp" if pk[1] == "udp" else "") if pk else r["key"]  # a port key is named by itself: the process behind it can change
+            at = "" if pk == (r["port"], r["proto"]) else f" :{r['port']}{udp}"  # (a port key that follows a Funnel to its backend: the row's own port too)
+            items.setdefault((REACH_ORDER.index(_expose_reach(r)), who, r["port"], r["proto"]),
+                             f"{safe(who)}{at} {EXPOSE_LABEL[_expose_reach(r)]} > {EXPOSE_LABEL[r['want']]}")
     return [items[k] for k in sorted(items)]
 
 

@@ -1092,6 +1092,39 @@ class Config(unittest.TestCase):
         self.assertTrue(cfg["features"]["map"])
         self.assertIn("cannot read", err)
 
+    def test_expose_duplicate_key_after_lowercasing_does_not_drop_the_file(self):
+        cfg, err = self._load_err("[features]\nmap = no\n[expose]\nShop-DB = local\nshop-db = lan\n")   # last wins, the rest of the file is kept
+        self.assertEqual(cfg["expose"], {"shop-db": "LAN"})
+        self.assertFalse(cfg["features"]["map"])
+        self.assertEqual((cfg["config_error"], err), ("", ""))
+
+    def test_a_file_that_cannot_be_read_is_flagged(self):
+        self.assertEqual(self._load("[features]\nmap = no\n")["config_error"], "")
+        self.assertEqual(nuc_config.load("/nonexistent/config.ini")["config_error"], "")           # no file is not an error
+        cfg, _ = self._load_err("[expose]\n:8080 = lan\n")
+        self.assertIn(":8080", cfg["config_error"])
+        self.assertLessEqual(len(cfg["config_error"]), 200)
+        cfg, _ = self._load_err("this is not ini\n")
+        self.assertTrue(cfg["config_error"])
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:                                                   # exists, cannot be opened as a file
+            import contextlib
+            import io
+            with contextlib.redirect_stderr(io.StringIO()):
+                cfg = nuc_config.load(d)
+            self.assertTrue(cfg["config_error"])
+            self.assertEqual(cfg["expose"], {})
+            bad = os.path.join(d, "config.ini")
+            with open(bad, "wb") as f:
+                f.write(b"[expose]\nshop = lan\n\xff\xfe = lan\n")                                  # not UTF-8
+            with contextlib.redirect_stderr(io.StringIO()):
+                cfg = nuc_config.load(bad)
+            self.assertTrue(cfg["config_error"])
+
+    def test_expose_keys_of_the_default_section_are_not_services(self):
+        cfg, _ = self._load_err("[DEFAULT]\nshop-db = lan\n8080 = lan\n[expose]\nn8n = local\n[webapps]\nblog = 8081\n")
+        self.assertEqual(cfg["expose"], {"n8n": "LOCALE"})
+
     def test_expose_port_keys(self):
         self.assertEqual(nuc_config.expose_port("8080"), (8080, "tcp"))
         self.assertEqual(nuc_config.expose_port("8080/udp"), (8080, "udp"))
@@ -1518,7 +1551,7 @@ class ExposeVsDeclared(unittest.TestCase):
                                                                        cont or self.cont)}
 
     def problem(self, pid, net=None, cont=None):
-        return [t for _, t, i in render.problems_raw(net or self.net, cont or self.cont) if i == pid]
+        return [t for _, t, i in render.problems_raw(net or self.net, cont or self.cont, boot={}) if i == pid]
 
     def test_no_policy_touches_nothing(self):
         rows = render.exposure_rows(self.net, self.cont)
@@ -1564,7 +1597,7 @@ class ExposeVsDeclared(unittest.TestCase):
         self.assertEqual((rows[8080, "tcp"]["want"], rows[8080, "udp"]["want"]), ("LOCALE", None))   # a bare port is tcp
         rows = self.rows({"8080/udp": "LOCALE", "22/tcp": "LAN"}, net)
         self.assertEqual((rows[8080, "tcp"]["want"], rows[8080, "udp"]["want"], rows[22, "tcp"]["want"]), (None, "LOCALE", "LAN"))
-        self.assertEqual(self.problem("over-exposed", net), ["1 service reaches beyond config.ini: dnsmasq :8080/udp tailnet > local"])
+        self.assertEqual(self.problem("over-exposed", net), ["1 service reaches beyond config.ini: port 8080/udp tailnet > local"])
 
     def test_container_replica_project_service_and_database_names(self):
         for key, ports in (("shop-db", {5432}), ("shop-db-1", {5432}), ("db", {5432, 5433}), ("shop", {5432, 8080}),
@@ -1605,7 +1638,7 @@ class ExposeVsDeclared(unittest.TestCase):
         self.assertEqual(render.expose_unmatched(self.net, self.cont), ["postgress", "n8nn"])  # a stopped container and a DB kind are known names
         self.assertEqual(self.problem("expose-unmatched"), ["[expose] 'postgress', 'n8nn' match no service"])
         render.CFG["expose"] = {"postgress": "LOCALE", "8888": "LAN"}
-        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "expose-unmatched"]
+        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont, boot={}) if i == "expose-unmatched"]
         self.assertEqual(found, [(1, "[expose] 'postgress' matches no service")])
         render.CFG["expose"] = {"8888": "LAN", "53/udp": "LOCALE"}                             # nothing listens there: fine
         self.assertEqual(self.problem("expose-unmatched"), [])
@@ -1647,12 +1680,14 @@ class ExposeVsDeclared(unittest.TestCase):
             render.CFG["expose"]["shop-db"] = "LOCALE"                                         # back to what was accepted
             self.assertFalse([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t])
 
-    def test_fingerprint_keeps_the_numbers_of_over_exposed_only(self):
+    def test_fingerprint_keeps_the_numbers_of_the_expose_problems(self):
         self.assertIn("over-exposed", render.COUNT_MATTERS)
         a, b = "2|1 service reaches beyond config.ini: x :5432 LAN > local", "2|1 service reaches beyond config.ini: x :5433 LAN > local"
         self.assertNotEqual(render.fingerprint(2, a[2:], "over-exposed"), render.fingerprint(2, b[2:], "over-exposed"))
-        self.assertEqual(render.fingerprint(1, "[expose] 'a1' matches no service", "expose-unmatched"),
-                         render.fingerprint(1, "[expose] 'a2' matches no service", "expose-unmatched"))     # a lint, not a count
+        self.assertIn("expose-unmatched", render.COUNT_MATTERS)
+        self.assertNotEqual(render.fingerprint(1, "[expose] 'a1' matches no service", "expose-unmatched"),
+                            render.fingerprint(1, "[expose] 'a2' matches no service", "expose-unmatched"))  # a new typo is not the accepted one
+        self.assertEqual(render.fingerprint(1, "x 1 y", "net-sections"), render.fingerprint(1, "x 2 y", "net-sections"))  # the noisy ones still ignore digits
 
     def test_both_problems_are_catalogued_and_in_the_json(self):
         import contextlib
@@ -1664,7 +1699,7 @@ class ExposeVsDeclared(unittest.TestCase):
             self.assertTrue(title and why and fix, pid)
             self.assertNotIn(pid, render.NOT_ACCEPTABLE)
         orig = render.current_problem_records
-        render.current_problem_records = lambda: render.problem_records(self.net, self.cont)
+        render.current_problem_records = lambda: render.problem_records(self.net, self.cont, boot={})
         try:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -1674,6 +1709,70 @@ class ExposeVsDeclared(unittest.TestCase):
         recs = {r["id"]: r for r in _json.loads(out.getvalue())}
         self.assertEqual((recs["over-exposed"]["severity"], recs["expose-unmatched"]["severity"]), ("error", "warning"))
         self.assertTrue(recs["over-exposed"]["acceptable"] and recs["over-exposed"]["fix"])
+
+    def test_port_key_follows_a_funnel_to_its_backend(self):
+        self.net["serve"] = [{"port": 8444, "path": "/", "target": "http://127.0.0.1:3000", "funnel": True}]
+        rows = self.rows({"3000": "LOCALE"})
+        self.assertEqual((rows[3000, "tcp"]["want"], rows[8444, "tcp"]["want"]), ("LOCALE", "LOCALE"))
+        self.assertFalse(render.expose_over(rows[3000, "tcp"]))                                # the listener is local
+        self.assertTrue(render.expose_over(rows[8444, "tcp"]))                                 # the Funnel publishes it
+        self.assertEqual(self.problem("over-exposed"), ["1 service reaches beyond config.ini: port 3000 :8444 Internet > local"])
+        self.assertEqual(self.rows({"3000/tcp": "LOCALE"})[8444, "tcp"]["want"], "LOCALE")
+        self.assertIsNone(self.rows({"3000/udp": "LOCALE"})[8444, "tcp"]["want"])              # a udp key has no backend to follow
+        self.assertIsNone(self.rows({"3001": "LOCALE"})[8444, "tcp"]["want"])
+
+    def test_port_key_label_does_not_depend_on_the_process_name(self):
+        rows = list(self.rows({"8080": "LOCALE"}).values())
+        items = render.expose_over_items(rows)
+        self.assertEqual(items, ["port 8080 LAN > local"])
+        for r in rows:
+            r["name"] = "haproxy"                                                              # the process behind a port can flip between cycles
+        self.assertEqual(render.expose_over_items(rows), items)                                # ...the text, and what was accepted, must not
+        self.assertEqual(render.fingerprint(2, items[0], "over-exposed"), "2|port 8080 LAN > local")
+
+    def test_unknown_funnel_status_counts_as_internet(self):
+        net = dict(self.net, serve=[], errors={"serve": "tailscale serve status failed"})     # the tailnet-only row 8444: Funnel unknown
+        r = self.rows({"8444": "TAILNET"}, net)[8444, "tcp"]
+        self.assertEqual((r["net"], render.group_of(r)), (3, "TAILNET"))                       # group_of is untouched
+        self.assertTrue(render.expose_over(r))
+        self.assertEqual(self.problem("over-exposed", net), ["1 service reaches beyond config.ini: port 8444 Internet > tailnet"])
+        r = self.rows({"8444": "TAILNET"}, dict(self.net, serve=[]))[8444, "tcp"]              # Funnel known to be off: within
+        self.assertEqual(r["net"], 0)
+        self.assertFalse(render.expose_over(r))
+        self.assertEqual(self.problem("over-exposed", dict(self.net, serve=[])), [])
+
+    def test_unmatched_is_not_said_from_degraded_data(self):
+        render.CFG["expose"] = {"nope": "LOCALE"}
+        want = ["[expose] 'nope' matches no service"]
+        self.assertEqual(self.problem("expose-unmatched"), want)
+        for label, net, cont, boot in (("containers error", self.net, dict(self.cont, error="docker: boom"), {}),
+                                       ("containers absent", self.net, dict(self.cont, absent=True), {}),
+                                       ("containers disabled", self.net, dict(self.cont, disabled=True), {}),
+                                       ("links unreadable", dict(self.net, errors={"links": "boom"}), self.cont, {}),
+                                       ("dbs unreadable", dict(self.net, errors={"dbs": "boom"}), self.cont, {}),
+                                       ("no boot data", self.net, self.cont, None),
+                                       ("no boot argument", self.net, self.cont, False)):
+            with self.subTest(label):
+                self.assertEqual([t for _, t, i in render.problems_raw(net, cont, boot=boot) if i == "expose-unmatched"], [])
+        net = dict(self.net, errors={"serve": "boom"})                                         # another section: the names are all there
+        self.assertEqual(self.problem("expose-unmatched", net), want)
+        self.assertFalse([t for _, t in render.safe_problems(self.net, self.cont) if "match no service" in t or "matches no service" in t])  # page_rete
+
+    def test_a_broken_config_file_is_an_error(self):
+        saved = render.CFG.get("config_error")
+        try:
+            render.CFG["config_error"] = ""
+            self.assertEqual([i for _, _, i in render.problems_raw(self.net, self.cont) if i == "config-unreadable"], [])
+            render.CFG["config_error"] = "Source contains parsing errors"
+            found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "config-unreadable"]
+            self.assertEqual(found, [(2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)")])
+            self.assertTrue(all(render.CATALOG["config-unreadable"]))
+            self.assertNotIn("config-unreadable", render.NOT_ACCEPTABLE)
+        finally:
+            if saved is None:
+                render.CFG.pop("config_error", None)
+            else:
+                render.CFG["config_error"] = saved
 
     def test_the_matrix_says_beyond_and_expected(self):
         render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN"}
@@ -1716,6 +1815,16 @@ class ExposeVsDeclared(unittest.TestCase):
         self.assertTrue(all(render.vlen(ln) <= 73 for ln in lines), lines)
         self.assertEqual(render.ANSI.sub("", " ".join(x.strip() for x in lines)).replace("✖ ", "", 1), text)
         self.assertEqual(len(render.msg_wrap("err", "short", 73)), 1)
+
+    def test_no_wrapped_line_is_wider_than_w(self):
+        for w in range(30, 130):
+            for step in range(1, 12):
+                parts = [f"svc{'x' * ((i * step) % 9)}-{i} :{5000 + i}/udp LAN > local" for i in range(14)]
+                parts[0] = "7 services reach beyond config.ini: " + parts[0]
+                if max(map(len, parts)) > w - 6:
+                    continue                                                                   # one item wider than the line cannot be wrapped
+                for line in render.msg_wrap("err", ", ".join(parts), w):
+                    self.assertLessEqual(render.vlen(line), w, (w, step, line))
 
 
 class ChangedMessage(unittest.TestCase):

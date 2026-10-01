@@ -50,13 +50,17 @@ def load(path=None):
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100}}
-    cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
+    cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of render.GROUPS); here so the early returns have it
+    cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
+            if os.path.exists(path):  # read() ignores a file it cannot open: that is not "no config.ini"
+                cfg["config_error"] = "cannot open " + path[-150:]
             return cfg
     except (configparser.Error, OSError, UnicodeDecodeError) as e:
         print(f"nuc-console: cannot read {path}: {e}", file=sys.stderr)
+        cfg["config_error"] = str(e)[:200]
         return cfg
     for key in cp["features"] if cp.has_section("features") else ():
         if key not in FEATURES:
@@ -110,7 +114,7 @@ def load(path=None):
             else:
                 print(f"nuc-console: {path}: [webapps] {name}: invalid port list", file=sys.stderr)
     if cp.has_section("expose"):  # name or port = local|tailnet|lan|internet: the widest reach you intend (more is an ATTENTION problem)
-        for key in cp["expose"]:
+        for key in [k for k in cp.options("expose") if k not in cp.defaults()]:  # a [DEFAULT] key belongs to every section: not a service
             word = cp.get("expose", key).strip().lower()
             try:
                 expose_port(key)
