@@ -97,7 +97,7 @@ def fake_python_tree(label, version=FAKE_PY):
         ("python/lib/python%s" % minor, "dir", None, 0o755),
         ("python/lib/python%s/os.py" % minor, "file", b"# os of " + label.encode() + b"\n", 0o644),
         ("python/lib/python%s/__pycache__" % minor, "dir", None, 0o755),
-        ("python/lib/python%s/__pycache__/os.cpython-39.pyc" % minor.replace(".", ""), "file", b"pyc " + label.encode(), 0o644),
+        ("python/lib/python%s/__pycache__/os.cpython-%s.pyc" % (minor, minor.replace(".", "")), "file", b"pyc " + label.encode(), 0o644),
         ("python/lib/python%s/empty" % minor, "dir", None, 0o755),
         ("python/include", "dir", None, 0o755),
         ("python/include/Python.h", "file", b"/* header */\n", 0o600),
@@ -747,35 +747,134 @@ class Refusals(TempDirCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             br.main(["--out", self.tmp()])
 
+    def build(self, out, pythons, pins, python_pins, **kw):
+        kw.setdefault("root", ROOT)
+        return br.build(repo_version(), out, python_dir=pythons, pins=pins, python_pins=python_pins, epoch=EPOCH, log=lambda s: None, **kw)
+
     def test_a_python_zip_with_another_hash_is_refused_and_nothing_is_written(self):
         out, py = os.path.join(self.tmp(), "dist"), self.tmp()
-        pins = fake_pythons(py)
+        pins, python_pins = fake_pythons(py)
         write(os.path.join(py, "python-%s-embed-arm64.zip" % FAKE_PY), b"PK tampered")
         with self.assertRaisesRegex(br.ReleaseError, "pins .* refused"):
-            br.build(repo_version(), out, root=ROOT, python_zips=py, pins=pins, epoch=EPOCH, log=lambda s: None)
+            self.build(out, py, pins, python_pins)
         self.assertFalse(os.path.exists(out))
 
-    def test_fake_zips_never_pass_the_real_pins(self):
+    def test_a_tarball_with_another_hash_or_size_is_refused_and_nothing_is_written(self):
+        for suffix in br.STANDALONE_TARGETS:
+            out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+            pins, python_pins = fake_pythons(py)
+            _, _, pinned = br.read_python_pins(python_pins)
+            file = pinned[suffix][0]
+            write(os.path.join(py, file), read(os.path.join(py, file)) + b"\0")  # one byte more: the size is checked, and the hash
+            with self.assertRaisesRegex(br.ReleaseError, r"bytes, python-pins\.json pins %d: refused" % pinned[suffix][2], msg=suffix):
+                self.build(out, py, pins, python_pins)
+            self.assertFalse(os.path.exists(out), suffix)
         out, py = os.path.join(self.tmp(), "dist"), self.tmp()
-        fake_pythons(py, "3.14.8")  # the real version and file names, but not the real files
-        with self.assertRaisesRegex(br.ReleaseError, "install-windows.ps1 pins"):
-            br.build(repo_version(), out, root=ROOT, python_zips=py, epoch=EPOCH, log=lambda s: None)
+        pins, python_pins = fake_pythons(py)
+        _, _, pinned = br.read_python_pins(python_pins)
+        file = pinned["macos-arm64"][0]
+        data = bytearray(read(os.path.join(py, file)))
+        data[-1] ^= 1  # the same size, another content
+        write(os.path.join(py, file), bytes(data))
+        with self.assertRaisesRegex(br.ReleaseError, r"SHA-256 .* python-pins\.json pins .* refused"):
+            self.build(out, py, pins, python_pins)
         self.assertFalse(os.path.exists(out))
 
-    def test_a_missing_python_zip_is_refused(self):
-        py = self.tmp()
-        pins = fake_pythons(py)
-        os.remove(os.path.join(py, "python-%s-embed-amd64.zip" % FAKE_PY))
-        with self.assertRaisesRegex(br.ReleaseError, "missing"):
-            br.build(repo_version(), os.path.join(self.tmp(), "dist"), root=ROOT, python_zips=py, pins=pins, epoch=EPOCH, log=lambda s: None)
+    def test_a_missing_tarball_or_zip_is_refused(self):
+        for name in ("python-%s-embed-amd64.zip" % FAKE_PY, "cpython-%s+%s-aarch64-apple-darwin-install_only_stripped.tar.gz" % (FAKE_PY, FAKE_RELEASE)):
+            py = self.tmp()
+            pins, python_pins = fake_pythons(py)
+            os.remove(os.path.join(py, name))
+            with self.assertRaisesRegex(br.ReleaseError, "missing"):
+                self.build(os.path.join(self.tmp(), "dist"), py, pins, python_pins)
 
-    def test_without_python_zips_only_linux_and_macos_are_built(self):
+    def test_fake_files_never_pass_the_real_pins(self):
+        out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+        _, python_pins = fake_pythons(py, "3.14.8")  # the real version and file names of the Windows zips, but not the real files
+        with self.assertRaisesRegex(br.ReleaseError, "install-windows.ps1 pins"):
+            br.build(repo_version(), out, root=ROOT, python_dir=py, python_pins=python_pins, epoch=EPOCH, log=lambda s: None)
+        self.assertFalse(os.path.exists(out))
+
+    def test_without_python_dir_nothing_is_built(self):
+        """Every archive carries its Python: there is no build without one (and no half build of the archives that have it)."""
         out = os.path.join(self.tmp(), "dist")
-        logs = []
-        with contextlib.redirect_stderr(io.StringIO()):
-            names = br.build(repo_version(), out, root=ROOT, epoch=EPOCH, log=logs.append)
-        self.assertEqual(sorted(names), sorted("nuc-console-%s-%s.tar.gz" % (repo_version(), s) for s in ("linux", "macos")))
-        self.assertTrue([m for m in logs if "windows archives skipped" in m])
+        pins, python_pins = fake_pythons(self.tmp())
+        with self.assertRaisesRegex(br.ReleaseError, "--python-dir is required"):
+            br.build(repo_version(), out, root=ROOT, pins=pins, python_pins=python_pins, epoch=EPOCH, log=lambda s: None)
+        self.assertFalse(os.path.exists(out))
+        r = subprocess.run([sys.executable, SCRIPT, "--version", repo_version(), "--out", out, "--pins", pins, "--python-pins", python_pins],
+                           capture_output=True, text=True, env=dict(os.environ, SOURCE_DATE_EPOCH=str(EPOCH)))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--python-dir is required", r.stderr)
+        self.assertFalse(os.path.exists(out))
+
+    def test_a_pin_file_with_a_null_refuses_even_when_the_files_are_there(self):
+        out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+        pins, python_pins = fake_pythons(py)
+        doc = json.loads(read(python_pins).decode("utf-8"))
+        doc["targets"]["linux-arm64"]["sha256"] = None
+        write(python_pins, json.dumps(doc))
+        with self.assertRaisesRegex(br.ReleaseError, "not pinned yet"):
+            self.build(out, py, pins, python_pins)
+        self.assertFalse(os.path.exists(out))
+
+    def python_tree_is_refused(self, members, message):
+        """A tarball whose hash IS pinned (so the pin does not stop it) but whose content the build must refuse."""
+        out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+        windows, _ = fake_pythons(py)
+        tarballs = {s: fake_tarball(fake_python_tree(s)) for s in br.STANDALONE_TARGETS}
+        tarballs["linux-arm64"] = fake_tarball(members)
+        python_pins = standalone_pins(py, tarballs)
+        with self.assertRaisesRegex(br.ReleaseError, message):
+            self.build(out, py, windows, python_pins)
+        self.assertFalse(os.path.exists(out))
+
+    def test_a_python_tree_that_could_be_turned_against_the_user_is_refused(self):
+        tree = fake_python_tree("evil")
+        cases = [
+            ("not inside python/", tree + [("python/../evil", "file", b"x", 0o644)]),
+            ("not inside python/", tree + [("../evil", "file", b"x", 0o644)]),
+            ("not inside python/", tree + [("/etc/evil", "file", b"x", 0o644)]),
+            ("not inside python/", tree + [("other/evil", "file", b"x", 0o644)]),
+            ("a link must be relative", tree + [("python/bin/evil", "sym", "/etc/passwd", 0o777)]),
+            ("a link must be relative", tree + [("python/bin/evil", "sym", "../../../../etc", 0o777)]),
+            ("a link must be relative", tree + [("python/bin/evil", "sym", "../..", 0o777)]),
+            ("below a symbolic link", tree + [("python/lib/via", "sym", "python3.99", 0o777), ("python/lib/via/evil", "file", b"x", 0o644)]),
+            ("device or a pipe", tree + [("python/dev", "dev", None, 0o666)]),
+            ("no python/bin/python3", [m for m in tree if m[0] != "python/bin/python3"]),
+        ]
+        for message, members in cases:
+            self.python_tree_is_refused(members, message)
+
+    def test_a_hard_link_in_the_tarball_becomes_a_copy_and_a_link_that_stays_inside_is_kept(self):
+        out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+        windows, _ = fake_pythons(py)
+        tree = fake_python_tree("hard") + [("python/bin/pip3.99", "hard", "python/bin/pip3", 0o755),
+                                           ("python/lib/python3.99/bin", "sym", "../../bin", 0o777)]
+        tarballs = {s: fake_tarball(fake_python_tree(s)) for s in br.STANDALONE_TARGETS}
+        tarballs["macos-x86_64"] = fake_tarball(tree)
+        names = self.build(out, py, windows, standalone_pins(py, tarballs))
+        members = tar_members(os.path.join(out, "nuc-console-%s-macos-x86_64.tar.gz" % repo_version()))
+        top = "nuc-console-%s/python/" % repo_version()
+        self.assertEqual(members[top + "bin/pip3.99"][1], b"#!/bin/sh\necho pip\n")  # the data of its target
+        self.assertTrue(members[top + "bin/pip3.99"][0].isfile())
+        self.assertEqual(mode_of(members[top + "bin/pip3.99"][0]), 0o755)
+        self.assertTrue(members[top + "lib/python3.99/bin"][0].issym())
+        self.assertEqual(len(names), 6)
+
+    def test_a_tarball_that_is_not_a_tarball_is_refused(self):
+        out, py = os.path.join(self.tmp(), "dist"), self.tmp()
+        windows, _ = fake_pythons(py)
+        tarballs = {s: fake_tarball(fake_python_tree(s)) for s in br.STANDALONE_TARGETS}
+        tarballs["linux-x86_64"] = gzip.compress(b"not a tar file at all")
+        python_pins = standalone_pins(py, tarballs)
+        with self.assertRaisesRegex(br.ReleaseError, "unreadable|not a .tar.gz"):
+            self.build(out, py, windows, python_pins)
+        tarballs["linux-x86_64"] = b"not even gzip"
+        python_pins = standalone_pins(py, tarballs)
+        with self.assertRaisesRegex(br.ReleaseError, "not a .tar.gz"):
+            self.build(out, py, windows, python_pins)
+        self.assertFalse(os.path.exists(out))
 
     def test_a_bad_source_date_epoch_is_refused(self):
         with mock.patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "yesterday"}):
@@ -795,8 +894,11 @@ class Refusals(TempDirCase):
     def test_a_symbolic_link_cannot_be_shipped(self):
         root = make_tree(self.tmp())
         os.symlink("/etc/passwd", os.path.join(root, "docs", "passwd"))
+        py = self.tmp()
+        pins, python_pins = fake_pythons(py)
         with self.assertRaisesRegex(br.ReleaseError, "symbolic link"):
-            br.build("9.9.9", os.path.join(self.tmp(), "dist"), root=root, epoch=EPOCH, log=lambda s: None)
+            br.build("9.9.9", os.path.join(self.tmp(), "dist"), root=root, python_dir=py, pins=pins, python_pins=python_pins, epoch=EPOCH,
+                     log=lambda s: None)
 
 
 # ---- a small tree: new files (the portable launcher, the updater) get in without touching the script -------------------
@@ -838,23 +940,26 @@ def make_tree(base, version="9.9.9"):
 class NewFilesGetIn(TempDirCase):
     def build_all(self, root):
         out, py = os.path.join(self.tmp(), "dist"), self.tmp()
-        pins = fake_pythons(py)
-        br.build("9.9.9", out, root=root, python_zips=py, pins=pins, epoch=EPOCH, log=lambda s: None)
+        pins, python_pins = fake_pythons(py)
+        br.build("9.9.9", out, root=root, python_dir=py, pins=pins, python_pins=python_pins, epoch=EPOCH, log=lambda s: None)
         top = "nuc-console-9.9.9"
-        return (top, tar_members(os.path.join(out, top + "-linux.tar.gz")), tar_members(os.path.join(out, top + "-macos.tar.gz")),
+        return (top, tar_members(os.path.join(out, top + "-linux-x86_64.tar.gz")), tar_members(os.path.join(out, top + "-macos-arm64.tar.gz")),
                 zip_members(os.path.join(out, top + "-windows-x64.zip")))
 
     def test_layout_of_a_small_tree(self):
         top, linux, macos, win = self.build_all(make_tree(self.tmp()))
-        files = lambda members: sorted(n[len(top) + 1:] for n, (_, d) in members.items() if d is not None)
-        self.assertEqual(files(linux), ["LICENSE", "README.md", "SECURITY.md", "bin/tool", "config/config.ini", "docs/INSTALL.md", "install.sh",
-                                       "scripts/s.sh", "src/collect_windows.py", "src/collector.py", "src/nuc_config.py", "systemd/a.service"])
-        self.assertEqual(files(macos), ["LICENSE", "README.md", "SECURITY.md", "bin/tool", "config/config.ini", "docs/INSTALL.md", "install-macos.sh",
-                                       "install.sh", "launchd/a.plist", "scripts/s.sh", "src/collect_windows.py", "src/collector.py",
-                                       "src/nuc_config.py"])
+        files = lambda members: sorted(n[len(top) + 1:] for n, (m, d) in members.items() if d is not None or (hasattr(m, "issym") and m.issym()))
+        no_python = lambda names: [n for n in names if not n.startswith("python/")]
+        self.assertEqual(no_python(files(linux)), ["LICENSE", "README.md", "SECURITY.md", "bin/tool", "config/config.ini", "docs/INSTALL.md", "install.sh",
+                                                   "scripts/s.sh", "src/collect_windows.py", "src/collector.py", "src/nuc_config.py", "systemd/a.service"])
+        self.assertEqual(no_python(files(macos)), ["LICENSE", "README.md", "SECURITY.md", "bin/tool", "config/config.ini", "docs/INSTALL.md", "install-macos.sh",
+                                                   "install.sh", "launchd/a.plist", "scripts/s.sh", "src/collect_windows.py", "src/collector.py",
+                                                   "src/nuc_config.py"])
         self.assertEqual(files(win), ["LICENSE", "README.md", "SECURITY.md", "bin/tool.cmd", "config/config.ini", "docs/INSTALL.md",
                                       "install-windows.cmd", "install-windows.ps1", "python/python-%s-embed-amd64.zip" % FAKE_PY,
                                       "src/collect_windows.py", "src/collector.py", "src/nuc_config.py"])
+        for members in (linux, macos):  # the Python of each: a tree with python/bin/python3 in it
+            self.assertIn(top + "/python/bin/python3", members)
 
     def test_the_portable_launcher_and_the_updater_are_picked_up(self):
         root = make_tree(self.tmp())
@@ -897,8 +1002,10 @@ class NewFilesGetIn(TempDirCase):
         root = make_tree(self.tmp())
         out = os.path.join(root, "out")
         write(os.path.join(out, "stale.txt"), "old build")
-        br.build("9.9.9", out, root=root, epoch=EPOCH, log=lambda s: None)
-        for name in ("nuc-console-9.9.9-linux.tar.gz", "nuc-console-9.9.9-macos.tar.gz"):
+        py = self.tmp()
+        pins, python_pins = fake_pythons(py)
+        br.build("9.9.9", out, root=root, python_dir=py, pins=pins, python_pins=python_pins, epoch=EPOCH, log=lambda s: None)
+        for name in ("nuc-console-9.9.9-linux-x86_64.tar.gz", "nuc-console-9.9.9-macos-arm64.tar.gz"):
             self.assertFalse([n for n in tar_members(os.path.join(out, name)) if "/out/" in n or "stale" in n], name)
 
     def test_a_tree_inside_another_repository_is_not_a_checkout(self):
@@ -932,16 +1039,20 @@ class GitCheckout(TempDirCase):
         with mock.patch.dict(os.environ):
             os.environ.pop("SOURCE_DATE_EPOCH", None)
             with contextlib.redirect_stderr(io.StringIO()):
-                br.build("9.9.9", out, root=root, log=lambda s: None)
+                py = self.tmp()
+                pins, python_pins = fake_pythons(py)
+                br.build("9.9.9", out, root=root, python_dir=py, pins=pins, python_pins=python_pins, log=lambda s: None)
         top = "nuc-console-9.9.9"
-        members = tar_members(os.path.join(out, top + "-linux.tar.gz"))
+        members = tar_members(os.path.join(out, top + "-linux-x86_64.tar.gz"))
         self.assertNotIn(top + "/notes.txt", members)
         self.assertEqual(mode_of(members[top + "/bin/tool"][0]), 0o755)
         self.assertEqual(mode_of(members[top + "/install.sh"][0]), 0o755)
         self.assertEqual(mode_of(members[top + "/src/collector.py"][0]), 0o644)
         commit_time = int(self.git(root, "log", "-1", "--format=%ct").strip())
         self.assertEqual(commit_time, 1580608922)
-        self.assertEqual({m.mtime for m, _ in members.values()}, {commit_time})  # the default time: the last commit's
+        # the default time: the last commit's (the Python keeps the times of its tarball)
+        self.assertEqual({m.mtime for n, (m, _) in members.items() if n != top + "/python" and not n.startswith(top + "/python/")},
+                         {commit_time})
 
     def test_uncommitted_changes_are_reported(self):
         root = self.checkout()
@@ -1016,8 +1127,23 @@ class Workflow(unittest.TestCase):
         self.assertIn("gh release create", release)
         self.assertIn("--verify-tag", release)
         self.assertLess(release.index("attest-build-provenance"), release.index("gh release create"))
-        self.assertIn("--python-zips", self.jobs["build"])  # the Windows archives carry their Python
+        self.assertIn("--python-dir", self.jobs["build"])  # every archive carries its Python
         self.assertIn("cmp ", self.jobs["build"])  # and the build is made twice and compared
+
+    def test_six_archives_are_expected_and_every_python_is_checked_before_the_build(self):
+        build, release = self.jobs["build"], self.jobs["release"]
+        for suffix in ("linux-x86_64.tar.gz", "linux-arm64.tar.gz", "macos-arm64.tar.gz", "macos-x86_64.tar.gz", "windows-x64.zip", "windows-arm64.zip"):
+            self.assertIn(suffix, build, suffix)
+            self.assertIn(suffix, release, suffix)
+            self.assertIn("nuc-console-9.9.9-" + suffix, br.archive_names("9.9.9"), suffix)  # the names the script builds
+        for job in (build, release):
+            self.assertIn("-eq 7", job)  # the six archives and SHA256SUMS
+        self.assertIn("-eq 6", build)  # the six Pythons
+        self.assertIn("--list-python", build)  # the files and their hashes come from the pins, not from the workflow
+        self.assertIn("sha256sum --check -", build)
+        self.assertLess(build.index("--list-python"), build.index("tools/build_release.py --version"))
+        self.assertNotIn("linux.tar.gz", self.text)  # the old names are gone
+        self.assertNotIn("macos.tar.gz", self.text)
 
     def test_no_expression_is_pasted_into_a_script(self):
         # ${{ }} in a run: block is shell injection (a tag name, an input): values go through env: and are quoted there
@@ -1032,6 +1158,29 @@ class Workflow(unittest.TestCase):
             if in_run or re.match(r"\s*(- )?run:\s*\S", line):
                 self.assertNotIn("${{", line)
         self.assertNotIn("pull_request_target", self.text)
+
+
+class PinsWorkflow(unittest.TestCase):
+    """.github/workflows/ai-pins.yml: the python-pins job reads what tools/python-pins.json needs, and can change nothing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = read(os.path.join(ROOT, ".github", "workflows", "ai-pins.yml")).decode("utf-8").replace("\r\n", "\n")
+
+    def test_the_python_pins_job_runs_the_script_that_prints_the_json(self):
+        self.assertRegex(self.text, r"(?m)^  python-pins:$")
+        job = self.text[self.text.index("  python-pins:"):self.text.index("  for-real:")]
+        self.assertIn("python3 tools/python_pins.py", job)
+        self.assertIn("--download", job)  # the real bytes are compared with the numbers
+        self.assertIn("GITHUB_TOKEN", job)
+        self.assertNotIn("write", job)
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")  # nothing here can write
+        self.assertEqual(len(re.findall(r"^\s+\w[\w-]*: write\b", self.text, re.M)), 0)
+        self.assertIn("tools/python-pins.json", self.text)  # a pull request that changes the pins runs it
+        self.assertIn("workflow_dispatch:", self.text)
+
+    def test_the_script_the_workflow_runs_exists(self):
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "tools", "python_pins.py")))
 
 
 if __name__ == "__main__":
