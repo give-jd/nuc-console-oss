@@ -66,6 +66,7 @@ def load(path=None):
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True}  # notify.py; the bot token is never here
+    cfg["ui"] = {"web": "classic", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
             if os.path.exists(path):  # read() ignores a file it cannot open: that is not "no config.ini"
@@ -208,6 +209,14 @@ def load(path=None):
             ai["timeout_s"] = max(10, min(600, cp.getint("ai", "timeout_s", fallback=ai["timeout_s"])))
         except ValueError:
             print(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)", file=sys.stderr)
+    try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
+        import prefs  # here, not at the top: prefs reads SECTIONS from this module
+        keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours
+        cfg["ui"], warnings = prefs.parse_ui(keys, cfg["sections"])
+        for w in warnings:
+            print(f"nuc-console: {path}: {w}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001  (a bug in the optional interface settings must never take the collector or the screen down)
+        print(f"nuc-console: {path}: [ui] ignored: {e}", file=sys.stderr)
     return cfg
 
 
