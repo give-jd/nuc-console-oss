@@ -400,6 +400,20 @@ class CollectNet(unittest.TestCase):
         self.assertEqual((ls[22].get("unit"), ls[8080].get("unit"), ls[6379].get("unit")), ("ssh.service", "docker.service", None))
         self.assertFalse([x for x in d["listeners"] if "pid" in x])                # the pid never reaches net.json
 
+    def test_docker_installed_but_not_running_is_a_note_not_an_error(self):
+        self.as_linux()
+        real = collector.run
+        for err in ("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+                    "failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct"):
+            collector.LINKS_SEEN.clear()
+            collector.run = lambda name, *a, **k: (1, "", err) if name == "docker" else real(name, *a, **k)
+            d = collector.collect_net()
+            self.assertNotIn("dbs", d["errors"], err)
+            self.assertIn("dbs", d["absent"])
+            self.assertEqual(d["notes"]["dbs"], "Docker is installed but its engine is not running")
+        collector.run = lambda name, *a, **k: (1, "", "permission denied") if name == "docker" else real(name, *a, **k)
+        self.assertIn("dbs", collector.collect_net()["errors"])                     # any other failure is still an error
+
     def test_a_nightly_job_is_remembered_until_it_is_removed(self):
         """Exited (0): off the container lists, but its connections stay on the map for 24 h, until `docker rm`."""
         self.as_linux()

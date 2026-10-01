@@ -166,6 +166,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
 - A long host name no longer pushes the problem status off the header (`✖ 4 PROBLEMS` was cut to `✖ 4 PROBLE`).
+- Docker installed but not running (Docker Desktop closed, the daemon stopped) is shown as such in DATABASE, not as a collector
+  error on every cycle.
 
 ## [1.4.0] - 2026-10-01
 
