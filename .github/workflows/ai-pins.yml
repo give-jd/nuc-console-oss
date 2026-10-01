@@ -1,0 +1,30 @@
+name: ai-pins
+
+# The AI manifest (src/aisetup.py: RUNTIME, MODELS) pins a commit, a SHA-256 and a size for every download. This job reads them
+# from the Hugging Face and GitHub APIs (`aisetup.py pins`) on a machine with network access and shows them in the job summary,
+# for a maintainer to compare and paste. It never changes the repository and never fails a pull request.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - src/aisetup.py
+      - .github/workflows/ai-pins.yml
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: read the values to pin
+        continue-on-error: true
+        run: python3 src/aisetup.py pins | tee pins.txt
+      - name: summary
+        if: always()
+        run: |
+          { echo '```'; cat pins.txt 2>/dev/null || echo "no output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

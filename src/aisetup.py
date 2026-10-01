@@ -1335,7 +1335,9 @@ def pin_from_hub(info, tree, path):
                 raise SetupError("%s is not an LFS file with a SHA-256 on the Hub" % path)
             lic = (info.get("cardData") or {}).get("license") or next((t[8:] for t in info.get("tags", []) if t.startswith("license:")), "?")
             return {"revision": rev, "sha256": lfs["oid"], "size": lfs["size"], "license": lic}
-    raise SetupError("no file %s in that repository" % path)
+    near = sorted(e["path"] for e in (tree if isinstance(tree, list) else [])
+                  if isinstance(e, dict) and str(e.get("path", "")).lower().endswith(".gguf") and "q4_k_m" in str(e.get("path", "")).lower())
+    raise SetupError("no file %s in that repository" % path + ("; Q4_K_M files there: %s" % ", ".join(near[:5]) if near else ""))
 
 
 def pin_from_release(release, url):
@@ -1354,6 +1356,10 @@ def cmd_pins(args, runtime=None, models=None):
     models = models if models is not None else MODELS
     bad = 0
     print("# paste into RUNTIME / MODELS of aisetup.py, check the licence, run the tests, try `setup` and `serve` for real\n")
+    try:  # the newest runtime knows the newest model families: say which one it is
+        print("RUNTIME latest release: %s" % fetch_json("https://api.github.com/repos/Mozilla-Ocho/llamafile/releases/latest").get("tag_name"))
+    except (OSError, ValueError, http.client.HTTPException) as e:
+        print("RUNTIME latest release: ERROR %s" % safe(e, 200))
     try:
         rel = fetch_json("https://api.github.com/repos/Mozilla-Ocho/llamafile/releases/tags/" + runtime["version"])
         print("RUNTIME %s: %s" % (runtime["version"], json.dumps(pin_from_release(rel, runtime["url"]))))
