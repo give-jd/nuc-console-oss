@@ -1,11 +1,11 @@
 {
   "_comment": "The Python that the Linux and macOS archives carry: python-build-standalone (github.com/astral-sh/python-build-standalone), the install_only_stripped build, one tarball per target. null = NOT PINNED YET: tools/build_release.py refuses to build while any value is null, and so does the release workflow. Never type these values from memory: run the python-pins job of .github/workflows/ai-pins.yml (or python3 tools/python_pins.py on a machine with network access) and paste the JSON it prints over this file.",
-  "python": null,
-  "release": null,
+  "python": "3.13.15",
+  "release": "20260929",
   "targets": {
-    "linux-x86_64": {"target": "x86_64-unknown-linux-gnu", "file": null, "sha256": null, "size": null},
-    "linux-arm64": {"target": "aarch64-unknown-linux-gnu", "file": null, "sha256": null, "size": null},
-    "macos-arm64": {"target": "aarch64-apple-darwin", "file": null, "sha256": null, "size": null},
-    "macos-x86_64": {"target": "x86_64-apple-darwin", "file": null, "sha256": null, "size": null}
+    "linux-x86_64": {"target": "x86_64-unknown-linux-gnu", "file": "cpython-3.13.15+20260929-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz", "sha256": "c552deaf9ed0e678dee4ccc760d6dcd7cab33f1bd43e8037123b4a4db8508e14", "size": 35004265},
+    "linux-arm64": {"target": "aarch64-unknown-linux-gnu", "file": "cpython-3.13.15+20260929-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz", "sha256": "3807936bef22d3e347454df4f8774c786f98c7caa5e7328425e7b40766a9cff8", "size": 29289926},
+    "macos-arm64": {"target": "aarch64-apple-darwin", "file": "cpython-3.13.15+20260929-aarch64-apple-darwin-install_only_stripped.tar.gz", "sha256": "d66c67f16148c7454b1509c32747175f7669c8b8e105b97b92a0000d66af6e6e", "size": 25207202},
+    "macos-x86_64": {"target": "x86_64-apple-darwin", "file": "cpython-3.13.15+20260929-x86_64-apple-darwin-install_only_stripped.tar.gz", "sha256": "73b503a2d3f47f0601265d7936744b77dc4ee75d2a3e88a470594a014dcf6822", "size": 24949564}
   }
 }

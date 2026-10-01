@@ -6,7 +6,8 @@ Thanks for helping. The project is small on purpose: **Python standard library o
 
 ```bash
 git clone <this repository> && cd nuc-console
-python3 -m unittest discover -s tests            # must pass on Python 3.8+, on Linux, macOS and Windows (CI runs all three)
+python3 -m unittest discover -s tests            # must pass on Python 3.8+, on Linux, macOS and Windows (CI runs all three, once per commit of a PR and on main;
+                                                 # a newer commit on the same PR cancels the older run)
 python3 src/render.py --once --demo --cols 200 --rows 50
 python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
 python3 src/render.py --once --demo --view ai --cols 200 --rows 50           # the AI screen: three invented machines (--demo-os windows|darwin for the others)
