@@ -26,6 +26,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `docker_disk` | DOCKER · DISK | `docker system df` |
 | `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels (thermal: Linux only) | — (reads `/proc`, `/sys`; macOS/Windows: system calls) |
 | `cpu` | the **CPU** screen: per-core load and frequency, temperatures, top processes, like htop (console key `c`, web `cpu` link) | `/proc`, `/sys` (Linux); system calls and `ps` (macOS); Windows API. Temperatures on macOS/Windows: the collector (`powermetrics`; WMI, LibreHardwareMonitor/OpenHardwareMonitor if installed) |
+| `health` | the **HEALTH** screen: which apps, services and containers cause trouble over time (CPU, memory, crashes, restarts, OOM), disks filling up, hot hours (console key `h`, web `health` link) | the collector keeps `history.db` (SQLite): per-app CPU/memory per hour, events and log *templates* from `journalctl` (Linux), the Event Log (Windows), crash reports (macOS) |
 | `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console keys `m`/`Tab`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
@@ -39,6 +40,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `details` | `yes` | The overview cuts a list only when it really does not fit; those sections then get **Details** pages showing everything, rotating on the monitor (it has no keyboard). `no`: never rotate |
 | `overview_seconds` | `45` | How long the overview stays before the Details pages (10-600) |
 | `cpu_in_rotation` | `no` | `yes`: the CPU screen joins the pages the monitor rotates through (a monitor with no keyboard) |
+| `health_in_rotation` | `no` | `yes`: the HEALTH screen joins the pages the monitor rotates through |
 | `map_in_rotation` | `no` | `yes`: the MAP, expanded as far as it fits, joins the pages the monitor rotates through (a monitor with no keyboard). The interactive MAP is always one key / one click away |
 | `rotate_seconds` | `15` | How long each page stays in `rotate` mode and each Details page (3-600) |
 | `refresh_seconds` | `2` | Seconds between two redraws, **1–10** (smaller or larger values are clamped): the console, the full-screen window and the browser pages, where the **− / +** links next to "refresh every" change it while you look. Faster = livelier CPU and traffic bars, a little more CPU |
