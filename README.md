@@ -107,27 +107,33 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | | |
 |---|---|
 | OS | **Linux** with systemd (Debian/Ubuntu/Fedora/Arch… anything with `systemd`, `/proc`, `/sys`) · **macOS** 11 or newer · **Windows** 10/11 or Server 2019+ (64-bit x86 or ARM) |
-| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, shipped in the release ZIP (or downloaded once, hash-checked, and kept for the next update) |
+| Python | 3.8 or newer, standard library only, and **none needed on the machine for a release archive: every archive carries its own** (Linux and macOS: a python-build-standalone CPython, Windows: the official embeddable Python). From a clone: Linux the system's `python3`; macOS a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing; Windows a private copy of the embeddable Python, downloaded once, hash-checked, and kept for the next update |
 | Root | only for the installers, the updater of an installed one and the collector service (Windows: Administrator, the collector runs as SYSTEM). The [portable run](docs/PORTABLE.md) needs none (what needs it then shows less) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`, `nvidia-smi` (the AI screen's NVIDIA memory). macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
 | Display | Linux: a virtual terminal. macOS/Windows: it opens at every login, your choice how — a normal browser window (default) or full screen (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
 
 ## Download
 
-Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system and a `SHA256SUMS` file, built and attested by CI
-(`X.Y.Z` is the release number):
+Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system **and processor** and a `SHA256SUMS` file, built and attested by CI
+(`X.Y.Z` is the release number). **Every archive has everything it needs, its own Python included: download, unpack, use, with no Python on the machine and no
+network.**
 
 | System | Archive | Run it without installing | Install |
 |---|---|---|---|
-| Linux | `nuc-console-X.Y.Z-linux.tar.gz` | `tar xzf nuc-console-X.Y.Z-linux.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the terminal) | `sudo ./install.sh` |
-| macOS | `nuc-console-X.Y.Z-macos.tar.gz` | `tar xzf nuc-console-X.Y.Z-macos.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the browser) | `sudo ./install.sh` |
+| Linux, Intel/AMD 64-bit | `nuc-console-X.Y.Z-linux-x86_64.tar.gz` | `tar xzf nuc-console-X.Y.Z-linux-x86_64.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the terminal) | `sudo ./install.sh` |
+| Linux, ARM 64-bit (Raspberry Pi 4/5 64-bit...) | `nuc-console-X.Y.Z-linux-arm64.tar.gz` | the same | `sudo ./install.sh` |
+| macOS, Apple Silicon | `nuc-console-X.Y.Z-macos-arm64.tar.gz` | `tar xzf nuc-console-X.Y.Z-macos-arm64.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the browser) | `sudo ./install.sh` |
+| macOS, Intel | `nuc-console-X.Y.Z-macos-x86_64.tar.gz` | the same | `sudo ./install.sh` |
 | Windows, Intel/AMD | `nuc-console-X.Y.Z-windows-x64.zip` | extract it, double-click `run.cmd` (in the browser) | double-click `install-windows.cmd` |
 | Windows on ARM | `nuc-console-X.Y.Z-windows-arm64.zip` | the same | the same |
 
+`uname -m` says which processor a Linux or macOS machine has (`x86_64`, or `aarch64` / `arm64`); 32-bit systems have no archive.
+
 - **Check it**: `sha256sum --ignore-missing -c SHA256SUMS` (macOS: `shasum -a 256`; Windows: `Get-FileHash`) and
   `gh attestation verify <archive> --repo give-jd/nuc-console-oss`: [how, and what they prove](docs/INSTALL.md#check-it).
-- **Offline**: the Windows ZIPs carry the official embeddable Python, so the install needs no download. Nothing is ever downloaded twice: the
-  installers keep what they fetched and reuse it.
+- **Offline**: every archive carries its Python (Linux and macOS: python-build-standalone, unpacked in `python/`; Windows: the official embeddable Python), so
+  running or installing it needs no download and no Python on the machine. [Where it comes from, and how it is pinned and verified](SECURITY.md#the-python-in-the-archives).
+  Nothing is ever downloaded twice: what an installer of a clone fetches is kept and reused.
 - **Portable**: `./run.sh` / `run.cmd` install nothing, create no service and write only to `./data`; Ctrl+C stops everything.
   Without root it still runs, and shows less. [docs/PORTABLE.md](docs/PORTABLE.md).
 - **Update**: `nuc-console-update --check` says whether a newer release exists, `nuc-console-update` (`sudo` for an installed one) updates it.
