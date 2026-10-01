@@ -98,6 +98,23 @@ class Web(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_full_view_shows_everything_the_overview_cuts(self):
+        saved = dict(render.CFG["webapps"])
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}   # 20 declared apps: the compact overview cuts them
+        render.CFG["details"] = True
+        try:
+            self.open.cache.clear()
+            _, _, short = get(self.open, "/?cols=100")
+            _, _, full = get(self.open, "/?cols=100&full=1")
+        finally:
+            render.CFG["webapps"] = saved
+            render.CFG["details"] = False
+        self.assertNotIn("app19", short)
+        self.assertIn("more", short)
+        for i in range(20):
+            self.assertIn("app%02d" % i, full)
+        self.assertIn("full details", short)
+
     def test_cols_parameter_is_clamped(self):
         self.assertEqual(get(self.open, "/?cols=abc")[0], 200)
         self.assertEqual(get(self.open, "/?cols=5")[0], 200)

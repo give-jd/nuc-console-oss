@@ -59,6 +59,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | Path | |
 |---|---|
 | `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` |
+| `/?full=1` | the overview **plus every Details page**: everything the overview cuts ("… +N more"), stacked |
 | `/healthz` | `ok` (no data) |
 
 Everything else is 404; any method but GET is 405. Security headers: strict CSP (`default-src 'none'`), `no-store`, `nosniff`,

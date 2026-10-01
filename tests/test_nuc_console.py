@@ -14,6 +14,7 @@ import re
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 render.MODE = "rotate"  # page tests assume the 3-page rotation; overview tests pass mode= explicitly
 render.CFG["spacing"] = 0  # legacy layout tests count lines: spacing has its own tests
+render.CFG["details"] = False  # legacy tests expect one overview slide; detail pages have their own tests
 
 CONT = {"ts": time.time(), "containers": [
     {"name": "web-1", "status": "Up 3 days", "state": "running", "project": "shop",
@@ -1153,6 +1154,73 @@ class SectionOrder(unittest.TestCase):
         tiny = "\n".join(render.ANSI.sub("", l) for l in render.ov_sistema(sm, 76, 3))
         self.assertNotIn(" 13 ", tiny)                                                # only the tiny-console levels compress
         self.assertIn("core ", tiny)
+
+
+class DetailPages(unittest.TestCase):
+    """What the overview cuts ("… +N more") is shown in full on rotating detail pages: that monitor has no keyboard."""
+
+    def setUp(self):
+        self.saved = (dict(render.CFG["webapps"]), render.CFG["details"])
+        render.CFG["details"] = True
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}
+        self.sm = {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": {"local": [], "ssh": []}, "fs": []}
+
+    def tearDown(self):
+        render.CFG["webapps"], render.CFG["details"] = self.saved
+        render.FULL = False
+
+    def _slides(self, w, h):
+        return render.slides(self.sm, CONT, NET, w, h - 2, BOOT, False, mode="overview")
+
+    def test_truncated_sections_get_detail_pages_with_everything(self):
+        sl = self._slides(118, 33)
+        names = [x[0] for x in sl]
+        self.assertEqual(names[0], "Overview")
+        self.assertIn("Details", names)
+        overview = render.ANSI.sub("", "\n".join(sl[0][3]))
+        details = render.ANSI.sub("", "\n".join("\n".join(x[3]) for x in sl if x[0] == "Details"))
+        self.assertIn("more", overview)
+        self.assertNotIn("app19", overview)
+        for i in range(20):
+            self.assertIn("app%02d" % i, details)
+        self.assertNotIn("… +", details)                                   # nothing is hidden on the detail pages
+        for x in sl:
+            self.assertLessEqual(len(x[3]), 31)                             # every page fits the screen
+
+    def test_no_detail_pages_when_nothing_is_cut_or_when_switched_off(self):
+        render.CFG["webapps"] = {}
+        self.assertEqual([x[0] for x in render.slides(self.sm, {"ts": time.time(), "containers": []}, dict(NET, listeners=[]), 226, 60, None, False, mode="overview")].count("Details"), 0)
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}
+        render.CFG["details"] = False
+        self.assertNotIn("Details", [x[0] for x in self._slides(118, 33)])
+
+    def test_full_flag_never_leaks_and_trunc_only_counts_the_final_level(self):
+        self._slides(118, 33)
+        self.assertFalse(render.FULL)
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(2)}
+        render.page_overview(self.sm, CONT, NET, BOOT, 226, 60)
+        self.assertNotIn("webapps", render.TRUNC)                           # 2 declared apps plus the ones found fit the 12-row cap: nothing to detail for them
+        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}
+        render.page_overview(self.sm, CONT, NET, BOOT, 226, 60)
+        self.assertIn("webapps", render.TRUNC)
+
+    def test_rotation_gives_the_overview_longer_and_cycles(self):
+        sl = [("Overview", 1, 1, []), ("Details", 1, 2, []), ("Details", 2, 2, [])]
+        o, r = render.CFG["overview_seconds"], render.ROTATE_S
+        self.assertEqual([render.pick_slide(sl, t) for t in (0, o - 1, o, o + r - 1, o + r, o + 2 * r - 1, o + 2 * r)], [0, 0, 1, 1, 2, 2, 0])
+        one = [("Overview", 1, 1, [])]
+        self.assertEqual(render.pick_slide(one, 12345), 0)
+
+    def test_config_details_and_overview_seconds(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
+            f.write("[dashboard]\ndetails = no\noverview_seconds = 5\n")
+        try:
+            cfg = nuc_config.load(f.name)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual((cfg["details"], cfg["overview_seconds"]), (False, 10))   # clamped to 10-600
+        self.assertEqual((nuc_config.load("/nonexistent")["details"], nuc_config.load("/nonexistent")["overview_seconds"]), (True, 45))
 
 
 class WebAppsAndProblems(unittest.TestCase):

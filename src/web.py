@@ -163,7 +163,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             cols = 0
         cols = max(60, min(300, (cols + 10) // 20 * 20)) if cols else srv.cfg["columns"]  # few distinct sizes: bounded cache and CPU
-        self._send(200, srv.page(cols).encode(), "text/html; charset=utf-8")
+        self._send(200, srv.page(cols, (q.get("full") or [""])[0] == "1").encode(), "text/html; charset=utf-8")
 
     def _no(self):
         self._send(405, b"read-only\n", extra=(("Allow", "GET"),))
@@ -197,14 +197,17 @@ class Server(http.server.ThreadingHTTPServer):
         finally:
             self.slots.release()
 
-    def page(self, cols):
+    def page(self, cols, full=False):
         with self.lock:
-            hit = self.cache.get(cols)
+            hit = self.cache.get((cols, full))
             if hit and time.time() - hit[0] < self.cfg["refresh_seconds"] / 2:
                 return hit[1]
             try:
-                screen, _ = render.render_screen(self.smp, cols - 1, self.cfg["rows"], mode="overview")
-                body = to_html(screen)
+                if full:  # overview + every detail page: nothing hidden behind "… +N more"
+                    body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, cols - 1, self.cfg["rows"], mode="overview"))
+                else:
+                    screen, _ = render.render_screen(self.smp, cols - 1, self.cfg["rows"], mode="overview")
+                    body = to_html(screen)
             except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
                 print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
                 body = "render error (see the service log)"
@@ -212,8 +215,8 @@ class Server(http.server.ThreadingHTTPServer):
             page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     f'<meta http-equiv="refresh" content="{r}"><title>{html.escape(socket.gethostname())} · nuc-console</title>'
                     f'<style>{CSS}</style><pre>{body}</pre><footer>read-only · {time.strftime("%H:%M:%S")} · refreshes every {r}s · '
-                    f'<a href="/?cols=100">compact</a> · <a href="/?cols=200">wide</a></footer></html>')
-            self.cache[cols] = (time.time(), page)
+                    f'<a href="/?cols=100">compact</a> · <a href="/?cols=200">wide</a> · <a href="/?full=1">full details</a></footer></html>')
+            self.cache[(cols, full)] = (time.time(), page)
             return page
 
 

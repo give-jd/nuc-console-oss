@@ -77,8 +77,22 @@ def kv(label, value, lw=13):
     return f"   {c(90, pad(label, lw))}{value}"
 
 
-def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
+FULL = False   # True while the detail pages / full view are built: no section hides items
+TRUNC = set()  # sections that hid items in the last overview ("… +N more"): the detail pages show them in full
+
+
+def lim(seq, n, section):
+    """seq[:n] unless FULL; remembers that `section` hides items so the detail pages can show everything."""
+    if FULL or len(seq) <= n:
+        return seq
+    TRUNC.add(section)
+    return seq[:n]
+
+
+def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
     """Compact list over several lines without splitting items; beyond max_lines the last line ends with '… +N'."""
+    if FULL:
+        max_lines = None
     rows, cur = [], []
     for it in items:
         if cur and indent + vlen(sep.join(cur)) + len(sep) + vlen(it) > w:
@@ -89,6 +103,8 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     rows = [r for r in rows if r]
     if not max_lines or len(rows) <= max_lines:
         return [" " * indent + sep.join(r) for r in rows]
+    if section:
+        TRUNC.add(section)
     rows, hidden = rows[:max_lines], sum(len(r) for r in rows[max_lines:])
     while len(rows[-1]) > 1 and indent + vlen(sep.join(rows[-1])) + 8 > w:  # 8 = "  … +NNN"
         rows[-1].pop()
@@ -739,7 +755,7 @@ def boot_block_lente(b, w, k):
     bl = b.get("blame")
     if bl is None:
         return lines + [unavail_msg(b, "blame")]
-    top = bl[:k]
+    top = lim(bl, k, "boot")
     mx = max((x["s"] for x in top), default=1) or 1
     for x in top:
         n = max(1, round(20 * x["s"] / mx))
@@ -764,7 +780,7 @@ def boot_block_servizi(b, w, k):
     act = [e for e in en if e["state"] == "active"]
     off = [e for e in en if e["state"] != "active"]
     lines.append(f"   {len(en)} enabled   {c(32, f'{len(act)} active')}   {len(off)} inactive (often one-shots already done)")
-    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k)
+    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k, section="boot")
     fail = [e for e in off if e["state"] == "failed"]
     if fail:
         lines += [msg("err", safe(e["unit"]) + " failed") for e in fail]
@@ -794,7 +810,7 @@ def boot_block_journal(b, w, k):
     cap = " (last 500)" if j.get("capped") else ""
     lines.append(f"   {c(31, str(j['err'])) if j['err'] else 0} errors   {c(33, str(j['warn'])) if j['warn'] else 0} warning{cap}")
     room = max(20, w - 45)
-    for e in j["top"][:k]:
+    for e in lim(j["top"], k, "boot"):
         col = 31 if e["pr"] <= 3 else 33
         lines.append(f"   {c(col, '●')} {pad(safe(e['id'])[:26], 27)}{e['n']:>4}×  {c(90, safe(e['last'])[:room])}")
     return lines
@@ -988,12 +1004,12 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
         else:
             new, gone, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
-            for k, v in list(new.items())[:3]:
+            for k, v in lim(list(new.items()), 3, "attention"):
                 port, _, group = k.partition(":")
                 out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})", "port-new"))
-            if len(new) > 3:
+            if len(new) > 3 and not FULL:
                 out.append((3, f"… and {len(new) - 3} more new exposed ports", "port-new"))
-            for k, why in list(changed.items())[:3]:
+            for k, why in lim(list(changed.items()), 3, "attention"):
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
                 out.append((1, plural(len(gone), "port") + " no longer exposed: if intended, sudo nuc-console-accept", "port-gone"))
@@ -1312,7 +1328,9 @@ def firewall_block(net, w, max_rules=None):
                   c(1, "   " + pad("TO", 28) + pad("ACTION", 14) + "FROM")]
         open_all = lambda r: (r["action"].startswith(("ALLOW", "LIMIT")) and r["from"].startswith("Anywhere")
                               and not r["to"].startswith("Anywhere"))  # exposes the port to the world: must be seen first
-        shown = rules_in if max_rules is None else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
+        shown = rules_in if (max_rules is None or FULL) else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
+        if len(shown) < len(rules_in):
+            TRUNC.add("firewall")
         for r in shown:  # no cap: all of them, and the page splits by itself if they do not fit
             row = f"   {pad(safe(r['to'])[:26], 28)}{pad(safe(r['action'])[:12], 14)}{safe(r['from'])}"
             lines.append(c(33, row) if open_all(r) else row)
@@ -1374,7 +1392,7 @@ def stack_lines(cont, w, cap):
         head = (f" {c('1;36', '▸')} {c(1, pad((proj or '(no stack)')[:26], 27))}{len(cts) - bad}/{len(cts)} running   "
                 f"RAM {human(sum(ct['mem'] or 0 for ct in cts))}" + (c(31, f"   ✖ {bad}") if bad else ""))
         items = [(c(32, "●") if ct_ok(ct) else c(31, "✖")) + " " + short_name(ct["name"], proj) for ct in cts]
-        lines += [head] + wrap_items(items, w, indent=5, sep="   ", max_lines=cap)
+        lines += [head] + wrap_items(items, w, indent=5, sep="   ", max_lines=cap, section="containers")
     return lines
 
 
@@ -1404,7 +1422,7 @@ def ov_sistema(s, w, k, cont=None):
             spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
             lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
     if k <= -2 and cont:
-        top = sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"])[:5]
+        top = lim(sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"]), 5, "system")
         if top:
             lines += ["", c(1, " HEAVIEST CONTAINERS (RAM)")]
             mx = top[0]["mem"]
@@ -1431,7 +1449,7 @@ def ov_container(cont, w, k):
     for x in cs:
         groups[safe(x["project"]) or "(standalone)"] = groups.get(safe(x["project"]) or "(standalone)", 0) + 1
     if k < 4:
-        lines += wrap_items([f"{g} {n}" for g, n in sorted(groups.items())], w, indent=1, max_lines=1)
+        lines += wrap_items([f"{g} {n}" for g, n in sorted(groups.items())], w, indent=1, max_lines=1, section="containers")
     for x in (sick + down)[:max(0, 4 - k)]:
         lines.append(f" {c(31, '✖')} {pad(safe(x['name'])[:36], 37)}{c(90, safe(x['status'])[:30])}")
     return lines
@@ -1508,7 +1526,7 @@ def ov_esposizione(net, cont, w, k, new=None):
     lines.append(f" Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}   LAN {len(by['LAN'])}   "
                  f"tailnet only {len(by['TAILNET'])}   local only {len(by['LOCALE'])}"
                  + (f"   {c(31, f'⚠ {warn} DB/broker on LAN')}" if warn else ""))
-    for r in by["INTERNET"][:2]:
+    for r in lim(by["INTERNET"], 2, "exposure"):
         tag = new.get(f"{r['port']}/{r['proto'][0]}:INTERNET")
         lines.append(f" {c('1;31', '●')} {c('1;31', tag + ' ') if tag else ''}{r['port']}/{r['proto'][0]} "
                      f"{r['name'][:40]}  {c(31, 'public on the Internet')}")
@@ -1518,7 +1536,7 @@ def ov_esposizione(net, cont, w, k, new=None):
         label = f"{r['port']} {r['name'][:22]}"
         items.append((0 if tag else 1, (c("1;31", tag + " ") if tag else "") + (c(31, "⚠" + label) if r["warn"] else label)))
     # new/changed items first: they must not end up behind the '… +N'
-    lines += wrap_items([t for _, t in sorted(items, key=lambda x: x[0])], w, indent=1, max_lines=max(1, 3 - min(k, 2)))
+    lines += wrap_items([t for _, t in sorted(items, key=lambda x: x[0])], w, indent=1, max_lines=max(1, 3 - min(k, 2)), section="exposure")
     return lines
 
 
@@ -1585,10 +1603,12 @@ def ov_traffico(s, w, k):
     if not nets:
         return lines + [msg("info", "no interfaces")]
     sw = 12 if w >= 100 else 8  # shorter sparkline in narrow columns: the line must not be cut
-    for name, v in sorted(nets.items(), key=lambda kv: -(kv[1]["rx_tot"] + kv[1]["tx_tot"]))[:5]:
+    for name, v in lim(sorted(nets.items(), key=lambda kv: -(kv[1]["rx_tot"] + kv[1]["tx_tot"])), 5, "network_traffic"):
         lines.append(f" {pad(safe(name)[:11], 12)}{c(32, '↓')} {pad(fmt_rate(v['rx']), 10)}{sparkline(v['hist_rx'], sw)} "
                      f"{c(36, '↑')} {pad(fmt_rate(v['tx']), 10)}{sparkline(v['hist_tx'], sw)}"
                      + c(90, f" ↓{human(v['rx_tot'])} ↑{human(v['tx_tot'])}"))
+    if len(nets) > 5 and not FULL:
+        lines.append(c(90, f" … +{len(nets) - 5} more"))
     return lines
 
 
@@ -1601,12 +1621,14 @@ def ov_sessioni(s, w, k):
     lines.append(f" {plural(len(sess['local']), 'user session')}   ssh: " + (
         c(31 if remote else 32, f"{len(sess['ssh'])} connected") if sess["ssh"]
         else c(90, "none")))
-    for ip in sess["ssh"][:4]:
+    for ip in lim(sess["ssh"], 4, "sessions"):
         lines.append(f" {c(31, '✖') if ip in remote else c(32, '●')} ssh from {safe(ip)}  "
                      + (c(31, "address NOT local or Tailscale") if ip in remote else c(90, "LAN or Tailscale")))
+    if len(sess["ssh"]) > 4 and not FULL:
+        lines.append(c(90, f" … +{len(sess['ssh']) - 4} more ssh clients"))
     ttys = sorted({x["tty"] for x in sess["local"] if x["tty"]})
     if ttys:
-        lines += wrap_items([safe(t) for t in ttys], w, indent=1, sep=" ", max_lines=1)
+        lines += wrap_items([safe(t) for t in ttys], w, indent=1, sep=" ", max_lines=1, section="sessions")
     return lines
 
 
@@ -1621,14 +1643,14 @@ def ov_tailscale(net, w, k):
     stale = now - net.get("ts", now) > NET_STALE_S
     lines[0] = section("TAILSCALE", w, f"{safe(me['name'])} · {on}/{len(peers)} nodes online" + (" · exit node" if me["exit_option"] else "")
                        + (f" · stale data ({fmt_ago(now - net['ts'])} old)" if stale else ""))
-    for p in peers[:8]:
+    for p in lim(peers, 8, "tailscale"):
         if p["online"]:
             state = c(32, "online ") + c(90, "direct" if p["direct"] else f"via relay {safe(p['relay'])}")
         else:
             state = c(90, "offline · " + (f"seen {fmt_ago(now - p['last_seen'])} ago" if p["last_seen"] else "never seen"))
         lines.append(f" {c(32, '●') if p['online'] else c(90, '○')} {pad(safe(p['name'])[:18], 19)}{pad(safe(p['os'])[:8], 9)}{state}"
                      + (c(33, "  exit node in use") if p["exit"] else ""))
-    if len(peers) > 8:
+    if len(peers) > 8 and not FULL:
         lines.append(c(90, f" … +{len(peers) - 8} nodes"))
     return lines
 
@@ -1680,6 +1702,10 @@ def ov_webapp(net, cont, w, k):
     declared = bool(CFG["webapps"])
     nw = max(8, min(22, w - 47))
     cap = 12 if k <= 0 else 6 if k <= 2 else 4
+    if FULL:
+        cap = len(rows)
+    elif len(rows) > cap:
+        TRUNC.add("webapps")
     for r in rows[:cap]:
         ports = ",".join(str(p) for p in r["ports"][:3]) + ("…" if len(r["ports"]) > 3 else "")
         if r["state"] == "down":
@@ -1721,8 +1747,10 @@ def ov_dischi(s, w, k):
     if not fs:
         return lines + [msg("info" if fs == [] else "warn", "no filesystems" if fs == [] else "unavailable")]
     bw = max(8, min(30, w - 42))
-    for f in fs[:5]:
+    for f in lim(fs, 5, "disks"):
         lines.append(f" {pad(safe(f['mount'])[:14], 15)}{bar(f['used'] / f['total'], bw)} {human(f['used'])}/{human(f['total'])}")
+    if len(fs) > 5 and not FULL:
+        lines.append(c(90, f" … +{len(fs) - 5} more"))
     return lines
 
 
@@ -1748,8 +1776,10 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     return columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else cols[0]
 
 
-def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None):
-    """Everything on one screen. If it does not fit, details shrink (k = 0..3); at the last level no empty lines."""
+def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None):
+    """Everything on one screen. If it does not fit, details shrink (k = 0..3); at the last level no empty lines.
+
+    `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides()."""
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
@@ -1760,20 +1790,18 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             return [section(title, width), msg("err", safe(repr(e))[:60])]
 
     def guardare(bw, k):
-        rows = [msg("err" if sev >= 2 else "warn", t) for sev, t in pb[:max(3, 6 - k)]]
+        shown = lim(pb, max(3, 6 - k), "attention")
+        rows = [msg("err" if sev >= 2 else "warn", t) for sev, t in shown]
         extra = [c(90, f"   … +{len(pb) - len(rows)} more")] if len(pb) > len(rows) else []
         acc = getattr(pb, "accepted", 0)
         known = [c(90, f"   · {acc} accepted as known (nuc-console-problems)")] if acc else []
         return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
 
-    # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
-    # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
     cw = (w - 3 * (ncol - 1)) // ncol
-    levels = ((-2, True), (-1, True), (0, True), (1, True), (2, True), (3, True), (3, False), (4, False))
-    for i, (k, spaced) in enumerate(levels):
-        gap = [""] if spaced else []
-        # (feature, block): a section switched off in config.ini does not appear and takes no space
+
+    def make_cand(k):
+        """(feature, block) per section at detail level k: a section switched off in config.ini does not appear."""
         cand = {"attention": (True, lambda c_: guardare(c_, k)),
                 "exposure": ("exposure", lambda c_: block(ov_esposizione, "EXPOSURE", c_, net, cont, c_, k, new)),
                 "firewall": ("firewall", lambda c_: block(ov_firewall, "FIREWALL", c_, net, c_, k)),
@@ -1790,17 +1818,53 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
                         docker_disk=("docker_disk", lambda c_: block(ov_docker, "DOCKER · DISK", c_, boot, c_, k)),
                         disks=("disks", lambda c_: block(ov_dischi, "DISKS", c_, s, c_, k)))
         # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
-        blocks = [cand[n][1] for n in CFG["sections"] if n in cand and (cand[n][0] is True or on(cand[n][0]))]
+        return [(n, cand[n][1]) for n in CFG["sections"] if n in cand and (cand[n][0] is True or on(cand[n][0]))]
+
+    def detail_pages(trunc):
+        """The sections that hid items ("… +N more"), built in full at the richest level and laid out page by page."""
+        global FULL
+        FULL = True
+        try:
+            blocks = [fn(cw) for n, fn in make_cand(-2) if n in trunc]
+        finally:
+            FULL = False
+        pages, cols, ci = [], [[] for _ in range(ncol)], 0
+        flush = lambda: pages.append(columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else list(cols[0]))
+        for lines in blocks:
+            for chunk in [lines[i:i + body_h] for i in range(0, len(lines), body_h)]:
+                while True:
+                    col = cols[ci]
+                    if len(col) + len(chunk) + (1 if col else 0) <= body_h:
+                        col.extend(([""] if col else []) + chunk)
+                        break
+                    if ci + 1 < ncol:
+                        ci += 1
+                    else:
+                        flush()
+                        cols, ci = [[] for _ in range(ncol)], 0
+        if any(cols):
+            flush()
+        return pages
+
+    # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
+    # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
+    levels = ((-2, True), (-1, True), (0, True), (1, True), (2, True), (3, True), (3, False), (4, False))
+    for i, (k, spaced) in enumerate(levels):
+        TRUNC.clear()  # only what the level that is finally shown hides counts
+        blocks = [fn for _, fn in make_cand(k)]
         last = i == len(levels) - 1
-        lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, gap)  # at the last level: no limit (the page splits)
+        lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, [""] if spaced else [])  # last level: no limit (the page splits)
         if lines is not None:
+            if details is not None and CFG["details"] and TRUNC:
+                details.extend(detail_pages(set(TRUNC)))
             return lines  # the last level has a 10**6 limit: we always return here
 
 
 def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None):
     """Each page is split into chunks body_h tall: (page name, index, total, lines)."""
+    det = []
     if (mode or MODE) == "overview":
-        pages = (("Overview", lambda: page_overview(s, cont, net, boot, w, body_h, baseline=baseline)),)
+        pages = (("Overview", lambda: page_overview(s, cont, net, boot, w, body_h, baseline=baseline, details=det)),)
     else:
         every = {"System": lambda: page_sistema(s, w, cont),
                  "Network & firewall": lambda: page_rete(net, cont, w, baseline=baseline),
@@ -1814,7 +1878,24 @@ def slides(s, cont, net, w, body_h, boot=None, baseline=False, mode=None):
             lines = [c(31, f" error on page {name}: {safe(repr(e))[:w - 20]}")]
         chunks = [lines[i:i + body_h] for i in range(0, len(lines), body_h)] or [[]]
         out += [(name, i + 1, len(chunks), ch) for i, ch in enumerate(chunks)]
+    out += [("Details", i + 1, len(det), pg) for i, pg in enumerate(det)]  # full content of what the overview cut ("… +N more")
     return out
+
+
+def slide_seconds(slide, n):
+    """How long a slide stays: the overview longer when it is followed by detail pages (nobody can press a key on that monitor)."""
+    return CFG["overview_seconds"] if slide[0] == "Overview" and n > 1 else ROTATE_S
+
+
+def pick_slide(sl, t):
+    """Index of the slide shown t seconds after the start, cycling through all of them."""
+    durs = [slide_seconds(x, len(sl)) for x in sl]
+    t %= sum(durs)
+    for i, d in enumerate(durs):
+        if t < d:
+            return i
+        t -= d
+    return 0
 
 
 def frame(slide, idx, n, w, h, pb=None):
@@ -1825,7 +1906,8 @@ def frame(slide, idx, n, w, h, pb=None):
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
     foot = c(90, (f" single screen   console {w + 1}x{h}" if n == 1 else
-                  f" screen {idx + 1}/{n}   keys 1-{len(PAGES)}: jump to page   console {w + 1}x{h}"))
+                  f" screen {idx + 1}/{n}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
+                  + f"   keys 1-{len(PAGES)}: jump to page   console {w + 1}x{h}"))
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
@@ -1859,6 +1941,20 @@ def render_screen(smp, w, h, mode=None, n=0):
     sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
     return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
                  safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])), len(sl)
+
+
+def render_screens(smp, w, h, mode=None):
+    """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
+    st, sm = snapshot(w), smp.sample()
+    if DEMO:
+        import demo
+        sm = demo.sampler_data(sm)
+        socket.gethostname = lambda: "demo-host"
+        if not CFG["webapps"]:
+            CFG["webapps"] = {"shop-web": [8080], "admin-console": [9443]}
+    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode)
+    pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    return [frame(x, i, len(sl), w, h, pb) for i, x in enumerate(sl)]
 
 
 def once(argv):
@@ -1908,7 +2004,7 @@ def main(argv):
             st, sm = snapshot(w), smp.sample()
             sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
             now = time.time()
-            idx = held if now < hold_until else int((now - t0) / ROTATE_S) % len(sl)
+            idx = held if now < hold_until else pick_slide(sl, now - t0)
             out.write("\x1b[H" + frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
                                         safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"],
                                                       baseline=st["baseline"])))
