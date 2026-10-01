@@ -1,12 +1,81 @@
 # Installation guide
 
-One command on each system; re-run it to upgrade, add `--uninstall` / `-Uninstall` to remove it.
+Download the archive of your system, check it, extract it and run one command. To upgrade, run `nuc-console-update` (or the same command
+again); to remove it, add `--uninstall` / `-Uninstall`. To try it without installing anything: [PORTABLE.md](PORTABLE.md).
 
 | System | Command | The monitor shows |
 |---|---|---|
 | **Linux** (systemd) | `sudo ./install.sh` | the text console (a virtual terminal): sections 1–8 below |
 | **macOS** 11+ | `sudo ./install.sh` (hands over to `install-macos.sh`) | your browser, or a full-screen window at login: [macOS](#macos) |
 | **Windows** 10/11, Server 2019+ | double-click `install-windows.cmd` | your browser, or a full-screen window at login: [Windows](#windows) |
+
+[Download a release](#download-a-release) · [Linux](#linux) · [macOS](#macos) · [Windows](#windows) · [Update](#update)
+
+# Download a release
+
+Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system and a `SHA256SUMS` file. The release
+workflow builds them from the tag, not on anyone's machine, and signs a build provenance for each one
+([how, and what the checks prove](../SECURITY.md#verifying-a-release)).
+
+## Which file
+
+`X.Y.Z` is the release number.
+
+| Your system | Download | Notes |
+|---|---|---|
+| Linux, any processor | `nuc-console-X.Y.Z-linux.tar.gz` | Python and shell code only: the same file for x86-64, ARM, a Raspberry Pi |
+| macOS, Intel or Apple Silicon | `nuc-console-X.Y.Z-macos.tar.gz` | the same |
+| Windows 10/11, Server 2019+, Intel or AMD (64-bit) | `nuc-console-X.Y.Z-windows-x64.zip` | carries the official embeddable Python (`python\`) |
+| Windows on ARM | `nuc-console-X.Y.Z-windows-arm64.zip` | the same, with the ARM64 Python |
+| every system | `SHA256SUMS` | the SHA-256 of each archive |
+
+Windows: *Settings › System › About › System type* says which one you have. 32-bit Windows is not supported.
+
+An archive holds one folder, `nuc-console-X.Y.Z/`, with what is needed to install and to run it: `src/`, `bin/`, `config/`, the service files of
+that system (`systemd/` or `launchd/`), `scripts/` (Linux and macOS), the installer and the portable launcher of that system, `docs/`, `README.md`,
+`LICENSE`, `SECURITY.md`. It does not hold the tests or the development tools: `git clone` gives those too (the Windows installer then
+downloads Python once, see [Windows](#windows)).
+
+## Check it
+
+Do this before you extract or run anything, in the folder where you saved the files.
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS                                   # Linux: checks every archive that is here
+grep ' nuc-console-X.Y.Z-macos.tar.gz$' SHA256SUMS | shasum -a 256 -c -   # macOS: the line of your archive
+gh attestation verify nuc-console-X.Y.Z-linux.tar.gz --repo give-jd/nuc-console-oss
+```
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\nuc-console-X.Y.Z-windows-x64.zip           # the same hash as its line in SHA256SUMS (case does not matter)
+gh attestation verify .\nuc-console-X.Y.Z-windows-x64.zip --repo give-jd/nuc-console-oss
+```
+
+- `SHA256SUMS` says the file is whole and is the one listed. It comes from the same release page, so it does not protect against a
+  release that someone else published.
+- `gh attestation verify` (the [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`) says the file was built by this repository's release
+  workflow, from a tag of this repository. That is what protects against a swapped archive. Neither check is a signature by a person, and nothing in
+  the archives is code-signed (Windows may ask you to confirm a file that comes from the Internet).
+
+## Install from the archive
+
+Linux and macOS, from SSH or another terminal (Linux: not from the console the dashboard will take over):
+
+```bash
+tar xzf nuc-console-X.Y.Z-linux.tar.gz       # on a Mac: nuc-console-X.Y.Z-macos.tar.gz
+cd nuc-console-X.Y.Z
+sudo ./install.sh
+```
+
+Windows: extract the ZIP (right-click › *Extract All*, or `Expand-Archive nuc-console-X.Y.Z-windows-x64.zip .`), double-click **`install-windows.cmd`**
+and accept the administrator prompt. The ZIP carries the Python the installer needs, in `python\` next to it, so **the install downloads nothing
+and works on a PC with no Internet access**: the installer checks that file against the SHA-256 it pins, and python.exe against the Python Software Foundation's
+signature, before it uses it.
+
+Linux downloads nothing at all. macOS downloads the official python.org package only if the Mac has no Python 3.8+ of its own
+(hash and signature checked). What each installer does, its options, and what it keeps for the next time: [Linux](#linux), [macOS](#macos),
+[Windows](#windows). The extracted folder is not used after the install: delete it, or keep it to run `./run.sh` / `run.cmd`
+without installing ([PORTABLE.md](PORTABLE.md)).
 
 # Linux
 
@@ -35,25 +104,29 @@ Optional tools — install only what you want to see; every missing one just dis
 
 ## 2. Preview without installing (no root)
 
+From the extracted [archive](#download-a-release), or from a clone:
+
 ```bash
-git clone <this repository> nuc-console && cd nuc-console
+git clone <this repository> nuc-console && cd nuc-console     # a clone; an archive is extracted instead
 python3 src/render.py --once --demo --cols 200 --rows 50      # synthetic data
 python3 src/render.py --once --cols 120 --rows 33              # your machine (sections that need root show "collector not running")
-python3 -m unittest discover -s tests                          # test-suite
+python3 -m unittest discover -s tests                          # test-suite (a clone: the archives do not hold the tests)
 ```
+
+`./run.sh` runs the whole dashboard from that folder without installing it: [PORTABLE.md](PORTABLE.md).
 
 ## 3. Install
 
 **Run it from SSH or another terminal, not from the console it will take over.**
 
 ```bash
-sudo ./install.sh
+sudo ./install.sh          # in the folder of the extracted archive (or of the clone)
 ```
 
 What it does (all idempotent, re-run it to upgrade):
 
 1. creates the system user `nuc-console` (no shell, no home);
-2. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started);
+2. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept`, `nuc-console-update` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started);
 3. writes `/etc/nuc-console/config.ini` **only if it does not exist**;
 4. starts the root collector, **masks `getty@tty<N>`** and starts the dashboard on that terminal;
 5. waits for the first fresh collector snapshot and stores the **port baseline** (only if none exists).
@@ -129,13 +202,15 @@ with. On a machine with a GPU the unit it writes lets the service see the GPU (`
 ## 8. Update, uninstall
 
 ```bash
-git pull && sudo ./install.sh          # update (keeps config.ini, baseline, VT and time zone)
+sudo nuc-console-update                # update to the latest release (see Update below; keeps config.ini, baseline, VT and time zone)
+git pull && sudo ./install.sh          # update a clone
 sudo ./install.sh --uninstall          # restore the login on the terminal
 ```
 
 Uninstall removes the commands and, if you installed it, the AI model service. It leaves `/etc/nuc-console`, `/var/lib/nuc-console` (baseline,
 accepted problems, the HEALTH history `history.db`, and the AI runtime and models in `ai/`), the `nuc-console` and `nuc-console-notify` users and the `nuc-console-ai` account with its
-state `/var/lib/nuc-console-ai`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
+state `/var/lib/nuc-console-ai` and, if you used `nuc-console-update`, its download cache
+`/var/cache/nuc-console`; remove them by hand if you want. To give the disk of the AI files back first: `sudo nuc-console-ai remove`. It does delete `/var/lib/nuc-console-notify` (the Telegram notifier's token and paired chat).
 
 ## Troubleshooting (Linux)
 
@@ -168,20 +243,28 @@ content: in a browser window every section stays and the page scrolls; full scre
 
 ## Install
 
+From the extracted [archive](#download-a-release) (`nuc-console-X.Y.Z-macos.tar.gz`) or from a clone:
+
 ```bash
-git clone <this repository> nuc-console && cd nuc-console
+git clone <this repository> nuc-console && cd nuc-console                  # a clone; an archive is extracted instead
 python3 src/render.py --once --demo --demo-os darwin --cols 200 --rows 50   # optional preview (needs a python3)
 sudo ./install.sh                                                          # install, start, open the dashboard now
 ```
+
+`./run.sh` runs the dashboard from that folder without installing it: [PORTABLE.md](PORTABLE.md).
 
 What it does (idempotent):
 
 1. **Python**: uses a Python 3.8+ owned by the system (a python.org install, or Apple's with the Command Line Tools). If
    there is none it downloads the official python.org package (SHA-256 pinned, signature checked) and installs **only the
    framework**: no apps, no `/usr/local/bin` links, no shell profile changes. Homebrew's Python is never used: its files
-   belong to a user, and the collector runs as root.
+   belong to a user, and the collector runs as root. The package is kept in `/Library/Caches/nuc-console` (root-owned) and reused
+   by the next install if its hash and signature still check: it is never downloaded twice. It is downloaded to a temporary name
+   there and gets its real name only after both checks.
 2. Copies the code to `/opt/nuc-console`, `config.ini` to `/etc/nuc-console` (only if missing), and creates
-   `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog).
+   `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog). Links `nuc-console-problems`,
+   `nuc-console-accept` and `nuc-console-update` into `/usr/local/bin` and `/usr/local/sbin`, but only into folders root owns (else it says to run
+   `/opt/nuc-console/bin/<command>` by its full path).
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
 4. Starts the web view as the hidden user `_nuc-console`: on 127.0.0.1, or as configured in `[web]` if you enabled it there.
@@ -207,11 +290,12 @@ Choose the mode: `sudo NUC_CONSOLE_DISPLAY=fullscreen ./install.sh` (it is writt
 ## Update, uninstall
 
 ```bash
-git pull && sudo ./install.sh          # update (keeps config.ini and the baseline)
-sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launchd jobs
+sudo nuc-console-update                # update to the latest release (see Update below; keeps config.ini, the baseline and the display mode)
+git pull && sudo ./install.sh          # update a clone; or run install.sh from the new release archive
+sudo ./install.sh --uninstall          # removes /opt/nuc-console, the launchd jobs and the three commands
 ```
 
-It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
+It also removes the AI model service, if you installed it. `/etc/nuc-console`, `/var/lib/nuc-console` (with the HEALTH history, `history.db`), `/var/log/nuc-console`, the download cache `/Library/Caches/nuc-console`, the `_nuc-console` user, the `_nuc-console-ai` account and the AI runtime and models (`/Library/Application Support/nuc-console/ai`) are left in place; `/var/lib/nuc-console-notify` (the Telegram token) is deleted.
 
 ## What is different from Linux
 
@@ -252,7 +336,9 @@ content: in a browser window every section stays and the page scrolls; full scre
 
 ## Install
 
-1. Download the repository (*Code › Download ZIP*) and extract it, or `git clone` it.
+1. Download `nuc-console-X.Y.Z-windows-x64.zip` (`-windows-arm64.zip` on a Windows on ARM PC) from the
+   [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest), [check it](#check-it) and extract it. The ZIP carries Python: the
+   install needs no Internet access. (Or *Code › Download ZIP* / `git clone`: the installer then downloads Python once.)
 2. Double-click **`install-windows.cmd`** and accept the administrator prompt.
    From an administrator prompt: `powershell -ExecutionPolicy Bypass -File install-windows.ps1`.
 
@@ -260,7 +346,9 @@ What it does (idempotent):
 
 1. Puts a **private Python** (the official python.org *embeddable* build, SHA-256 pinned and checked for the Python
    Software Foundation's signature) and the code in `%ProgramFiles%\nuc-console`. Nothing else on the system uses it or is changed by it.
-2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`): writable only by SYSTEM and
+   The Python zip is taken from `python\` next to the installer (the release ZIP ships it there), else from the cache
+   `%ProgramData%\nuc-console\cache`, else downloaded from python.org into that cache: see the options below.
+2. Creates `%ProgramData%\nuc-console` (`config.ini` only if missing, `run`, `lib`, `logs`, `cache`): writable only by SYSTEM and
    Administrators, readable by users.
 3. Registers scheduled tasks in the folder **`\nuc-console\`**: `collector` (SYSTEM, at startup, restarted if it stops),
    `web` (LOCAL SERVICE: on 127.0.0.1, or as configured in `[web]` if you enabled it there) and `display` (every user, at
@@ -268,13 +356,18 @@ What it does (idempotent):
    task too, `notify` (NETWORK SERVICE, outbound only): it idles until you run `nuc-console-telegram.cmd --setup` ([TELEGRAM.md](TELEGRAM.md));
    its token lives in `%ProgramData%\nuc-console\notify\private`, which only SYSTEM, Administrators and NETWORK SERVICE can open.
 4. Adds **Start › nuc-console** and `%ProgramFiles%\nuc-console\bin` to the system PATH: `nuc-console-problems`,
-   `nuc-console-accept` (administrator prompt) and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
+   `nuc-console-accept` (administrator prompt), `nuc-console-update` and, for the optional local AI model ([AI.md](AI.md)), `nuc-console-ai` (administrator
    prompt to install, switch or serve; `models` and `status` need none) and `nuc-console-ask`. Nothing is downloaded or started until you run them.
 5. Waits for the first snapshot, stores the port baseline (only if missing) and opens the dashboard.
 
 Options: `-Display browser|fullscreen|none` (written to `config.ini`; without it the file decides; `-NoDisplay` = `none`),
-`-PythonZip <file>` (offline: the `python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash).
-Python is downloaded only the first time: a re-install reuses it.
+`-PythonZip <file>` (the `python-3.14.8-embed-amd64.zip` you downloaded yourself, checked against the same hash; it wins over everything below).
+
+Python is never downloaded twice. The installer looks for the embeddable zip, with the SHA-256 it pins, in this order, and takes
+the first one that matches: `python\` next to `install-windows.ps1`, then the folder of the script itself, then the cache
+`%ProgramData%\nuc-console\cache` (same access rules as `%ProgramData%\nuc-console`: only SYSTEM and Administrators write there).
+Only if none has it, it downloads it from python.org to a temporary name in the cache and gives it its real name after the hash check,
+so the next install or update finds it. An already installed, unchanged Python is not touched at all.
 
 ## A PC used as a wall screen
 
@@ -285,8 +378,10 @@ Python is downloaded only the first time: a re-install reuses it.
 
 ## Update, uninstall
 
-Run `install-windows.cmd` again to update (it keeps `config.ini` and the baseline). `install-windows.cmd -Uninstall` removes
-the tasks (the AI model's too, if you installed it), `%ProgramFiles%\nuc-console` and the PATH entry; `%ProgramData%\nuc-console` (config, state, the HEALTH history `lib\history.db` and the AI runtime and models in `ai\`) is left in place, except its `notify` folder (the Telegram token), which is deleted. An update keeps the AI model's task.
+`nuc-console-update` updates to the latest release (see [Update](#update); it keeps `config.ini`, the baseline and the display mode). Running
+`install-windows.cmd` again, from a newer ZIP, does the same by hand. `install-windows.cmd -Uninstall` removes the tasks (the AI model's too, if you installed it), `%ProgramFiles%\nuc-console`
+(with the commands) and the PATH entry; `%ProgramData%\nuc-console` (with `config.ini`, the baseline, the logs, the HEALTH history
+`lib\history.db`, the download cache `cache\` and the AI runtime and models in `ai\`) is left in place, except its `notify` folder (the Telegram token), which is deleted. An update keeps the AI model's task.
 
 ## What is different from Linux
 
@@ -309,3 +404,68 @@ the tasks (the AI model's too, if you installed it), `%ProgramFiles%\nuc-console
 | Docker "not installed" or "not responding" | Docker Desktop must be running (it runs in a user's session) |
 | Many `?` in EXPOSURE | rules the evaluation cannot read with certainty: see the NOTE column; `Get-NetFirewallRule` shows them |
 
+
+# Update
+
+nuc-console never updates itself: there is no timer, no service and no check at start-up. The only things that download anything are this
+updater, when you run it, and an installer that has to fetch a Python (once). You run the updater when you decide to.
+
+```bash
+nuc-console-update --check        # only say whether a newer release exists: changes nothing, needs no root
+sudo nuc-console-update           # ask, then update
+sudo nuc-console-update --yes     # do not ask
+```
+
+| Option | Windows | |
+|---|---|---|
+| `--check` | `-Check` | only report: `already at X.Y.Z`, or `update available: X.Y.Z -> A.B.C (archive name)`. The exit code is 0 either way: read the message |
+| `--yes`, `-y` | `-Yes` | do not ask `update nuc-console X -> Y? [y/N]` (without a terminal it refuses to ask: add `--yes`) |
+| `--installed` | `-Installed` | update the installed nuc-console even when you run the command from an extracted folder |
+
+On Windows run `nuc-console-update` (or `nuc-console-update.cmd`) from a new prompt, as the install put it on the PATH. It asks for
+administrator rights itself, like `install-windows.cmd` (a new window opens and waits for a key at the end), except for `-Check`. On Linux and macOS it
+never calls `sudo` itself: if it needs root it says so. On macOS, if `/usr/local/sbin` is not root's, use `sudo /opt/nuc-console/bin/nuc-console-update`.
+
+## Which one is updated
+
+| You run | It updates | Needs | Replaced | Kept | Cache |
+|---|---|---|---|---|---|
+| `bin/nuc-console-update` in a folder that has `run.sh` / `run.cmd` (a [portable](PORTABLE.md) folder) | that folder | nothing: no root, no administrator (quit it first) | `src/`, `bin/`, `docs/`, `config/`, the launchers, ... of the folder | `data/` (config, state, baseline, logs) and `cache/` | `<folder>/cache` |
+| `nuc-console-update` on Linux | `/opt/nuc-console`, by running the new release's `install.sh` | `sudo` | the code, the units and the commands | `/etc/nuc-console/config.ini`, the baseline, the VT and the time zone | `/var/cache/nuc-console` |
+| `nuc-console-update` on macOS | the same, through `install-macos.sh` | `sudo` | the same | `config.ini`, the baseline, the display mode | `/Library/Caches/nuc-console` |
+| `nuc-console-update` on Windows | `%ProgramFiles%\nuc-console`, by running the new release's `install-windows.ps1` | Administrator | the code, the tasks and the commands | `%ProgramData%\nuc-console\config.ini`, the baseline, the display mode | `%ProgramData%\nuc-console\cache` |
+
+An installed one is updated by the installer of the new release, so it is the same as extracting that archive and running the installer
+yourself: the notes of [Linux](#linux), [macOS](#macos) and [Windows](#windows) apply (Linux: run it from SSH or another
+terminal, not from the console the dashboard takes over; the services restart). Each install also refreshes `config.ini.dist` next to your
+`config.ini`, which is never touched. If the installer fails, the update says so, and running it again repeats the install from the same cache.
+An installation made before the first release that has the updater has none: update that one once by hand (`sudo ./install.sh` from the new
+archive), and from then on `nuc-console-update` is there.
+
+## What it does
+
+1. Asks `api.github.com` (HTTPS) for the latest release: the one GitHub calls *latest*, never a draft or a pre-release. It compares the number with
+   the `VERSION` you have, as numbers (`1.10.0` is newer than `1.9.9`). If you are up to date, or ahead, it says so and stops: it never downgrades.
+2. Asks you (unless `--yes`).
+3. Downloads `SHA256SUMS` (every time: it is what the archive is checked against) and the archive of this system (Windows: x64 or ARM64) into the
+   **cache**. A file that is already in the cache with the SHA-256 that `SHA256SUMS` lists is **not downloaded again**; a missing, half or
+   damaged one is.
+4. Checks the archive against `SHA256SUMS`. A mismatch deletes it and nothing is installed.
+5. If `gh` (GitHub CLI) is installed and logged in, runs `gh attestation verify <archive> --repo give-jd/nuc-console-oss`; a failure stops the
+   update. Without `gh`, or without a login, it says that the provenance was not checked and goes on.
+6. Unpacks the archive into a temporary folder of the cache (an absolute path or `..` in it is refused, and so is a link or a device in a `.tar.gz`; the
+   `VERSION` inside must be the release's) and installs from there: the installer of the new release, or, for a portable folder, the replacement of its files.
+7. Deletes the unpacked folder and the archives of older releases from the cache.
+
+Downloads are HTTPS only (a redirect too), from `github.com` assets, with a size limit, and nothing downloaded is run before the checks have passed.
+What these checks prove and what they do not: [SECURITY.md](../SECURITY.md#verifying-a-release).
+
+## The cache
+
+Nothing is downloaded twice: the updater, the Windows installer (the Python zip) and the macOS installer (the python.org package) all keep what they
+fetched, check it again before every use, and reuse it. Only the newest release's archive and `SHA256SUMS` are kept (older archives are deleted after
+an update); the Python zip or package is kept for the next install. Delete the folder whenever you like: the next update fetches again.
+
+An installed one's cache is root's (Windows: only SYSTEM and Administrators can write there). As root the updater refuses a cache folder that is a link or that
+anyone else can write to, runs `gh` only if root owns it and nobody else can write it, and ignores the `PYTHON*` environment variables. Uninstalling leaves the cache in place
+(Linux `/var/cache/nuc-console`, macOS `/Library/Caches/nuc-console`, Windows `%ProgramData%\nuc-console\cache`); a portable folder's is in the folder.

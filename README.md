@@ -13,7 +13,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 [![Windows 10/11](https://img.shields.io/badge/windows-10%20%7C%2011-0078d4?style=flat-square)](docs/INSTALL.md#windows)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-8957e5?style=flat-square)](#security)
 
-[**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
+[**Download**](#download) · [**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
 
 <a href="docs/img/overview.svg"><img src="docs/img/overview.svg" alt="nuc-console on a wide console: three-column overview with synthetic demo data" width="100%"></a>
 
@@ -37,6 +37,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🩺 **HEALTH over time** | a small local history (SQLite) and a screen of its own (console `h`, web **health** link): over the last day, week or month, which apps use the CPU and memory, which crash, hang or get killed, which services and containers keep restarting, hot hours, disks filling up ("full in 12 days"), noisy or new log messages, each with how to fix it. Rules over numbers; names and counts only, never command lines or log lines as they are ([docs/HEALTH.md](docs/HEALTH.md)) |
 | 🤖 **AI advisor** *(optional, off by default)* | an **AI** screen (console `a`, web **ai** link) reads this machine's RAM, GPU and GPU memory and tells, model by model, whether it *fits entirely on the GPU*, runs on *GPU+CPU* or *in RAM*, *fits but slows the PC*, or is *too big*, with a rough speed. `nuc-console-ai` installs the open model you choose (hash-pinned; 12 sizes, 0.4 to 19 GB) and serves it on 127.0.0.1, on the GPU when it fits there; it turns the HEALTH findings into plain advice and answers questions from the history (`nuc-console-ask`). It analyses, **never acts**; Linux, macOS, Windows ([docs/AI.md](docs/AI.md)) |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
+| 📦 **Download, run, update** | one archive per system on the [releases page](https://github.com/give-jd/nuc-console-oss/releases/latest), built and attested by CI, with `SHA256SUMS`; the Windows ZIP carries its Python, so it installs offline. `./run.sh` / `run.cmd` run it without installing (everything stays in `./data`); `nuc-console-update` updates only when *you* run it, hash and build provenance checked ([Download](#download)) |
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Read-only web view** | optional: the same screen in a browser over Tailscale/LAN ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only |
@@ -105,10 +106,32 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | | |
 |---|---|
 | OS | **Linux** with systemd (Debian/Ubuntu/Fedora/Arch… anything with `systemd`, `/proc`, `/sys`) · **macOS** 11 or newer · **Windows** 10/11 or Server 2019+ (64-bit x86 or ARM) |
-| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
-| Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
+| Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, shipped in the release ZIP (or downloaded once, hash-checked, and kept for the next update) |
+| Root | only for the installers, the updater of an installed one and the collector service (Windows: Administrator, the collector runs as SYSTEM). The [portable run](docs/PORTABLE.md) needs none (what needs it then shows less) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`, `nvidia-smi` (the AI screen's NVIDIA memory). macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
 | Display | Linux: a virtual terminal. macOS/Windows: it opens at every login, your choice how — a normal browser window (default) or full screen (Alt+F4 / Cmd+Q closes it); text size with **A− / A+** |
+
+## Download
+
+Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system and a `SHA256SUMS` file, built and attested by CI
+(`X.Y.Z` is the release number):
+
+| System | Archive | Run it without installing | Install |
+|---|---|---|---|
+| Linux | `nuc-console-X.Y.Z-linux.tar.gz` | `tar xzf nuc-console-X.Y.Z-linux.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the terminal) | `sudo ./install.sh` |
+| macOS | `nuc-console-X.Y.Z-macos.tar.gz` | `tar xzf nuc-console-X.Y.Z-macos.tar.gz && cd nuc-console-X.Y.Z && ./run.sh` (in the browser) | `sudo ./install.sh` |
+| Windows, Intel/AMD | `nuc-console-X.Y.Z-windows-x64.zip` | extract it, double-click `run.cmd` (in the browser) | double-click `install-windows.cmd` |
+| Windows on ARM | `nuc-console-X.Y.Z-windows-arm64.zip` | the same | the same |
+
+- **Check it**: `sha256sum --ignore-missing -c SHA256SUMS` (macOS: `shasum -a 256`; Windows: `Get-FileHash`) and
+  `gh attestation verify <archive> --repo give-jd/nuc-console-oss`: [how, and what they prove](docs/INSTALL.md#check-it).
+- **Offline**: the Windows ZIPs carry the official embeddable Python, so the install needs no download. Nothing is ever downloaded twice: the
+  installers keep what they fetched and reuse it.
+- **Portable**: `./run.sh` / `run.cmd` install nothing, create no service and write only to `./data`; Ctrl+C stops everything.
+  Without root it still runs, and shows less. [docs/PORTABLE.md](docs/PORTABLE.md).
+- **Update**: `nuc-console-update --check` says whether a newer release exists, `nuc-console-update` (`sudo` for an installed one) updates it.
+  It runs only when *you* start it; it checks the SHA-256 and, with `gh` installed, the build provenance, and keeps your config and baseline.
+  [docs/INSTALL.md#update](docs/INSTALL.md#update).
 
 ## Quick start
 
@@ -120,14 +143,14 @@ sudo ./install.sh                                            # Linux: install + 
 sudo ./install.sh                                            # macOS: the same command (launchd, full-screen browser at login)
 ```
 
-Windows: download the ZIP, extract it, double-click **`install-windows.cmd`** (it asks for administrator rights).
-Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `--demo-os windows`.
+From a release archive instead of git: extract it and run the same commands (Windows: double-click **`install-windows.cmd`**, it asks for administrator
+rights). Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `--demo-os windows`.
 
-Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
+Full guide (VT choice, time zone, font, update, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ## Configuration
 
-`/etc/nuc-console/config.ini` (created on first install, never overwritten). Everything defaults to *on*:
+`/etc/nuc-console/config.ini` (created on first install, never overwritten; Windows: `%ProgramData%\nuc-console\config.ini`; a portable run: `data/config.ini`). Everything defaults to *on*:
 
 ```ini
 [features]
@@ -240,7 +263,7 @@ Set-up, what leaves the machine, troubleshooting: **[docs/TELEGRAM.md](docs/TELE
 ## Security
 
 It reads sensitive-looking facts (ports, container names) and runs privileged commands, so it is built defensively: fixed command lines (no shell, no user input), output sanitised against terminal-escape injection, secrets in container env are matched but **never stored or shown**, state files are world-readable on purpose (no secrets inside) and written atomically. The monitor itself shows your topology to anyone in the room — keep that in mind.
-Read the threat model and how to report a vulnerability in **[SECURITY.md](SECURITY.md)**.
+Read the threat model, how releases are built and verified, and how to report a vulnerability in **[SECURITY.md](SECURITY.md)**.
 
 ## Limitations
 
@@ -255,4 +278,4 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 
 ## Contributing · License
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Released under the [MIT License](LICENSE). Copyright © 2026 [Gi.Ve Group S.r.l.](https://givegroup.it)
+See [CONTRIBUTING.md](CONTRIBUTING.md); what changed in each release: [CHANGELOG.md](CHANGELOG.md). Released under the [MIT License](LICENSE). Copyright © 2026 [Gi.Ve Group S.r.l.](https://givegroup.it)

@@ -892,7 +892,7 @@ class Installers(unittest.TestCase):
         private = next(l for l in s.splitlines() if "icacls.exe" in l and '"$Data\\notify\\private"' in l)
         self.assertEqual(sorted(re.findall(r"\*(S-[0-9-]+):", private)), ["S-1-5-18", "S-1-5-20", "S-1-5-32-544"])  # SYSTEM, NETWORK SERVICE, Admins
         self.assertIn("/inheritance:r", private)                                                    # nobody else, Users and the web view included
-        down = s[s.index("if ($Uninstall) {"):s.index("# ---- 1. private Python")]
+        down = s[s.index("if ($Uninstall) {"):s.index("# ---- 1. data folder")]
         self.assertLess(down.index('Remove-Item -Recurse -Force "$Data\\notify"'), down.index("Remove-Item -Recurse -Force $Dest"))  # the token first
         self.assertIn("bin\\*.cmd", s)                                                              # nuc-console-telegram.cmd rides along
 

@@ -33,6 +33,8 @@ then prints a link: `https://t.me/<your_bot>?start=<code>`.
 **3. Tap the link on your phone and press Start.** The machine notices it by itself, stores the chat and says *paired*. That is all: no numbers
 to type, no chat id to look up. The notifier is on from now on (`--off` switches it off).
 
+The notifier is a service of an **installed** nuc-console: a portable run (`run.sh` / `run.cmd`, [PORTABLE.md](PORTABLE.md)) does not start it.
+
 ## Switch it on and off, test it
 
 | Command | |

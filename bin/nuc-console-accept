@@ -3,6 +3,8 @@
 # Run it after an intended change (e.g. databases moved to 127.0.0.1). Requires root.
 # Also: --problem <id> --reason "..." accepts a known ATTENTION item (hidden from the list, counted as "N accepted"; tied to the current text, so a worse situation reappears); --forget <id> undoes it.
 # List ids and advice with nuc-console-problems.
+# Not installed here (an extracted folder, the portable run)? ./run.sh --accept [--problem ID --reason "why" | --forget ID] does the same there.
 # env -u: NUC_CONSOLE_* variables must not be able to redirect a write done by root (e.g. with sudo -E)
+[ -f /opt/nuc-console/render.py ] || { echo "nuc-console is not installed here. In an extracted (portable) folder use: ./run.sh --accept" >&2; exit 1; }
 exec env -u NUC_CONSOLE_BASELINE -u NUC_CONSOLE_NET -u NUC_CONSOLE_STATE -u NUC_CONSOLE_BOOT -u NUC_CONSOLE_ACCEPTED \
     /usr/bin/python3 /opt/nuc-console/render.py --accept "$@"

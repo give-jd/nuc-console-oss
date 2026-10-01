@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -S warning install.sh install-macos.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-ai bin/nuc-console-ask bin/nuc-console-telegram
+      - run: shellcheck -S warning install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-update bin/nuc-console-ai bin/nuc-console-ask bin/nuc-console-telegram
 
   # The real installers on fresh machines: install, collect, problems, uninstall.
   install-linux:

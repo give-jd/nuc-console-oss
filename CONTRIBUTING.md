@@ -11,7 +11,7 @@ python3 src/render.py --once --demo --cols 200 --rows 50
 python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # the screen as the Windows (or darwin) collector writes it
 python3 src/render.py --once --demo --view ai --cols 200 --rows 50           # the AI screen: three invented machines (--demo-os windows|darwin for the others)
 python3 src/render.py --once --demo --view ai --select qwen3-8b --details    # the details of one model: why, licence, the commands
-shellcheck install.sh install-macos.sh scripts/*.sh bin/nuc-console-{accept,problems,ai,ask}   # if you touch shell
+shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
 ```
 
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
@@ -21,6 +21,9 @@ shellcheck install.sh install-macos.sh scripts/*.sh bin/nuc-console-{accept,prob
   parsers are pure functions with fixtures, so they are tested on every OS; the classes `OnWindows` / `OnMacOS` in
   `tests/test_platforms.py` exercise the real system calls on their own OS. Text output of system tools is localised on Windows:
   use the API or PowerShell objects (`ConvertTo-Json`), never `netstat`/`netsh` text.
+- The portable run (`run.sh`, `run.cmd` + `run.ps1`) and the updater (`bin/nuc-console-update` and its `.cmd` / `.ps1`) are thin wrappers: the logic that can be
+  wrong (versions, choosing the asset, `SHA256SUMS`, the cache, unpacking, replacing a portable folder) is `src/update.py`, pure functions tested without a network in
+  `tests/test_portable.py`. They are never started by anything but the user: no timer, nothing at start-up.
 - The AI screen reads the hardware in `aihw.py` the same way: the commands (`nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler`) and the files
   (`/proc`, `/sys`) go through two injectable functions, so each OS has fixtures in the tests; fixed argument lists, a short time limit, never a
   shell, and whatever cannot be read goes to the notes instead of being guessed. The thresholds of the five verdicts and the memory
@@ -42,6 +45,35 @@ shellcheck install.sh install-macos.sh scripts/*.sh bin/nuc-console-{accept,prob
 
 Small, focused, with tests. Describe the *why*. Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
 
+## Releasing
+
+A release is a tag. Everything else is done by `.github/workflows/release.yml`, so nobody builds or uploads archives by hand.
+
+1. **Version.** Set `VERSION` in `src/nuc_config.py` to `X.Y.Z` (the number the tag will have, without the `v`), commit and push. It is the only place
+   the number lives: the workflow, `tools/build_release.py` and `nuc-console-update` (which compares it with the latest release) read it from there.
+2. **Dry run (optional).** *Actions › release › Run workflow*: choose the branch (or tag) to build and type the tag you are about to create (`vX.Y.Z`).
+   It runs the same checks and builds the same archives, which you can download from the run for seven days; it signs no provenance and creates no release.
+3. **Tag.** `git tag -a vX.Y.Z -m "nuc-console X.Y.Z" && git push origin vX.Y.Z`. Only tags of the form `vX.Y.Z` work (no `-rc1`). The workflow then:
+   - **refuses a tag that is not `VERSION`** (and one that is not `vX.Y.Z`);
+   - runs the unit tests;
+   - downloads the two embeddable Pythons for the Windows archives and checks them against the SHA-256 pinned in `install-windows.ps1`;
+   - builds the four archives and `SHA256SUMS` with `tools/build_release.py`, builds them again and checks that the second build is byte-identical and
+     that `SHA256SUMS` matches;
+   - attests every archive and `SHA256SUMS` (build provenance), and creates the release `nuc-console X.Y.Z` with them, with generated notes.
+   The release is public as soon as the workflow ends, and from then on it is the *latest* one that `nuc-console-update` offers.
+4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist [--python-zips DIR]`. Without `--python-zips` only
+   the Linux and macOS archives are built (it says so); `--list-python` prints the file, SHA-256 and URL of the Pythons to download for the Windows ones.
+   The version must be `VERSION`, and the build warns when the tree has uncommitted changes (the archives are of the files git tracks).
+
+What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script: everything except `tests/`, `tools/`,
+`CONTRIBUTING.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
+`*.ps1` only in the Windows ones, shell scripts and `scripts/` not in the Windows ones. Name and place a new file accordingly. The rules are in the docstring of
+`tools/build_release.py` and tested in `tests/test_release.py`.
+
+The Python the Windows installer uses is pinned in one place, `$PyVersion` / `$PyBuilds` in `install-windows.ps1`: the installer, `run.ps1`, the build script and the
+workflow all read it from there. Changing it is a normal commit; the next release carries the new Python. The actions of the workflow are pinned by commit SHA: to
+update one, change the SHA and the version in the comment together.
+
 ## Pinning the AI manifest
 
 `nuc-console-ai setup` downloads only what `RUNTIME` and `MODELS` in `src/aisetup.py` pin, and refuses while a value is `None`. A
@@ -56,7 +88,7 @@ release must fill them, from the sources, never from memory or from a web page. 
    Q4_K_M GGUF you meant (or the model's own quantisation, noted in its entry); the size should be near its `approx_mb`, which only feeds the
    advice before and after pinning. Change `approx_mb` if it is off by more than a few percent.
 3. Paste `revision`, `sha256` and `size` into the entries (for the runtime `sha256` and `size`, and its `version` and `url` when you move to a newer
-   llamafile). Then check the flags `serve_argv` passes (`--server --host --port -m -a -t -c --nobrowser`, `--gpu auto -ngl N` or
+   llamafile). Then check the flags `serve_argv` passes (`--server --host --port -m -a -t -c`, `--gpu auto -ngl N` or
    `--gpu disable`, and the runtime's `args`) against `llamafile --help` of that version, and that the models that need a recent llama.cpp
    (SmolLM3, gpt-oss) load with it. A model's `revision` is a 40-hex commit, never `main`.
 4. `python3 -m unittest discover -s tests`, then try it for real on each OS you can reach: `setup`, `serve`, `status`, a question with
