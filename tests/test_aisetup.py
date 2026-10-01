@@ -1,5 +1,8 @@
 """nuc-console-ai (src/aisetup.py): the manifest, the downloader, the cache directories, the server command lines, the config
-helper, status, the service files. No network: downloads run against a local http.server serving fake files."""
+helper, status, the service files, and the choice of models by what the machine can run (models, setup of several, use, the GPU
+decision, catalog). No network: downloads run against a local http.server serving fake files. The hardware advice (src/aihw.py)
+is replaced by FakeAihw, written from its contract, so these tests depend neither on that module nor on the machine they run on."""
+import argparse
 import contextlib
 import hashlib
 import http.server
@@ -140,17 +143,126 @@ def fake_manifest(base, runtime_bytes, model_bytes, name="tiny"):
     return runtime, model
 
 
+class FakeAihw:
+    """A stand-in for src/aihw.py, written from the contract (verdicts gpu / partial / ram / slow / no, recommend, cached). aisetup imports
+    aihw lazily, so a test puts this in sys.modules. The numbers are simplified: need = weights + 0.6 GB of KV cache + 0.3 GB."""
+
+    def __init__(self, hw):
+        self.hw = hw
+
+    def cached(self, max_age=300):
+        return self.hw
+
+    def need_mb(self, model, ctx=4096):
+        return int((model.get("approx_mb") or (model.get("size") or 0) // 10 ** 6) + ctx * 0.15 + 300)
+
+    def assess(self, model, hw, ctx=4096):
+        need, layers = self.need_mb(model, ctx), model.get("layers") or 32
+        ram, free = (hw.get("ram") or {}).get("total_mb"), (hw.get("ram") or {}).get("available_mb")
+        gpu = next((g for g in hw.get("gpus") or [] if g.get("backend") not in (None, "none")), None)
+        active = (model.get("active_b") or model.get("params_b") or 1.0) / (model.get("params_b") or 1.0)
+
+        def res(verdict, where, n, bandwidth):
+            tps = bandwidth * 1000.0 / max(1.0, (model.get("approx_mb") or 100) * active)
+            return {"verdict": verdict, "where": where, "need_mb": need, "gpu_layers": n, "why": "%s needs %d MB: %s" % (model["id"], need, verdict),
+                    "tok_s": [round(tps * 0.6), round(tps)] if bandwidth else None}
+        if gpu and gpu.get("unified"):
+            if ram and need <= ram * 0.65 and need <= free:
+                return res("gpu", "GPU", layers, 100)
+        elif gpu and gpu.get("vram_free_mb"):
+            if gpu["vram_free_mb"] >= need * 1.1:
+                return res("gpu", "GPU", layers, 300)
+            share = gpu["vram_free_mb"] / float(need)
+            if share >= 0.25 and need * (1 - share) <= (ram or 0) * 0.5:
+                return res("partial", "GPU+CPU", int(layers * share), 120)
+        if ram is None:
+            return res("slow", "CPU", 0, 0)
+        if need <= ram * 0.5 and need <= free - 1000:
+            return res("ram", "CPU", 0, 30)
+        return res("slow" if need <= ram * 0.85 else "no", "CPU", 0, 20)
+
+    def recommend(self, models, hw):
+        rated = [(m, self.assess(m, hw)["verdict"]) for m in models]  # models are ordered best first
+        for wanted in (("gpu", "ram"), ("partial",)):
+            for m, v in rated:
+                if v in wanted:
+                    return m["id"]
+        fits = [m for m, v in rated if v != "no"]
+        return min(fits, key=lambda m: m.get("approx_mb") or 0)["id"] if fits else None
+
+
+def hw_of(ram_mb, available_mb=None, gpus=(), os_name="linux", arch="x86_64", notes=()):
+    return {"os": os_name, "arch": arch, "cpu": {"model": "Test CPU 9000", "cores": 8, "threads": 16, "flags": ["avx2", "avx512f"]},
+            "ram": {"total_mb": ram_mb, "available_mb": available_mb}, "gpus": list(gpus), "notes": list(notes)}
+
+
+def gpu_of(name, vram_mb, free_mb, vendor="nvidia", backend="cuda", unified=False):
+    return {"vendor": vendor, "name": name, "vram_mb": vram_mb, "vram_free_mb": free_mb, "unified": unified, "backend": backend, "source": "test"}
+
+
+HW_BIG = hw_of(65536, 60000, [gpu_of("NVIDIA GeForce RTX 4090", 24576, 22000)])  # a big NVIDIA GPU
+HW_SMALL_GPU = hw_of(16384, 11000, [gpu_of("NVIDIA GeForce GTX 1650", 4096, 3500)], "windows")
+HW_APPLE = hw_of(16384, 11000, [gpu_of("Apple M2", None, None, "apple", "metal", True)], "darwin", "arm64")  # 16 GB unified memory
+HW_CPU8 = hw_of(8192, 5500, notes=["nvidia-smi not found"])  # 8 GB, no GPU
+HW_UNKNOWN = hw_of(None, None, notes=["/proc/meminfo could not be read"])  # nothing known about the memory
+ALL_HW = {"big nvidia": HW_BIG, "small gpu": HW_SMALL_GPU, "apple 16 GB": HW_APPLE, "8 GB cpu": HW_CPU8, "unknown ram": HW_UNKNOWN}
+
+
+def advice(testcase, hw):
+    """The hardware advice with FakeAihw and the machine `hw` for the rest of the test."""
+    patcher = mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)})
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+
+
+def fake_catalog(base="http://127.0.0.1:1"):
+    """-> (runtime, [huge, big, mid, small], {id: file bytes}): models of known sizes (the fake advice needs ~31, ~10, ~3.4 and ~1.3 GB)."""
+    runtime, _m = fake_manifest(base, b"r" * 100, b"x")
+    models, data = [], {}
+    for rank, (name, approx) in enumerate((("huge", 30000), ("big", 9000), ("mid", 2500), ("small", 400)), 1):
+        data[name] = blob(5000 + rank, name.encode())
+        m = fake_manifest(base, b"r" * 100, data[name], name)[1]
+        models.append(dict(m, rank=rank, approx_mb=approx, ram_mb=approx + 800, layers=32, params_b=approx / 600.0, ctx_max=32768, notes="note " + name))
+    runtime["sha256"], runtime["size"] = sha(b"r" * 100), 100
+    return runtime, models, data
+
+
+def install_files(d, runtime, models, data, only=None):
+    """Put the runtime and the models of fake_catalog on disk, verified (stamp written), like a finished setup."""
+    aisetup.ensure_dirs(d)
+    put(aisetup.runtime_path(d, runtime), b"r" * 100)
+    aisetup.record(d, aisetup.runtime_path(d, runtime), runtime["sha256"])
+    for m in models:
+        if only is None or m["id"] in only:
+            put(aisetup.model_path(d, m), data[m["id"]])
+            aisetup.record(d, aisetup.model_path(d, m), m["sha256"])
+
+
+Q4B = aisetup.find_model("qwen3-4b")
+
+
 class ManifestTests(unittest.TestCase):
     def test_models(self):
         ids = [m["id"] for m in aisetup.MODELS]
         self.assertEqual(len(ids), len(set(ids)), "ids must be unique")
         self.assertIn(aisetup.DEFAULT_MODEL, ids)
-        self.assertGreaterEqual(len(ids), 3)
+        self.assertGreaterEqual(len(ids), 8, "a catalog to choose from: several sizes")
+        self.assertEqual([m["rank"] for m in aisetup.MODELS], list(range(1, len(ids) + 1)), "ordered best first, ranks 1..n")
         for m in aisetup.MODELS:
             with self.subTest(m["id"]):
                 self.assertTrue(re.fullmatch(r"[a-z0-9][a-z0-9.-]*", m["id"]))
                 self.assertIn(m["license"], aisetup.ALLOWED_LICENSES)
                 self.assertIsInstance(m["ram_mb"], int)
+                self.assertEqual(m["quant"], "Q4_K_M")
+                self.assertGreater(m["params_b"], 0.1)
+                self.assertTrue(10 <= m["layers"] <= 100, m["layers"])
+                self.assertGreaterEqual(m["ctx_max"], aisetup.DEFAULT_CTX)
+                self.assertTrue(m["notes"] and "\n" not in m["notes"] and m["notes"].isascii(), "one line of ASCII")
+                # a typo in a size would silently turn a verdict around: Q4_K_M is about 0.5-0.8 GB per billion parameters
+                self.assertTrue(m["params_b"] * 500 <= m["approx_mb"] <= m["params_b"] * 800, (m["params_b"], m["approx_mb"]))
+                self.assertTrue(300 <= m["ram_mb"] - m["approx_mb"] <= 1200, "the server needs the file plus a KV cache and some overhead")
+                if "active_b" in m:  # a mixture of experts reads fewer parameters per token than it holds
+                    self.assertLess(m["active_b"], m["params_b"])
                 self.assertTrue(re.fullmatch(r"[\w.-]+/[\w.-]+", m["repo"]))
                 self.assertTrue(m["file"].endswith(".gguf") and "Q4_K_M" in m["file"], "Q4_K_M GGUF files only")
                 self.assertNotIn("url", m, "the URL is built from repo, commit and file: nothing else can be fetched")
@@ -163,6 +275,15 @@ class ManifestTests(unittest.TestCase):
                     self.assertRegex(url, r"^https://huggingface\.co/[\w.-]+/[\w.-]+/resolve/[0-9a-f]{40}/[^/]+\.gguf$")
                     self.assertRegex(m["sha256"], r"^[0-9a-f]{64}$")
                     self.assertGreater(m["size"], 10 ** 8)
+
+    def test_a_model_that_cannot_work_is_refused_before_anything_else(self):
+        advice(self, HW_CPU8)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(urllib_request(), "urlopen", side_effect=AssertionError("network")):
+            args = aisetup.build_parser().parse_args(["setup", "qwen3-30b-a3b", "--dir", d, "--yes", "--no-config"])
+            with self.assertRaises(aisetup.SetupError) as cm:
+                call(aisetup.cmd_setup, args)
+            self.assertEqual(os.listdir(d), [])
+        self.assertIn("qwen3-30b-a3b will not work on this machine", str(cm.exception))
 
     def test_runtime(self):
         r = aisetup.RUNTIME
@@ -177,11 +298,27 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(len(aisetup.missing_pins(m, True)), 2)
         self.assertEqual(aisetup.missing_pins(dict(m, revision="b" * 40, sha256="c" * 64), True), [])
 
-    def test_default_and_ram(self):
-        self.assertEqual(aisetup.pick_default(None)["id"], aisetup.DEFAULT_MODEL)
-        self.assertEqual(aisetup.pick_default(16000)["id"], aisetup.MODELS[0]["id"])
-        self.assertLessEqual(aisetup.pick_default(4096)["ram_mb"], 4096 * 0.85)
-        self.assertEqual(aisetup.pick_default(500)["ram_mb"], min(m["ram_mb"] for m in aisetup.MODELS))
+    def test_moe_models_are_marked(self):
+        moe = {m["id"] for m in aisetup.MODELS if "active_b" in m}
+        self.assertEqual(moe, {"qwen3-30b-a3b", "gpt-oss-20b"})
+
+    def test_default_and_ram(self):  # without advice: the best model that takes at most half the RAM
+        with mock.patch.dict(sys.modules, {"aihw": None}):
+            self.assertEqual(aisetup.pick_default(None)["id"], aisetup.DEFAULT_MODEL)
+            for total in (16000, 8000, 4096):
+                self.assertEqual(aisetup.pick_default(total), next(m for m in aisetup.MODELS if m["ram_mb"] <= total * 0.5), total)
+            self.assertEqual(aisetup.pick_default(500)["ram_mb"], min(m["ram_mb"] for m in aisetup.MODELS))
+            self.assertEqual(aisetup.pick_default(16000, hw=HW_BIG)["id"], aisetup.pick_default(16000)["id"], "no aihw: the RAM rule")
+
+    def test_default_follows_the_advice_when_there_is_one(self):
+        for name, hw in ALL_HW.items():
+            with self.subTest(name), mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
+                want = FakeAihw(hw).recommend(aisetup.MODELS, hw)
+                self.assertEqual(aisetup.pick_default(None, hw=hw)["id"], want or min(aisetup.MODELS, key=lambda m: m["ram_mb"])["id"])
+        with mock.patch.dict(sys.modules, {"aihw": FakeAihw(HW_BIG)}):
+            self.assertEqual(aisetup.pick_default(None, hw=HW_BIG)["id"], "qwen3-30b-a3b", "a 24 GB GPU holds the best one")
+            tiny = hw_of(512, 300)
+            self.assertEqual(aisetup.pick_default(512, hw=tiny)["id"], "qwen3-0.6b", "nothing fits: the smallest (setup then refuses it)")
 
     def test_shipped_endpoint_is_the_config_default(self):
         self.assertEqual(aisetup.SHIPPED_ENDPOINT, nuc_config.load("/nonexistent")["ai"]["endpoint"])
@@ -189,6 +326,7 @@ class ManifestTests(unittest.TestCase):
     def test_real_manifest_unpinned_refuses_to_download(self):
         if not aisetup.missing_pins(aisetup.RUNTIME, False) and not any(aisetup.missing_pins(m, True) for m in aisetup.MODELS):
             self.skipTest("everything is pinned")
+        advice(self, hw_of(16384, 12000))
         with tempfile.TemporaryDirectory() as d, mock.patch.object(urllib_request(), "urlopen", side_effect=AssertionError("network")):
             args = aisetup.build_parser().parse_args(["setup", "--dir", d, "--yes", "--no-config"])
             rc, out, err = call(aisetup.cmd_setup, args)
@@ -280,20 +418,20 @@ class ServeCommandTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("-t") + 1], "2")
         self.assertEqual(argv[argv.index("-c") + 1], str(aisetup.DEFAULT_CTX))
         self.assertEqual(argv[argv.index("-a") + 1], "qwen3-4b")
-        self.assertTrue(argv[argv.index("-m") + 1].endswith(aisetup.MODELS[0]["file"]))
+        self.assertTrue(argv[argv.index("-m") + 1].endswith(Q4B["file"]))
         for a in aisetup.RUNTIME["args"]:
             self.assertIn(a, argv)
 
     def test_linux_and_mac_go_through_sh(self):
         for plat, d in (("linux", "/var/lib/nuc-console/ai"), ("darwin", "/Library/Application Support/nuc-console/ai")):
             with self.subTest(plat):
-                argv = aisetup.serve_argv(d, aisetup.MODELS[0], 8080, 2, plat=plat)
+                argv = aisetup.serve_argv(d, Q4B, 8080, 2, plat=plat)
                 self.assertEqual(argv[0], "/bin/sh")
                 self.assertEqual(argv[1], d + "/runtime/llamafile-" + aisetup.RUNTIME["version"])
                 self.check_common(argv)
 
     def test_windows_runs_the_exe(self):
-        argv = aisetup.serve_argv(r"C:\ProgramData\nuc-console\ai", aisetup.MODELS[0], 8080, 2, plat="win32")
+        argv = aisetup.serve_argv(r"C:\ProgramData\nuc-console\ai", Q4B, 8080, 2, plat="win32")
         self.assertTrue(argv[0].endswith(".exe"), argv[0])
         self.assertNotIn("/bin/sh", argv)
         self.assertEqual(argv[0], r"C:\ProgramData\nuc-console\ai\runtime\llamafile-%s.exe" % aisetup.RUNTIME["version"])
@@ -524,6 +662,7 @@ class SetupTests(unittest.TestCase):
         patcher = mock.patch.object(aisetup, "memory_mb", return_value=(16000, 12000))
         patcher.start()
         self.addCleanup(patcher.stop)
+        advice(self, hw_of(16000, 12000))
 
     def run_setup(self, srv, *extra, runtime=None, model=None, ask=None):
         runtime, model = fake_manifest(srv_base(srv), self.rt_bytes, self.m_bytes) if runtime is None else (runtime, model)
@@ -626,6 +765,126 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             self.assertTrue(any(r and r.startswith("bytes=") for _p, r in srv.requests), "resumed with Range")
 
+    # --- several models, the recommended one, what will not work or will be slow ---------------------------------------------------
+    def many(self, srv_files, approx=(("a", 400), ("b", 2500))):
+        """-> (runtime, [models]) of fake models (name, approx_mb) with their own bytes, all served by `srv_files`."""
+        models = []
+        for rank, (name, mb) in enumerate(approx, 1):
+            data = blob(30_000 + rank, name.encode())
+            srv_files["/%s.gguf" % name] = data
+            models.append(dict(fake_manifest("http://x", self.rt_bytes, data, name)[1], rank=rank, approx_mb=mb, ram_mb=mb + 800, layers=32))
+        srv_files["/llamafile-0.0"] = self.rt_bytes
+        return models
+
+    def setup_many(self, srv, models, *argv, ask=None):
+        runtime = fake_manifest(srv_base(srv), self.rt_bytes, b"x")[0]
+        args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--config", self.cfg, "--port", "18080"] + list(argv))
+        with mock.patch.object(aisetup, "model_url", lambda m: srv_base(srv) + "/" + m["file"]):
+            return call(aisetup.cmd_setup, args, runtime=runtime, models=models, allow_loopback_http=True, **({"ask": ask} if ask else {}))
+
+    def test_several_models_in_one_run(self):
+        files = {}
+        models = self.many(files, (("a", 400), ("b", 2500), ("c", 1000)))
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "b", "a", "--yes")
+            self.assertEqual(rc, 0, out + err)
+            self.assertEqual(sorted(p for p, _r in srv.requests), ["/a.gguf", "/b.gguf", "/llamafile-0.0"], "the runtime once, each model once")
+            self.assertEqual(sorted(aisetup.load_stamp(self.d)), ["a.gguf", "b.gguf", "llamafile-0.0"])
+            self.assertFalse(os.path.exists(os.path.join(self.d, "models", "c.gguf")), "only what was asked for")
+            rc, out, err = self.setup_many(srv, models, "a", "b", "--yes")  # again, in another order
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(srv.requests), 3, "nothing is downloaded twice")
+        self.assertEqual(out.count("not downloaded again"), 3)
+        self.assertIn("model = b", get(self.cfg), "the first model named is the one [ai] points at")
+        self.assertIn("one model at a time", out)
+
+    def test_repeated_names_are_one_download(self):
+        files = {}
+        models = self.many(files)
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "a", "a", "--model", "a", "--yes", "--no-config")
+            self.assertEqual(rc, 0, out + err)
+            self.assertEqual(len(srv.requests), 2)
+
+    def test_an_unknown_name_among_several_downloads_nothing(self):
+        files = {}
+        models = self.many(files)
+        with Server(files) as srv:
+            with self.assertRaises(aisetup.SetupError) as cm:
+                self.setup_many(srv, models, "a", "nope", "--yes")
+            self.assertEqual(srv.requests, [])
+        self.assertIn("nope", str(cm.exception))
+        self.assertFalse(os.path.exists(self.d))
+
+    def test_no_model_named_installs_the_recommended_one(self):
+        files = {}
+        models = self.many(files, (("huge", 30000), ("fits", 2500), ("small", 400)))  # on 16 GB: no, ram, ram
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "--yes", "--no-config")
+            self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.d, "models"))), ["fits.gguf"], "the best-ranked model that fits")
+        self.assertIn("recommended for this machine", out)
+
+    def test_no_model_named_and_nothing_fits_is_refused_with_the_reason(self):
+        files = {}
+        models = self.many(files, (("huge", 30000), ("big", 20000)))
+        with Server(files) as srv:
+            with self.assertRaises(aisetup.SetupError) as cm:
+                self.setup_many(srv, models, "--yes")
+            self.assertEqual(srv.requests, [])
+        self.assertIn("will not work on this machine", str(cm.exception))
+        self.assertIn("--force", str(cm.exception))
+
+    def test_a_model_that_will_not_work_is_refused_unless_forced(self):
+        files = {}
+        models = self.many(files, (("huge", 30000), ("small", 400)))
+        with Server(files) as srv:
+            with self.assertRaises(aisetup.SetupError) as cm:
+                self.setup_many(srv, models, "small", "huge", "--yes")
+            self.assertEqual(srv.requests, [], "not even the model that would have been fine")
+            self.assertIn("huge will not work on this machine", str(cm.exception))
+            self.assertNotIn("small will not", str(cm.exception))
+            rc, out, err = self.setup_many(srv, models, "huge", "--yes", "--force", "--no-config")
+            self.assertEqual(rc, 0, out + err)
+        self.assertIn("will not work on this machine, installing it anyway", out)
+        self.assertTrue(os.path.exists(os.path.join(self.d, "models", "huge.gguf")))
+
+    def test_a_model_that_will_slow_the_pc_down_is_installed_with_a_warning(self):
+        files = {}
+        models = self.many(files, (("heavy", 9000),))  # needs ~9.9 GB of 16: more than half, less than 85 %
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "heavy", "--yes", "--no-config")
+            self.assertEqual(rc, 0, out + err)
+        self.assertIn("slow down a lot", out)
+        self.assertIn("SLOW", out)
+        self.assertTrue(os.path.exists(os.path.join(self.d, "models", "heavy.gguf")))
+
+    def test_without_advice_the_plain_ram_rule_still_warns(self):
+        files = {}
+        models = self.many(files, (("a", 400),))
+        with mock.patch.dict(sys.modules, {"aihw": None}), mock.patch.object(aisetup, "memory_mb", return_value=(500, 400)), Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "a", "--yes", "--no-config")
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("swap or fail", out)
+
+    def test_the_model_option_is_still_accepted(self):
+        files = {}
+        models = self.many(files)
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "--model", "b", "--yes", "--no-config")
+            self.assertEqual(rc, 0, out + err)
+        self.assertEqual(os.listdir(os.path.join(self.d, "models")), ["b.gguf"])
+
+    def test_one_unpinned_model_among_several_refuses_all(self):
+        files = {}
+        models = self.many(files)
+        models[1] = dict(models[1], revision=None, sha256=None, size=None)
+        with Server(files) as srv:
+            rc, out, err = self.setup_many(srv, models, "a", "b", "--yes")
+            self.assertEqual((rc, srv.requests), (1, []))
+        self.assertIn("b: not pinned: revision, sha256, size", err)
+        self.assertNotIn("a: not pinned", err)
+
 
 class ConfigTests(unittest.TestCase):
     def setUp(self):
@@ -641,6 +900,28 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(new, text.replace("endpoint = http://127.0.0.1:11434/v1", "endpoint = http://127.0.0.1:8080/v1").replace("model =\n", "model = qwen3-4b\n"))
         ai = nuc_config.load(self.cfg)["ai"]
         self.assertEqual((ai["endpoint"], ai["model"], ai["enabled"], ai["timeout_s"]), ("http://127.0.0.1:8080/v1", "qwen3-4b", True, 60))
+
+    def test_gpu_key(self):
+        err = io.StringIO()
+        self.assertEqual(nuc_config.load("/nonexistent")["ai"]["gpu"], "auto", "the default: the GPU when the model fits there")
+        for text, want in (("", "auto"), ("gpu =\n", "auto"), ("gpu = auto\n", "auto"), ("gpu = AUTO\n", "auto"), ("gpu = no\n", "no"), ("gpu = No\n", "no"),
+                           ("gpu = off\n", "no"), ("gpu = false\n", "no"), ("gpu = cpu\n", "no"), ("gpu = yes\n", "auto")):
+            with self.subTest(text), contextlib.redirect_stderr(err):
+                put(self.cfg, "[ai]\nenabled = no\n" + text)
+                self.assertEqual(nuc_config.load(self.cfg)["ai"]["gpu"], want)
+        self.assertEqual(err.getvalue(), "", "valid spellings are quiet")
+        put(self.cfg, "[ai]\ngpu = nvidia\nmodel = m\n")
+        with contextlib.redirect_stderr(err):
+            ai = nuc_config.load(self.cfg)["ai"]
+        self.assertEqual((ai["gpu"], ai["model"]), ("auto", "m"), "a bad value keeps the default and does not touch the other keys")
+        self.assertIn("[ai] gpu must be auto or no", err.getvalue())
+        put(self.cfg, "[web]\nenabled = no\n")
+        self.assertEqual(nuc_config.load(self.cfg)["ai"]["gpu"], "auto", "no [ai] section")
+
+    def test_set_key_writes_gpu_like_the_other_keys(self):
+        put(self.cfg, "[ai]\n# comment\ngpu = auto\nmodel =\n")
+        nuc_config.set_key(self.cfg, "ai", "gpu", "no")
+        self.assertEqual(get(self.cfg), "[ai]\n# comment\ngpu = no\nmodel =\n")
 
     def test_write_creates_missing_section_and_file(self):
         aisetup.write_config(self.cfg, "http://127.0.0.1:8080/v1", "m")
@@ -804,6 +1085,16 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("not pinned in this build", out)
 
+    def test_only_installed_models_are_listed_and_the_active_one_is_marked(self):
+        self.install()
+        other = dict(self.model, id="other", file="other.gguf")
+        put(self.cfg, "[ai]\nenabled = yes\nendpoint = http://127.0.0.1:%d/v1\nmodel = tiny\n" % free_port())
+        args = aisetup.build_parser().parse_args(["status", "--dir", self.d, "--config", self.cfg])
+        rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model, other, dict(other, id="o2", file="o2.gguf")])
+        self.assertRegex(out, r"model     : tiny .*installed, SHA-256 verified  \(active\)")
+        self.assertNotIn("model     : other", out, "a catalog of a dozen models would bury the one that is there")
+        self.assertIn("2 more in the catalog, not installed (nuc-console-ai models)", out)
+
     def test_loopback_probe_ignores_proxy_variables(self):
         s, httpd = self.models_server((200, b'{"data": []}'))
         with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9"}):
@@ -823,6 +1114,7 @@ class ServeCommandFlowTests(unittest.TestCase):
         self.d = os.path.join(self.tmp.name, "ai")
         self.runtime, self.model = fake_manifest("http://127.0.0.1:1", blob(1000, b"r"), blob(5000, b"m"))
         self.cfg = os.path.join(self.tmp.name, "config.ini")
+        advice(self, HW_CPU8)
 
     def install(self):
         aisetup.ensure_dirs(self.d)
@@ -870,6 +1162,567 @@ class ServeCommandFlowTests(unittest.TestCase):
                 self.parse("--port", bad)
 
 
+class ModelsCommandTests(unittest.TestCase):
+    """`nuc-console-ai models`: the hardware found, one row per model with its verdict, speed, installed / active / recommended."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.d = os.path.join(self.tmp.name, "ai")
+        self.cfg = os.path.join(self.tmp.name, "config.ini")
+        self.runtime, self.models, self.data = fake_catalog()
+
+    def models_cmd(self, hw, models=None, ini=""):
+        put(self.cfg, ini)
+        args = aisetup.build_parser().parse_args(["models", "--dir", self.d, "--config", self.cfg])
+        with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
+            return call(aisetup.cmd_models, args, runtime=self.runtime, models=self.models if models is None else models, hw=hw)
+
+    def row(self, out, model_id):
+        return next(ln for ln in out.splitlines() if ln[2:].startswith(model_id + " "))
+
+    def test_big_nvidia_gpu(self):
+        rc, out, err = self.models_cmd(HW_BIG)
+        self.assertEqual(rc, 0)
+        self.assertIn("RTX 4090, 24.0 GB, 21.5 GB free, cuda", out)
+        self.assertIn("RAM      : 64.0 GB, 58.6 GB free", out)
+        self.assertIn("Test CPU 9000 (8 cores, 16 threads) avx2 avx512", out)
+        self.assertRegex(self.row(out, "huge"), r"GPU\+CPU")  # 31 GB do not fit 22 GB of VRAM: partly in RAM
+        for name in ("big", "mid", "small"):
+            self.assertRegex(self.row(out, name), r"  GPU  ")
+        self.assertTrue(self.row(out, "big").startswith("*"), "the best-ranked model that fits entirely is recommended")
+        self.assertEqual(sum(ln.startswith("*") and ln[2:3] != "r" for ln in out.splitlines()), 1, "exactly one row is starred")
+        self.assertIn("recommended for this machine: big: big needs", out)
+
+    def test_small_gpu_on_windows(self):
+        rc, out, err = self.models_cmd(HW_SMALL_GPU)
+        self.assertIn("GTX 1650, 4.0 GB, 3.4 GB free, cuda", out)
+        self.assertRegex(self.row(out, "huge"), "TOO BIG")
+        self.assertRegex(self.row(out, "big"), "GPU\\+CPU")
+        self.assertRegex(self.row(out, "small"), "  GPU  ")
+        self.assertTrue(self.row(out, "small").startswith("*"), "big only fits in part: the recommendation is what fits entirely")
+
+    def test_apple_unified_memory(self):
+        rc, out, err = self.models_cmd(HW_APPLE)
+        self.assertIn("GPU      : Apple M2, unified memory (it uses the RAM), metal", out)
+        self.assertRegex(self.row(out, "huge"), "TOO BIG")
+        self.assertRegex(self.row(out, "big"), "  GPU  ")
+        self.assertTrue(self.row(out, "big").startswith("*"))
+
+    def test_8gb_without_gpu(self):
+        rc, out, err = self.models_cmd(HW_CPU8)
+        self.assertIn("GPU      : none found: the CPU does the work", out)
+        self.assertIn("note     : nvidia-smi not found", out, "what could not be read is said")
+        self.assertRegex(self.row(out, "huge"), "TOO BIG")
+        self.assertRegex(self.row(out, "big"), "TOO BIG")
+        self.assertRegex(self.row(out, "mid"), "  RAM  ")
+        self.assertTrue(self.row(out, "mid").startswith("*"))
+
+    def test_unknown_ram_does_not_guess(self):
+        rc, out, err = self.models_cmd(HW_UNKNOWN)
+        self.assertEqual(rc, 0)
+        self.assertIn("RAM      : unknown", out)
+        self.assertIn("note     : /proc/meminfo could not be read", out)
+        for name in ("huge", "big", "mid", "small"):
+            self.assertNotRegex(self.row(out, name), "TOO BIG", "nothing is called too big on a guess")
+        self.assertRegex(self.row(out, "mid"), r"SLOW\s+\?\s", "no speed estimate without a memory reading")
+
+    def test_no_advice_at_all(self):
+        with mock.patch.dict(sys.modules, {"aihw": None}):
+            args = aisetup.build_parser().parse_args(["models", "--dir", self.d, "--config", self.cfg])
+            put(self.cfg, "")
+            rc, out, err = call(aisetup.cmd_models, args, runtime=self.runtime, models=self.models, hw={})
+        self.assertEqual(rc, 0)
+        self.assertIn("not detected", out)
+        self.assertIn("could not be assessed", out)
+        self.assertEqual(len(out.splitlines()) > 8, True)
+
+    def test_installed_active_and_unpinned(self):
+        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
+        models = [dict(m, revision=None, sha256=None, size=None) if m["id"] == "huge" else m for m in self.models]
+        rc, out, err = self.models_cmd(HW_CPU8, models=models, ini="[ai]\nmodel = mid\n")
+        self.assertRegex(self.row(out, "mid"), r"installed, ACTIVE$")
+        self.assertRegex(self.row(out, "small"), r"not installed$")
+        self.assertRegex(self.row(out, "huge"), r"not pinned yet$")
+        self.assertRegex(self.row(out, "mid"), r"\s5 KB\s", "a pinned model shows its real size")
+        self.assertRegex(self.row(out, "huge"), r"~30\.0 GB", "an unpinned one the approximate size, marked with ~")
+        rc, out, err = self.models_cmd(HW_CPU8, ini="[ai]\nmodel = small\n")
+        self.assertRegex(self.row(out, "mid"), r"installed$")
+        self.assertRegex(self.row(out, "small"), r"not installed$", "active but not installed: not shown as installed")
+
+    def test_it_only_reads_so_an_unprivileged_user_can_run_it(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        stamp = get(aisetup.stamp_path(self.d))
+        boom = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("models must only read"))  # noqa: E731
+        with mock.patch.object(aisetup, "is_root", side_effect=boom), mock.patch.object(aisetup, "ensure_dirs", side_effect=boom), \
+                mock.patch.object(aisetup, "record", side_effect=boom), mock.patch.object(aisetup, "forget", side_effect=boom), \
+                mock.patch.object(aisetup, "download", side_effect=boom), mock.patch.object(aisetup, "sha256_file", side_effect=boom), \
+                mock.patch.object(nuc_config, "set_key", side_effect=boom), mock.patch.object(os, "makedirs", side_effect=boom), \
+                mock.patch.object(subprocess, "run", side_effect=boom), mock.patch.object(subprocess, "Popen", side_effect=boom):
+            rc, out, err = self.models_cmd(HW_BIG)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(sorted(os.listdir(self.d)), ["models", "runtime", "verified.json"])
+        self.assertEqual(get(aisetup.stamp_path(self.d)), stamp, "the stamp file is read, never written")
+        self.assertRegex(self.row(out, "big"), "installed$")
+
+    def test_without_a_directory_argument_it_looks_where_the_administrator_installed(self):
+        system = os.path.join(self.tmp.name, "system-ai")
+        install_files(system, self.runtime, self.models, self.data, only=("mid",))
+        put(self.cfg, "")
+        args = aisetup.build_parser().parse_args(["models", "--config", self.cfg])
+        with mock.patch.object(aisetup, "find_dir", return_value=system), mock.patch.dict(sys.modules, {"aihw": FakeAihw(HW_CPU8)}):
+            rc, out, err = call(aisetup.cmd_models, args, runtime=self.runtime, models=self.models, hw=HW_CPU8)
+        self.assertRegex(self.row(out, "mid"), "installed")
+        self.assertRegex(self.row(out, "small"), "not installed")
+
+    def test_commands_are_shown_and_output_is_ascii(self):
+        rc, out, err = self.models_cmd(HW_BIG)
+        self.assertIn("sudo nuc-console-ai setup ID", out)
+        self.assertIn("sudo nuc-console-ai use ID", out)
+        self.assertTrue(out.isascii(), "Windows consoles")
+
+    def test_the_real_catalog_on_every_machine(self):
+        for name, hw in ALL_HW.items():
+            with self.subTest(name):
+                rc, out, err = self.models_cmd(hw, models=aisetup.MODELS)
+                self.assertEqual(rc, 0)
+                for m in aisetup.MODELS:
+                    self.assertIn(m["id"], out)
+                self.assertTrue(out.isascii())
+                self.assertLess(max(len(ln) for ln in out.splitlines()), 110, "fits a terminal")
+
+
+class CatalogTests(unittest.TestCase):
+    """catalog(): what the screens show. Never downloads, never hashes, never raises."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.d = os.path.join(self.tmp.name, "ai")
+        self.runtime, self.models, self.data = fake_catalog()
+        self.cfg = {"ai": {"model": "mid"}}
+
+    def cat(self, hw, **kw):
+        kw.setdefault("cfg", self.cfg)
+        with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
+            return aisetup.catalog(hw, self.d, models=self.models, runtime=self.runtime, **kw)
+
+    def test_shape(self):
+        install_files(self.d, self.runtime, self.models, self.data, only=("mid", "small"))
+        c = self.cat(HW_CPU8)
+        self.assertEqual(set(c), {"hw", "dir", "runtime", "recommended", "active", "models"})
+        self.assertEqual((c["hw"], c["dir"]), (HW_CPU8, self.d))
+        self.assertEqual(c["runtime"], {"installed": True, "version": "0.0"})
+        self.assertEqual((c["recommended"], c["active"]), ("mid", "mid"))
+        self.assertEqual([m["id"] for m in c["models"]], ["huge", "big", "mid", "small"], "the catalog's order: best first")
+        for m in c["models"]:
+            for key in ("id", "name", "license", "rank", "approx_mb", "notes", "layers", "params_b", "ctx_max"):
+                self.assertIn(key, m, "the model's own fields are kept")
+            self.assertEqual(set(m["assess"]), {"verdict", "where", "need_mb", "gpu_layers", "tok_s", "why"})
+            self.assertEqual(set(m["commands"]), {"install", "use", "remove"})
+            self.assertTrue(m["pinned"])
+        self.assertEqual({m["id"]: m["installed"] for m in c["models"]}, {"huge": False, "big": False, "mid": True, "small": True})
+        self.assertEqual([m["assess"]["verdict"] for m in c["models"]], ["no", "no", "ram", "ram"])
+        json.dumps(c)  # plain data: the web view can serialise it
+
+    def test_runtime_not_installed_and_unpinned_model(self):
+        self.models[0] = dict(self.models[0], revision=None, sha256=None, size=None)
+        c = self.cat(HW_CPU8)
+        self.assertEqual(c["runtime"]["installed"], False)
+        self.assertEqual([m["pinned"] for m in c["models"]], [False, True, True, True])
+
+    def test_commands_per_system(self):
+        c = self.cat(HW_BIG)
+        self.assertEqual(c["models"][2]["commands"], {"install": "sudo nuc-console-ai setup mid", "use": "sudo nuc-console-ai use mid",
+                                                      "remove": "sudo nuc-console-ai remove mid"})
+        w = self.cat(HW_BIG, plat="win32")
+        self.assertEqual(w["models"][2]["commands"]["install"], "nuc-console-ai setup mid (in an administrator prompt)")
+        for c in w["models"]:
+            self.assertNotIn("sudo", " ".join(c["commands"].values()))
+        self.assertTrue(self.cat(HW_APPLE, plat="darwin")["models"][0]["commands"]["use"].startswith("sudo "))
+
+    def test_every_machine(self):
+        want = {"big nvidia": "big", "small gpu": "small", "apple 16 GB": "big", "8 GB cpu": "mid", "unknown ram": "small"}
+        for name, hw in ALL_HW.items():
+            with self.subTest(name):
+                self.assertEqual(self.cat(hw)["recommended"], want[name])
+        self.assertEqual(self.cat(HW_BIG)["models"][0]["assess"]["verdict"], "partial")
+        self.assertGreater(self.cat(HW_BIG)["models"][0]["assess"]["gpu_layers"], 0)
+        self.assertEqual(self.cat(HW_UNKNOWN)["models"][2]["assess"]["tok_s"], None)
+
+    def test_nothing_fits(self):
+        c = self.cat(hw_of(512, 300))
+        self.assertIsNone(c["recommended"])
+        self.assertEqual({m["assess"]["verdict"] for m in c["models"]}, {"no"})
+
+    def test_never_downloads_never_hashes(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        with mock.patch.object(urllib_request(), "urlopen", side_effect=AssertionError("network")), \
+                mock.patch.object(aisetup, "sha256_file", side_effect=AssertionError("hashing")), \
+                mock.patch.object(aisetup, "download", side_effect=AssertionError("download")), \
+                mock.patch.object(subprocess, "run", side_effect=AssertionError("subprocess")):
+            c = self.cat(HW_BIG)
+        self.assertTrue(all(m["installed"] for m in c["models"]), "the stamp file is what counts")
+
+    def test_a_changed_file_is_not_installed(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        path = aisetup.model_path(self.d, self.models[2])
+        put(path, self.data["mid"][:-1] + b"!")  # same size, new mtime: the stamp no longer matches
+        os.utime(path, ns=(1, 1))
+        self.assertEqual({m["id"]: m["installed"] for m in self.cat(HW_BIG)["models"]}["mid"], False)
+
+    def test_the_hardware_argument_wins_over_the_detected_one(self):
+        with mock.patch.dict(sys.modules, {"aihw": FakeAihw(HW_CPU8)}):  # the machine running this has 8 GB, the demo shows another
+            c = aisetup.catalog(HW_BIG, self.d, models=self.models, runtime=self.runtime, cfg=self.cfg)
+            self.assertEqual(c["hw"], HW_BIG)
+            self.assertEqual(c["models"][1]["assess"]["verdict"], "gpu")
+            self.assertEqual(aisetup.catalog(None, self.d, models=self.models, runtime=self.runtime, cfg=self.cfg)["hw"], HW_CPU8)
+
+    def test_without_aihw_it_still_answers(self):
+        with mock.patch.dict(sys.modules, {"aihw": None}):
+            c = aisetup.catalog(None, self.d, models=self.models, runtime=self.runtime, cfg=self.cfg)
+        self.assertEqual(c["hw"], {})
+        self.assertIsNone(c["recommended"])
+        self.assertEqual({m["assess"]["verdict"] for m in c["models"]}, {"unknown"})
+        self.assertTrue(all(m["assess"]["why"] for m in c["models"]))
+
+    def test_a_failing_assessment_does_not_break_the_screen(self):
+        class Broken(FakeAihw):
+            def assess(self, model, hw, ctx=4096):
+                raise ZeroDivisionError("bug")
+
+            def recommend(self, models, hw):
+                raise ValueError("bug")
+
+            def cached(self, max_age=300):
+                raise OSError("bug")
+        with mock.patch.dict(sys.modules, {"aihw": Broken(HW_BIG)}):
+            c = aisetup.catalog(None, self.d, models=self.models, runtime=self.runtime, cfg=self.cfg)
+            c2 = aisetup.catalog(HW_BIG, self.d, models=self.models, runtime=self.runtime, cfg=self.cfg)
+        self.assertEqual(c["hw"], {})
+        self.assertEqual({m["assess"]["verdict"] for m in c2["models"]}, {"unknown"})
+        self.assertIsNone(c2["recommended"])
+
+    def test_active_comes_from_the_config(self):
+        self.assertEqual(self.cat(HW_BIG, cfg={"ai": {"model": ""}})["active"], None)
+        self.assertEqual(self.cat(HW_BIG, cfg={"ai": {"model": "llama3"}})["active"], "llama3", "whatever [ai] model says")
+        cfg = os.path.join(self.tmp.name, "c.ini")
+        put(cfg, "[ai]\nmodel = big\n")
+        with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": cfg}):
+            self.assertEqual(self.cat(HW_BIG, cfg=None)["active"], "big")
+
+    def test_a_directory_that_does_not_exist_is_just_empty(self):
+        c = self.cat(HW_CPU8)
+        self.assertFalse(c["runtime"]["installed"])
+        self.assertFalse(any(m["installed"] for m in c["models"]))
+        self.assertFalse(os.path.exists(self.d), "looking does not create anything")
+
+    def test_the_real_catalog(self):
+        for name, hw in ALL_HW.items():
+            with self.subTest(name), mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
+                c = aisetup.catalog(hw, self.d, cfg={"ai": {"model": ""}})
+                self.assertEqual([m["id"] for m in c["models"]], [m["id"] for m in aisetup.MODELS])
+                self.assertIn(c["recommended"], [None] + [m["id"] for m in aisetup.MODELS])
+                self.assertFalse(any(m["installed"] or m["pinned"] for m in c["models"]), "nothing is pinned in this build, so nothing can be installed")
+
+    def test_find_dir_prefers_the_system_wide_directory(self):
+        system, own = os.path.join(self.tmp.name, "sys"), os.path.join(self.tmp.name, "own")
+        for d in (system, own):
+            os.makedirs(d)
+
+        def fake_default(plat=None, env=None, euid=None, home=None):
+            return system if euid == 0 else own
+        with mock.patch.object(aisetup, "default_dir", side_effect=fake_default):
+            self.assertEqual(aisetup.find_dir(), own, "nothing installed anywhere: the caller's own")
+            put(aisetup.stamp_path(own), "{}")
+            self.assertEqual(aisetup.find_dir(), own)
+            put(aisetup.stamp_path(system), "{}")
+            self.assertEqual(aisetup.find_dir(), system, "what the administrator installed with sudo is what the screen shows")
+
+
+class UseTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.d = os.path.join(self.tmp.name, "ai")
+        self.cfg = os.path.join(self.tmp.name, "config.ini")
+        self.runtime, self.models, self.data = fake_catalog()
+        advice(self, HW_CPU8)
+
+    def use(self, *argv):
+        args = aisetup.build_parser().parse_args(["use", "--dir", self.d, "--config", self.cfg] + list(argv))
+        return call(aisetup.cmd_use, args, runtime=self.runtime, models=self.models)
+
+    def test_writes_ai_model_and_says_how_to_restart(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        put(self.cfg, "# mine\n[web]\nenabled = no\n\n[ai]\n# the model\nenabled = yes\nendpoint = http://127.0.0.1:8080/v1\nmodel = small\n\n[features]\nhealth = yes\n")
+        before = get(self.cfg)
+        rc, out, err = self.use("mid")
+        self.assertEqual(rc, 0, err)
+        text = get(self.cfg)
+        self.assertEqual(text, before.replace("model = small", "model = mid"), "only that line changed")
+        self.assertIn("# mine", text)
+        self.assertIn("# the model", text)
+        self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "mid")
+        self.assertEqual(nuc_config.load(self.cfg)["features"]["health"], True)
+        self.assertIn("sudo nuc-console-ai serve --install-service", out)
+        self.assertIn("one model at a time", out)
+        self.assertNotIn("still the Ollama default", out)
+        self.assertNotIn("enabled = no", out)
+
+    def test_creates_the_section_and_notes_what_is_not_set_up(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        rc, out, err = self.use("small")
+        self.assertEqual(rc, 0)
+        ai = nuc_config.load(self.cfg)["ai"]
+        self.assertEqual((ai["model"], ai["enabled"]), ("small", False), "the advisor is not switched on behind the admin's back")
+        self.assertIn("Ollama default", out)
+        self.assertIn("http://127.0.0.1:8080/v1", out)
+        self.assertIn("[ai] enabled = no", out)
+
+    def test_only_installed_and_verified_models(self):
+        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
+        rc, out, err = self.use("mid")
+        self.assertEqual(rc, 0)
+        before = get(self.cfg)
+        with self.assertRaises(aisetup.SetupError) as cm:
+            self.use("small")  # in the catalog, not on disk
+        self.assertIn("not installed", str(cm.exception))
+        self.assertIn("nuc-console-ai setup small", str(cm.exception))
+        with self.assertRaises(aisetup.SetupError) as cm:
+            self.use("gpt-9")
+        self.assertIn("unknown model", str(cm.exception))
+        put(aisetup.model_path(self.d, self.models[3]), self.data["small"])  # on disk, never verified: no stamp
+        with self.assertRaises(aisetup.SetupError):
+            self.use("small")
+        self.assertEqual(get(self.cfg), before, "a refusal changes nothing")
+
+    def test_runtime_must_be_verified_too(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        os.unlink(aisetup.runtime_path(self.d, self.runtime))
+        with self.assertRaises(aisetup.SetupError):
+            self.use("mid")
+        self.assertFalse(os.path.exists(self.cfg))
+
+    def test_a_model_that_will_not_work_needs_force(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        with self.assertRaises(aisetup.SetupError) as cm:
+            self.use("huge")
+        self.assertIn("will not work on this machine", str(cm.exception))
+        self.assertIn("--force", str(cm.exception))
+        self.assertFalse(os.path.exists(self.cfg))
+        rc, out, err = self.use("huge", "--force")
+        self.assertEqual(rc, 0)
+        self.assertIn("will not work here", out)
+        self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "huge")
+
+    def test_a_slow_model_is_used_with_a_warning(self):
+        self.models[2] = dict(self.models[2], approx_mb=3500)  # ~4.4 GB of 8: more than half of the RAM, less than 85 %
+        install_files(self.d, self.runtime, self.models, self.data)
+        rc, out, err = self.use("mid")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("will slow the PC down a lot", out)
+        self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "mid")
+
+    def test_unwritable_config_is_one_line(self):
+        install_files(self.d, self.runtime, self.models, self.data)
+        self.cfg = os.path.join(self.tmp.name, "no", "such", "dir", "config.ini")
+        with self.assertRaises(aisetup.SetupError) as cm:
+            self.use("mid")
+        self.assertIn("model = mid", str(cm.exception))
+        self.assertNotIn("\n", str(cm.exception))
+
+    def test_restart_hint_per_system(self):
+        self.assertTrue(aisetup.restart_hint("linux")[0].startswith("service   : sudo nuc-console-ai serve --install-service"))
+        win = "\n".join(aisetup.restart_hint("win32"))
+        self.assertIn("administrator prompt", win)
+        self.assertNotIn("sudo", win)
+        self.assertIn("nuc-console-ai serve", win)
+
+
+class ServeGpuTests(unittest.TestCase):
+    """serve: the GPU is used when the model fits there (all of it, or in part), the CPU otherwise or when [ai] gpu = no."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.d = os.path.join(self.tmp.name, "ai")
+        self.cfg = os.path.join(self.tmp.name, "config.ini")
+        self.runtime, self.models, self.data = fake_catalog()
+        install_files(self.d, self.runtime, self.models, self.data)
+        self.big = self.models[1]
+
+    def dry_run(self, hw, *extra, ini="", model="big"):
+        put(self.cfg, ini)
+        args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", model, "--dry-run"] + list(extra))
+        with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
+            rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
+        self.assertEqual(rc, 0, err)
+        return out.replace('"', "").split()
+
+    def test_argv_cpu_or_gpu(self):
+        cpu = aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux")
+        self.assertEqual(cpu[cpu.index("--gpu") + 1], "disable")
+        self.assertNotIn("-ngl", cpu)
+        self.assertEqual(aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers=0), cpu)
+        for plat in ("linux", "darwin", "win32"):
+            with self.subTest(plat):
+                gpu = aisetup.serve_argv("/c", Q4B, 8080, 2, plat=plat, gpu_layers=24)
+                self.assertEqual(gpu[gpu.index("--gpu") + 1], "auto")
+                self.assertEqual(gpu[gpu.index("-ngl") + 1], "24")
+                self.assertEqual(gpu.count("--gpu"), 1)
+                self.assertEqual(gpu[gpu.index("--host") + 1], "127.0.0.1", "the GPU changes nothing about where it listens")
+        with self.assertRaises(ValueError):
+            aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers=-1)
+        with self.assertRaises(ValueError):
+            aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers="12; reboot")
+
+    def test_the_runtime_no_longer_forces_the_cpu(self):
+        self.assertNotIn("--gpu", aisetup.RUNTIME["args"])
+        self.assertNotIn("disable", aisetup.RUNTIME["args"])
+
+    def test_plan_per_machine(self):
+        advice(self, HW_BIG)
+        for name, hw, mid_all_on_gpu in (("big nvidia", HW_BIG, True), ("apple", HW_APPLE, True), ("small gpu", HW_SMALL_GPU, None),
+                                         ("8 GB cpu", HW_CPU8, False), ("unknown", HW_UNKNOWN, False)):
+            with self.subTest(name):
+                layers, why = aisetup.gpu_plan(self.models[2], hw)  # "mid": 32 layers
+                if mid_all_on_gpu:
+                    self.assertEqual(layers, 32)
+                elif mid_all_on_gpu is None:
+                    self.assertTrue(0 < layers <= 33, layers)
+                else:
+                    self.assertEqual(layers, 0)
+                self.assertTrue(why)
+        layers, why = aisetup.gpu_plan(self.big, HW_SMALL_GPU)
+        self.assertTrue(0 < layers < 32, "part of the model on a GPU that is too small for all of it")
+        self.assertEqual(aisetup.gpu_plan(self.models[0], HW_SMALL_GPU)[0], 0, "a GPU that holds almost nothing of it is not worth it")
+
+    def test_config_gpu_no_forces_the_cpu(self):
+        advice(self, HW_BIG)
+        layers, why = aisetup.gpu_plan(self.big, HW_BIG, "no")
+        self.assertEqual(layers, 0)
+        self.assertIn("[ai] gpu = no", why)
+
+    def test_no_advice_means_cpu(self):
+        with mock.patch.dict(sys.modules, {"aihw": None}):
+            layers, why = aisetup.gpu_plan(self.big, HW_BIG)
+        self.assertEqual(layers, 0)
+        self.assertIn("could not be assessed", why)
+        self.assertEqual(aisetup.gpu_plan(self.big, {})[0], 0)
+
+    def test_dry_run_on_a_big_gpu(self):
+        words = self.dry_run(HW_BIG)
+        self.assertEqual(words[words.index("--gpu") + 1], "auto")
+        self.assertEqual(words[words.index("-ngl") + 1], "32")
+
+    def test_dry_run_on_apple_silicon(self):
+        words = self.dry_run(HW_APPLE)
+        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", "32"))
+
+    def test_dry_run_on_a_gpu_that_holds_part_of_it(self):
+        words = self.dry_run(HW_SMALL_GPU)
+        n = int(words[words.index("-ngl") + 1])
+        self.assertTrue(0 < n < 32, n)
+
+    def test_dry_run_without_gpu_is_cpu_only(self):
+        for hw in (HW_CPU8, HW_UNKNOWN):
+            words = self.dry_run(hw, model="mid")
+            self.assertEqual(words[words.index("--gpu") + 1], "disable")
+            self.assertNotIn("-ngl", words)
+
+    def test_a_model_the_gpu_cannot_help_with_runs_on_the_cpu(self):
+        words = self.dry_run(HW_SMALL_GPU, model="huge")
+        self.assertEqual(words[words.index("--gpu") + 1], "disable")
+
+    def test_config_gpu_no(self):
+        words = self.dry_run(HW_BIG, ini="[ai]\ngpu = no\n")
+        self.assertEqual(words[words.index("--gpu") + 1], "disable")
+        self.assertNotIn("-ngl", words)
+        words = self.dry_run(HW_BIG, ini="[ai]\ngpu = auto\n")
+        self.assertIn("-ngl", words)
+
+    def test_config_gpu_no_does_not_even_detect_the_hardware(self):
+        put(self.cfg, "[ai]\ngpu = no\n")
+        args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", "big", "--dry-run"])
+        with mock.patch.object(aisetup, "_hardware", side_effect=AssertionError("detected")):
+            rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
+        self.assertEqual(rc, 0)
+
+    def test_explicit_gpu_layers_win(self):
+        words = self.dry_run(HW_CPU8, "--gpu-layers", "12")
+        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", "12"))
+        words = self.dry_run(HW_BIG, "--gpu-layers", "0")
+        self.assertEqual(words[words.index("--gpu") + 1], "disable")
+        for bad in ("-1", "1000", "many"):
+            with self.subTest(bad), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                aisetup.build_parser().parse_args(["serve", "--gpu-layers", bad])
+
+    def test_start_message_says_where_it_runs(self):
+        put(self.cfg, "")
+        for hw, want in ((HW_BIG, "32 layers on the GPU"), (HW_CPU8, "CPU only")):
+            args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", "mid"])
+            with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}), mock.patch.object(aisetup, "run_server", return_value=0) as rs:
+                rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
+            self.assertIn(want, out)
+            self.assertIn("needs", out, "the reason (aihw's sentence) is printed")
+
+    def test_context_beyond_what_the_model_handles_is_refused(self):
+        put(self.cfg, "")
+        args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", "mid", "--ctx", "65536", "--dry-run"])
+        with self.assertRaises(aisetup.SetupError) as cm:
+            call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
+        self.assertIn("--ctx 32768", str(cm.exception))
+
+    def test_the_service_has_the_decision_in_its_command(self):
+        """The service reads no config of ours: the unit's command is what `serve` was told, and `serve` accepts it."""
+        for layers in (0, 24):
+            with self.subTest(layers):
+                argv = aisetup.service_argv(self.d, self.big, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu_layers=layers)
+                self.assertEqual(argv[-2:], ["--gpu-layers", str(layers)])
+                args = aisetup.build_parser().parse_args(argv[3:] + ["--dry-run", "--config", os.path.join(self.tmp.name, "none.ini")])
+                self.assertEqual(args.gpu_layers, layers)
+                with mock.patch.object(aisetup, "_hardware", side_effect=AssertionError("the service does not detect: it was told")):
+                    rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
+                words = out.split()
+                self.assertEqual(words[words.index("--gpu") + 1], "auto" if layers else "disable")
+        w = aisetup.service_argv(r"C:\PD\nuc-console\ai", self.big, 8080, 2, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\a\aisetup.py", gpu_layers=8)
+        self.assertEqual(w[w.index("--gpu-layers") + 1], "8")
+        self.assertEqual(w[-2], "--log")
+
+    def test_install_linux_with_a_gpu(self):
+        m, ran, wrote = self.big, [], {}
+        with mock.patch.object(aisetup, "is_root", return_value=True), mock.patch.object(aisetup, "_linux_user"), \
+                mock.patch.object(aisetup, "_gpu_groups", return_value=["render", "video"]), mock.patch.object(aisetup, "_readable_by_all", return_value=True), \
+                mock.patch.object(aisetup, "_write_root_file", side_effect=lambda p, data, mode=0o644: wrote.update({p: data})), \
+                mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: "/usr/bin/" + n), \
+                mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: ran.append(argv)), \
+                mock.patch.object(aisetup, "_is_win", return_value=False), mock.patch.object(aisetup, "_is_mac", return_value=False):
+            _r, out, _e = call(aisetup.install_service, self.d, m, 8080, 2, 4096, "linux", gpu_layers=24)
+            unit = wrote["/etc/systemd/system/nuc-console-ai.service"]
+            self.assertIn("--gpu-layers 24\n", unit)
+            self.assertIn("PrivateDevices=no\n", unit, "the sandbox must let the service see the GPU")
+            self.assertIn("SupplementaryGroups=render video\n", unit)
+            self.assertIn("24 layers on the GPU", out)
+            wrote.clear()
+            call(aisetup.install_service, self.d, m, 8080, 2, 4096, "linux", gpu_layers=0)
+            unit = wrote["/etc/systemd/system/nuc-console-ai.service"]
+            self.assertIn("--gpu-layers 0\n", unit)
+            self.assertIn("PrivateDevices=yes\n", unit, "CPU only: the sandbox keeps its private /dev")
+            self.assertNotIn("SupplementaryGroups", unit)
+
+    def test_install_on_windows_stops_a_running_task_first(self):
+        """schtasks /Run does not start a second instance: a task that is still running would keep serving the old model."""
+        calls = []
+        record = lambda argv, *a, **kw: calls.append(list(argv))  # noqa: E731
+        with mock.patch.object(aisetup, "is_root", return_value=True), mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: n), \
+                mock.patch.object(subprocess, "run", side_effect=record), mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: record(argv)), \
+                mock.patch.object(os, "makedirs"):
+            call(aisetup.install_service, r"C:\PD\nuc-console\ai", self.big, 8080, 2, 4096, "win32", gpu_layers=8)
+        verbs = [c[1] for c in calls if c[0] == "schtasks"]
+        self.assertEqual(verbs, ["/End", "/Create", "/Run"])
+
+
 class ServiceTemplateTests(unittest.TestCase):
     def test_systemd_unit(self):
         argv = ["/usr/bin/python3", "-B", "/opt/nuc-console/aisetup.py", "serve", "--dir", "/var/lib/nuc-console/ai", "--model", "qwen3-4b", "--port", "8080"]
@@ -893,11 +1746,25 @@ class ServiceTemplateTests(unittest.TestCase):
         unit = aisetup.systemd_unit(["/usr/bin/python3", "x y", "--dir", "/a b/c"])
         self.assertIn('ExecStart=/usr/bin/python3 "x y" --dir "/a b/c"\n', unit)
 
+    def test_systemd_unit_for_a_gpu(self):
+        argv = ["/usr/bin/python3", "-B", "/opt/aisetup.py", "serve", "--gpu-layers", "24"]
+        cpu, gpu = aisetup.systemd_unit(argv, 3600), aisetup.systemd_unit(argv, 3600, gpu=True, groups=["render", "video"])
+        self.assertIn("PrivateDevices=yes\n", cpu)
+        self.assertNotIn("SupplementaryGroups", cpu)
+        self.assertIn("PrivateDevices=no\n", gpu)
+        self.assertNotIn("PrivateDevices=yes", gpu)
+        self.assertIn("SupplementaryGroups=render video\n", gpu)
+        self.assertNotIn("SupplementaryGroups", aisetup.systemd_unit(argv, 3600, gpu=True), "no such group on this machine: none is asked for")
+        drop = lambda u: [ln for ln in u.splitlines() if not ln.startswith(("PrivateDevices", "SupplementaryGroups"))]  # noqa: E731
+        self.assertEqual(drop(cpu), drop(gpu), "everything else of the sandbox is the same")
+        for line in ("User=nuc-console-ai", "NoNewPrivileges=yes", "ProtectSystem=strict", "CapabilityBoundingSet="):
+            self.assertIn(line + "\n", gpu)
+
     @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze not installed")
     def test_systemd_analyze_accepts_the_unit(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "nuc-console-ai.service")
-            put(p, aisetup.systemd_unit(["/bin/true", "serve"], 2000))
+            put(p, aisetup.systemd_unit(["/bin/true", "serve"], 2000, gpu=True, groups=["root"]))
             r = subprocess.run(["systemd-analyze", "verify", "--man=no", p], capture_output=True, text=True)
         bad = [ln for ln in (r.stdout + r.stderr).splitlines() if re.search(r"Unknown (key|section)|Invalid|Failed to parse|Unknown lvalue", ln)]
         self.assertEqual(bad, [])
@@ -932,7 +1799,7 @@ class ServiceTemplateTests(unittest.TestCase):
         m = aisetup.MODELS[0]
         argv = aisetup.service_argv("/var/lib/nuc-console/ai", m, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/nuc-console/aisetup.py")
         self.assertEqual(argv, ["/usr/bin/python3", "-B", "/opt/nuc-console/aisetup.py", "serve", "--dir", "/var/lib/nuc-console/ai", "--model", m["id"],
-                                "--port", "8080", "--threads", "2", "--ctx", "4096"])
+                                "--port", "8080", "--threads", "2", "--ctx", "4096", "--gpu-layers", "0"])
         w = aisetup.service_argv(r"C:\PD\nuc-console\ai", m, 8080, 2, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\app\aisetup.py")
         self.assertEqual(w[-2], "--log")
         self.assertTrue(w[-1].endswith("ai.log"))
@@ -1011,6 +1878,26 @@ class RemoveTests(unittest.TestCase):
         self.assertTrue(os.path.exists(aisetup.model_path(self.d, self.other)))
         self.assertTrue(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
         self.assertNotIn("tiny.gguf", aisetup.load_stamp(self.d))
+
+    def test_the_model_as_a_plain_argument(self):
+        rc, out, err = self.remove("tiny", "--yes")
+        self.assertEqual(rc, 0)
+        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.model)))
+        self.assertTrue(os.path.exists(aisetup.model_path(self.d, self.other)))
+        with self.assertRaises(aisetup.SetupError) as cm:
+            self.remove("gpt-9", "--yes")
+        self.assertIn("unknown model", str(cm.exception))
+
+    def test_removing_the_active_model_says_so(self):
+        cfg = os.path.join(self.d, "..", "config.ini")
+        put(cfg, "[ai]\nmodel = tiny\n")
+        rc, out, err = self.remove("tiny", "--yes", "--config", cfg)
+        self.assertEqual(rc, 0)
+        self.assertIn("active model", out)
+        self.assertIn("nuc-console-ai use ID", out)
+        put(cfg, "[ai]\nmodel = other\n")
+        rc, out, err = self.remove("--model", "tiny", "--yes", "--config", cfg)
+        self.assertNotIn("active model", out)
 
     def test_everything_but_only_what_we_downloaded(self):
         rc, out, err = self.remove("--yes")
@@ -1099,10 +1986,38 @@ class MainTests(unittest.TestCase):
         self.assertEqual([ln for ln in err.splitlines() if ln.startswith("nuc-console-ai:")], [err.strip().splitlines()[-1]])
         self.assertIn("setup", err)
 
+    def test_the_older_model_option_works_but_is_not_advertised(self):
+        p = aisetup.build_parser()
+        sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction)).choices
+        for cmd in ("setup", "remove"):
+            self.assertNotIn("--model", sub[cmd].format_help(), cmd)
+            self.assertIn("MODEL", sub[cmd].format_usage(), cmd)
+        self.assertIn("--model", sub["serve"].format_help(), "serve keeps its own --model")
+        self.assertEqual(p.parse_args(["setup", "--model", "a", "--model", "b", "c"]).model_opt, ["a", "b"])
+        self.assertEqual(p.parse_args(["setup", "a", "b"]).models, ["a", "b"])
+        self.assertEqual(p.parse_args(["setup"]).models, [])
+        self.assertEqual(p.parse_args(["remove"]).model, None)
+        self.assertEqual(p.parse_args(["remove", "a"]).model, "a")
+        self.assertEqual(p.parse_args(["remove", "--model", "a"]).model_opt, "a")
+
     def test_help_mentions_every_command(self):
         text = aisetup.build_parser().format_help()
-        for word in ("setup", "serve", "status", "remove"):
+        for word in ("models", "setup", "use", "serve", "status", "remove"):
             self.assertIn(word, text)
+
+    def test_models_and_use_through_main(self):
+        advice(self, HW_BIG)
+        with tempfile.TemporaryDirectory() as d:
+            rc, out, err = call(aisetup.main, ["nuc-console-ai", "models", "--dir", d, "--config", os.path.join(d, "c.ini")])
+            self.assertEqual((rc, err), (0, ""))
+            self.assertIn("qwen3-30b-a3b", out)
+            rc, out, err = call(aisetup.main, ["nuc-console-ai", "use", "qwen3-4b", "--dir", d, "--config", os.path.join(d, "c.ini")])
+            self.assertEqual(rc, 1)
+            self.assertIn("nuc-console-ai: qwen3-4b is not installed", err)
+            self.assertFalse(os.path.exists(os.path.join(d, "c.ini")))
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(io.StringIO()):
+            aisetup.main(["nuc-console-ai", "use"])  # a model is required
+        self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":

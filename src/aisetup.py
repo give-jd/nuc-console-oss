@@ -1,17 +1,24 @@
-"""nuc-console-ai: install a small local model and its server, once (setup), run it on 127.0.0.1 (serve), report (status).
+"""nuc-console-ai: choose a small local model by what this machine can run, install it once (setup), run it on 127.0.0.1 (serve).
 
-  setup   download the runtime (llamafile, one executable for Linux, macOS and Windows) and one small open model (GGUF) into a
-          cache directory, verify both against the SHA-256 pinned below, never download a file that is already there with the
-          right hash; with your consent write [ai] endpoint/model in config.ini
-  serve   run the server in the foreground, on 127.0.0.1 only, at low priority (--install-service / --remove-service: a system
-          service: systemd unit, launchd daemon or Windows scheduled task, each run by an unprivileged account)
+  models  the hardware found (RAM, GPU and its memory) and every model of the catalog: does it fit (GPU / GPU+CPU / RAM / SLOW /
+          TOO BIG), a rough speed, installed, active, the recommended one
+  setup   download the runtime (llamafile, one executable for Linux, macOS and Windows) and one or several models (GGUF) into a
+          cache directory, verify each against the SHA-256 pinned below, never download a file that is already there with the
+          right hash; with your consent write [ai] endpoint/model in config.ini. No model named = the recommended one; a model
+          that will not work here is refused unless --force
+  use     make an installed, verified model the one the advisor asks for ([ai] model in config.ini)
+  serve   run the server in the foreground, on 127.0.0.1 only, at low priority, on the GPU when the model fits there ([ai] gpu =
+          no: never) (--install-service / --remove-service: a system service: systemd unit, launchd daemon or Windows scheduled
+          task, each run by an unprivileged account)
   status  what is installed and verified, whether the configured endpoint answers
-  remove  delete the downloaded files
+  remove  delete the downloaded files (one model, or everything)
   pins    for maintainers: prints the values to paste in RUNTIME and MODELS (needs the network)
 
 Security: HTTPS only (a redirect to http:// is refused), every file is checked against a SHA-256 written in this file, downloads
 go to "<name>.part" and are renamed only after the check (a mismatch deletes them), commands are argument lists (no shell), the
 server binds to 127.0.0.1 and nothing here can change that, no auto-update: a new runtime or model means a new pin in a new release.
+The advice (aihw.py) only reads the machine and does arithmetic: it never downloads and never hashes. catalog() is what the screens
+call: it reads the stamp file only, so an unprivileged process can show it.
 Standard library only, Python 3.8+. Output is plain ASCII (Windows consoles).
 """
 import argparse
@@ -54,32 +61,68 @@ UNIX_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 # llamafile (Mozilla, Apache-2.0): ONE executable for Linux, macOS, Windows, x86_64 and arm64; it runs a GGUF model given with -m
 # and serves an OpenAI-compatible API under /v1. The tag in the URL pins the release; the SHA-256 pins the bytes.
 # STATUS: UNPINNED. The version and the asset name below are the maintainer's best knowledge and must be confirmed with `pins`;
-# "args" (CPU only: the server shares a monitoring machine and must never start compiling GPU code) must be confirmed against
-# `llamafile --help` of the pinned version.
+# the GPU flags serve_argv adds (--gpu auto -ngl N, or --gpu disable) must be confirmed against `llamafile --help` of the pinned
+# version, and the newer models (SmolLM3, gpt-oss) against the llama.cpp that version is built on: an older runtime may not know them.
+# "args" are extra arguments for every start; the GPU ones are not here because they depend on the machine (gpu_plan).
 RUNTIME = {
     "name": "llamafile", "version": "0.9.3", "license": "Apache-2.0",
     "url": "https://github.com/Mozilla-Ocho/llamafile/releases/download/0.9.3/llamafile-0.9.3",
     "sha256": None, "size": None,
-    "args": ["--gpu", "disable"],
+    "args": [],
 }
 
-# Small instruct models, GGUF Q4_K_M, permissive licences. "revision" is a Hugging Face COMMIT (never "main"), "sha256" and "size"
-# are those of the file at that commit (the Hub's tree API: lfs.oid, lfs.size). ram_mb is the approximate total memory of the
-# server with DEFAULT_CTX tokens of context. repo/file: best knowledge, UNVERIFIED until `pins` finds them; revision, sha256, size:
-# NOT PINNED. Qwen3 starts in "thinking" mode (long <think> blocks): the advisor should ask for /no_think or similar.
+# Instruct models, GGUF Q4_K_M, permissive licences, ordered best first (rank 1 = best for the advisor's job: short, grounded advice).
+# "revision" is a Hugging Face COMMIT (never "main"), "sha256" and "size" are those of the file at that commit (the Hub's tree API:
+# lfs.oid, lfs.size). repo/file: best knowledge, UNVERIFIED until `pins` finds them; revision, sha256, size: NOT PINNED.
+# The rest is for ADVICE only (what fits, how fast), before and after pinning; a download never uses it: params_b (billions; MoE:
+# active_b = parameters read per token), layers (transformer blocks: how many fit on a GPU becomes -ngl), ctx_max (tokens the model
+# was trained for), approx_mb (approximate Q4_K_M file in MB of 10^6 bytes: the maintainer's estimate, not a measurement), ram_mb
+# (approximate memory of the server with DEFAULT_CTX tokens of context). Qwen3 and SmolLM3 start in "thinking" mode (long <think>
+# blocks): the advisor should ask for /no_think.
 MODELS = [
-    {"id": "qwen3-4b", "name": "Qwen3 4B", "license": "Apache-2.0", "ram_mb": 3600,
+    {"id": "qwen3-30b-a3b", "name": "Qwen3 30B-A3B (MoE)", "license": "Apache-2.0", "rank": 1, "params_b": 30.5, "active_b": 3.3,
+     "quant": "Q4_K_M", "layers": 48, "ctx_max": 32768, "approx_mb": 18600, "ram_mb": 19300,
+     "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think",
+     "repo": "Qwen/Qwen3-30B-A3B-GGUF", "file": "Qwen3-30B-A3B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "gpt-oss-20b", "name": "OpenAI gpt-oss 20B (MoE)", "license": "Apache-2.0", "rank": 2, "params_b": 21.0, "active_b": 3.6,
+     "quant": "Q4_K_M", "layers": 24, "ctx_max": 131072, "approx_mb": 11600, "ram_mb": 12100,
+     "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)",
+     "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "phi-4", "name": "Phi-4 14B", "license": "MIT", "rank": 3, "params_b": 14.7, "quant": "Q4_K_M", "layers": 40,
+     "ctx_max": 16384, "approx_mb": 9100, "ram_mb": 10300, "notes": "dense 14B: strong reasoning, slow without a GPU",
+     "repo": "bartowski/phi-4-GGUF", "file": "phi-4-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "qwen3-14b", "name": "Qwen3 14B", "license": "Apache-2.0", "rank": 4, "params_b": 14.8, "quant": "Q4_K_M", "layers": 40,
+     "ctx_max": 32768, "approx_mb": 9000, "ram_mb": 10000, "notes": "dense 14B: slow without a GPU; /no_think",
+     "repo": "Qwen/Qwen3-14B-GGUF", "file": "Qwen3-14B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "qwen3-8b", "name": "Qwen3 8B", "license": "Apache-2.0", "rank": 5, "params_b": 8.2, "quant": "Q4_K_M", "layers": 36,
+     "ctx_max": 32768, "approx_mb": 5000, "ram_mb": 6000, "notes": "a good balance on 16 GB; /no_think",
+     "repo": "Qwen/Qwen3-8B-GGUF", "file": "Qwen3-8B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "granite-3.3-8b", "name": "IBM Granite 3.3 8B instruct", "license": "Apache-2.0", "rank": 6, "params_b": 8.2,
+     "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 4900, "ram_mb": 5900, "notes": "enterprise-tuned, 128k context",
+     "repo": "ibm-granite/granite-3.3-8b-instruct-GGUF", "file": "granite-3.3-8b-instruct-Q4_K_M.gguf",
+     "revision": None, "sha256": None, "size": None},
+    {"id": "qwen3-4b", "name": "Qwen3 4B", "license": "Apache-2.0", "rank": 7, "params_b": 4.0, "quant": "Q4_K_M", "layers": 36,
+     "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think",
      "repo": "Qwen/Qwen3-4B-GGUF", "file": "Qwen3-4B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
-    {"id": "phi-4-mini", "name": "Phi-4-mini instruct 3.8B", "license": "MIT", "ram_mb": 3600,
+    {"id": "phi-4-mini", "name": "Phi-4-mini instruct 3.8B", "license": "MIT", "rank": 8, "params_b": 3.8, "quant": "Q4_K_M", "layers": 32,
+     "ctx_max": 131072, "approx_mb": 2500, "ram_mb": 3600, "notes": "good at reasoning for its size, 128k context",
      "repo": "bartowski/microsoft_Phi-4-mini-instruct-GGUF", "file": "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf",
      "revision": None, "sha256": None, "size": None},
-    {"id": "granite-3.3-2b", "name": "IBM Granite 3.3 2B instruct", "license": "Apache-2.0", "ram_mb": 2400,
+    {"id": "smollm3-3b", "name": "SmolLM3 3B", "license": "Apache-2.0", "rank": 9, "params_b": 3.1, "quant": "Q4_K_M", "layers": 36,
+     "ctx_max": 65536, "approx_mb": 1900, "ram_mb": 2500, "notes": "3B with a thinking mode; /no_think",
+     "repo": "unsloth/SmolLM3-3B-GGUF", "file": "SmolLM3-3B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "granite-3.3-2b", "name": "IBM Granite 3.3 2B instruct", "license": "Apache-2.0", "rank": 10, "params_b": 2.5,
+     "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 1550, "ram_mb": 2400, "notes": "small and quick, 128k context",
      "repo": "ibm-granite/granite-3.3-2b-instruct-GGUF", "file": "granite-3.3-2b-instruct-Q4_K_M.gguf",
      "revision": None, "sha256": None, "size": None},
-    {"id": "qwen3-1.7b", "name": "Qwen3 1.7B", "license": "Apache-2.0", "ram_mb": 2000,
+    {"id": "qwen3-1.7b", "name": "Qwen3 1.7B", "license": "Apache-2.0", "rank": 11, "params_b": 1.7, "quant": "Q4_K_M", "layers": 28,
+     "ctx_max": 32768, "approx_mb": 1100, "ram_mb": 2000, "notes": "for old or small machines; /no_think",
      "repo": "unsloth/Qwen3-1.7B-GGUF", "file": "Qwen3-1.7B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
+    {"id": "qwen3-0.6b", "name": "Qwen3 0.6B", "license": "Apache-2.0", "rank": 12, "params_b": 0.6, "quant": "Q4_K_M", "layers": 28,
+     "ctx_max": 32768, "approx_mb": 400, "ram_mb": 1200, "notes": "the smallest: simple summaries only; /no_think",
+     "repo": "unsloth/Qwen3-0.6B-GGUF", "file": "Qwen3-0.6B-Q4_K_M.gguf", "revision": None, "sha256": None, "size": None},
 ]
-DEFAULT_MODEL = "qwen3-4b"  # the best of the list that fits in about 4 GB; MODELS is ordered best first (pick_default)
+DEFAULT_MODEL = "qwen3-4b"  # without a reading of the machine: the best that fits an 8 GB one; MODELS is ordered best first (pick_default)
 
 HEX40, HEX64 = re.compile(r"^[0-9a-f]{40}$"), re.compile(r"^[0-9a-f]{64}$")
 
@@ -113,13 +156,17 @@ def find_model(model_id, models=None):
     raise SetupError("unknown model '%s' (known: %s)" % (model_id, ", ".join(m["id"] for m in (models or MODELS))))
 
 
-def pick_default(total_mb, models=None):
-    """The default model: the best one (the list is ordered) that fits the machine's RAM with some room; the smallest otherwise."""
+def pick_default(total_mb, models=None, hw=None):
+    """The model to suggest: with a reading of the machine (hw) and aihw, the recommended one (the smallest when nothing fits: setup
+    then explains why it is refused); otherwise the best one (the list is ordered) that fits half the RAM, like aihw's "ram" verdict."""
     models = models if models is not None else MODELS
+    if hw and _aihw():
+        rec = recommend_id(models, hw)
+        return next((m for m in models if m["id"] == rec), None) or min(models, key=lambda m: m["ram_mb"])
     if not total_mb:
         return next((m for m in models if m["id"] == DEFAULT_MODEL), models[0])
     for m in models:
-        if m["ram_mb"] <= total_mb * 0.85:
+        if m["ram_mb"] <= total_mb * 0.5:
             return m
     return min(models, key=lambda m: m["ram_mb"])
 
@@ -479,17 +526,124 @@ def confirm(question, assume_yes=False, ask=input):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
+# Advice: what this machine can run. aihw.py measures the machine and does the arithmetic (it is imported when needed); without it,
+# or without a reading, every function here says "unknown" instead of guessing: the advice is optional, it never stops a command.
+# ---------------------------------------------------------------------------------------------------------------------------
+VERDICT_LABEL = {"gpu": "GPU", "partial": "GPU+CPU", "ram": "RAM", "slow": "SLOW", "no": "TOO BIG"}
+NO_ADVICE = "this machine's hardware could not be assessed"
+
+
+def _aihw():
+    try:
+        import aihw
+    except ImportError:
+        return None
+    return aihw
+
+
+def _hardware():
+    """aihw.cached(): what the machine has (detected at most every five minutes per process); {} when it cannot be told."""
+    mod = _aihw()
+    try:
+        return (mod.cached() if mod else None) or {}
+    except Exception:  # noqa: BLE001 - advice is optional: a detection bug must not stop setup or a screen
+        return {}
+
+
+def assess_model(model, hw, ctx=DEFAULT_CTX):
+    """aihw.assess(): {"verdict": gpu|partial|ram|slow|no, "where", "need_mb", "gpu_layers", "tok_s", "why"}; None without advice."""
+    mod = _aihw()
+    if mod is None or not hw:
+        return None
+    try:
+        return mod.assess(model, hw, ctx)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def recommend_id(models, hw):
+    """aihw.recommend(): the id of the best model that fits comfortably; None when nothing fits or there is no advice."""
+    mod = _aihw()
+    if mod is None or not hw:
+        return None
+    try:
+        return mod.recommend(models, hw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def gpu_plan(model, hw, cfg_gpu="auto", ctx=DEFAULT_CTX):
+    """-> (layers, why). layers > 0: that many layers on the GPU (serve passes --gpu auto -ngl N); 0: the CPU only (--gpu disable).
+    The GPU is used when aihw says the model fits there (all of it, or in part) and [ai] gpu is not "no"."""
+    if cfg_gpu == "no":
+        return 0, "[ai] gpu = no: CPU only"
+    a = assess_model(model, hw, ctx)
+    if a is None:
+        return 0, "%s: CPU only" % NO_ADVICE
+    layers = a.get("gpu_layers") or 0
+    if a.get("verdict") in ("gpu", "partial") and layers > 0:
+        return min(int(layers), 999), a.get("why") or ""
+    return 0, a.get("why") or "CPU only"
+
+
+def find_dir(plat=None):
+    """The directory to read when none is given: the system-wide one (where `sudo nuc-console-ai setup` puts the files and the service
+    reads them) if it holds a stamp file, else the caller's own. An unprivileged screen sees what the administrator installed."""
+    own = default_dir(plat)
+    for d in (default_dir(plat, euid=0), own):
+        if os.path.isfile(stamp_path(d)):
+            return d
+    return own
+
+
+def commands_for(model_id, plat=None):
+    """The commands to show next to a model (they change the system: an administrator runs them; Windows has no sudo)."""
+    pre, post = ("", " (in an administrator prompt)") if _is_win(plat) else ("sudo ", "")
+    verbs = {"install": "setup", "use": "use", "remove": "remove"}
+    return {k: "%snuc-console-ai %s %s%s" % (pre, v, model_id, post) for k, v in verbs.items()}
+
+
+def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
+    """Everything a screen shows about the models: {"hw", "dir", "runtime": {"installed", "version"}, "recommended": id|None,
+    "active": [ai] model|None, "models": [model + assess, installed, pinned, commands]} in rank order, best first.
+    Never downloads, never hashes (the stamp file says what was verified), never raises: an unprivileged process can call it.
+    `hw` (default aihw.cached()) can be given: the demo screens pass invented machines. models/runtime/cfg/plat are for tests.
+    "assess" is aihw's answer, or verdict "unknown" with a sentence when the machine cannot be assessed."""
+    models = list(MODELS if models is None else models)
+    runtime = RUNTIME if runtime is None else runtime
+    d = d or find_dir(plat)
+    hw = hw if hw is not None else _hardware()
+    if cfg is None:
+        cfg = nuc_config.load(config_path())
+    rp = runtime_path(d, runtime, plat)
+    out = []
+    for m in models:
+        a = assess_model(m, hw)
+        if a is None:
+            a = {"verdict": "unknown", "where": "", "need_mb": m.get("ram_mb") or 0, "gpu_layers": 0, "tok_s": None, "why": NO_ADVICE}
+        out.append(dict(m, assess=a, installed=is_verified(d, model_path(d, m, plat), m), pinned=not missing_pins(m, True),
+                        commands=commands_for(m["id"], plat)))
+    return {"hw": hw, "dir": d, "runtime": {"installed": is_verified(d, rp, runtime), "version": runtime["version"]},
+            "recommended": recommend_id(models, hw), "active": (cfg.get("ai") or {}).get("model") or None, "models": out}
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
 # The server command line
 # ---------------------------------------------------------------------------------------------------------------------------
-def serve_argv(d, model, port=DEFAULT_PORT, threads=None, ctx=DEFAULT_CTX, runtime=None, plat=None):
+def serve_argv(d, model, port=DEFAULT_PORT, threads=None, ctx=DEFAULT_CTX, runtime=None, plat=None, gpu_layers=0):
     """argv list that starts the server. The host is fixed to 127.0.0.1. Unix: the runtime is an "actually portable executable"
     that the kernel cannot start by itself without binfmt_misc; started through sh it works everywhere (and avoids binfmt/WINE
-    interference). Windows: the file is a real .exe."""
+    interference). Windows: the file is a real .exe. gpu_layers > 0: that many layers on the GPU (--gpu auto -ngl N); 0: the CPU
+    only (--gpu disable), so that the server never starts compiling GPU code on a machine whose GPU cannot hold the model."""
     runtime = runtime or RUNTIME
     exe = runtime_path(d, runtime, plat)
     args = ["--server", "--host", LOOPBACK, "--port", str(int(port)), "-m", model_path(d, model, plat), "-a", model["id"],
             "-t", str(int(threads if threads is not None else default_threads())), "-c", str(int(ctx)), "--nobrowser"]
     args += list(runtime.get("args", []))
+    gpu_layers = int(gpu_layers or 0)
+    if gpu_layers < 0:
+        raise ValueError("gpu_layers must not be negative")
+    args += ["--gpu", "auto", "-ngl", str(gpu_layers)] if gpu_layers else ["--gpu", "disable"]
     return [exe] + args if _is_win(plat) else ["/bin/sh", exe] + args
 
 
@@ -569,26 +723,137 @@ def offer_config(path, endpoint, model_id, assume_yes, ask=input):
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
+# models: the hardware and the catalog
+# ---------------------------------------------------------------------------------------------------------------------------
+def fmt_mb(mb):
+    """MB (10^6 bytes, the unit of file sizes) -> '5.0 GB' / '400 MB'."""
+    if not mb:
+        return "?"
+    return "%.1f GB" % (mb / 1000.0) if mb >= 1000 else "%d MB" % mb
+
+
+def fmt_ram(mb):
+    """RAM and VRAM as the machine reports them (MiB) -> '16.0 GB'."""
+    return "unknown" if mb is None else "%.1f GB" % (mb / 1024.0)
+
+
+def size_text(m):
+    """The pinned size when there is one, else the approximate one ('~5.0 GB'): for choosing, not for downloading."""
+    return fmt_size(m["size"]) if m.get("size") else "~" + fmt_mb(m.get("approx_mb"))
+
+
+def speed_text(a):
+    t = (a or {}).get("tok_s")
+    if not t:
+        return "?"
+    lo, hi = int(round(t[0])), int(round(t[1]))
+    return str(lo) if lo == hi else "%d-%d" % (lo, hi)
+
+
+def hw_lines(hw):
+    """The machine in a few plain lines: what the advice is based on, and what could not be read."""
+    if not hw:
+        return ["hardware : not detected (no advice on what fits)"]
+    cpu, ram = hw.get("cpu") or {}, hw.get("ram") or {}
+    flags = [k for k in ("avx2", "avx512", "neon") if any(str(f).startswith(k) for f in cpu.get("flags") or [])]
+    cores = [x for x in ("%s cores" % cpu["cores"] if cpu.get("cores") else "", "%s threads" % cpu["threads"] if cpu.get("threads") else "") if x]
+    free = ", %s free" % fmt_ram(ram["available_mb"]) if ram.get("available_mb") is not None else ""
+    out = ["CPU      : %s%s%s" % (safe(cpu.get("model") or "unknown"), " (%s)" % ", ".join(cores) if cores else "", " " + " ".join(flags) if flags else ""),
+           "RAM      : %s%s" % (fmt_ram(ram.get("total_mb")), free)]
+    for g in hw.get("gpus") or []:
+        if g.get("unified"):
+            mem = "unified memory (it uses the RAM)"
+        elif g.get("vram_mb") is None:
+            mem = "memory unknown"
+        else:
+            mem = fmt_ram(g["vram_mb"]) + (", %s free" % fmt_ram(g["vram_free_mb"]) if g.get("vram_free_mb") is not None else "")
+        out.append("GPU      : %s, %s, %s" % (safe(g.get("name") or "unknown"), mem, g.get("backend") or "none"))
+    if not hw.get("gpus"):
+        out.append("GPU      : none found: the CPU does the work")
+    return out + ["note     : %s" % safe(n, 120) for n in hw.get("notes") or []]
+
+
+def state_text(m, active):
+    if m["installed"]:
+        return "installed, ACTIVE" if m["id"] == active else "installed"
+    return "not installed" if m["pinned"] else "not pinned yet"
+
+
+def model_row(m, mark, state):
+    a = m["assess"]
+    need = "~" + fmt_mb(a["need_mb"]) if a["need_mb"] else "?"
+    return "%s %-15s %-27s %8s %8s  %-8s %7s  %s" % (mark, m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a["verdict"], "?"), speed_text(a), state)
+
+
+def cmd_models(args, runtime=None, models=None, hw=None):
+    """The hardware found and every model of the catalog, best first: does it fit, a rough speed, installed, active, recommended (*)."""
+    d = args.dir or find_dir()
+    hw = hw if hw is not None else _hardware()
+    cat = catalog(hw, d, models, runtime, nuc_config.load(config_path(args.config)))
+    print("This machine (the advice below is based on it):")
+    for ln in hw_lines(hw):
+        print("  " + ln)
+    print("\n  %-15s %-27s %8s %8s  %-8s %7s  %s" % ("ID", "MODEL", "SIZE", "NEEDS", "FITS", "TOK/S", "STATE"))
+    for m in cat["models"]:
+        print(model_row(m, "*" if m["id"] == cat["recommended"] else " ", state_text(m, cat["active"])))
+    rec = next((m for m in cat["models"] if m["id"] == cat["recommended"]), None)
+    if rec:
+        print("\n* recommended for this machine: %s: %s" % (rec["id"], safe(rec["assess"]["why"], 200)))
+    else:
+        print("\n* recommended: none (%s)" % ("nothing in the catalog fits comfortably" if hw else "the machine could not be assessed"))
+    print("FITS: GPU = all on the GPU; GPU+CPU = partly on the GPU; RAM = fits in memory; SLOW = fits, but the PC\n"
+          "      will slow down a lot; TOO BIG = will not work here.\n"
+          "TOK/S is a rough estimate of the generation speed, not a promise. NEEDS: with %d tokens of context." % DEFAULT_CTX)
+    c = commands_for("ID")
+    print("Install: %s\nSwitch : %s\nRemove : %s" % (c["install"], c["use"], c["remove"]))
+    return 0
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------------------------------------------------------
-def show_choices(models, default_id, runtime):
-    print("Local model for the HEALTH advisor (open model, Q4_K_M, runs on the CPU, served on %s only):" % LOOPBACK)
-    print("   %-15s %-28s %8s %9s  %s" % ("ID", "NAME", "SIZE", "RAM", "LICENCE"))
-    for m in models:
-        print(" %s %-15s %-28s %8s %9s  %s" % ("*" if m["id"] == default_id else " ", m["id"], m["name"], fmt_size(m["size"]),
-                                               "~%.1f GB" % (m["ram_mb"] / 1000.0), m["license"]))
-    print("   runtime: %s %s (%s), %s; * = default for this machine" % (runtime["name"], runtime["version"], runtime["license"],
-                                                                      fmt_size(runtime["size"])))
+def show_choices(chosen, runtime, hw, recommended=False):
+    print("Local model%s for the HEALTH advisor (open model, Q4_K_M, served on %s only)%s:" % (
+        "s" if len(chosen) > 1 else "", LOOPBACK, ", recommended for this machine" if recommended else ""))
+    print("   %-15s %-27s %8s %8s  %-8s %s" % ("ID", "NAME", "SIZE", "NEEDS", "FITS", "LICENCE"))
+    for m in chosen:
+        a = assess_model(m, hw) or {}
+        need = "~" + fmt_mb(a.get("need_mb") or m["ram_mb"])
+        print("   %-15s %-27s %8s %8s  %-8s %s" % (m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a.get("verdict"), "?"), m["license"]))
+    print("   runtime: %s %s (%s), %s" % (runtime["name"], runtime["version"], runtime["license"], fmt_size(runtime["size"])))
 
 
-def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=input):
+def check_fit(chosen, hw, total, force):
+    """Print a warning for a model that will slow the PC down, refuse (SetupError) one that will not work unless `force`."""
+    refused = []
+    for m in chosen:
+        a = assess_model(m, hw)
+        if a is None:  # no advice: the plain RAM rule
+            if total and total < m["ram_mb"]:
+                print("\nwarning: this machine has about %.1f GB of RAM and %s needs about %.1f GB: it will swap or fail. "
+                      "Choose a smaller one (nuc-console-ai models)." % (total / 1000.0, m["id"], m["ram_mb"] / 1000.0))
+        elif a["verdict"] == "no":
+            if force:
+                print("\nwarning: %s will not work on this machine, installing it anyway (--force): %s" % (m["id"], safe(a["why"], 200)))
+            else:
+                refused.append("%s will not work on this machine: %s" % (m["id"], safe(a["why"], 200)))
+        elif a["verdict"] == "slow":
+            print("\nwarning: %s fits, but the PC will slow down a lot while it runs: %s" % (m["id"], safe(a["why"], 200)))
+    if refused:
+        raise SetupError("%s. Choose a smaller model (nuc-console-ai models), or add --force to install it anyway" % "; ".join(refused))
+
+
+def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=input, hw=None):
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     d = args.dir or default_dir()
-    total, avail = memory_mb()
-    model = find_model(args.model, models) if args.model else pick_default(total, models)
-    show_choices(models, model["id"], runtime)
-    todo = [("runtime", runtime, runtime_path(d, runtime), 0o755, False), (model["id"], model, model_path(d, model), 0o644, True)]
+    hw = hw if hw is not None else _hardware()
+    total = ((hw or {}).get("ram") or {}).get("total_mb") or memory_mb()[0]
+    asked = list(dict.fromkeys(list(args.models or []) + list(args.model_opt or [])))  # --model is the older spelling
+    chosen = [find_model(i, models) for i in asked] or [pick_default(total, models, hw)]
+    show_choices(chosen, runtime, hw, not asked)
+    check_fit(chosen, hw, total, args.force)  # first: a model that cannot work here is not worth a word about pins
+    todo = [("runtime", runtime, runtime_path(d, runtime), 0o755, False)] + [(m["id"], m, model_path(d, m), 0o644, True) for m in chosen]
     unpinned = [(n, missing_pins(e, is_m)) for n, e, _p, _m, is_m in todo if missing_pins(e, is_m)]
     if unpinned:
         print("\nnuc-console-ai: nothing downloaded: this build does not pin everything it needs.", file=sys.stderr)
@@ -597,9 +862,6 @@ def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=in
         print("A maintainer fills them in with `python3 aisetup.py pins` (values come from the Hugging Face and GitHub APIs, "
               "never from memory). Downloads are only ever made from pinned, hash-checked values.", file=sys.stderr)
         return 1
-    if total and total < model["ram_mb"]:
-        print("\nwarning: this machine has about %.1f GB of RAM and %s needs about %.1f GB: it will swap or fail. "
-              "Choose a smaller one with --model." % (total / 1000.0, model["id"], model["ram_mb"] / 1000.0))
     ok = {n: is_verified(d, p, e, rehash=True) for n, e, p, _m, _is_m in todo}  # hashed once: it takes seconds for a 2 GB file
     need = 0
     for n, e, p, _m, _is_m in todo:
@@ -627,9 +889,48 @@ def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=in
         record(d, p, e["sha256"])
         print("%s: %s, SHA-256 verified" % (n, how))
     if not args.no_config:
-        offer_config(config_path(args.config), endpoint_for(args.port), model["id"], args.yes, ask)
+        offer_config(config_path(args.config), endpoint_for(args.port), chosen[0]["id"], args.yes, ask)
     print("\nready. Run it:   nuc-console-ai serve --port %d     (foreground; Ctrl+C stops)\n"
           "or as a service: sudo nuc-console-ai serve --install-service\nThen set [ai] enabled = yes. Check: nuc-console-ai status" % args.port)
+    if len(chosen) > 1:
+        print("The server runs one model at a time (%s here): switch with nuc-console-ai use ID, then restart it." % ", ".join(m["id"] for m in chosen))
+    return 0
+
+
+def restart_hint(plat=None):
+    """How the running server is switched to the model in [ai] model: the service has every value explicit, so it is installed again."""
+    admin = "in an administrator prompt: " if _is_win(plat) else "sudo "
+    return ["service   : %snuc-console-ai serve --install-service  (writes it again for this model, restarts it)" % admin,
+            "foreground: stop it (Ctrl+C) and run: nuc-console-ai serve"]
+
+
+def cmd_use(args, runtime=None, models=None, hw=None):
+    """Make an installed, verified model the one the advisor asks for: [ai] model in config.ini (nothing else is changed)."""
+    runtime = runtime if runtime is not None else RUNTIME
+    models = models if models is not None else MODELS
+    d = args.dir or default_dir()
+    m = find_model(args.model, models)
+    if m not in installed_models(d, models, runtime):
+        raise SetupError("%s is not installed (or not verified) in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
+    a = assess_model(m, hw if hw is not None else _hardware())
+    if a and a["verdict"] == "no" and not args.force:
+        raise SetupError("%s will not work on this machine: %s. Add --force to use it anyway" % (m["id"], safe(a["why"], 200)))
+    if a and a["verdict"] in ("no", "slow"):
+        print("warning: %s %s: %s" % (m["id"], "will not work here" if a["verdict"] == "no" else "will slow the PC down a lot", safe(a["why"], 200)))
+    path = config_path(args.config)
+    try:
+        nuc_config.set_key(path, "ai", "model", m["id"])
+    except OSError as e:
+        raise SetupError("cannot write %s (%s): run as root/administrator, or set model = %s under [ai] by hand" % (path, e.strerror or e, m["id"]))
+    ai = nuc_config.load(path)["ai"]
+    print("config: %s: [ai] model = %s" % (path, m["id"]))
+    if ai["endpoint"] == SHIPPED_ENDPOINT:
+        print("note: [ai] endpoint is still the Ollama default; for the server of this tool set endpoint = %s" % endpoint_for(DEFAULT_PORT))
+    if not ai["enabled"]:
+        print("note: [ai] enabled = no: the advisor does not use it yet")
+    print("The server runs one model at a time. To switch the running one to %s:" % m["id"])
+    for ln in restart_hint():
+        print("  " + ln)
     return 0
 
 
@@ -649,7 +950,7 @@ def choose_model(args, d, models=None, runtime=None, cfg_model=None):
     if args.model:
         m = find_model(args.model, models)
         if m not in installed_models(d, models, runtime):
-            raise SetupError("%s is not installed (or not verified) in %s: run nuc-console-ai setup --model %s" % (m["id"], d, m["id"]))
+            raise SetupError("%s is not installed (or not verified) in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
         return m
     have = installed_models(d, models, runtime)
     if not have:
@@ -664,7 +965,9 @@ def systemd_quote(arg):
     return '"' + arg.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
 
 
-def systemd_unit(argv, ram_mb=None):
+def systemd_unit(argv, ram_mb=None, gpu=False, groups=()):
+    """gpu: the server uses the GPU, so the device nodes (/dev/nvidia*, /dev/dri, /dev/kfd) must exist for it and `groups` (render,
+    video: the ones the machine has) let the service user open them; everything else of the sandbox stays."""
     state = "/var/lib/" + SERVICE_NAME  # writable by the service user only (StateDirectory): the runtime unpacks its loader here
     lines = [
         "[Unit]", "Description=nuc-console local AI model server (llamafile, %s only)" % LOOPBACK, "After=network.target", "",
@@ -672,13 +975,15 @@ def systemd_unit(argv, ram_mb=None):
         "ExecStart=" + " ".join(systemd_quote(a) for a in argv),
         "Environment=HOME=%s TMPDIR=%s" % (state, state), "StateDirectory=" + SERVICE_NAME,
         "Nice=10", "Restart=on-failure", "RestartSec=10",
-        "NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "PrivateDevices=yes",
+        "NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "PrivateDevices=" + ("no" if gpu else "yes"),
         "ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes", "ProtectClock=yes",
         "ProtectHostname=yes", "CapabilityBoundingSet=", "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
         "RestrictNamespaces=yes", "RestrictSUIDSGID=yes", "LockPersonality=yes", "TasksMax=128",
     ]
     if ram_mb:
         lines.append("MemoryMax=%dM" % int(ram_mb * 1.5))
+    if gpu and groups:
+        lines.append("SupplementaryGroups=" + " ".join(groups))
     return "\n".join(lines + ["", "[Install]", "WantedBy=multi-user.target", ""])
 
 
@@ -708,13 +1013,14 @@ def task_xml(command, arguments):
         "</Task>\n" % (xml_escape(command), xml_escape(arguments)))
 
 
-def service_argv(d, model, port, threads, ctx, plat=None, python=None, script=None):
-    """The service runs `aisetup.py serve ...` with every value explicit (the service user reads no config of ours)."""
+def service_argv(d, model, port, threads, ctx, plat=None, python=None, script=None, gpu_layers=0):
+    """The service runs `aisetup.py serve ...` with every value explicit (the service user reads no config of ours): the GPU layers
+    too, decided when the service is installed (0 = CPU only). A new model or [ai] gpu = a new `serve --install-service`."""
     python = python or sys.executable
     if _is_win(plat) and python.lower().endswith("python.exe") and os.path.exists(python[:-10] + "pythonw.exe"):
         python = python[:-10] + "pythonw.exe"  # no console window
     argv = [python, "-B", script or os.path.realpath(__file__), "serve", "--dir", d, "--model", model["id"], "--port", str(port),
-            "--threads", str(threads), "--ctx", str(ctx)]
+            "--threads", str(threads), "--ctx", str(ctx), "--gpu-layers", str(int(gpu_layers or 0))]
     if _is_win(plat):
         argv += ["--log", ntpath.join(os.environ.get("ProgramData") or r"C:\ProgramData", "nuc-console", "logs", "ai.log")]
     return argv
@@ -772,14 +1078,29 @@ def _mac_user():
         run([dscl, ".", "-create", rec, key, val])
 
 
-def install_service(d, model, port, threads, ctx, plat=None):
+def _gpu_groups():
+    """The groups that own the GPU device nodes (Linux: render for /dev/dri and /dev/kfd, video) that this machine has."""
+    import grp
+    out = []
+    for g in ("render", "video"):
+        try:
+            grp.getgrnam(g)
+            out.append(g)
+        except KeyError:
+            pass
+    return out
+
+
+def install_service(d, model, port, threads, ctx, plat=None, gpu_layers=0):
     if not is_root():
         raise SetupError("--install-service needs %s" % ("an administrator prompt" if _is_win(plat) else "root: sudo nuc-console-ai serve --install-service"))
     if not _is_win(plat) and not (_readable_by_all(runtime_path(d)) and _readable_by_all(model_path(d, model))):
         raise SetupError("%s is not readable by other users (the service runs as its own account): run setup as root, or use --dir "
                          "on a shared path" % d)
-    argv = service_argv(d, model, port, threads, ctx, plat)
+    argv = service_argv(d, model, port, threads, ctx, plat, gpu_layers=gpu_layers)
     if _is_win(plat):
+        # a task that is running keeps its old model and ignores /Run: stop it first
+        subprocess.run([tool("schtasks", plat), "/End", "/TN", "\\nuc-console\\ai"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         subprocess.run([tool("icacls", plat), d, "/grant", "*S-1-5-19:(OI)(CI)RX"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         logs = os.path.dirname(argv[-1])
         os.makedirs(logs, exist_ok=True)
@@ -809,13 +1130,14 @@ def install_service(d, model, port, threads, ctx, plat=None):
     else:
         _linux_user()
         unit = "/etc/systemd/system/%s.service" % SERVICE_NAME
-        _write_root_file(unit, systemd_unit(argv, model["ram_mb"]))
+        _write_root_file(unit, systemd_unit(argv, model["ram_mb"], gpu=bool(gpu_layers), groups=_gpu_groups() if gpu_layers else ()))
         systemctl = tool("systemctl")
         run([systemctl, "daemon-reload"])
         run([systemctl, "enable", SERVICE_NAME + ".service"])
         run([systemctl, "restart", SERVICE_NAME + ".service"])
         print("service: %s.service (user %s, sandboxed, 127.0.0.1 only) started. Logs: journalctl -u %s" % (SERVICE_NAME, SERVICE_NAME, SERVICE_NAME))
-    print("model %s on %s (the first answer may take a minute: the model is loaded into memory)" % (model["id"], endpoint_for(port)))
+    print("model %s on %s, %s (the first answer may take a minute: the model is loaded into memory)"
+          % (model["id"], endpoint_for(port), "%d layers on the GPU" % gpu_layers if gpu_layers else "CPU only"))
 
 
 def remove_service(plat=None):
@@ -839,26 +1161,35 @@ def remove_service(plat=None):
     print("service removed (the downloaded model, the log and the %s account are left: nuc-console-ai remove deletes the files)" % SERVICE_NAME)
 
 
-def cmd_serve(args, runtime=None, models=None):
+def cmd_serve(args, runtime=None, models=None, hw=None):
     runtime = runtime if runtime is not None else RUNTIME
     if args.remove_service:
         remove_service()
         return 0
     d = args.dir or default_dir()
-    cfg_model = nuc_config.load(config_path(args.config))["ai"]["model"]
-    model = choose_model(args, d, models, runtime, cfg_model)
+    ai = nuc_config.load(config_path(args.config))["ai"]
+    model = choose_model(args, d, models, runtime, ai["model"])
+    if model.get("ctx_max") and args.ctx > model["ctx_max"]:
+        raise SetupError("%s handles %d tokens of context at most: use --ctx %d or less" % (model["id"], model["ctx_max"], model["ctx_max"]))
     threads = args.threads or default_threads()
-    argv = serve_argv(d, model, args.port, threads, args.ctx, runtime)
+    if args.gpu_layers is not None:  # explicit (the service passes it: it was decided when the service was installed)
+        layers, why = args.gpu_layers, "--gpu-layers %d" % args.gpu_layers
+    else:
+        layers, why = gpu_plan(model, hw if hw is not None else (_hardware() if ai["gpu"] != "no" else {}), ai["gpu"], args.ctx)
+    argv = serve_argv(d, model, args.port, threads, args.ctx, runtime, gpu_layers=layers)
     if args.install_service:
-        install_service(d, model, args.port, threads, args.ctx)
+        install_service(d, model, args.port, threads, args.ctx, gpu_layers=layers)
         return 0
     if args.dry_run:
         print(subprocess.list2cmdline(argv) if _is_win() else " ".join(shlex.quote(a) for a in argv))
         return 0
     if args.log:
         nuc_config.log_to(args.log)
-    print("nuc-console-ai: %s on %s (%d threads, context %d, low priority). Ctrl+C stops." % (model["id"], endpoint_for(args.port), threads, args.ctx),
+    where = "%d layers on the GPU" % layers if layers else "CPU only"
+    print("nuc-console-ai: %s on %s (%d threads, context %d, %s, low priority). Ctrl+C stops." % (model["id"], endpoint_for(args.port), threads, args.ctx, where),
           flush=True)
+    if why:
+        print("nuc-console-ai: %s" % safe(why, 200), flush=True)
     return run_server(argv)
 
 
@@ -911,8 +1242,15 @@ def cmd_status(args, runtime=None, models=None):
             return "not installed"
         return "installed, SHA-256 verified" if is_verified(d, path, entry, rehash=args.verify) else "present but NOT verified (run setup again)"
     print("  runtime   : %s %s: %s" % (runtime["name"], runtime["version"], state(rp, runtime, False)))
+    absent = 0
     for m in models:
-        print("  model     : %-15s %-28s %s" % (m["id"], m["name"], state(model_path(d, m), m, True)))
+        st = state(model_path(d, m), m, True)
+        if st.startswith(("not installed", "not pinned")):  # the catalog is long: only what is on disk is listed here
+            absent += 1
+            continue
+        print("  model     : %-15s %-28s %s%s" % (m["id"], m["name"], st, "  (active)" if m["id"] == ai["model"] else ""))
+    if absent:
+        print("  models    : %d more in the catalog, not installed (nuc-console-ai models)" % absent)
     ready = installed_models(d, models, runtime) if not args.verify else [
         m for m in models if is_verified(d, rp, runtime, True) and is_verified(d, model_path(d, m), m, True)]
     print("  config    : %s: [ai] enabled = %s, endpoint = %s, model = %s, allow_remote = %s"
@@ -942,7 +1280,8 @@ def cmd_remove(args, runtime=None, models=None, ask=input):
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     d = args.dir or default_dir()
-    targets = [model_path(d, find_model(args.model, models))] if args.model else \
+    which = args.model or args.model_opt  # MODEL, or the older --model MODEL
+    targets = [model_path(d, find_model(which, models))] if which else \
         [model_path(d, m) for m in models] + [runtime_path(d, runtime)]
     files = [p for t in targets for p in (t, t + ".part") if os.path.isfile(p)]
     if not files:
@@ -969,6 +1308,8 @@ def cmd_remove(args, runtime=None, models=None, ask=input):
         except OSError:
             pass
     print("deleted. [ai] in config.ini is not changed: set enabled = no there if you do not use another server." if not bad else "some files remain.")
+    if which and not bad and nuc_config.load(config_path(args.config))["ai"]["model"] == which:
+        print("note: %s is the active model ([ai] model): choose another with nuc-console-ai use ID, and restart the server" % which)
     return 1 if bad else 0
 
 
@@ -1051,28 +1392,41 @@ def _ranged(lo, hi):
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="nuc-console-ai", description="A small local AI model for the HEALTH advisor: install once, serve on 127.0.0.1.",
+    ap = argparse.ArgumentParser(prog="nuc-console-ai", description="A small local AI model for the HEALTH advisor, chosen by what this "
+                                 "machine can run: look (models), install (setup), switch (use), serve on 127.0.0.1.",
                                  epilog="status exit codes: 0 the endpoint answers; 3 installed but not answering (start it); 1 not installed.")
-    sub = ap.add_subparsers(dest="cmd", metavar="{setup,serve,status,remove}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{models,setup,use,serve,status,remove}")
     sub.required = True
 
     def common(p, config=True):
         p.add_argument("--dir", help="cache directory (default: %s)" % default_dir())
         if config:
             p.add_argument("--config", help="config.ini to read/write (default: %s)" % config_path())
-    p = sub.add_parser("setup", help="download the runtime and a model once, verify them, offer to write config.ini")
+    p = sub.add_parser("models", help="the hardware found and every model: does it fit, how fast, installed, active, recommended")
     common(p)
-    p.add_argument("--model", help="model id (default: the best that fits this machine: %s)" % ", ".join(m["id"] for m in MODELS))
+    p.set_defaults(func=cmd_models)
+    p = sub.add_parser("setup", help="download the runtime and one or more models once, verify them, offer to write config.ini")
+    common(p)
+    p.add_argument("models", nargs="*", metavar="MODEL", help="model id(s) (default: the one recommended for this machine; see `models`)")
+    p.add_argument("--model", action="append", dest="model_opt", metavar="MODEL", help=argparse.SUPPRESS)  # the older spelling of MODEL
+    p.add_argument("--force", action="store_true", help="install a model that will not work on this machine anyway")
     p.add_argument("--port", type=_port, default=DEFAULT_PORT, help="port the server will use, for [ai] endpoint (default %(default)s)")
     p.add_argument("--yes", "-y", action="store_true", help="agree to the download and to writing a first [ai] config")
     p.add_argument("--no-config", action="store_true", help="do not offer to write config.ini")
     p.set_defaults(func=cmd_setup)
-    p = sub.add_parser("serve", help="run the server in the foreground on 127.0.0.1, at low priority")
+    p = sub.add_parser("use", help="make an installed model the one the advisor asks for ([ai] model), and say how to restart the server")
+    common(p)
+    p.add_argument("model", metavar="MODEL", help="model id: one of those `models` lists as installed")
+    p.add_argument("--force", action="store_true", help="use a model that will not work on this machine anyway")
+    p.set_defaults(func=cmd_use)
+    p = sub.add_parser("serve", help="run the server in the foreground on 127.0.0.1, at low priority, on the GPU when the model fits there")
     common(p)
     p.add_argument("--model", help="model id (default: [ai] model if installed, else the default one)")
     p.add_argument("--port", type=_port, default=DEFAULT_PORT, help="default %(default)s")
     p.add_argument("--threads", type=_ranged(1, 512), help="default: cores minus two (at least 1)")
     p.add_argument("--ctx", type=_ranged(512, 131072), default=DEFAULT_CTX, help="context tokens, default %(default)s")
+    p.add_argument("--gpu-layers", type=_ranged(0, 999), metavar="N", help="layers on the GPU, 0 = CPU only (default: decided from this "
+                   "machine's hardware, unless [ai] gpu = no)")
     p.add_argument("--dry-run", action="store_true", help="print the command, do not start it")
     p.add_argument("--install-service", action="store_true", help="install and start it as a system service (root / administrator)")
     p.add_argument("--remove-service", action="store_true", help="stop and remove that service")
@@ -1083,9 +1437,10 @@ def build_parser():
     p.add_argument("--endpoint", help="probe this /v1 URL instead of [ai] endpoint")
     p.add_argument("--verify", action="store_true", help="hash the files again instead of trusting the stamp")
     p.set_defaults(func=cmd_status)
-    p = sub.add_parser("remove", help="delete the downloaded files")
-    common(p, config=False)
-    p.add_argument("--model", help="only this model (default: every model and the runtime)")
+    p = sub.add_parser("remove", help="delete the downloaded files of one model (or of everything)")
+    common(p)
+    p.add_argument("model", nargs="?", metavar="MODEL", help="only this model (default: every model and the runtime)")
+    p.add_argument("--model", dest="model_opt", metavar="MODEL", help=argparse.SUPPRESS)  # the older spelling of MODEL
     p.add_argument("--yes", "-y", action="store_true", help="do not ask")
     p.set_defaults(func=cmd_remove)
     p = sub.add_parser("pins", help="maintainers: print the values to pin (network)")

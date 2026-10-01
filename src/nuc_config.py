@@ -37,7 +37,7 @@ def load(path=None):
                    "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
-                  "daily": False}}
+                  "daily": False, "gpu": "auto"}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"))
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -138,6 +138,13 @@ def load(path=None):
                 print(f"nuc-console: {path}: [ai] {key} is not a boolean: kept {'on' if ai[key] else 'off'}", file=sys.stderr)
         ai["endpoint"] = cp.get("ai", "endpoint", fallback=ai["endpoint"]).strip() or ai["endpoint"]
         ai["model"] = cp.get("ai", "model", fallback="").strip()
+        gpu = cp.get("ai", "gpu", fallback="").strip().lower()  # nuc-console-ai serve: use the GPU when the model fits there (auto) or never (no)
+        if gpu in ("auto", "yes", "on", "true", "1"):
+            ai["gpu"] = "auto"
+        elif gpu in ("no", "off", "false", "0", "none", "cpu"):
+            ai["gpu"] = "no"
+        elif gpu:
+            print(f"nuc-console: {path}: [ai] gpu must be auto or no: kept auto", file=sys.stderr)
         try:
             ai["timeout_s"] = max(10, min(600, cp.getint("ai", "timeout_s", fallback=ai["timeout_s"])))
         except ValueError:
