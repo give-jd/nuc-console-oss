@@ -18,6 +18,22 @@ CSS = ("html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14
        "footer{position:sticky;bottom:0;margin-top:10px;padding:8px 0;background:#0d1117;border-top:1px solid #30363d;"
        "color:#6e7681;font:12px sans-serif}"
        "a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}")
+# the web MAP page (web.py): a tree of links, its details panel on the right of a wide window and under the tree on a narrow one
+MAP_CSS = (".hd{display:flex;justify-content:space-between;gap:2ch;white-space:pre;padding:0 1ch}.hd>span:first-child{overflow:hidden;"
+           "text-overflow:ellipsis}.lg{margin:8px 0 2px;color:#8b949e}.nt{margin:2px 0;color:#8b949e}.n{color:#c9d1d9}"
+           ".mp{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 28px;margin-top:8px}.tree{min-width:0}"
+           ".ro{display:grid;grid-template-columns:auto minmax(0,1fr);padding:0 4px;border-radius:3px;scroll-margin:30vh 0}"
+           ".ro:hover{background:#161b22}.ro:target{outline:1px solid #30363d}.sel,.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}"
+           ".tr{white-space:pre;color:#6e7681}.bd{white-space:pre-wrap;overflow-wrap:anywhere}"
+           ".tg{display:inline-block;width:1.6em;text-align:center;text-decoration:none}a.lb{text-decoration:none}a.lb:hover{text-decoration:underline}"
+           ".dp{align-self:start;border:1px solid #30363d;border-radius:6px;padding:8px 12px;scroll-margin:8px}"
+           ".dh{display:flex;justify-content:space-between;gap:2ch;margin-bottom:6px;font-weight:700}"
+           ".dp table{border-collapse:collapse;width:100%}.dp th{text-align:left;font-weight:400;color:#8b949e;padding:1px 2ch 1px 0;"
+           "vertical-align:top;white-space:nowrap}.dp td{padding:1px 0;overflow-wrap:anywhere}.dp th.in{padding-left:2ch}.dp tr.top td{font-weight:700}"
+           ".dl{display:none}"
+           "@media(min-width:1000px){.mp.two{grid-template-columns:minmax(0,1fr) minmax(340px,40%)}"
+           ".dp{position:sticky;top:8px;max-height:calc(100vh - 80px);overflow:auto}}"
+           "@media(max-width:999px){.mp.two .dl{display:inline}}")
 
 
 def to_html(text):
@@ -46,6 +62,13 @@ def to_html(text):
         pos = m.end()
     out.append(span(ESC.sub("", text[pos:])))
     return "".join(out)
+
+
+def sgr_class(code):
+    """'1;41;37' -> 'w bR B': an SGR code (render.status_pill's) as the class names to_html would give its text."""
+    codes = [int(x) for x in str(code).split(";") if x.isdigit()]
+    names = [COLOR[x] for x in codes if x in COLOR] + [BACKGROUND[x] for x in codes if x in BACKGROUND]
+    return " ".join(names + (["rv"] if 7 in codes else []) + (["B"] if 1 in codes else []))
 
 
 def fit_css(cols, rows=0):

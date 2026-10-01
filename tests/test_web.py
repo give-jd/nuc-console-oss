@@ -125,6 +125,19 @@ class Web(unittest.TestCase):
         self.assertEqual(get(self.open, "/?cols=5")[0], 200)
         self.assertEqual(get(self.open, "/?cols=99999")[0], 200)
 
+    def test_numbers_are_ascii_digits_only(self):
+        """'²' is a digit to str.isdigit() but not to int(), nor are 5000 digits (Python 3.11+): the ValueError dropped the
+        connection. Anything but a few ASCII digits is ignored: a normal page, the parameter at its default."""
+        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        for bad in ("%C2%B2", "%D9%A3", "1%C2%B2", "%EF%BC%95", "9" * 5000, "+5", "-5", " 5"):
+            p = q(f"zoom={bad}&cols={bad}&rows={bad}&refresh={bad}")
+            self.assertEqual([p[k] for k in ("zoom", "cols", "rows", "refresh")], [0, 0, 0, 0], bad)
+        for path in ("/?view=map&zoom=%C2%B2", "/?cols=%C2%B2&rows=%D9%A3&refresh=%C2%B9&zoom=%EF%BC%95", "/?zoom=" + "9" * 5000):
+            st, _, body = get(self.open, path)
+            self.assertEqual(st, 200, path)
+            self.assertNotIn("render error", body)
+        self.assertIn("font-size:14.0px", get(self.open, "/?zoom=%C2%B2")[2])                         # ignored: the default size
+
     def test_text_size_and_fit(self):
         q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("zoom=133")["zoom"], 125)                                                 # snapped to a step
