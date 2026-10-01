@@ -173,6 +173,7 @@ New-Item -ItemType Directory -Force -Path $App, $Bin | Out-Null
 Get-ChildItem -Path $App -Filter '*.py' | Remove-Item -Force
 Copy-Item -Path (Join-Path $Here 'src\*.py') -Destination $App -Force
 Copy-Item -Path (Join-Path $Here 'bin\*.cmd') -Destination $Bin -Force
+Copy-Item -Path (Join-Path $Here 'bin\*.ps1') -Destination $Bin -Force  # nuc-console-update.cmd runs its .ps1
 $cfg = Join-Path $Data 'config.ini'
 if (-not (Test-Path $cfg)) { Copy-Item (Join-Path $Here 'config\config.ini') $cfg }  # never overwrite the admin's edits
 Copy-Item (Join-Path $Here 'config\config.ini') (Join-Path $Data 'config.ini.dist') -Force  # diff it to see new options

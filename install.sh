@@ -26,7 +26,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
     rm -f /usr/local/bin/nuc-console-problems "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
     rm -rf "$DEST"
-    rm -f /usr/local/sbin/nuc-console-accept
+    rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update
     systemctl daemon-reload
     rm -rf "$UNITD"
     systemctl unmask "getty@tty$VT.service"
@@ -45,7 +45,7 @@ install -d "$DEST"
 rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
 install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
 install -m 0644 systemd/*.service /etc/systemd/system/
-install -m 0755 bin/nuc-console-accept /usr/local/sbin/
+install -m 0755 bin/nuc-console-accept bin/nuc-console-update /usr/local/sbin/
 install -m 0755 bin/nuc-console-problems /usr/local/bin/
 install -d "$UNITD"
 {

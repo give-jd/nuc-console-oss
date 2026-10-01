@@ -37,7 +37,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout "system/$label" 2>/dev/null || true; done
     [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
     rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /Applications/nuc-console.webloc
-    for link in /usr/local/bin/nuc-console-problems /usr/local/sbin/nuc-console-accept; do
+    for link in /usr/local/bin/nuc-console-problems /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update; do
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
     rm -rf "$DEST"
@@ -122,13 +122,13 @@ for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
 rm -f "$DEST"/*.py
 install -m 0644 src/*.py "$DEST/"
-for f in nuc-console-accept nuc-console-problems; do
+for f in nuc-console-accept nuc-console-problems nuc-console-update; do
     sed -e "s|/usr/bin/python3|$PY|g" -e "s|/opt/nuc-console/|$DEST/|g" "bin/$f" > "$DEST/bin/$f"
     chmod 0755 "$DEST/bin/$f"
 done
 # commands on the PATH, but only into folders root owns (on Intel Macs Homebrew makes /usr/local/bin a user's folder:
 # a link there could be swapped for anything, then run with sudo)
-for pair in "bin:nuc-console-problems" "sbin:nuc-console-accept"; do
+for pair in "bin:nuc-console-problems" "sbin:nuc-console-accept" "sbin:nuc-console-update"; do
     dir="/usr/local/${pair%%:*}" cmd="${pair#*:}"
     [ -d "$dir" ] || { [ "$(stat -f %u /usr/local 2>/dev/null || echo 1)" = 0 ] && install -d -m 0755 "$dir"; } || true
     if [ -d "$dir" ] && [ "$(stat -f %u "$dir")" = 0 ]; then ln -sf "$DEST/bin/$cmd" "$dir/$cmd"
