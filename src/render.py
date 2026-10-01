@@ -8,7 +8,6 @@ import collections
 import glob
 import ipaddress
 import json
-import math
 import os
 import re
 import select
@@ -20,12 +19,17 @@ import sys
 import textwrap
 import threading
 import time
-import unicodedata
 
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
 import procs
+import ui
+# the console primitives (ansi.py) and the text helpers (ui.py) moved out of this file; render.py draws with them, and tests,
+# tools and the other modules (notify.py, htmlview.py) still reach them as render.X, so the names stay here until the cleanup PR
+from ansi import ANSI, SPARK, bar, c, cc, cell, clip, columns, fit_join, kv, msg, msg_wrap, pad, section, sparkline, vlen  # noqa: F401
+from ui import (CTRL, fmt_ago, fmt_cputime, fmt_dur, fmt_k, fmt_min, fmt_rate, fmt_size, hclean, hcount, hnum, human, num,  # noqa: F401
+                plural, qf, safe)
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -66,61 +70,10 @@ def on(feature):
 
 ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
-ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
                               ("Boot", on("boot"))) if ok)
 # typical database/broker ports: exposed to the LAN they are the case to flag
 SENSITIVE = {3306, 5432, 5433, 5447, 5984, 6379, 6381, 9200, 27017, 1883, 9001, 18086, 8086}
-
-
-def c(code, s):
-    return f"\x1b[{code}m{s}\x1b[0m"
-
-
-CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def safe(s):
-    """External data (comm, labels, docker stderr) is untrusted: no escapes/newlines on the physical console."""
-    return CTRL.sub("?", str(s))
-
-
-def vlen(s):
-    return len(ANSI.sub("", s))
-
-
-def pad(s, w):
-    return s + " " * max(0, w - vlen(s))
-
-
-def section(title, w, note=""):
-    """Section title: '── TITLE ────────  note'. The caller always puts an empty line before it."""
-    t = f" {title} "
-    return c(36, "──") + c("1;36", t) + c(36, "─" * max(2, w - 4 - len(t) - (len(note) + 2 if note else 0))) \
-        + (c(90, f"  {note}") if note else "")
-
-
-def msg(level, text):
-    """Indented status message: level err/warn/ok/info, with a symbol (colour alone is not enough)."""
-    sym, col = {"err": ("✖", 31), "warn": ("!", 33), "ok": ("✔", 32), "info": ("·", 90)}[level]
-    return f"   {c(col, sym)} {text}"
-
-
-def msg_wrap(level, text, w):
-    """msg(), continued on the lines below (under the text) at the commas when it is wider than w: a long list is not cut."""
-    lines, cur = [], ""
-    for part in text.split(", "):
-        if cur and len(cur) + 2 + len(part) > w - 6:  # -6: the comma that ends the line when it wraps
-            lines.append(cur + ",")
-            cur = part
-        else:
-            cur = cur + ", " + part if cur else part
-    lines.append(cur)
-    return [msg(level, lines[0])] + ["     " + x for x in lines[1:]]
-
-
-def kv(label, value, lw=13):
-    return f"   {c(90, pad(label, lw))}{value}"
 
 
 FULL = False   # True while the detail pages / full view are built: no section hides items
@@ -157,56 +110,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
         rows[-1].pop()
         hidden += 1
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + c(90, f"  … +{hidden}")]
-
-
-def fit_join(items, sep, w, lead="", c90=False):
-    """lead + items joined by sep, dropping trailing items until it fits in w columns (at least one is kept)."""
-    items = list(items)
-    while len(items) > 1 and vlen(lead + sep.join(items)) > w:
-        items.pop()
-    text = sep.join(items)
-    return lead + (c(90, text) if c90 else text)
-
-
-def clip(s, w):
-    """Cut to w visible columns, leaving ANSI sequences intact."""
-    out, n, i = [], 0, 0
-    while i < len(s):
-        m = ANSI.match(s, i)
-        if m:
-            out.append(m.group())
-            i = m.end()
-        elif n >= w:
-            break
-        else:
-            out.append(s[i])
-            n += 1
-            i += 1
-    return "".join(out) + "\x1b[0m"
-
-
-def bar(frac, w, warn=0.7, err=0.9):
-    frac = min(max(frac, 0.0), 1.0)
-    n = round(frac * w)
-    col = 32 if frac < warn else 33 if frac < err else 31
-    return c(col, "█" * n) + c(90, "░" * (w - n))
-
-
-def plural(n, word):
-    """'1 rule', '2 rules': English count + noun (regular plurals only)."""
-    return f"{n} {word}" + ("" if n == 1 else "s")
-
-
-def human(nbytes):
-    if nbytes is None:
-        return "-"
-    return f"{nbytes / 2**30:.1f}G" if nbytes >= 2**30 else f"{nbytes / 2**20:.0f}M"
-
-
-def fmt_dur(sec):
-    d, r = divmod(int(sec), 86400)
-    h, r = divmod(r, 3600)
-    return f"{d}d {h}h" if d else f"{h}h {r // 60}m"
 
 
 THROTTLE_WINDOW_S = 60
@@ -461,19 +364,6 @@ def up_load_note(up, load):
     return f"up {fmt_dur(up)}" + (f" · load {' '.join(load)}" if load else "")
 
 
-def columns(cols, w, gap=2):
-    """Puts blocks of lines side by side; each block is (lines, width)."""
-    rows = max(len(x) for x, _ in cols)
-    out = []
-    for i in range(rows):
-        out.append((" " * gap).join(pad(clip(x[i], cw), cw) if i < len(x) else " " * cw for x, cw in cols))
-    return out
-
-
-def fmt_min(sec):
-    return f"{sec / 60:.1f} min" if sec >= 60 else f"{sec:.0f} s"
-
-
 def is_absent(d, key):
     """True if the collector recorded that the tool for that section is not installed (not an error)."""
     return isinstance(d, dict) and key in (d.get("absent") or [])
@@ -495,11 +385,6 @@ def unavail_msg(d, key, prefix="unavailable"):
     if is_absent(d, key):
         return msg("info", "not installed on this machine")
     return msg("warn", f"{prefix}: " + safe(((d or {}).get("errors") or {}).get(key, "collector needs updating"))[:60])
-
-
-def fmt_ago(sec):
-    sec = max(sec, 0)  # clocks out of sync must not produce "-5 s"
-    return f"{sec:.0f} s" if sec < 90 else f"{sec / 60:.0f} min" if sec < 5400 else f"{sec / 3600:.0f} h"
 
 
 def thermal_lines(th, bw, maxw=None):
@@ -838,18 +723,6 @@ def exposure_rows(net, cont):
                     "note": safe(note), "bad_note": bad, "warn": port in SENSITIVE and lan_cell in (1, 3)})
     out.sort(key=lambda x: (-(x["net"] == 1), -(x["lan"] in (1, 3)), -x["ts"], -x["warn"], x["port"], x["proto"]))
     return out
-
-
-def cell(v, warn=False, net=False, loc=False):
-    if loc:  # local is not an alarm: neutral colour
-        return c(37, "●") if v else c(90, "·")
-    if v == 3:
-        return c(33, "?")
-    if net:
-        return c("1;31", "●") if v else c(90, "·")
-    if v == 1:
-        return c("31" if warn else "33", "●")
-    return c(36, "◐") if v == 2 else c(90, "·")
 
 
 def fs(x):
@@ -1505,11 +1378,11 @@ def safe_problems(*a, **kw):
 def status_pill(pb):
     """(text, colour code) for the header: always visible, with a symbol besides the colour."""
     if not pb:
-        return "✔ ALL OK", "1;7"
+        return "✔ ALL OK", ui.sgr("banner_ok")
     if any(sev == 3 for sev, _ in pb):
-        return "✖ EXPOSED PORTS CHANGED", "1;41;37"
+        return "✖ EXPOSED PORTS CHANGED", ui.sgr("banner_err")
     n_err = sum(1 for sev, _ in pb if sev == 2)
-    return (f"✖ {len(pb)} PROBLEMS", "1;41;37") if n_err else (f"! {len(pb)} WARNINGS", "1;43;30")
+    return (f"✖ {len(pb)} PROBLEMS", ui.sgr("banner_err")) if n_err else (f"! {len(pb)} WARNINGS", ui.sgr("banner_warn"))
 
 
 GROUPS = (("INTERNET", "Reachable from the Internet (Tailscale Funnel)"),
@@ -1740,9 +1613,6 @@ def page_rete(net, cont, w, now=None, baseline=False):
     return head + exposure_block(net, cont, w, new) + ["", ""] + firewall_block(net, w)
 
 
-SPARK = "▁▂▃▄▅▆▇█"
-
-
 def short_name(name, project=""):
     """'ethibid-api-1' -> 'api' (without the stack prefix and the replica index)."""
     n = safe(name)
@@ -1965,20 +1835,6 @@ def ov_boot(b, w, k, now=None):
         top = [f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
         lines.append(fit_join(top, "  ·  ", w, " slowest: ", c90=True))
     return lines
-
-
-def fmt_rate(bps):
-    for unit in ("B", "kB", "MB", "GB"):
-        if bps < 1000 or unit == "GB":
-            return f"{bps:.0f} B/s" if unit == "B" else f"{bps:.1f} {unit}/s"
-        bps /= 1000
-
-
-def sparkline(values, width):
-    """Last `width` values as small bars; scaled to the series maximum (with a floor, so noise is not blown up)."""
-    vals = list(values)[-width:]
-    top = max(max(vals, default=0), 1024)
-    return c(90, "▁" * (width - len(vals))) + "".join(SPARK[min(7, int(v / top * 8))] for v in vals)
 
 
 def ov_traffico(s, w, k):
@@ -2573,11 +2429,6 @@ LV_COL = {"err": "31", "warn": "33", "ok": "32", "info": "90"}
 EV_COL = {"seen": "1", "declared": "", "possible": "90", "bind": "90"}  # how sure the link is: bright, normal, dim
 
 
-def cc(code, s):
-    """c() that leaves the terminal's own colour alone when there is no code."""
-    return c(code, s) if code else s
-
-
 class MapView(object):
     """The interactive Map: open branches (graph.State), the selected row (its key survives refreshes; its index is where
     the cursor stays when that row vanishes), the scroll position, the details pane, when it was opened and last touched."""
@@ -2832,11 +2683,6 @@ CPU_PRESSURE = {"nominal": "32", "moderate": "33", "heavy": "31", "trapping": "3
 CPU_CELL_MIN_BAR, CPU_CELL_MAX_BAR = 10, 32
 
 
-def num(x):
-    """x as a float when it is a finite number (a bool is not one), else None: what a producer hands over is data, not a promise."""
-    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
-
-
 def idict(d):
     """{int: value} of a dict whose keys may be digits or strings (JSON keys are always strings); other keys are dropped."""
     out = {}
@@ -2858,41 +2704,6 @@ def dget(d, *keys):
 def dd(x):
     """x when it is a dict, else an empty one: a producer's section that is not what the contract says is a section with nothing in it."""
     return x if isinstance(x, dict) else {}
-
-
-def qf(x, spec=".0f", unit=""):
-    """A number formatted, or '?' when it is not one."""
-    x = num(x)
-    return "?" if x is None else format(x, spec) + unit
-
-
-def fmt_size(b):
-    b = num(b)
-    if b is None:
-        return "?"
-    for unit, div in (("G", 2 ** 30), ("M", 2 ** 20), ("K", 2 ** 10)):
-        if b >= div:
-            v = b / div
-            return (f"{v:.0f}" if v >= 10 or v == int(v) else f"{v:.1f}") + unit
-    return f"{b:.0f}B"
-
-
-def fmt_k(x):
-    """Events per second: 842, 18.3k, 1.2M."""
-    x = num(x)
-    return "?" if x is None else f"{x:.0f}" if x < 1000 else f"{x / 1e3:.1f}k" if x < 1e6 else f"{x / 1e6:.1f}M"
-
-
-def fmt_cputime(sec):
-    """CPU seconds as htop writes them: 6:52.3, 5:03:53, 123h05m."""
-    sec = num(sec)
-    if sec is None:
-        return "?"
-    sec = max(sec, 0.0)
-    if sec < 3600:
-        return f"{int(sec // 60)}:{sec % 60:04.1f}"
-    h, r = divmod(int(sec), 3600)
-    return f"{h}:{r // 60:02d}:{r % 60:02d}" if h < 100 else f"{h}h{r // 60:02d}m"
 
 
 def cpu_os():
@@ -3764,28 +3575,9 @@ def health_extra_lines(report, w):
     return [c(90, text[0])] + text[1:-1 if cut else None] + ([c(90, text[-1])] if cut else [])
 
 
-def hclean(s, n=0):
-    """Text of the report (an app, a unit, a message template: all names the history took from the machine) as one plain line: control
-    and format characters, and wide characters (they would break the columns), become '?'; at most n characters (0: no limit)."""
-    out = []
-    for ch in safe("" if s is None else s):
-        cat = unicodedata.category(ch)
-        out.append(" " if cat in ("Zl", "Zp") else "?" if cat[0] == "C" or unicodedata.east_asian_width(ch) in "WF" else ch)
-    t = "".join(out)
-    return t[:n - 1] + "…" if n and len(t) > n else t
-
-
 def hansi(line):
     """A line from the advisor hook: its colours (SGR) stay, every other escape sequence and control character becomes '?'."""
     return "".join(x if re.fullmatch(r"\x1b\[[0-9;]*m", x) else hclean(x) for x in re.split(r"(\x1b\[[0-9;]*m)", str(line)))
-
-
-def hnum(x, default=0.0):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return default
-    return v if v == v and abs(v) != float("inf") else default
 
 
 def hwhen(ts, fmt="%Y-%m-%d %H:%M"):
@@ -3799,11 +3591,6 @@ def hwhen(ts, fmt="%Y-%m-%d %H:%M"):
 def hago(ts):
     sec = time.time() - hnum(ts, time.time())
     return "now" if sec < 90 else f"{sec / 60:.0f} min ago" if sec < 5400 else f"{sec / 3600:.0f} h ago" if sec < 129600 else f"{sec / 86400:.0f} d ago"
-
-
-def hcount(n):
-    n = hnum(n)
-    return f"{n:.0f}" if n < 1000 else f"{n / 1000:.1f}k" if n < 10000 else f"{n / 1000:.0f}k" if n < 1e6 else f"{n / 1e6:.1f}M"
 
 
 def hmsg(level, text, w):
