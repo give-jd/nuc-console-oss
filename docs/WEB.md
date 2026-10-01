@@ -63,6 +63,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?zoom=150` | text size in % (50–200, the **A− / A+** links); default `[display] zoom` |
 | `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out; every section and item is shown and the page scrolls. With `rows=` it fills the height instead (one screen, like the console) |
 | `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
+| `/?view=map` | the **MAP** (the **map** link in the bottom bar): every row is a link. ▸/▾ opens or closes a branch, a name shows its details pane. The whole state is in the URL, so a view can be bookmarked: `open=`/`shut=` the branches opened/closed by hand (row keys), `all=1` everything open, `sel=` the row whose details are shown, `only=1` problems only, `pause=1` no reload while you read. Off with `[features] map = no` |
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 
@@ -76,7 +77,7 @@ or a privileged helper — a large jump in risk for a file you change a few time
 
 ## Threat model in one paragraph
 
-The page shows your topology (ports, container names, client IPs seen on databases), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
+The page shows your topology (ports, container names, client IPs seen on databases, and on the map which service talks to which), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
 With a token, anyone holding the token can. It cannot change anything on the machine. Rendering is cached for half the refresh interval per layout size.
 
 ## macOS and Windows

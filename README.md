@@ -30,6 +30,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🧾 **Problem inventory** | every ATTENTION item has a stable id, an explanation and a fix: `nuc-console-problems` lists them, `sudo nuc-console-accept --problem <id> --reason "…"` marks a known one (dimmed, not counted) |
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
+| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link) |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
 | 🌡️ **Health** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
@@ -45,6 +46,12 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <img src="docs/img/compact.svg" alt="nuc-console on a 120x33 console, single column, demo data" width="100%">
 </details>
 
+<details>
+<summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
+<br>
+<img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+</details>
+
 ## Why
 
 A home server or NUC with a monitor attached usually shows a login prompt nobody reads. This turns it into a
@@ -58,6 +65,10 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 - **Port alarms.** A baseline of the exposed ports is stored on install; a new, changed or vanished port raises a red banner until you accept it (`sudo nuc-console-accept`).
 - **Honest about missing data.** Unreadable or missing sections show `?` and are treated as open, never as "OK". A tool that isn't installed is reported as such, not as an error.
 - **Databases.** Finds postgres/redis/mysql/mongo/… containers, shows their *real* published ports and which containers/hosts actually connect (seen inside the container's network namespace, so Docker's DNAT can't hide external clients).
+- **Map.** The sections above say *which* ports are open; the MAP follows each one to what is behind it — `LAN → :8080 → shop-web → shop-api → shop-db`
+  reads "the LAN reaches the database through web and api", `LAN → :5432 → shop-db` reads "the database is open on the LAN". The IMPACT branch
+  answers the other question: this is down, what depends on it? Links are *seen* (a live connection, inside each container's network namespace),
+  *declared* (compose `depends_on`, a container named in another's environment, service dependencies) or *same network*, and drawn differently.
 - **Least privilege.** A small root *collector* runs the privileged commands and writes JSON to `/run`; the *renderer* that owns the tty runs as an unprivileged user and only reads `/proc`, `/sys` and that JSON. No network listener unless you opt in to the read-only web view (macOS/Windows show the dashboard through it, on 127.0.0.1 only).
 - **Adaptive layout.** One screen from 79×24 up to 4K consoles: 1 column → 2 (≥200 cols) → 3 (≥225 cols), dropping detail before dropping sections.
 
@@ -95,7 +106,7 @@ Full guide (VT choice, time zone, font, upgrade, uninstall, troubleshooting): **
 containers = yes      databases = yes     exposure = yes      firewall = yes
 fail2ban   = yes      tailscale = yes     boot     = yes      docker_disk = yes
 network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
-webapps  = yes
+webapps  = yes      map      = yes
 
 [dashboard]
 mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
@@ -108,6 +119,7 @@ rows = 0              # e.g. 65 if the bottom lines are cut by the monitor
 spacing = 1           # a blank line under each section title (0 = compact)
 details = yes         # pages with everything the overview cuts ("… +N more"), rotating on the monitor
 overview_seconds = 45
+map_in_rotation = no  # yes: the MAP joins the rotating pages too (a monitor with no keyboard)
 
 [webapps]             # apps you EXPECT to be reachable: shown as active or DOWN; not a Docker-bypass problem
 ethibid = 8180, 8543
@@ -169,7 +181,8 @@ Read the threat model and how to report a vulnerability in **[SECURITY.md](SECUR
 - macOS/Windows: no thermal sensors, fail2ban or "who connects" inside containers (Docker Desktop runs them in a VM); Windows Firewall rules from Group Policy, port keywords (RPC…) and macOS `pf` rules show as unknown `?`. Details: [docs/INSTALL.md](docs/INSTALL.md#macos).
 - Non-systemd Linux (OpenRC, runit…) and the BSDs are not supported.
 - Docker-published ports are assumed TCP; `tailscaled` ephemeral ports (≥32768 except 41641) are ignored; one NVMe sensor is read.
-- Connections shorter than the 30 s sampling window are not seen by the database "who connects" view.
+- Connections shorter than the 30 s sampling window are not seen by the database "who connects" view nor by the MAP (which remembers what it saw for 24 h).
+- MAP on macOS/Windows: the containers' own connections are inside Docker Desktop's VM, so container-to-container links are *declared* or *same network* only.
 
 ## Contributing · License
 
