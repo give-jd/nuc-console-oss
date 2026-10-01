@@ -150,8 +150,8 @@ What it does (idempotent):
    `/var/lib/nuc-console` (baseline) and `/var/log/nuc-console` (logs, rotated by newsyslog).
 3. Starts the collector as a **LaunchDaemon** (root): `lsof`, the Application Firewall, `pfctl`, `launchctl`, Docker, Tailscale.
    Docker and Tailscale are run **as the user who owns them** (or the user at the screen), never as root.
-4. Installs a **LaunchAgent** that opens the dashboard at every login: Chrome, Edge, Brave or Chromium in kiosk mode if
-   installed, else Safari (press **Ctrl+Cmd+F** once for full screen). It opens it right away for the user at the screen.
+4. Installs a **LaunchAgent** that opens the dashboard at every login: a full-screen Chrome, Edge, Brave or Chromium window
+   if installed, else Safari (press **Ctrl+Cmd+F** once for full screen). It opens it right away for the user at the screen.
 5. Stores the port baseline (only if missing). `[web] enabled = yes` also starts the web view as the hidden user `_nuc-console`.
 
 Options: `sudo NUC_CONSOLE_DISPLAY=no ./install.sh` for a Mac without a monitor (use `nuc-console-problems` or the web view).
@@ -160,7 +160,7 @@ Options: `sudo NUC_CONSOLE_DISPLAY=no ./install.sh` for a Mac without a monitor 
 
 - *System Settings › Users & Groups › Automatically log in as…* (not available with FileVault on): the dashboard comes back after a power cut.
 - *System Settings › Lock Screen*: never turn the display off; *Energy*: prevent sleep.
-- **Cmd+Q** closes the dashboard until the next login.
+- **Cmd+Q** closes the dashboard until the next login; **Ctrl+Cmd+F** leaves full screen. The page has nothing to click: it rotates by itself.
 
 ## Update, uninstall
 
@@ -191,7 +191,7 @@ sudo ./install.sh --uninstall          # removes /opt/nuc-console and the launch
 
 # Windows
 
-Windows has no text console to take over, so the same screen is shown **full screen in Microsoft Edge** (kiosk mode) at
+Windows has no text console to take over, so the same screen is shown **full screen in a Microsoft Edge window** at
 every logon. Edge reads a local page rewritten every 2 seconds: no network port is opened.
 
 ## Install
@@ -218,7 +218,8 @@ Options: `install-windows.cmd -NoDisplay` (a machine without a monitor), `-Pytho
 
 - Automatic sign-in after a restart: Sysinternals **Autologon**; *Settings › Accounts › Sign-in options* to skip the lock screen.
 - *Settings › System › Power*: never turn off the screen, never sleep.
-- **Alt+F4** closes the dashboard until the next logon.
+- **Alt+F4** closes the dashboard until the next logon; **F11** leaves full screen; Alt+Tab reaches the other windows.
+  The page has nothing to click: it rotates by itself. Never open it again at logon: `install-windows.cmd -NoDisplay`.
 
 ## Update, uninstall
 

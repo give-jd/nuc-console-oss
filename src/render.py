@@ -2183,7 +2183,7 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True):
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint=""):
     name, part, parts, body = slide
     left = (" " * (int(time.time() // 600) % 3) + f" {socket.gethostname()} │ {name}"  # every 10 min shift the header
             + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}")
@@ -2192,7 +2192,8 @@ def frame(slide, idx, n, w, h, pb=None, keys=True):
     head = clip(head, w)
     foot = c(90, (f" single screen   console {w + 1}x{h}" if n == 1 else
                   f" screen {idx + 1}/{n}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {w + 1}x{h}"))
+                  + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {w + 1}x{h}") + (f"   {hint}" if hint else ""))
+    foot = clip(foot, w)
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
@@ -2314,19 +2315,21 @@ def find_browser(choice=None):
     return ""  # none found: macOS falls back on Safari through `open`
 
 
+# shown in the kiosk's footer: the page has nothing to click, the keyboard is the way out
+KIOSK_HINT = "Cmd+Q closes · Ctrl+Cmd+F leaves full screen" if MACOS else "Alt+F4 closes · F11 leaves full screen"
+
+
 def browser_command(exe, url, profile):
-    """Full screen, no first-run pages, a profile of its own (never the user's tabs and logins)."""
+    """A full-screen app window (no tabs, no address bar), no first-run pages, a profile of its own (never the user's tabs
+    and logins). Not the browsers' locked "kiosk" mode: that one swallows Alt+F4 & co. and the screen could not be closed."""
     if exe == "" and MACOS:
-        return ["/usr/bin/open", "-a", "Safari", url]  # Safari has no kiosk flag: Ctrl+Cmd+F once for full screen
+        return ["/usr/bin/open", "-a", "Safari", url]  # Safari has no full-screen flag: Ctrl+Cmd+F once
     if not exe:
         return None
     if "firefox" in os.path.basename(exe).lower():
-        return [exe, "--kiosk", url]
-    cmd = [exe, "--kiosk", url, "--no-first-run", "--no-default-browser-check", "--disable-session-crashed-bubble",
-           "--noerrdialogs", "--user-data-dir=" + profile]
-    if "msedge" in os.path.basename(exe).lower():
-        cmd.append("--edge-kiosk-type=fullscreen")
-    return cmd
+        return [exe, "--new-window", url]  # Firefox: only its locked kiosk mode starts full screen; F11 instead
+    return [exe, "--app=" + url, "--start-fullscreen", "--no-first-run", "--no-default-browser-check",
+            "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
 
 
 def write_text_atomic(path, text):
@@ -2362,7 +2365,8 @@ def kiosk(argv):
             sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"])
             idx = pick_slide(sl, time.time() - t0)
             screen = frame(sl[idx % len(sl)], idx % len(sl), len(sl), w, h,
-                           safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=False)
+                           safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
+                           keys=False, hint=KIOSK_HINT)
             write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
         except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)

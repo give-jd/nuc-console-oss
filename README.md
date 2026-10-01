@@ -69,7 +69,7 @@ A home server or NUC with a monitor attached usually shows a login prompt nobody
 | Python | 3.8 or newer, standard library only. Linux: the system's `python3`. macOS: a python.org or Command Line Tools Python, installed from python.org (hash-checked) if missing. Windows: a private copy of the official embeddable Python, downloaded and hash-checked by the installer |
 | Root | only for the installers and the collector service (Windows: Administrator, the collector runs as SYSTEM) |
 | Optional tools | Linux: `docker`, `ss` (iproute2), `ufw`, `iptables`, `fail2ban-client`, `tailscale`, `systemd-analyze`, `journalctl`, `nsenter`. macOS/Windows: Docker Desktop (or OrbStack), Tailscale. Each one that is missing simply disables its section — nothing crashes |
-| Display | Linux: a virtual terminal. macOS: Chrome/Edge/Brave/Chromium in kiosk mode, else Safari. Windows: Microsoft Edge in kiosk mode |
+| Display | Linux: a virtual terminal. macOS: a full-screen Chrome/Edge/Brave/Chromium window, else Safari. Windows: a full-screen Microsoft Edge window (Alt+F4 closes it, F11 leaves full screen) |
 
 ## Quick start
 
