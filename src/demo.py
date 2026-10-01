@@ -119,8 +119,8 @@ def snapshot(now=None, os_name=None):
                           "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}}}
     if os_name in ("windows", "darwin"):
         net, boot = _native(net, boot, os_name, now)
-    import render
-    base = {"ts": now, "ports": render.exposure_keys(net, cont)}  # baseline = current exposure: no "new port" alarm
+    import exposure
+    base = {"ts": now, "ports": exposure.exposure_keys(net, cont)}  # baseline = current exposure: no "new port" alarm
     return cont, net, boot, base
 
 

@@ -8,6 +8,7 @@ A broken file never stops the dashboard: the problem goes to stderr and defaults
 import configparser
 import os
 import sys
+import threading
 
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
@@ -37,7 +38,7 @@ SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "container
 NOTIFY_DIR = os.environ.get("NUC_CONSOLE_NOTIFY_DIR") or (os.path.join(BASE_DIR, "notify") if WINDOWS or PORTABLE else "/var/lib/nuc-console-notify")  # portable: under data/
 TELEGRAM_DETAILS = ("titles", "full")  # titles: only the problem's title leaves the machine; full: its text too (names, ports)
 
-# [expose]: the words for a reach, and the group names render.py uses for it (render.GROUPS); synonyms are accepted
+# [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
                 "lan": "LAN", "internet": "INTERNET", "public": "INTERNET"}
 
@@ -62,7 +63,7 @@ def load(path=None):
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto"}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
-    cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of render.GROUPS); here so the early returns have it
+    cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True}  # notify.py; the bot token is never here
     try:
@@ -208,6 +209,20 @@ def load(path=None):
         except ValueError:
             print(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)", file=sys.stderr)
     return cfg
+
+
+_CURRENT, _CURRENT_LOCK = None, threading.Lock()
+
+
+def current():
+    """The configuration of this process: read once, by the first caller, and the very same dict at every call.
+    Modules read it through here (render.CFG is this object); a test or a --demo run changes it in place and every module sees it.
+    Code that needs the file read again (notify.py's cycle, the AI installer after it wrote a key) calls load()."""
+    global _CURRENT
+    with _CURRENT_LOCK:
+        if _CURRENT is None:
+            _CURRENT = load()
+        return _CURRENT
 
 
 def set_key(path, section, key, value):
