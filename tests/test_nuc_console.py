@@ -1112,6 +1112,20 @@ class Config(unittest.TestCase):
         for name in nuc_config.SECTIONS:
             self.assertIn(name, doc)
 
+    def test_expose_is_documented_and_the_shipped_example_parses(self):
+        root = os.path.join(os.path.dirname(__file__), "..")
+        with open(os.path.join(root, "docs", "CONFIGURATION.md"), encoding="utf-8") as f:
+            self.assertIn("## `[expose]`", f.read())
+        with open(os.path.join(root, "docs", "DESIGN.md"), encoding="utf-8") as f:
+            self.assertNotIn("Expected vs actual", f.read().split("## Not yet applied")[1].split("\n## ")[0])   # applied: it has its own section
+        with open(os.path.join(root, "config", "config.ini"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("[expose]", text)
+        self.assertEqual(self._load(text)["expose"], {})                                       # shipped as a commented example
+        example = re.sub(r"(?m)^# (shop-db|n8n|8080)(\s*=)", r"\1\2", text)
+        self.assertNotEqual(example, text)
+        self.assertEqual(self._load(example)["expose"], {"shop-db": "LOCALE", "n8n": "TAILNET", "8080": "LAN"})
+
     def test_shipped_config_parses_and_lists_every_feature(self):
         path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")
         cfg = nuc_config.load(path)
