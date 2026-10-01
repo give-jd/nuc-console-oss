@@ -38,6 +38,7 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 | `network_traffic`, `sessions`, `disks`, `thermal` | the respective panels (thermal: Linux only) | — (reads `/proc`, `/sys`; macOS/Windows: system calls) |
 | `cpu` | the **CPU** screen: per-core load and frequency, temperatures, top processes, like htop (console key `c`, web `cpu` link) | `/proc`, `/sys` (Linux); system calls and `ps` (macOS); Windows API. Temperatures on macOS/Windows: the collector (`powermetrics`; WMI, LibreHardwareMonitor/OpenHardwareMonitor if installed) |
 | `health` | the **HEALTH** screen: which apps, services and containers cause trouble over time (CPU, memory, crashes, restarts, OOM), disks filling up, hot hours (console key `h`, web `health` link) | the collector keeps `history.db` (SQLite): per-app CPU/memory per hour, events and log *templates* from `journalctl` (Linux), the Event Log (Windows), crash reports (macOS) |
+| `ai` | the **AI** screen: this machine's RAM and GPU, and for each model of its list whether it fits (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big) and how fast it would be (console key `a`, web `ai` link; it is not a rotating page). It only reads the hardware and downloads or starts nothing, and shows with `[ai] enabled = no` too; `no`: no screen, no key, no link, the hardware is never probed. The advisor itself is `[ai]` below | — (unprivileged: `/proc`, `/sys`, the registry, Windows API; `nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler` with fixed arguments and a time limit of 5 s at most) |
 | `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console keys `m`/`Tab`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
@@ -88,7 +89,7 @@ admin-console = 9443
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | The only network listener of the project (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`; a portable run always runs it on 127.0.0.1 and ignores this section's `enabled`, `bind`, `port` and `token_file`). Details and threat model: [WEB.md](WEB.md) |
+| `enabled` | `no` | The only network listener of the dashboard (the optional AI model server listens on 127.0.0.1 only, [AI.md](AI.md)) (macOS/Windows: with `enabled = no` the installers still run it on 127.0.0.1 for `[display]`; a portable run always runs it on 127.0.0.1 and ignores this section's `enabled`, `bind`, `port` and `token_file`). Details and threat model: [WEB.md](WEB.md) |
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
@@ -96,10 +97,25 @@ admin-console = 9443
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
+## `[ai]` — optional local model for the HEALTH screen (off by default)
+
+What it is, how to choose a model for your hardware, the commands and the security rules: **[AI.md](AI.md)**.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `no` | Use a local model to turn the HEALTH findings into advice and to answer questions. It only reads and suggests: it never runs anything. The AI screen (`[features] ai`) shows with `no` as well: it is where you choose. `nuc-console-ai setup` never switches it on for you |
+| `endpoint` | `http://127.0.0.1:11434/v1` | Any OpenAI-compatible server: Ollama (this default), llama.cpp server, LM Studio, llamafile (`nuc-console-ai setup` installs one, and offers to write `http://127.0.0.1:8080/v1`, or the `--port` you gave) |
+| `model` | empty | The model name the server knows. What `nuc-console-ai setup` (the first model named) or `use` writes is a catalog id, e.g. `qwen3-8b`, which is the name its server answers to; for Ollama e.g. `qwen3:8b`. Also the model `serve` starts when none is named. Empty: the server's first model is used |
+| `gpu` | `auto` | `auto`: `nuc-console-ai serve` puts the model on the GPU (all of it, or some layers) when the hardware advice says it fits there; `no`: the server it starts never uses the GPU (and the hardware is not even read for it). Only for the server that `nuc-console-ai` starts: Ollama and the others decide for themselves. An installed service keeps what it was installed with: after changing `gpu` (or `model`, with `use`) run `sudo nuc-console-ai serve --install-service` again |
+| `allow_remote` | `no` | An endpoint that is not on this machine is refused unless `yes`: it would receive this machine's history |
+| `timeout_s` | `120` | Seconds a generation may take (10–600) |
+| `daily` | `no` | `yes`: the collector asks for one digest of the last 7 days a day, at low priority, shown on the HEALTH screen ([AI.md](AI.md#the-daily-digest)) |
+
 ## Commands
 
 Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept`; they are on the system PATH after the install.
 In a portable folder `nuc-console-accept` and `nuc-console-problems` are not used (they read an installation): `./run.sh --accept` (`run.cmd -Accept`) does the accepting.
+Windows: the same commands without `sudo`, from an **administrator** prompt for `nuc-console-accept` and `nuc-console-ai`; they are on the system PATH after the install.
 
 | Command | |
 |---|---|
@@ -110,7 +126,10 @@ In a portable folder `nuc-console-accept` and `nuc-console-problems` are not use
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
-| `render.py --once --view map` / `--view cpu` / `--view health` | the MAP, the CPU or the HEALTH screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`; HEALTH: `--period 1\|7\|30`, `--select TEXT`, `--details`) |
+| `render.py --once --view map` / `--view cpu` / `--view health` / `--view ai` | the MAP, the CPU, the HEALTH or the AI screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`; HEALTH: `--period 1\|7\|30`, `--select TEXT`, `--details`; AI: `--select TEXT`, `--details`, `--demo-os windows\|darwin`) |
+| `nuc-console-ai models` | what this machine can run: hardware and a verdict per model (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big), no root; `status` (is it installed, does it answer) also needs none. `/usr/local/sbin/nuc-console-ai` if your PATH lacks the folder |
+| `sudo nuc-console-ai setup [MODEL ...]` | download the local model server's runtime and the models you name (none: the recommended one), once, SHA-256 checked. Also `use MODEL`, `serve [--gpu-layers N] [--install-service]`, `remove [MODEL]` ([AI.md](AI.md#the-commands)) |
+| `nuc-console-ask "question"`, `nuc-console-ask advise [--days N]`, `nuc-console-ask status` | ask the local model about this machine, get advice on the HEALTH findings, check the server (read-only, no root; needs `[ai] enabled = yes`) |
 | `render.py --open` | the dashboard in a normal window of the default browser (what `browser` mode runs at login) |
 | `render.py --kiosk` | the full-screen window on the local web view (macOS/Windows; `--file` writes a local page instead, also on a Linux desktop: `--html FILE`, `--no-browser`) |
 

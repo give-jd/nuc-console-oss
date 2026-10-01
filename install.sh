@@ -24,14 +24,16 @@ VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
     systemctl disable --now nuc-console.service nuc-console-collector.service nuc-console-web.service || true
-    rm -f /usr/local/bin/nuc-console-problems "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service
+    # the AI model server exists only after `nuc-console-ai serve --install-service`; it runs code from $DEST, so it goes too
+    systemctl disable --now nuc-console-ai.service 2>/dev/null || true
+    rm -f /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service /etc/systemd/system/nuc-console-ai.service
     rm -rf "$DEST"
-    rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update
+    rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai
     systemctl daemon-reload
     rm -rf "$UNITD"
     systemctl unmask "getty@tty$VT.service"
     systemctl start "getty@tty$VT.service"
-    echo "removed: login on tty$VT restored (user nuc-console, /var/lib/nuc-console and /etc/nuc-console left in place)"
+    echo "removed: login on tty$VT restored (user nuc-console, /var/lib/nuc-console and /etc/nuc-console left in place; so are the AI runtime and models in /var/lib/nuc-console/ai: delete that folder to free the disk)"
     exit 0
 fi
 
@@ -46,7 +48,9 @@ rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
 install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
 install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept bin/nuc-console-update /usr/local/sbin/
+install -m 0755 bin/nuc-console-ai /usr/local/sbin/  # the optional local AI model: models, setup, serve (docs/AI.md); nothing runs until you ask
 install -m 0755 bin/nuc-console-problems /usr/local/bin/
+install -m 0755 bin/nuc-console-ask /usr/local/bin/  # questions to that model (read-only)
 install -d "$UNITD"
 {
     echo "[Service]"

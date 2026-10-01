@@ -110,7 +110,7 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   also appears on the HEALTH screen, marked "AI, check before acting", from a stored answer (a page never starts a generation).
 - Any OpenAI-compatible server on this machine works instead (Ollama, llama.cpp, LM Studio, llamafile): set `[ai] endpoint` and `model`.
 - New `[ai]` section: `enabled` (`no`), `endpoint` (`http://127.0.0.1:11434/v1`), `model`, `gpu` (`auto` | `no`), `allow_remote` (`no`),
-  `timeout_s` (`120`), `daily` (`no`: one digest a day). New `[features] ai`. Documentation: `docs/AI.md`.
+  `timeout_s` (`120`), `daily` (`no`: one digest a day). New `[features] ai`. Documentation: [docs/AI.md](docs/AI.md).
 
 **Releases**
 

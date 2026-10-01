@@ -34,14 +34,15 @@ CACHE=/Library/Caches/nuc-console  # downloads kept for the next install or upda
 CONSOLE_UID="$(stat -f %u /dev/console)"  # the user at the screen (0 at the login window)
 
 if [ "${1:-}" = "--uninstall" ]; then
-    for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout "system/$label" 2>/dev/null || true; done
+    # com.nuc-console.ai: the local AI model server, there only after `nuc-console-ai serve --install-service`
+    for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.ai; do launchctl bootout "system/$label" 2>/dev/null || true; done
     [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
-    rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /Applications/nuc-console.webloc
-    for link in /usr/local/bin/nuc-console-problems /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update; do
+    rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /etc/newsyslog.d/nuc-console-ai.conf /Applications/nuc-console.webloc
+    for link in /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai; do
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
     rm -rf "$DEST"
-    echo "removed ($ETC, $LIB, $LOG, the download cache $CACHE and the user $SVC_USER are left in place)"
+    echo "removed ($ETC, $LIB, $LOG, the download cache $CACHE and the user $SVC_USER are left in place; so are the AI runtime and models in \"/Library/Application Support/nuc-console/ai\": delete that folder to free the disk)"
     exit 0
 fi
 
@@ -122,13 +123,13 @@ for label in com.nuc-console.collector com.nuc-console.web; do launchctl bootout
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
 rm -f "$DEST"/*.py
 install -m 0644 src/*.py "$DEST/"
-for f in nuc-console-accept nuc-console-problems nuc-console-update; do
+for f in nuc-console-accept nuc-console-ai nuc-console-problems nuc-console-ask nuc-console-update; do
     sed -e "s|/usr/bin/python3|$PY|g" -e "s|/opt/nuc-console/|$DEST/|g" "bin/$f" > "$DEST/bin/$f"
     chmod 0755 "$DEST/bin/$f"
 done
 # commands on the PATH, but only into folders root owns (on Intel Macs Homebrew makes /usr/local/bin a user's folder:
 # a link there could be swapped for anything, then run with sudo)
-for pair in "bin:nuc-console-problems" "sbin:nuc-console-accept" "sbin:nuc-console-update"; do
+for pair in "bin:nuc-console-problems" "bin:nuc-console-ask" "sbin:nuc-console-accept" "sbin:nuc-console-update" "sbin:nuc-console-ai"; do
     dir="/usr/local/${pair%%:*}" cmd="${pair#*:}"
     [ -d "$dir" ] || { [ "$(stat -f %u /usr/local 2>/dev/null || echo 1)" = 0 ] && install -d -m 0755 "$dir"; } || true
     if [ -d "$dir" ] && [ "$(stat -f %u "$dir")" = 0 ]; then ln -sf "$DEST/bin/$cmd" "$dir/$cmd"
