@@ -2,6 +2,9 @@
 # Install nuc-console. Idempotent. Needs root: sudo ./install.sh
 # The monitor switches to the dashboard immediately, no reboot (getty on the chosen tty is masked and stopped).
 # Rollback: sudo ./install.sh --uninstall
+# Python: the system's /usr/bin/python3 (3.8+) when there is one, else the one the release archive carries (python/, a
+# python-build-standalone build for this processor): it is copied to /opt/nuc-console/python and the units and commands run it.
+# The archive needs no Python and no network: download, unpack, install.
 # Options (environment): NUC_CONSOLE_TZ=Europe/Rome  time zone of the dashboard (default: the system one)
 #                                 NUC_CONSOLE_VT=1            virtual terminal to draw on (default 1; on desktops
 #                                                             use a free one, e.g. 3: GDM takes tty1 and tty2). Re-running
@@ -46,11 +49,36 @@ fi
 # stopping getty@ttyN kills the session running on that terminal: never install from there
 [ "$(tty 2>/dev/null)" != "/dev/tty$VT" ] || { echo "do not run from tty$VT: use SSH or another terminal" >&2; exit 1; }
 
+# ---- Python 3.8+: the system's, else the one of the archive ---------------------------------------------------------------------
+SYS_PY=/usr/bin/python3  # what the units and the commands name
+py_ok() { [ -x "$1" ] && "$1" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; }
+PY=$SYS_PY
+if ! py_ok "$SYS_PY"; then
+    [ -x python/bin/python3 ] || { echo "Python 3.8 or newer is needed at $SYS_PY: install python3, or use the release archive for $(uname -m) (it carries its own Python in python/; this folder has none: a clone?)" >&2; exit 1; }
+    PY=$DEST/python/bin/python3
+fi
+
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
 # the Telegram notifier has a user of its own: the web view (user nuc-console, maybe reachable on the LAN) cannot read the bot token
 id nuc-console-notify >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify
 install -d "$DEST"
 rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
+if [ "$PY" != "$SYS_PY" ]; then
+    # the archive's Python, copied (links kept) and made root's: the services run it, as root and as their own users, so nobody else
+    # may write it and everybody can read it (an archive extracted with a strict umask would not be). Checked before it is put in place.
+    rm -rf "$DEST/python.new"
+    cp -a python "$DEST/python.new"
+    chown -R root:root "$DEST/python.new"
+    chmod -R u+rwX,go+rX,go-w "$DEST/python.new"
+    py_ok "$DEST/python.new/bin/python3" || { rm -rf "$DEST/python.new"; echo "the Python in python/ does not run on this machine ($(uname -m)): use the release archive for it (linux-x86_64 or linux-arm64; glibc systems only)" >&2; exit 1; }
+    rm -rf "$DEST/python.old"
+    [ ! -e "$DEST/python" ] || mv "$DEST/python" "$DEST/python.old"
+    mv "$DEST/python.new" "$DEST/python"
+    rm -rf "$DEST/python.old"
+    echo "nuc-console: using the Python of the archive: $PY ($("$PY" -c 'import platform; print(platform.python_version())'))"
+else
+    rm -rf "$DEST/python" "$DEST/python.new" "$DEST/python.old"  # one an earlier install put there, not used any more
+fi
 install -m 0644 src/*.py "$DEST"/  # every module: web.py needs htmlview.py, render.py graph.py
 install -m 0644 systemd/*.service /etc/systemd/system/
 install -m 0755 bin/nuc-console-accept bin/nuc-console-update /usr/local/sbin/
@@ -58,6 +86,10 @@ install -m 0755 bin/nuc-console-ai /usr/local/sbin/  # the optional local AI mod
 install -m 0755 bin/nuc-console-problems /usr/local/bin/
 install -m 0755 bin/nuc-console-telegram /usr/local/bin/
 install -m 0755 bin/nuc-console-ask /usr/local/bin/  # questions to that model (read-only)
+if [ "$PY" != "$SYS_PY" ]; then  # the units and the commands name the system's Python: they run the archive's instead
+    sed -i "s|$SYS_PY|$PY|g" /etc/systemd/system/nuc-console*.service /usr/local/sbin/nuc-console-{accept,update,ai} \
+        /usr/local/bin/nuc-console-{problems,ask,telegram}
+fi
 install -d "$UNITD"
 {
     echo "[Service]"
@@ -84,13 +116,13 @@ systemctl mask --now "getty@tty$VT.service"
 # It captures the state of right now, even if that is what you want to fix: afterwards run sudo nuc-console-accept
 # wait for a net.json written AFTER the collector restart: an older one would be stale
 for _ in $(seq 1 60); do [ "$(stat -c %Y /run/nuc-console/net.json 2>/dev/null || echo 0)" -ge "$t0" ] && break; sleep 1; done
-python3 "$DEST/render.py" --accept --if-missing || echo "warning: baseline not created (collector not ready yet): run sudo nuc-console-accept"
+"$PY" "$DEST/render.py" --accept --if-missing || echo "warning: baseline not created (collector not ready yet): run sudo nuc-console-accept"
 # optional web view (read-only; only the AI page has buttons): only if [web] enabled = yes in config.ini (never opens a port otherwise)
-if python3 "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
+if "$PY" "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
 else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
 # optional Telegram notifier (outbound HTTPS only): always installed, it idles (exit 0) until [telegram] enabled = yes and paired
 systemctl enable nuc-console-notify.service
-if python3 "$DEST/notify.py" --enabled; then systemctl restart nuc-console-notify.service
+if "$PY" "$DEST/notify.py" --enabled; then systemctl restart nuc-console-notify.service
 else systemctl stop nuc-console-notify.service 2>/dev/null || true; fi
 systemctl restart nuc-console.service
 echo "ok: dashboard on tty$VT${TZ_VAL:+ (time zone $TZ_VAL)}. Logs: journalctl -u nuc-console -u nuc-console-collector"

@@ -1,7 +1,8 @@
 # Installation guide
 
-Download the archive of your system, check it, extract it and run one command. To upgrade, run `nuc-console-update` (or the same command
-again); to remove it, add `--uninstall` / `-Uninstall`. To try it without installing anything: [PORTABLE.md](PORTABLE.md).
+Download the archive of your system and processor, check it, extract it and run one command. **The archive has everything it needs, Python
+included: no Python on the machine and no network are needed.** To upgrade, run `nuc-console-update` (or the same command again); to
+remove it, add `--uninstall` / `-Uninstall`. To try it without installing anything: [PORTABLE.md](PORTABLE.md).
 
 | System | Command | The monitor shows |
 |---|---|---|
@@ -13,37 +14,45 @@ again); to remove it, add `--uninstall` / `-Uninstall`. To try it without instal
 
 # Download a release
 
-Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system and a `SHA256SUMS` file. The release
-workflow builds them from the tag, not on anyone's machine, and signs a build provenance for each one
+Every [release](https://github.com/give-jd/nuc-console-oss/releases/latest) has one archive per system **and processor** and a `SHA256SUMS`
+file. The release workflow builds them from the tag, not on anyone's machine, and signs a build provenance for each one
 ([how, and what the checks prove](../SECURITY.md#verifying-a-release)).
 
 ## Which file
 
-`X.Y.Z` is the release number.
+`X.Y.Z` is the release number. Pick the row of your system and of your processor (`uname -m` on Linux and macOS: `x86_64` is Intel/AMD,
+`aarch64` or `arm64` is ARM):
 
-| Your system | Download | Notes |
+| Your system | Download | The Python inside |
 |---|---|---|
-| Linux, any processor | `nuc-console-X.Y.Z-linux.tar.gz` | Python and shell code only: the same file for x86-64, ARM, a Raspberry Pi |
-| macOS, Intel or Apple Silicon | `nuc-console-X.Y.Z-macos.tar.gz` | the same |
-| Windows 10/11, Server 2019+, Intel or AMD (64-bit) | `nuc-console-X.Y.Z-windows-x64.zip` | carries the official embeddable Python (`python\`) |
+| Linux, Intel/AMD 64-bit (`x86_64`) | `nuc-console-X.Y.Z-linux-x86_64.tar.gz` | `python/`: a CPython from python-build-standalone, already unpacked |
+| Linux, ARM 64-bit (`aarch64`: Raspberry Pi 4/5 with a 64-bit system, ARM servers) | `nuc-console-X.Y.Z-linux-arm64.tar.gz` | the same, for ARM |
+| macOS, Apple Silicon (M1 and later) | `nuc-console-X.Y.Z-macos-arm64.tar.gz` | the same, for Apple silicon |
+| macOS, Intel | `nuc-console-X.Y.Z-macos-x86_64.tar.gz` | the same, for Intel |
+| Windows 10/11, Server 2019+, Intel or AMD (64-bit) | `nuc-console-X.Y.Z-windows-x64.zip` | `python\`: the official embeddable Python, unpacked at the first run or install |
 | Windows on ARM | `nuc-console-X.Y.Z-windows-arm64.zip` | the same, with the ARM64 Python |
 | every system | `SHA256SUMS` | the SHA-256 of each archive |
 
-Windows: *Settings › System › About › System type* says which one you have. 32-bit Windows is not supported.
+Windows: *Settings › System › About › System type* says which one you have. 32-bit Windows is not supported, nor 32-bit Linux or ARM
+(`armv7l`, a 32-bit Raspberry Pi OS): there is no archive for them, and the updater says so. The Linux archives are for glibc systems (Debian,
+Ubuntu, Fedora, Arch, Raspberry Pi OS 64-bit...); on Alpine (musl) use a clone and the system's `python3`. An archive of the wrong processor does not run: `run.sh`
+and the installers say `the Python in python/ does not run here` and name the archive to take.
 
-An archive holds one folder, `nuc-console-X.Y.Z/`, with what is needed to install and to run it: `src/`, `bin/`, `config/`, the service files of
-that system (`systemd/` or `launchd/`), `scripts/` (Linux and macOS), the installer and the portable launcher of that system, `docs/`, `README.md`,
-`LICENSE`, `SECURITY.md`. It does not hold the tests or the development tools: `git clone` gives those too (the Windows installer then
-downloads Python once, see [Windows](#windows)).
+**Everything is in the archive.** One folder, `nuc-console-X.Y.Z/`, holds what is needed to install and to run it: `src/`, `bin/`, `config/`, the service
+files of that system (`systemd/` or `launchd/`), `scripts/` (Linux and macOS), the installer and the portable launcher of that system, `docs/`,
+`README.md`, `LICENSE`, `SECURITY.md`, and **the Python it runs with** (`python/`). So it works on a machine that has no Python and no Internet
+access: download it elsewhere, copy it over, extract, run. It does not hold the tests or the development tools: `git clone` gives those too
+(a clone has no Python of its own: Linux and macOS use the machine's `python3`, the Windows installer downloads one once, see [Windows](#windows)).
+Where the Python comes from and how it is checked: [SECURITY.md](../SECURITY.md#the-python-in-the-archives).
 
 ## Check it
 
 Do this before you extract or run anything, in the folder where you saved the files.
 
 ```bash
-sha256sum --ignore-missing -c SHA256SUMS                                   # Linux: checks every archive that is here
-grep ' nuc-console-X.Y.Z-macos.tar.gz$' SHA256SUMS | shasum -a 256 -c -   # macOS: the line of your archive
-gh attestation verify nuc-console-X.Y.Z-linux.tar.gz --repo give-jd/nuc-console-oss
+sha256sum --ignore-missing -c SHA256SUMS                                          # Linux: checks every archive that is here
+grep ' nuc-console-X.Y.Z-macos-arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c -   # macOS: the line of your archive
+gh attestation verify nuc-console-X.Y.Z-linux-x86_64.tar.gz --repo give-jd/nuc-console-oss
 ```
 
 ```powershell
@@ -62,27 +71,36 @@ gh attestation verify .\nuc-console-X.Y.Z-windows-x64.zip --repo give-jd/nuc-con
 Linux and macOS, from SSH or another terminal (Linux: not from the console the dashboard will take over):
 
 ```bash
-tar xzf nuc-console-X.Y.Z-linux.tar.gz       # on a Mac: nuc-console-X.Y.Z-macos.tar.gz
+tar xzf nuc-console-X.Y.Z-linux-x86_64.tar.gz    # your file: -linux-arm64, -macos-arm64 or -macos-x86_64
 cd nuc-console-X.Y.Z
 sudo ./install.sh
 ```
+
+The archive's Python is used like this. **Linux**: the system's `/usr/bin/python3` when it is 3.8 or newer (updated by your distribution), else the one in
+`python/`, which `install.sh` copies to `/opt/nuc-console/python` (owned by root, readable by the service users) and which the systemd units and the commands
+then run. **macOS**: the one in `python/` is always used, copied to `/opt/nuc-console/python`; nothing is downloaded. Re-running the installer, or an update,
+replaces it with the one of the new release; it is removed with the rest by `--uninstall`.
 
 Windows: extract the ZIP (right-click › *Extract All*, or `Expand-Archive nuc-console-X.Y.Z-windows-x64.zip .`), double-click **`install-windows.cmd`**
 and accept the administrator prompt. The ZIP carries the Python the installer needs, in `python\` next to it, so **the install downloads nothing
 and works on a PC with no Internet access**: the installer checks that file against the SHA-256 it pins, and python.exe against the Python Software Foundation's
 signature, before it uses it.
 
-Linux downloads nothing at all. macOS downloads the official python.org package only if the Mac has no Python 3.8+ of its own
-(hash and signature checked). What each installer does, its options, and what it keeps for the next time: [Linux](#linux), [macOS](#macos),
-[Windows](#windows). The extracted folder is not used after the install: delete it, or keep it to run `./run.sh` / `run.cmd`
-without installing ([PORTABLE.md](PORTABLE.md)).
+**No installer of an archive downloads anything**, on any system. Only a clone (no `python/`) can: the macOS installer then downloads the official python.org
+package if the Mac has no Python 3.8+ of its own (hash and signature checked), and the Windows installer downloads its Python once. What each installer
+does, its options, and what it keeps for the next time: [Linux](#linux), [macOS](#macos), [Windows](#windows). The extracted folder is not used after the
+install: delete it, or keep it to run `./run.sh` / `run.cmd` without installing ([PORTABLE.md](PORTABLE.md)).
+
+macOS may refuse to start programs that come from a browser download (they are "quarantined"). If the installer says `the Python in python/ does not run on
+this Mac`, take the archive that matches `uname -m` and run `xattr -dr com.apple.quarantine nuc-console-X.Y.Z` on the extracted folder; extracting
+with `tar` in a terminal does not mark the files.
 
 # Linux
 
 ## 1. Check the prerequisites
 
 ```bash
-python3 --version          # 3.8 or newer
+python3 --version          # 3.8 or newer: only needed from a clone; the release archive carries its own (a system older than that uses it)
 systemctl --version        # systemd is required
 ls /proc /sys >/dev/null && echo ok
 ```
@@ -126,10 +144,12 @@ sudo ./install.sh          # in the folder of the extracted archive (or of the c
 What it does (all idempotent, re-run it to upgrade):
 
 1. creates the system user `nuc-console` (no shell, no home);
-2. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept`, `nuc-console-update` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started) and gives the folder `/var/lib/nuc-console/ai` to the `nuc-console` account, so that the AI page and the AI screen can set a model up (step 7);
-3. writes `/etc/nuc-console/config.ini` **only if it does not exist**;
-4. starts the root collector, **masks `getty@tty<N>`** and starts the dashboard on that terminal;
-5. waits for the first fresh collector snapshot and stores the **port baseline** (only if none exists).
+2. picks the Python: `/usr/bin/python3` if it is 3.8 or newer, else the one in `python/` of the release archive (a clone has none: it then stops and
+   says to install `python3`), which is copied to `/opt/nuc-console/python` (root-owned) and which the units and the commands then run;
+3. copies the code to `/opt/nuc-console`, the units to `/etc/systemd/system`, the commands `nuc-console-accept`, `nuc-console-update` and `nuc-console-ai` to `/usr/local/sbin` and `nuc-console-problems` and `nuc-console-ask` to `/usr/local/bin` (the last two are for the optional AI model, step 7: nothing is downloaded or started) and gives the folder `/var/lib/nuc-console/ai` to the `nuc-console` account, so that the AI page and the AI screen can set a model up (step 7);
+4. writes `/etc/nuc-console/config.ini` **only if it does not exist**;
+5. starts the root collector, **masks `getty@tty<N>`** and starts the dashboard on that terminal;
+6. waits for the first fresh collector snapshot and stores the **port baseline** (only if none exists).
 
 Options (environment variables; a re-install without options keeps the previous choice):
 
@@ -254,7 +274,7 @@ content: in a browser window every section stays and the page scrolls; full scre
 
 ## Install
 
-From the extracted [archive](#download-a-release) (`nuc-console-X.Y.Z-macos.tar.gz`) or from a clone:
+From the extracted [archive](#download-a-release) (`nuc-console-X.Y.Z-macos-arm64.tar.gz` or `-macos-x86_64.tar.gz`) or from a clone:
 
 ```bash
 git clone <this repository> nuc-console && cd nuc-console                  # a clone; an archive is extracted instead
@@ -266,7 +286,9 @@ sudo ./install.sh                                                          # ins
 
 What it does (idempotent):
 
-1. **Python**: uses a Python 3.8+ owned by the system (a python.org install, or Apple's with the Command Line Tools). If
+1. **Python**: from a release archive, the Python it carries (`python/`, a python-build-standalone CPython for this Mac's processor) is copied to
+   `/opt/nuc-console/python`, owned by root (nobody else can write it), checked there and used: **nothing is downloaded** and the Mac needs no Python. From a
+   clone (no `python/`) it uses a Python 3.8+ owned by the system (a python.org install, or Apple's with the Command Line Tools). If
    there is none it downloads the official python.org package (SHA-256 pinned, signature checked) and installs **only the
    framework**: no apps, no `/usr/local/bin` links, no shell profile changes. Homebrew's Python is never used: its files
    belong to a user, and the collector runs as root. The package is kept in `/Library/Caches/nuc-console` (root-owned) and reused
@@ -445,7 +467,7 @@ never calls `sudo` itself: if it needs root it says so. On macOS, if `/usr/local
 
 | You run | It updates | Needs | Replaced | Kept | Cache |
 |---|---|---|---|---|---|
-| `bin/nuc-console-update` in a folder that has `run.sh` / `run.cmd` (a [portable](PORTABLE.md) folder) | that folder | nothing: no root, no administrator (quit it first) | `src/`, `bin/`, `docs/`, `config/`, the launchers, ... of the folder | `data/` (config, state, baseline, logs) and `cache/` | `<folder>/cache` |
+| `bin/nuc-console-update` in a folder that has `run.sh` / `run.cmd` (a [portable](PORTABLE.md) folder) | that folder | nothing: no root, no administrator (quit it first) | `src/`, `bin/`, `docs/`, `config/`, the launchers, ... of the folder, and the `python/` of a Linux or macOS archive (links included) | `data/` (config, state, baseline, logs) and `cache/` | `<folder>/cache` |
 | `nuc-console-update` on Linux | `/opt/nuc-console`, by running the new release's `install.sh` | `sudo` | the code, the units and the commands | `/etc/nuc-console/config.ini`, the baseline, the VT and the time zone | `/var/cache/nuc-console` |
 | `nuc-console-update` on macOS | the same, through `install-macos.sh` | `sudo` | the same | `config.ini`, the baseline, the display mode | `/Library/Caches/nuc-console` |
 | `nuc-console-update` on Windows | `%ProgramFiles%\nuc-console`, by running the new release's `install-windows.ps1` | Administrator | the code, the tasks and the commands | `%ProgramData%\nuc-console\config.ini`, the baseline, the display mode | `%ProgramData%\nuc-console\cache` |
@@ -462,13 +484,15 @@ archive), and from then on `nuc-console-update` is there.
 1. Asks `api.github.com` (HTTPS) for the latest release: the one GitHub calls *latest*, never a draft or a pre-release. It compares the number with
    the `VERSION` you have, as numbers (`1.10.0` is newer than `1.9.9`). If you are up to date, or ahead, it says so and stops: it never downgrades.
 2. Asks you (unless `--yes`).
-3. Downloads `SHA256SUMS` (every time: it is what the archive is checked against) and the archive of this system (Windows: x64 or ARM64) into the
-   **cache**. A file that is already in the cache with the SHA-256 that `SHA256SUMS` lists is **not downloaded again**; a missing, half or
+3. Downloads `SHA256SUMS` (every time: it is what the archive is checked against) and the archive of this system **and processor** (`linux-x86_64`,
+   `linux-arm64`, `macos-arm64`, `macos-x86_64`, `windows-x64`, `windows-arm64`: the one of the Python that runs the updater) into the
+   **cache**. A processor with no archive (32-bit, RISC-V...) is refused with a message that lists what exists; so is a release that lacks the archive of yours. A file that is already in the cache with the SHA-256 that `SHA256SUMS` lists is **not downloaded again**; a missing, half or
    damaged one is.
 4. Checks the archive against `SHA256SUMS`. A mismatch deletes it and nothing is installed.
 5. If `gh` (GitHub CLI) is installed and logged in, runs `gh attestation verify <archive> --repo give-jd/nuc-console-oss`; a failure stops the
    update. Without `gh`, or without a login, it says that the provenance was not checked and goes on.
-6. Unpacks the archive into a temporary folder of the cache (an absolute path or `..` in it is refused, and so is a link or a device in a `.tar.gz`; the
+6. Unpacks the archive into a temporary folder of the cache (an absolute path or `..` in it is refused, and so is a device or a hard link in a `.tar.gz`
+   and a symbolic link that is absolute or leaves the folder: the links of the bundled Python, such as `python/bin/python3`, stay inside it; the
    `VERSION` inside must be the release's) and installs from there: the installer of the new release, or, for a portable folder, the replacement of its files.
 7. Deletes the unpacked folder and the archives of older releases from the cache.
 
@@ -477,9 +501,9 @@ What these checks prove and what they do not: [SECURITY.md](../SECURITY.md#verif
 
 ## The cache
 
-Nothing is downloaded twice: the updater, the Windows installer (the Python zip) and the macOS installer (the python.org package) all keep what they
+Nothing is downloaded twice: the updater, the Windows installer (the Python zip) and the macOS installer (the python.org package, a clone only) all keep what they
 fetched, check it again before every use, and reuse it. Only the newest release's archive and `SHA256SUMS` are kept (older archives are deleted after
-an update); the Python zip or package is kept for the next install. Delete the folder whenever you like: the next update fetches again.
+an update; an archive is 20 to 40 MB, it carries its Python); the Python zip or package is kept for the next install. Delete the folder whenever you like: the next update fetches again.
 
 An installed one's cache is root's (Windows: only SYSTEM and Administrators can write there). As root the updater refuses a cache folder that is a link or that
 anyone else can write to, runs `gh` only if root owns it and nobody else can write it, and ignores the `PYTHON*` environment variables. Uninstalling leaves the cache in place

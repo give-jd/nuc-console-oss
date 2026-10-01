@@ -6,8 +6,10 @@ it and stops when you quit it. To install it instead: [INSTALL.md](INSTALL.md). 
 
 ## Run it
 
-Download the archive of your system from the [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest)
-([which one, and how to check it](INSTALL.md#download-a-release)) and extract it, or `git clone` the repository. In that folder:
+Download the archive of your system **and processor** from the [latest release](https://github.com/give-jd/nuc-console-oss/releases/latest)
+([which one, and how to check it](INSTALL.md#download-a-release): `linux-x86_64`, `linux-arm64`, `macos-arm64`, `macos-x86_64`, `windows-x64`,
+`windows-arm64`) and extract it. **It carries its own Python: nothing else has to be installed on the machine and no network is needed** (download,
+unpack, run). Or `git clone` the repository, which needs a Python 3.8+ on Linux and macOS. In that folder:
 
 | System | Command | What you get |
 |---|---|---|
@@ -28,7 +30,7 @@ Options (Windows: `run.cmd` takes the PowerShell spelling):
 | `-h`, `--help` | | the usage |
 
 Only one copy runs per folder: a second start says `already running` and exits. On Linux and macOS, `PYTHON=/path/to/python3 ./run.sh`
-chooses the Python.
+chooses the Python (otherwise: [Python](#python)).
 
 ## What it does, and where
 
@@ -49,7 +51,7 @@ Everything it writes:
 | `data/lib/` | `baseline.json` (the port alarms) and `accepted.json` (the problems you accepted) |
 | `data/logs/` | `collector.log`, `web.log` (the view in the browser), `baseline.log`; a `collector.log` over 1 MB is kept once as `.1` at the next start |
 | `data/portable.pid` | the process ID of the running copy; removed when it stops |
-| `python\` (Windows ZIP) | the Python, unpacked once on the first run (see [Python](#python)) |
+| `python\` (Windows ZIP) | the Python, unpacked once on the first run (see [Python](#python)); on Linux and macOS `python/` is already unpacked in the archive and is only read |
 | `cache/` | what `nuc-console-update` downloaded; only exists once you used it |
 
 On Linux and macOS `data/` is private to you (mode 0700, files 0600): the snapshots hold your topology. On Windows it has the
@@ -72,9 +74,13 @@ to see everything. Then **every** part runs with those rights, so keep that fold
 
 ## Python
 
-- **Linux and macOS**: Python 3.8 or newer, standard library only; nothing is downloaded. `$PYTHON` if you set it; else on macOS the newest
+- **Linux and macOS archives**: the Python is in `python/` (`python/bin/python3`), a python-build-standalone CPython for the processor of the archive,
+  already unpacked: `./run.sh` uses it first, so the machine needs no Python. `$PYTHON` overrides it if you set it. If it does not run here (the archive of
+  another processor or system: `run.sh` says `the Python in .../python does not run here: is this the archive for Linux x86_64?`; on macOS the files of a
+  browser download are blocked until `xattr -dr com.apple.quarantine <folder>`), the Python of the machine is looked for instead: on macOS the newest
   python.org Python, then Apple's `/usr/bin/python3` (only when the Command Line Tools are installed); on Linux `/usr/bin/python3`; then the
-  first `python3` on the PATH.
+  first `python3` on the PATH (Python 3.8 or newer, standard library only). A **clone** has no `python/`: it uses those. As root (`sudo ./run.sh`) it refuses a
+  `python/` that is a link or that others can write to, before it runs anything from it. Nothing is ever downloaded.
 - **Windows ZIP**: the official embeddable Python is in `python\` (the x64 ZIP carries the x64 one, the ARM64 ZIP the ARM64 one). The first run checks its
   SHA-256 against the pin in `install-windows.ps1` and python.exe's signature (Python Software Foundation), unpacks it once into `python\`, and reuses it afterwards. If it
   cannot be used (`warning: ... not used`), or in a source checkout that has none, the run falls back to a Python 3.8+ of the machine (`py -3`, `python`, `python3`).
@@ -118,14 +124,15 @@ bin/nuc-console-update                # ask, then update
 bin/nuc-console-update --yes          # do not ask
 ```
 
-Windows: `bin\nuc-console-update.cmd`, with `-Check` and `-Yes`. It needs no rights: run it as the user who owns the folder (as root, on
+The archive of your **processor** is taken (`x86_64` or `arm64`: the one of the Python that runs the updater; a processor without an archive is refused). Windows: `bin\nuc-console-update.cmd`, with `-Check` and `-Yes`. It needs no rights: run it as the user who owns the folder (as root, on
 Linux and macOS, it refuses a folder root does not own). It refuses while a copy is running from the folder: quit it first. Run it when you decide to; it is never automatic.
 
 It downloads and checks the archive of your system as described in [Update](INSTALL.md#update), into `cache/` of this folder (a file
 already there with the right SHA-256 is not downloaded again), and then:
 
 - replaces the files the new release ships: `src/`, `bin/`, `docs/`, `config/`, `scripts/`, the launchers, installers, `README.md`...; a file the new
-  release no longer has is deleted from those folders; on Windows, when the release has another Python, its zip replaces the old one in `python\` and is unpacked at the next run.
+  release no longer has is deleted from those folders; on Linux and macOS the new release's `python/` replaces the old one (links stay links, a file of the old
+  Python that the new one lacks is deleted, files that did not change are not written again); on Windows, when the release has another Python, its zip replaces the old one in `python\` and is unpacked at the next run.
   The files are first written next to their targets and then renamed over them, so a full disk stops it before anything is replaced;
 - keeps `data/` (your config, state, baseline, accepted problems, logs) and `cache/`, untouched. `data/config.ini` is never replaced; the
   next start refreshes `config.ini.dist`;
@@ -140,7 +147,8 @@ updater only in a folder extracted from an archive. To update an *installed* nuc
 |---|---|
 | `already running (pid N): quit it first` | a copy runs from this folder; if it does not, delete `data/portable.pid` |
 | `--console needs a terminal: use --web` | there is no terminal (a script, a pipe): use `./run.sh --web` |
-| `Python 3.8 or newer not found` | Linux: install `python3`; macOS: python.org or `xcode-select --install`; Windows: use the release ZIP, which carries one |
+| `the Python in .../python does not run here` | the archive is for another processor or system: take the one that matches `uname -m` ([which file](INSTALL.md#which-file)); macOS: `xattr -dr com.apple.quarantine <folder>` |
+| `Python 3.8 or newer not found` | a clone: Linux: install `python3`; macOS: python.org or `xcode-select --install`; Windows: use the release ZIP. The release archives carry their own |
 | `the web view did not start` | the end of `data/logs/web.log` is printed; if you gave `--port`, that port may be taken: try without it |
 | the screen says the collector is not running, or the data is old | `data/logs/collector.log` (Windows: `the collector stopped (see ...)` is printed) |
 | `baseline not created` | [Port alarms](#port-alarms): `./run.sh --accept`, or start it as root once |

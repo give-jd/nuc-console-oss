@@ -543,5 +543,195 @@ class MacosPythonPackageCache(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.cache)), ["other.txt", "python-9.9.9-macos11.pkg"])
 
 
+# ---- the Python of a release archive: install.sh (Linux) and install-macos.sh use it, run for real in bash ---------------------------
+
+def write_file(path, text, mode=0o644):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(text)
+    os.chmod(path, mode)
+
+
+def archive_python(folder, ok=True):
+    """A python/ like the one of an archive (a link python3 -> python3.99, a library, a link to it), in a hostile umask: 0700 / 0600.
+    The fake python3.99 is a script: it exits 0 for `-c` when ok (so `Python 3.8+?` is answered yes), else 1."""
+    write_file(os.path.join(folder, "python", "bin", "python3.99"), "#!/bin/sh\n" + ("exit 0\n" if ok else "exit 1\n"), 0o700)
+    os.symlink("python3.99", os.path.join(folder, "python", "bin", "python3"))
+    write_file(os.path.join(folder, "python", "lib", "libpython3.99.so.1.0"), "lib", 0o700)
+    os.symlink("libpython3.99.so.1.0", os.path.join(folder, "python", "lib", "libpython3.99.so"))
+    write_file(os.path.join(folder, "python", "lib", "python3.99", "os.py"), "# os\n", 0o600)
+    for dirpath, _dirs, _files in os.walk(os.path.join(folder, "python")):
+        os.chmod(dirpath, 0o700)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "install.sh runs on Linux")
+class LinuxInstallerPython(unittest.TestCase):
+    """install.sh: the system's /usr/bin/python3 when it is 3.8+, else the archive's python/ (copied to /opt/nuc-console/python)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="nuc-install-py-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.src = read_text(INSTALL)
+        self.choose = re.search(r"(?ms)^# ---- Python 3\.8\+: the system's, else the one of the archive.*?^fi\n", self.src).group(0)
+        self.copy = re.search(r"(?ms)^if \[ \"\$PY\" != \"\$SYS_PY\" \]; then\n    # the archive's Python.*?^fi\n", self.src).group(0)
+        self.py_ok = re.search(r"(?m)^py_ok\(\) .*$", self.src).group(0)
+        self.dest = os.path.join(self.tmp, "opt", "nuc-console")
+        self.folder = os.path.join(self.tmp, "archive")
+        os.makedirs(self.folder)
+        os.makedirs(self.dest)
+        stubs = os.path.join(self.tmp, "stubs")
+        write_file(os.path.join(stubs, "chown"), "#!/bin/sh\nexit 0\n", 0o755)  # the test is not root: the owner is not changed here
+        self.env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"])
+
+    def choose_python(self, system_python):
+        script = "set -euo pipefail\nDEST=%s\n%s\necho \"PY=$PY\"\n" % (
+            shlex.quote(self.dest), self.choose.replace("SYS_PY=/usr/bin/python3", "SYS_PY=" + shlex.quote(system_python)))
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def good_system_python(self, ok=True):
+        path = os.path.join(self.tmp, "sys", "python3")
+        write_file(path, "#!/bin/sh\n" + ("exit 0\n" if ok else "exit 1\n"), 0o755)
+        return path
+
+    def test_the_system_python_is_used_when_there_is_one_even_with_the_archive_python_there(self):
+        archive_python(self.folder)
+        sys_py = self.good_system_python()
+        r = self.choose_python(sys_py)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "PY=" + sys_py), r.stderr)
+
+    def test_no_system_python_or_one_older_than_3_8_gives_the_one_of_the_archive(self):
+        archive_python(self.folder)
+        for system in (os.path.join(self.tmp, "nowhere", "python3"), self.good_system_python(ok=False)):
+            r = self.choose_python(system)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, "PY=" + os.path.join(self.dest, "python", "bin", "python3")), (system, r.stderr))
+
+    def test_neither_is_an_error_that_says_what_to_do(self):
+        r = self.choose_python(os.path.join(self.tmp, "nowhere", "python3"))  # a clone on a machine without python3: no python/ either
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Python 3.8 or newer is needed", r.stderr)
+        self.assertIn("release archive", r.stderr)
+
+    def copy_python(self, ok=True):
+        archive_python(self.folder, ok)
+        script = ("set -euo pipefail\nDEST=%s\nSYS_PY=/usr/bin/python3\nPY=$DEST/python/bin/python3\n%s\n%s\n"
+                  % (shlex.quote(self.dest), self.py_ok, self.copy))
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def mode(self, *parts):
+        return os.lstat(os.path.join(self.dest, *parts)).st_mode & 0o777
+
+    def test_the_python_is_copied_with_its_links_and_readable_by_the_service_users(self):
+        r = self.copy_python()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        py = os.path.join(self.dest, "python")
+        self.assertEqual(os.readlink(os.path.join(py, "bin", "python3")), "python3.99")  # links stay links
+        self.assertEqual(os.readlink(os.path.join(py, "lib", "libpython3.99.so")), "libpython3.99.so.1.0")
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python"])  # no python.new or python.old left
+        for rel in (("python",), ("python", "bin"), ("python", "lib", "python3.99")):  # extracted with umask 077: now 0755
+            self.assertEqual(self.mode(*rel), 0o755, rel)
+        self.assertEqual(self.mode("python", "bin", "python3.99"), 0o755)  # exec kept, others may run it
+        self.assertEqual(self.mode("python", "lib", "python3.99", "os.py"), 0o644)  # others may read it, nobody else may write it
+        self.assertEqual(self.mode("python", "lib", "libpython3.99.so.1.0"), 0o755)
+        self.assertIn("using the Python of the archive", r.stdout)
+
+    def test_a_python_that_does_not_run_here_stops_the_install_and_leaves_the_old_one(self):
+        write_file(os.path.join(self.dest, "python", "marker"), "the old install")
+        r = self.copy_python(ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("does not run on this machine", r.stderr)
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python"])  # python.new removed
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "python", "marker")))  # the installed one is as it was
+
+    def test_a_new_python_replaces_the_old_one_whole(self):
+        write_file(os.path.join(self.dest, "python", "old-file"), "from the last release")
+        self.assertEqual(self.copy_python().returncode, 0)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.dest, "python"))), ["bin", "lib"])
+
+    def test_the_units_and_the_commands_that_name_the_system_python_are_all_rewritten(self):
+        """Every systemd unit (the glob) and every sh command of bin/ that runs /usr/bin/python3 is in the sed of install.sh."""
+        sed = re.search(r'(?ms)^    sed -i "s\|\$SYS_PY\|\$PY\|g" (.*?)\nfi\n', self.src).group(1)
+        self.assertIn("/etc/systemd/system/nuc-console*.service", sed)
+        named = set()
+        for m in re.finditer(r"/usr/local/(?:s?bin)/nuc-console-\{([^}]*)\}", sed):
+            named |= set("nuc-console-" + n for n in m.group(1).split(","))
+        users = set()
+        for name in os.listdir(os.path.join(ROOT, "bin")):
+            if not name.endswith((".cmd", ".ps1")) and "/usr/bin/python3" in read_text(os.path.join(ROOT, "bin", name)):
+                users.add(name)
+        self.assertEqual(users, named)  # a new command that runs the system Python must be added to that sed
+        for name in os.listdir(os.path.join(ROOT, "systemd")):
+            text = read_text(os.path.join(ROOT, "systemd", name))
+            if "/usr/bin/python3" in text:
+                fixed = text.replace("/usr/bin/python3", "/opt/nuc-console/python/bin/python3")
+                self.assertNotIn("/usr/bin/python3", fixed)
+                self.assertRegex(fixed, r"(?m)^ExecStart=/opt/nuc-console/python/bin/python3 ")
+        # and the steps that run the installed code use the chosen Python, not whatever python3 the PATH has
+        for line in self.src.splitlines():
+            if "$DEST/render.py" in line or "$DEST/web.py" in line or "$DEST/notify.py" in line:
+                self.assertIn('"$PY" "$DEST/', line)
+
+    def test_the_uninstall_removes_the_python_with_the_rest(self):
+        down = self.src[self.src.index('"--uninstall" ]'):self.src.index("exit 0")]
+        self.assertIn('rm -rf "$DEST"', down)  # /opt/nuc-console/python is inside it
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "the macOS tools are replaced by stand-ins that run on Linux only")
+class MacosInstallerPython(unittest.TestCase):
+    """install-macos.sh: the archive's Python is copied to /opt/nuc-console/python, checked, and used; nothing is downloaded."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="nuc-install-macpy-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.src = read_text(INSTALL_MACOS)
+        self.dest = os.path.join(self.tmp, "opt", "nuc-console")
+        self.folder = os.path.join(self.tmp, "archive")
+        os.makedirs(self.folder)
+        os.makedirs(self.dest)
+        stubs = os.path.join(self.tmp, "stubs")
+        for name, text in (("stat", "#!/bin/sh\n[ \"$1\" = -f ] && [ \"$2\" = %u ] && { echo 0; exit 0; }\necho \"stat stand-in: $*\" >&2; exit 2\n"),
+                           ("chown", "#!/bin/sh\nexit 0\n"), ("xattr", "#!/bin/sh\necho \"$*\" >> \"$STUB_LOG\"\n")):
+            write_file(os.path.join(stubs, name), text, 0o755)
+        self.log = os.path.join(self.tmp, "xattr.log")
+        self.env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], STUB_LOG=self.log)
+        functions = [re.search(r"(?ms)^py_ok\(\) \{.*?^\}$", self.src).group(0), re.search(r"(?m)^python_real\(\) \{.*\}$", self.src).group(0)]
+        functions.append(re.search(r"(?ms)^prepare_bundled_python\(\) \{.*?^\}$", self.src).group(0))
+        self.functions = "\n".join(functions)
+
+    def prepare(self, ok=True):
+        archive_python(self.folder, ok)
+        script = "set -euo pipefail\nDEST=%s\n%s\nprepare_bundled_python\n" % (shlex.quote(self.dest), self.functions)
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def test_the_python_is_copied_beside_the_final_one_checked_and_cleaned_of_quarantine_marks(self):
+        r = self.prepare()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        new = os.path.join(self.dest, "python.new")
+        self.assertEqual(os.readlink(os.path.join(new, "bin", "python3")), "python3.99")
+        self.assertEqual(os.lstat(os.path.join(new, "bin")).st_mode & 0o777, 0o755)
+        self.assertEqual(os.lstat(os.path.join(new, "lib", "python3.99", "os.py")).st_mode & 0o777, 0o644)
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python.new"])  # the final one is put in place later, with the services stopped
+        with open(self.log) as f:
+            self.assertIn("-cr %s" % new, f.read())  # a browser download marks every file: the copy that root runs has none
+
+    def test_a_python_that_does_not_run_on_this_mac_stops_the_install(self):
+        r = self.prepare(ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("does not run on this Mac", r.stderr)
+        self.assertIn("macos-arm64", r.stderr)
+        self.assertEqual(os.listdir(self.dest), [])
+
+    def test_the_archives_python_comes_first_and_nothing_is_downloaded_for_it(self):
+        src = self.src
+        use = src.index("    prepare_bundled_python\n    PY=")
+        self.assertLess(use, src.index("for cand in /Library/Frameworks/Python.framework"))  # before the search for a system Python
+        self.assertLess(use, src.index("    fetch_python_pkg\n    tmp="))  # and before the download of the python.org package
+        self.assertIn('if [ -x python/bin/python3 ]; then', src)
+        self.assertIn('if [ -z "$PY" ] && xcode-select', src)  # the old search is still there, for a clone
+        # in place only after the services are stopped, and the old one of an earlier install is dropped when it is not used any more
+        place = src.index('mv "$DEST/python.new" "$DEST/python"')
+        self.assertLess(src.index('launchctl bootout "system/$label" 2>/dev/null || true; done\ninstall -d'), place)
+        self.assertLess(place, src.index('install -m 0644 src/*.py "$DEST/"'))
+
+
 if __name__ == "__main__":
     unittest.main()

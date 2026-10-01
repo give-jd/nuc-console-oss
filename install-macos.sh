@@ -3,10 +3,12 @@
 # (install.sh hands over to this script on macOS). Rollback: sudo ./install.sh --uninstall
 #
 # What it does:
-#   1. finds a Python 3.8+ owned by the system (python.org framework, or Apple's Command Line Tools); if there is none it
-#      installs the official python.org package (SHA-256 pinned, signature checked), framework only: no PATH or shell
-#      profile changes. Homebrew's Python is never used: its files belong to a user, and the collector runs as root.
-#      The package is kept in /Library/Caches/nuc-console and never downloaded twice;
+#   1. the Python: the release archive carries one (python/, a python-build-standalone build for this Mac's processor):
+#      it is copied to /opt/nuc-console/python, owned by root, and used: nothing is downloaded, no Python is needed on the
+#      Mac. Without it (a git checkout) it finds a Python 3.8+ owned by the system (python.org framework, or Apple's Command
+#      Line Tools); if there is none it installs the official python.org package (SHA-256 pinned, signature checked),
+#      framework only: no PATH or shell profile changes. Homebrew's Python is never used: its files belong to a user, and
+#      the collector runs as root. The package is kept in /Library/Caches/nuc-console and never downloaded twice;
 #   2. copies the code to /opt/nuc-console, config to /etc/nuc-console (config.ini only if missing), state to /var/run,
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
 #   3. starts the collector as a LaunchDaemon (root) and the web view (read-only; only the AI page has buttons) as user _nuc-console, on 127.0.0.1 only
@@ -90,8 +92,29 @@ fetch_python_pkg() {
         if [ "$old" != "$PKG" ] && [ -f "$old" ]; then rm -f "$old"; fi
     done
 }
-PY="" best=0
+# The archive's Python: copied beside the final one and checked there (the copy is what root runs, so it is root's and nobody
+# else can write it; the services run as their own users, so everybody can read it). It replaces the old one in section 2,
+# once the services are stopped. A browser download marks every file "quarantined": the copy has none of those marks.
+prepare_bundled_python() {
+    install -d -m 0755 "$DEST"
+    rm -rf "$DEST/python.new"
+    cp -RPp python "$DEST/python.new"
+    chown -R root:wheel "$DEST/python.new"
+    chmod -R u+rwX,go+rX,go-w "$DEST/python.new"
+    xattr -cr "$DEST/python.new" 2>/dev/null || true
+    py_ok "$DEST/python.new/bin/python3" || {
+        rm -rf "$DEST/python.new"
+        echo "the Python in python/ does not run on this Mac ($(uname -m)): use the release archive for it (macos-arm64: Apple silicon, macos-x86_64: Intel)" >&2
+        exit 1
+    }
+}
+PY="" PY_CHECK="" best=0
+if [ -x python/bin/python3 ]; then  # a release archive: its own Python, nothing to find and nothing to download
+    prepare_bundled_python
+    PY="$DEST/python/bin/python3" PY_CHECK="$DEST/python.new/bin/python3"
+fi
 for cand in /Library/Frameworks/Python.framework/Versions/3.*/bin/python3; do  # python.org installs: the newest one
+    [ -z "$PY" ] || break
     if py_ok "$cand"; then
         v="$("$cand" -c 'import sys; print(sys.version_info[0] * 100 + sys.version_info[1])')"
         if [ "$v" -gt "$best" ]; then PY="$cand" best="$v"; fi
@@ -115,7 +138,7 @@ if [ -z "$PY" ]; then
     py_ok "$PY_FRAMEWORK" || { echo "Python installation failed" >&2; exit 1; }
     PY="$PY_FRAMEWORK"
 fi
-echo "nuc-console: using $PY ($("$PY" -c 'import platform; print(platform.python_version())'))"
+echo "nuc-console: using $PY ($("${PY_CHECK:-$PY}" -c 'import platform; print(platform.python_version())'))"
 
 # ---- 2. files ---------------------------------------------------------------------------------------------------------
 fill() { sed -e "s|@PYTHON@|$PY|g" -e "s|@DEST@|$DEST|g" -e "s|@DISPLAY@|${DISPLAY_ARG:-}|g" "$1"; }
@@ -143,6 +166,14 @@ ensure_service_user() {  # the web view and the Telegram notifier run as this ac
 }
 for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify; do launchctl bootout "system/$label" 2>/dev/null || true; done
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
+if [ -d "$DEST/python.new" ]; then  # the archive's Python, checked in section 1, now in place (the services are stopped)
+    rm -rf "$DEST/python.old"
+    [ ! -e "$DEST/python" ] || mv "$DEST/python" "$DEST/python.old"
+    mv "$DEST/python.new" "$DEST/python"
+    rm -rf "$DEST/python.old"
+else
+    rm -rf "$DEST/python" "$DEST/python.old"  # one an earlier install put there, not used any more
+fi
 rm -f "$DEST"/*.py
 install -m 0644 src/*.py "$DEST/"
 for f in nuc-console-accept nuc-console-ai nuc-console-problems nuc-console-ask nuc-console-update nuc-console-telegram; do
