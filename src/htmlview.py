@@ -36,6 +36,10 @@ MAP_CSS = (".hd{display:flex;justify-content:space-between;gap:2ch;white-space:p
            "@media(max-width:999px){.mp.two .dl{display:inline}}")
 
 
+# the web CPU page (web.py): a process row is a link that looks like the text around it
+CPU_CSS = "a.pr{color:inherit;text-decoration:none}a.pr:hover{background:#161b22}"
+
+
 def to_html(text):
     """ANSI text -> HTML spans (colour, background, reverse, bold)."""
     out, fg, bg, rev, bold, pos = [], "", "", False, False, 0
