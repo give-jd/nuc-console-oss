@@ -439,7 +439,7 @@ class RepoArchives(TempDirCase):
                 self.assertEqual(parts[0], self.top, (label, name))
                 self.assertFalse(any(p.startswith(".") for p in parts), (label, name))  # .github, .gitignore, .gitattributes
                 self.assertNotIn(parts[1:2], (["tests"], ["tools"]), (label, name))
-                self.assertNotEqual(name, self.top + "/CONTRIBUTING.md", label)
+                self.assertNotIn(name, (self.top + "/CONTRIBUTING.md", self.top + "/CLAUDE.md"), label)
             for name in self.repo_part(members):
                 self.assertNotIn("__pycache__", name)
 
@@ -925,6 +925,7 @@ def make_tree(base, version="9.9.9"):
         "LICENSE": "MIT\n",
         "SECURITY.md": "# security\n",
         "CONTRIBUTING.md": "# contributing\n",
+        "CLAUDE.md": "# rules\n",
         "tests/test_x.py": "pass\n",
         "tools/t.py": "pass\n",
         ".github/workflows/w.yml": "name: w\n",

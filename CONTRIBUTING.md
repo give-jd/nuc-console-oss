@@ -92,9 +92,46 @@ Compare runs on one machine and one Python, one after the other: the figures do 
 3. Other container runtimes (podman).
 4. More sensors (AMD/ARM thermal, macOS, Windows), multiple NVMe.
 
-## Pull requests
+## Branches, commits and pull requests
 
-Small, focused, with tests. Describe the *why*. Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
+These rules are for everyone who changes this repository, people and automated agents alike (agents also read `CLAUDE.md`, which points here).
+The repository is public: everything pushed to it, every pull request, comment and release note can be read by anyone and stays in its history.
+
+**Branches**
+- `main` is always green and releasable. Nobody commits to it directly: every change reaches it through a pull request.
+- One branch per piece of work, started from an up-to-date `main`: `feat/…`, `fix/…`, `docs/…`, `test/…`, `ci/…`, `refactor/…`, `chore/…`, with a name
+  that says what the change is (never who or what made it).
+- One topic per branch, one pull request per branch. After the merge the branch is deleted.
+- When `main` moves ahead while a branch is open, merge `main` into the branch. No rebase and no force push of a branch that has been pushed.
+- Several people or agents may work at the same time: before starting, look at the open pull requests and branches, and never push to a branch
+  someone else is working on.
+- Plans, notes, prompts and to-do lists stay out of the repository, in every branch.
+
+**Commits**
+- Author and committer are the repository's own accounts (`dipada`, `give-jd`, with their GitHub `noreply` addresses); commits are not signed.
+- The subject is `type(scope): summary` (`feat`, `fix`, `docs`, `test`, `ci`, `refactor`, `chore`), in English, in the imperative or as a statement of
+  what now holds; the body says *why*. Each commit passes the tests on its own.
+- Never, in a commit or anywhere else (pull requests, comments, reviews, code, docs, release notes, branch names): co-author trailers, "generated
+  with" footers or signatures, links to the session or tool a change was made with, the names of tools or models used to write it, or paths of
+  the machine it was written on. `tools/check_hygiene.py` lists exactly what is refused.
+
+**Before pushing**
+- `python3 -m unittest discover -s tests` on Python 3.8 and on the newest Python, and `shellcheck` if you touched shell (see *Development*).
+- `python3 tools/check_hygiene.py --base origin/main --head HEAD`: the commits of the branch and the lines it adds. `--text FILE` checks a pull
+  request description or a comment before it is posted.
+- Push only your own branch. Tags and deleting branches on GitHub are the maintainers' job.
+
+**Pull requests**
+- Small, focused, with tests. The title follows the commit format; the description says what changes, why, how it was tested and which docs
+  changed. No signature or footer.
+- The docs change in the same pull request as the code (README, `docs/`, `SECURITY.md`, this file, `config/config.ini`, `docs/CONFIGURATION.md`
+  where it applies; screenshots regenerated, see below). A user-visible change gets a line in `CHANGELOG.md`.
+- Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
+- Merge only when every check is green on Linux, macOS and Windows (`tests`, `hygiene`), with **Create a merge commit**. A failing test is fixed,
+  never skipped or disabled; a check that fails for a reason outside the pull request is explained in a comment on it.
+- Comment on GitHub only when it is needed: a review answer, a failure explained. The same rules apply to comments.
+
+**Releases** are a version bump and a `CHANGELOG.md` entry in a pull request, a dry run of the release workflow, then the tag (see *Releasing*).
 
 ## Releasing
 
@@ -130,7 +167,7 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
    (the archives are of the files git tracks).
 
 What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script: everything except `tests/`, `tools/`,
-`CONTRIBUTING.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
+`CONTRIBUTING.md`, `CLAUDE.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
 `*.ps1` only in the Windows ones, shell scripts and `scripts/` not in the Windows ones. Name and place a new file accordingly. The rules are in the docstring of
 `tools/build_release.py` and tested in `tests/test_release.py`.
 
