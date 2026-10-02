@@ -4,11 +4,11 @@
 <circle cx="20" cy="17" r="6" fill="#ff5f56"/><circle cx="40" cy="17" r="6" fill="#ffbd2e"/><circle cx="60" cy="17" r="6" fill="#27c93f"/>
 <text x="522" y="22" fill="#8b949e" font-family="ui-sans-serif,system-ui,Helvetica,Arial,sans-serif" font-size="13" text-anchor="middle">nuc-console · 120×40 console, single column (demo data)</text>
 <g font-family="'DejaVu Sans Mono','Liberation Mono',Menlo,Consolas,ui-monospace,monospace" font-size="14" xml:space="preserve">
-<text x="34.8" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
-<rect x="122.4" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="135.6" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
-<rect x="214.8" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="228.0" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">07:48:09</text>
+<text x="43.2" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
+<rect x="130.8" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="144.0" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
+<rect x="223.2" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="236.4" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">07:56:10</text>
 <text x="900.0" y="65.5" fill="#c9d1d9" font-weight="700" text-anchor="start">✖</text>
 <text x="916.8" y="65.5" fill="#c9d1d9" font-weight="700" textLength="84.0" lengthAdjust="spacing">6 PROBLEMS</text>
 <text x="1017.6" y="65.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>

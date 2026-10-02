@@ -4,11 +4,11 @@
 <circle cx="20" cy="17" r="6" fill="#ff5f56"/><circle cx="40" cy="17" r="6" fill="#ffbd2e"/><circle cx="60" cy="17" r="6" fill="#27c93f"/>
 <text x="967" y="22" fill="#8b949e" font-family="ui-sans-serif,system-ui,Helvetica,Arial,sans-serif" font-size="13" text-anchor="middle">nuc-console · overview, 3-column layout (demo data)</text>
 <g font-family="'DejaVu Sans Mono','Liberation Mono',Menlo,Consolas,ui-monospace,monospace" font-size="14" xml:space="preserve">
-<text x="34.8" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
-<rect x="122.4" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="135.6" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
-<rect x="214.8" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
-<text x="228.0" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">07:48:08</text>
+<text x="43.2" y="65.5" fill="#c9d1d9" font-weight="700" textLength="75.6" lengthAdjust="spacing">demo-host</text>
+<rect x="130.8" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="144.0" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">Overview</text>
+<rect x="223.2" y="54.0" width="1.2" height="16.0" fill="#c9d1d9"/>
+<text x="236.4" y="65.5" fill="#c9d1d9" font-weight="700" textLength="67.2" lengthAdjust="spacing">07:56:10</text>
 <text x="1790.4" y="65.5" fill="#c9d1d9" font-weight="700" text-anchor="start">✖</text>
 <text x="1807.2" y="65.5" fill="#c9d1d9" font-weight="700" textLength="84.0" lengthAdjust="spacing">6 PROBLEMS</text>
 <text x="1908.0" y="65.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
@@ -463,25 +463,25 @@
 <text x="681.6" y="389.5" fill="#c9d1d9" textLength="420.0" lengthAdjust="spacing">Anywhere on tailscale0      ALLOW IN      Anywhere</text>
 <text x="1303.2" y="389.5" fill="#c9d1d9" textLength="33.6" lengthAdjust="spacing">eth0</text>
 <text x="1404.0" y="389.5" fill="#3fb950" text-anchor="start">↓</text>
-<text x="1420.8" y="389.5" fill="#c9d1d9" textLength="67.2" lengthAdjust="spacing">1.9 MB/s</text>
-<rect x="1505.4" y="385.0" width="7.2" height="7.0" fill="#c9d1d9"/>
-<rect x="1513.8" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
-<rect x="1522.2" y="385.0" width="7.2" height="7.0" fill="#c9d1d9"/>
-<rect x="1530.6" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
-<rect x="1539.0" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
-<rect x="1547.4" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
-<rect x="1555.2" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
-<rect x="1563.6" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<text x="1420.8" y="389.5" fill="#c9d1d9" textLength="67.2" lengthAdjust="spacing">1.6 MB/s</text>
+<rect x="1504.8" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1513.2" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1521.6" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1530.6" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
+<rect x="1539.0" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
+<rect x="1547.4" y="381.5" width="7.2" height="10.5" fill="#c9d1d9"/>
+<rect x="1555.8" y="381.5" width="7.2" height="10.5" fill="#c9d1d9"/>
+<rect x="1564.2" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
 <text x="1580.4" y="389.5" fill="#39c5cf" text-anchor="start">↑</text>
-<text x="1597.2" y="389.5" fill="#c9d1d9" textLength="84.0" lengthAdjust="spacing">471.2 kB/s</text>
-<rect x="1681.8" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
-<rect x="1690.2" y="385.0" width="7.2" height="7.0" fill="#c9d1d9"/>
-<rect x="1698.6" y="381.5" width="7.2" height="10.5" fill="#c9d1d9"/>
+<text x="1597.2" y="389.5" fill="#c9d1d9" textLength="84.0" lengthAdjust="spacing">172.7 kB/s</text>
+<rect x="1681.2" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1689.6" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1698.6" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
 <rect x="1707.0" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
-<rect x="1715.4" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
-<rect x="1723.2" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
-<rect x="1732.2" y="379.8" width="7.2" height="12.2" fill="#c9d1d9"/>
-<rect x="1740.0" y="379.0" width="8.8" height="13.0" fill="#c9d1d9"/>
+<rect x="1715.4" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
+<rect x="1723.8" y="383.2" width="7.2" height="8.8" fill="#c9d1d9"/>
+<rect x="1732.2" y="385.0" width="7.2" height="7.0" fill="#c9d1d9"/>
+<rect x="1740.6" y="385.0" width="7.2" height="7.0" fill="#c9d1d9"/>
 <text x="1756.8" y="389.5" fill="#6e7681" text-anchor="start">↓</text>
 <text x="1765.2" y="389.5" fill="#6e7681" textLength="42.0" lengthAdjust="spacing">40.2G</text>
 <text x="1815.6" y="389.5" fill="#6e7681" text-anchor="start">↑</text>
@@ -759,7 +759,7 @@
 <rect x="866.4" y="523.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="874.8" y="523.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="883.2" y="523.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="900.0" y="533.5" fill="#c9d1d9" textLength="109.2" lengthAdjust="spacing">6%   16 cores</text>
+<text x="900.0" y="533.5" fill="#c9d1d9" textLength="126.0" lengthAdjust="spacing">6%   16 threads</text>
 <rect x="1294.8" y="530.0" width="8.8" height="1.2" fill="#39c5cf"/>
 <rect x="1303.2" y="530.0" width="8.8" height="1.2" fill="#39c5cf"/>
 <text x="1320.0" y="533.5" fill="#39c5cf" font-weight="700" textLength="75.6" lengthAdjust="spacing">TAILSCALE</text>
@@ -1333,7 +1333,7 @@
 <rect x="1656.0" y="829.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="1664.4" y="829.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
 <rect x="1672.8" y="829.0" width="8.8" height="13.0" fill="#6e7681" opacity="0.22"/>
-<text x="1689.6" y="839.5" fill="#c9d1d9" textLength="126.0" lengthAdjust="spacing">1660.4G/2000.0G</text>
+<text x="1689.6" y="839.5" fill="#c9d1d9" textLength="109.2" lengthAdjust="spacing">249.0G/300.0G</text>
 <text x="1908.0" y="839.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
 <text x="18.0" y="857.5" fill="#c9d1d9" textLength="8.4" lengthAdjust="spacing"></text>
 <text x="26.4" y="875.5" fill="#6e7681" textLength="571.2" lengthAdjust="spacing">single screen   m: map   c: cpu   h: health   a: ai   console 226x46</text>
