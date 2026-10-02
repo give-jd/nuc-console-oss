@@ -97,8 +97,13 @@ jobs:
           for i in $(seq 1 90); do curl -fs http://127.0.0.1:8091/v1/models > /dev/null && break; sleep 2; done
           curl -fsS http://127.0.0.1:8091/v1/models
           curl -fsS --max-time 300 http://127.0.0.1:8091/v1/chat/completions -H 'Content-Type: application/json' \
-            -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "/no_think Say hello in five words."}], "max_tokens": 40}'
+            -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "Say hello in five words."}], "max_tokens": 40}'
           echo
+          # Qwen3 thinks by default: the advisor asks an Ollama not to, and the answer must then be in `content`
+          curl -fsS --max-time 300 http://127.0.0.1:8091/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "Say hello in five words."}], "max_tokens": 40, "reasoning_effort": "none"}' \
+            > "$RUNNER_TEMP/answer.json"
+          python -c "import json, sys; c = json.load(open(sys.argv[1]))['choices'][0]['message']; print('content:', repr(c.get('content')), 'reasoning:', repr(c.get('reasoning'))); sys.exit(0 if (c.get('content') or '').strip() else 1)" "$RUNNER_TEMP/answer.json"
           python src/aisetup.py status --dir "$d" --endpoint http://127.0.0.1:8091/v1
           python src/advisor.py status
           tail -40 "$RUNNER_TEMP/serve.log"
@@ -132,7 +137,10 @@ jobs:
               t0 = time.time()
               msg = advisor.chat(advisor.endpoint_info(cfg["ai"]["endpoint"]), cfg["ai"]["model"],
                                  [{"role": "user", "content": "/no_think Say hello in five words."}], max_tokens=40, timeout=300)
-              print("answer (%.1f s): %r" % (time.time() - t0, advisor._content(msg)))
+              answer = advisor._content(msg)
+              print("answer (%.1f s): %r" % (time.time() - t0, answer))
+              if not answer.strip():
+                  snap["job"]["state"] = "empty answer"
           eng.delete_all()
           eng.wait(300)
           print("delete:", eng.snapshot()["job"]["state"], eng.snapshot()["job"]["note"] or eng.snapshot()["job"]["error"])

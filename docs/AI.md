@@ -75,14 +75,14 @@ This machine (the advice below is based on it):
 
   ID              MODEL                           SIZE    NEEDS  FITS         TOK/S  STATE
   qwen3-30b-a3b   Qwen3 30B-A3B (MoE)          18.6 GB ~19.2 GB  TOO BIG          ?  not installed
-  gpt-oss-20b     OpenAI gpt-oss 20B (MoE)     11.6 GB ~12.0 GB  SLOW        2.1-14  not installed
+  gpt-oss-20b     OpenAI gpt-oss 20B (MoE)     13.8 GB ~14.1 GB  TOO BIG          ?  not installed
   phi-4           Phi-4 14B                     9.1 GB  ~9.8 GB  SLOW       0.5-3.2  not installed
-* qwen3-8b        Qwen3 8B                      5.0 GB  ~5.7 GB  RAM        4.1-8.2  not installed
+* qwen3-8b        Qwen3 8B                      5.2 GB  ~5.9 GB  RAM        3.9-7.9  not installed
   qwen3-4b        Qwen3 4B                      2.5 GB  ~3.3 GB  RAM         8.2-16  not installed
-  qwen3-0.6b      Qwen3 0.6B                    400 MB  ~1.1 GB  RAM         51-102  not installed
+  qwen3-0.6b      Qwen3 0.6B                    523 MB  ~1.2 GB  RAM          39-79  not installed
   ...
 
-* recommended for this machine: qwen3-8b: needs 5.7 GB, this machine has 16 GB of RAM (15 GB free): runs on the CPU, comfortably
+* recommended for this machine: qwen3-8b: needs 5.9 GB, this machine has 16 GB of RAM (14 GB free): runs on the CPU, comfortably
 FITS: GPU = all on the GPU; GPU+CPU = partly on the GPU; RAM = fits in memory; SLOW = fits, but the PC
       will slow down a lot; TOO BIG = will not work here.
 TOK/S is a rough estimate of the generation speed, not a promise. NEEDS: with 4096 tokens of context.
@@ -159,7 +159,7 @@ console screen (`folder ...`), and in `nuc-console-ai models` and `status`. It i
 | Portable run | `data/ai` next to `run.sh` / `run.cmd` (`$NUC_CONSOLE_HOME/ai`) | you |
 | Run by hand as a user | `~/.local/share/nuc-console/ai` (`$XDG_DATA_HOME`), macOS `~/Library/Application Support/nuc-console/ai`, unless the system-wide folder exists, is writable by you and your own has nothing in it | you |
 
-The server takes 0.5 to 4 GB (its archive is kept for `serve --install-service`; the Windows and Linux builds carry the CUDA libraries) and the models 0.4 to
+The server takes 0.5 to 4 GB (its archive is kept for `serve --install-service`; the Windows and Linux builds carry the CUDA libraries) and the models 0.5 to
 19 GB: the page says what is free on that disk, a download that would not leave 300 MB free is refused before it starts, and the folder stays
 when you uninstall (delete everything, or `sudo nuc-console-ai remove`, gives the disk back). An installation that already had files there from
 `sudo nuc-console-ai setup` keeps them (root's, readable, usable); to let the page delete them too, `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS:
@@ -238,7 +238,8 @@ or confused, take the next size up before changing anything else.
 
 ### The models
 
-Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation as the Ollama library ships them. Each one is
+Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation as the Ollama library ships them (Q4_K_M; gpt-oss
+in its own MXFP4). Each one is
 pulled under its Ollama name (`qwen3:4b`; SmolLM3 from its GGUF repository, `hf.co/unsloth/SmolLM3-3B-GGUF:Q4_K_M`) and then known to the server by its
 id. Ordered best first, as in `nuc-console-ai models`. **Sizes are approximate** (they feed the advice). *Needs* is for 4096 tokens of context, the
 default of `serve`.
@@ -246,24 +247,26 @@ default of `serve`.
 | Id | Model | Parameters | File (approx.) | Needs | Context | Licence | Notes |
 |---|---|---|---|---|---|---|---|
 | `qwen3-30b-a3b` | Qwen3 30B-A3B (MoE) | 30.5 B (3.3 B active) | 18.6 GB | 19.2 GB | 32k | Apache-2.0 | MoE: reads only 3.3B per token, fast on CPU if the RAM holds it |
-| `gpt-oss-20b` | OpenAI gpt-oss 20B (MoE) | 21 B (3.6 B active) | 11.6 GB | 12.0 GB | 128k | Apache-2.0 | MoE: reads only 3.6B per token; a reasoning model (long answers) |
+| `gpt-oss-20b` | OpenAI gpt-oss 20B (MoE) | 21 B (3.6 B active) | 13.8 GB | 14.1 GB | 128k | Apache-2.0 | MoE: reads only 3.6B per token; a reasoning model (long answers) |
 | `phi-4` | Phi-4 14B | 14.7 B | 9.1 GB | 9.8 GB | 16k | MIT | dense 14B: strong reasoning, slow without a GPU |
-| `qwen3-14b` | Qwen3 14B | 14.8 B | 9.0 GB | 9.7 GB | 32k | Apache-2.0 | dense 14B: slow without a GPU |
-| `qwen3-8b` | Qwen3 8B | 8.2 B | 5.0 GB | 5.7 GB | 32k | Apache-2.0 | a good balance on 16 GB |
+| `qwen3-14b` | Qwen3 14B | 14.8 B | 9.3 GB | 10.0 GB | 32k | Apache-2.0 | dense 14B: slow without a GPU |
+| `qwen3-8b` | Qwen3 8B | 8.2 B | 5.2 GB | 5.9 GB | 32k | Apache-2.0 | a good balance on 16 GB |
 | `granite-3.3-8b` | IBM Granite 3.3 8B instruct | 8.2 B | 4.9 GB | 5.7 GB | 128k | Apache-2.0 | enterprise-tuned |
 | `qwen3-4b` | Qwen3 4B | 4 B | 2.5 GB | 3.3 GB | 32k | Apache-2.0 | the default: small and capable |
 | `phi-4-mini` | Phi-4-mini instruct 3.8B | 3.8 B | 2.5 GB | 3.2 GB | 128k | MIT | good at reasoning for its size |
 | `smollm3-3b` | SmolLM3 3B | 3.1 B | 1.9 GB | 2.7 GB | 64k | Apache-2.0 | 3B with a thinking mode |
 | `granite-3.3-2b` | IBM Granite 3.3 2B instruct | 2.5 B | 1.6 GB | 2.4 GB | 128k | Apache-2.0 | small and quick |
-| `qwen3-1.7b` | Qwen3 1.7B | 1.7 B | 1.1 GB | 1.8 GB | 32k | Apache-2.0 | for old or small machines |
-| `qwen3-0.6b` | Qwen3 0.6B | 0.6 B | 400 MB | 1.1 GB | 32k | Apache-2.0 | the smallest: simple summaries only |
+| `qwen3-1.7b` | Qwen3 1.7B | 1.7 B | 1.4 GB | 2.1 GB | 32k | Apache-2.0 | for old or small machines |
+| `qwen3-0.6b` | Qwen3 0.6B | 0.6 B | 520 MB | 1.2 GB | 32k | Apache-2.0 | the smallest: simple summaries only |
 
 `serve` refuses a `--ctx` above the model's own context. The model `serve` starts when none is named is the `[ai] model` if it
 is installed, else `qwen3-4b` if that is installed, else the first installed one.
 
-Qwen3 and SmolLM3 start in a "thinking" mode that writes a long `<think>` block first; the advisor removes that block from what it
-shows, but the time it takes still counts against `[ai] timeout_s`. (The `/no_think` in some model notes is the models' own switch:
-the advisor does not send it.) Which models the list holds, and in which order, is part of each release (a new model is a new entry
+Qwen3 and SmolLM3 start in a "thinking" mode that writes a long reasoning first. When the server is an Ollama (nuc-console's own, or
+yours) the advisor asks it not to think (`reasoning_effort: "none"`, asked again without it if a model refuses), so that the tokens of
+the answer are spent on the answer; another server may still think, and the advisor then removes a `<think>` block from what it shows,
+but the time it takes counts against `[ai] timeout_s`. (The `/no_think` in some model notes is the models' own switch: the advisor
+does not send it.) Which models the list holds, and in which order, is part of each release (a new model is a new entry
 in a new release); there is no automatic update.
 
 ## GPU support

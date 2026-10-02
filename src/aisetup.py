@@ -88,8 +88,10 @@ RUNTIME = {
 }
 
 # Instruct models, permissive licences, ordered best first (rank 1 = best for the advisor's job: short, grounded advice). "ollama" is the
-# name the model is pulled under (the Ollama library's, registry.ollama.ai); once pulled it is known to the server by its "id". "size" is
-# what the registry's manifest says the model weighs (every layer), read by `aisetup.py pins`; it feeds the disk check and the screens.
+# name the model is pulled under (the Ollama library's, registry.ollama.ai; SmolLM3's GGUF repository through hf.co); once pulled it is
+# known to the server by its "id". "size" is what the registry's manifest says the model weighs (every layer), read by `aisetup.py pins`
+# (the ai-pins workflow, 2026-10-02, which also checked that every name exists and printed each licence layer: Apache-2.0 or MIT; the
+# SmolLM3 repository carries none in its manifest, its model card says Apache-2.0); it feeds the disk check and the screens.
 # The rest is for ADVICE only (what fits, how fast): params_b (billions; MoE: active_b = parameters read per token), layers (transformer
 # blocks), ctx_max (tokens the model was trained for), approx_mb (approximate file in MB of 10^6 bytes: the maintainer's estimate, not a
 # measurement), ram_mb (approximate memory of the server with DEFAULT_CTX tokens of context). Qwen3 and SmolLM3 start in "thinking"
@@ -97,36 +99,36 @@ RUNTIME = {
 MODELS = [
     {"id": "qwen3-30b-a3b", "name": "Qwen3 30B-A3B (MoE)", "license": "Apache-2.0", "rank": 1, "params_b": 30.5, "active_b": 3.3,
      "quant": "Q4_K_M", "layers": 48, "ctx_max": 32768, "approx_mb": 18600, "ram_mb": 19300,
-     "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think", "ollama": "qwen3:30b-a3b", "size": None},
+     "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think", "ollama": "qwen3:30b-a3b", "size": 18556699314},
     {"id": "gpt-oss-20b", "name": "OpenAI gpt-oss 20B (MoE)", "license": "Apache-2.0", "rank": 2, "params_b": 21.0, "active_b": 3.6,
-     "quant": "Q4_K_M", "layers": 24, "ctx_max": 131072, "approx_mb": 11600, "ram_mb": 12100,
-     "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)", "ollama": "gpt-oss:20b", "size": None},
+     "quant": "MXFP4", "layers": 24, "ctx_max": 131072, "approx_mb": 13800, "ram_mb": 14300,
+     "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)", "ollama": "gpt-oss:20b", "size": 13793441244},
     {"id": "phi-4", "name": "Phi-4 14B", "license": "MIT", "rank": 3, "params_b": 14.7, "quant": "Q4_K_M", "layers": 40,
      "ctx_max": 16384, "approx_mb": 9100, "ram_mb": 10300, "notes": "dense 14B: strong reasoning, slow without a GPU", "ollama": "phi4:14b",
-     "size": None},
+     "size": 9053116391},
     {"id": "qwen3-14b", "name": "Qwen3 14B", "license": "Apache-2.0", "rank": 4, "params_b": 14.8, "quant": "Q4_K_M", "layers": 40,
-     "ctx_max": 32768, "approx_mb": 9000, "ram_mb": 10000, "notes": "dense 14B: slow without a GPU; /no_think", "ollama": "qwen3:14b", "size": None},
+     "ctx_max": 32768, "approx_mb": 9300, "ram_mb": 10300, "notes": "dense 14B: slow without a GPU; /no_think", "ollama": "qwen3:14b", "size": 9276198565},
     {"id": "qwen3-8b", "name": "Qwen3 8B", "license": "Apache-2.0", "rank": 5, "params_b": 8.2, "quant": "Q4_K_M", "layers": 36,
-     "ctx_max": 32768, "approx_mb": 5000, "ram_mb": 6000, "notes": "a good balance on 16 GB; /no_think", "ollama": "qwen3:8b", "size": None},
+     "ctx_max": 32768, "approx_mb": 5200, "ram_mb": 6200, "notes": "a good balance on 16 GB; /no_think", "ollama": "qwen3:8b", "size": 5225388164},
     {"id": "granite-3.3-8b", "name": "IBM Granite 3.3 8B instruct", "license": "Apache-2.0", "rank": 6, "params_b": 8.2,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 4900, "ram_mb": 5900, "notes": "enterprise-tuned, 128k context",
-     "ollama": "granite3.3:8b", "size": None},
+     "ollama": "granite3.3:8b", "size": 4942891653},
     {"id": "qwen3-4b", "name": "Qwen3 4B", "license": "Apache-2.0", "rank": 7, "params_b": 4.0, "quant": "Q4_K_M", "layers": 36,
-     "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think", "ollama": "qwen3:4b", "size": None},
+     "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think", "ollama": "qwen3:4b", "size": 2497293931},
     {"id": "phi-4-mini", "name": "Phi-4-mini instruct 3.8B", "license": "MIT", "rank": 8, "params_b": 3.8, "quant": "Q4_K_M", "layers": 32,
      "ctx_max": 131072, "approx_mb": 2500, "ram_mb": 3600, "notes": "good at reasoning for its size, 128k context", "ollama": "phi4-mini:3.8b",
-     "size": None},
+     "size": 2491876774},
     {"id": "smollm3-3b", "name": "SmolLM3 3B", "license": "Apache-2.0", "rank": 9, "params_b": 3.1, "quant": "Q4_K_M", "layers": 36,
      "ctx_max": 65536, "approx_mb": 1900, "ram_mb": 2500, "notes": "3B with a thinking mode; /no_think", "ollama": "hf.co/unsloth/SmolLM3-3B-GGUF:Q4_K_M",
-     "size": None},
+     "size": 1915307425},
     {"id": "granite-3.3-2b", "name": "IBM Granite 3.3 2B instruct", "license": "Apache-2.0", "rank": 10, "params_b": 2.5,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 1550, "ram_mb": 2400, "notes": "small and quick, 128k context",
-     "ollama": "granite3.3:2b", "size": None},
+     "ollama": "granite3.3:2b", "size": 1545321637},
     {"id": "qwen3-1.7b", "name": "Qwen3 1.7B", "license": "Apache-2.0", "rank": 11, "params_b": 1.7, "quant": "Q4_K_M", "layers": 28,
-     "ctx_max": 32768, "approx_mb": 1100, "ram_mb": 2000, "notes": "for old or small machines; /no_think", "ollama": "qwen3:1.7b", "size": None},
+     "ctx_max": 32768, "approx_mb": 1400, "ram_mb": 2300, "notes": "for old or small machines; /no_think", "ollama": "qwen3:1.7b", "size": 1359293444},
     {"id": "qwen3-0.6b", "name": "Qwen3 0.6B", "license": "Apache-2.0", "rank": 12, "params_b": 0.6, "quant": "Q4_K_M", "layers": 28,
-     "ctx_max": 32768, "approx_mb": 400, "ram_mb": 1200, "notes": "the smallest: simple summaries only; /no_think", "ollama": "qwen3:0.6b",
-     "size": None},
+     "ctx_max": 32768, "approx_mb": 520, "ram_mb": 1300, "notes": "the smallest: simple summaries only; /no_think", "ollama": "qwen3:0.6b",
+     "size": 522653767},
 ]
 DEFAULT_MODEL = "qwen3-4b"  # without a reading of the machine: the best that fits an 8 GB one; MODELS is ordered best first (pick_default)
 

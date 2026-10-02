@@ -126,6 +126,7 @@ class Fake(object):
     def __init__(self):
         self.requests, self.queue, self.models = [], [], ["tiny-model", "other-model"]
         self.default = completion("ok")
+        self.version = None  # set: it answers GET /api/version like an Ollama
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -163,6 +164,8 @@ class Fake(object):
                 outer.requests.append({"method": "GET", "path": self.path, "body": None, "at": time.monotonic()})
                 if self.path.rstrip("/") == "/v1/models":
                     self._send({"object": "list", "data": [{"id": m, "object": "model"} for m in outer.models]})
+                elif self.path == "/api/version" and outer.version:
+                    self._send({"version": outer.version})
                 else:
                     self._send({"status": 404, "body": {"error": {"message": "not found"}}})
 
@@ -1364,6 +1367,45 @@ class Docs(unittest.TestCase):
     def test_prompts_are_ascii_free_of_names(self):
         for text in (advisor.ADVISE_SYSTEM, advisor.ASK_SYSTEM, advisor.JSON_PROTOCOL % advisor._catalogue()):
             self.assertIsNone(re.search(r"[^\x20-\x7e\n\"]", text))
+
+
+class OllamaThinking(unittest.TestCase):
+    """Ollama turns the thinking of Qwen3 on by default: the 600 tokens of an answer went to the thinking and the answer was empty. An Ollama
+    is asked not to think (reasoning_effort "none"); another server never sees the field; one that refuses it is asked again without it."""
+
+    def setUp(self):
+        self.srv = Fake()
+        self.addCleanup(self.srv.stop)
+        advisor._OLLAMA.clear()
+        self.addCleanup(advisor._OLLAMA.clear)
+        self.info = advisor.endpoint_info(self.srv.url)
+
+    def test_an_ollama_is_asked_not_to_think_and_asked_once_what_it_is(self):
+        self.srv.version = "0.35.0"
+        for _ in range(3):
+            msg = advisor.chat(self.info, "qwen3-4b", [{"role": "user", "content": "hi"}], max_tokens=40, timeout=10)
+            self.assertEqual(advisor._content(msg), "ok")
+        self.assertEqual([p["body"].get("reasoning_effort") for p in self.srv.posts()], ["none"] * 3)
+        self.assertEqual(sum(1 for r in self.srv.requests if r["path"] == "/api/version"), 1, "asked once, then remembered")
+
+    def test_another_server_never_sees_the_field(self):
+        advisor.chat(self.info, "m", [{"role": "user", "content": "hi"}], max_tokens=40, timeout=10)
+        self.assertNotIn("reasoning_effort", self.srv.posts()[0]["body"])
+        self.assertFalse(advisor.is_ollama(self.info))
+
+    def test_a_model_that_refuses_it_is_asked_again_without_it(self):
+        self.srv.version = "0.35.0"
+        self.srv.queue = [{"status": 400, "body": {"error": {"message": "invalid reasoning value: 'none'"}}}]
+        msg = advisor.chat(self.info, "gpt-oss-20b", [{"role": "user", "content": "hi"}], max_tokens=40, timeout=10)
+        self.assertEqual(advisor._content(msg), "ok")
+        self.assertEqual([p["body"].get("reasoning_effort") for p in self.srv.posts()], ["none", None])
+
+    def test_another_error_is_not_asked_again(self):
+        self.srv.version = "0.35.0"
+        self.srv.queue = [{"status": 500, "body": {"error": {"message": "model requires more system memory"}}}]
+        with self.assertRaises(advisor.AdvisorError):
+            advisor.chat(self.info, "qwen3-4b", [{"role": "user", "content": "hi"}], max_tokens=40, timeout=10)
+        self.assertEqual(len(self.srv.posts()), 1)
 
 
 if __name__ == "__main__":

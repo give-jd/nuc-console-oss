@@ -207,7 +207,7 @@ you which local models this machine can run: RAM, GPU and GPU memory, one verdic
 explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules). **You only choose a model**:
 press **use this model** on the page (or `Enter` then `u` on the screen); the model server (Ollama, the build of this system, SHA-256 checked) and the model
 are downloaded with a progress bar, the server is started on 127.0.0.1 and the AI is turned on. The **AI on / off** button at the top (console key `e`) starts and stops it, and
-the chat below it answers as soon as the server does. The files go to the folder the page shows (`/var/lib/nuc-console/ai`, a model is 0.4 to 19 GB).
+the chat below it answers as soon as the server does. The files go to the folder the page shows (`/var/lib/nuc-console/ai`, a model is 0.5 to 19 GB).
 
 The same from a terminal (as before; `nuc-console-ai` and `nuc-console-ask` are unchanged):
 
