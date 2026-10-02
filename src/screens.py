@@ -1842,7 +1842,8 @@ def ai_table(rows, lay, first, count, cur, fw):
     return Table(cols, body, fill=True, solid=fw, clip=fw)
 
 
-def _lines(nodes, w):
+def _group_lines(nodes, w):
+    """The console's lines of components drawn as one Group (the AI screen's layout counts them so)."""
     return ansi.render(ui.Group(list(nodes)), w)[0]
 
 
@@ -1853,7 +1854,7 @@ def ai_lines(data, st, av, rows, w, h):
     render.ai_data() has it, st: render.ai_status(), av: the AiView (its cursor and scroll are set here), rows: ai_rows(cat)."""
     cat = data["cat"]
     if cat is None:  # the catalog could not be read
-        return _lines([ai_title(None, w)] + _msg("err" if data.get("err") else "info", data["msg"], w), w)[:h]
+        return _group_lines([ai_title(None, w)] + _msg("err" if data.get("err") else "info", data["msg"], w), w)[:h]
     n, hwd = len(rows), dd(cat.get("hw"))
     ai_sync(av, rows)
     sel = rows[av.idx] if rows else None
@@ -1862,7 +1863,7 @@ def ai_lines(data, st, av, rows, w, h):
     windows = hwd.get("os") == "windows"
     fw = int(w * 0.55) if side else w
     lay = ai_layout(rows, fw)
-    full = len(_lines([ai_spec(sel, windows, 99)], w - fw - 3 if side else w)) if pane else 0
+    full = len(_group_lines([ai_spec(sel, windows, 99)], w - fw - 3 if side else w)) if pane else 0
     levels = {}
 
     def level(k):  # the three sections at level k and the lines they take (each node is one line; side by side, the taller of the two)
@@ -1913,7 +1914,7 @@ def ai_lines(data, st, av, rows, w, h):
         out.append(ai_spec(sel, windows, max(0, avail - rows_n)))
     else:
         out += bottom
-    return [ansi.clip(x, w) for x in _lines(out, w)[:h]]
+    return [ansi.clip(x, w) for x in _group_lines(out, w)[:h]]
 
 
 def ai_footer(av, n, w, snap=None, enabled=None):
