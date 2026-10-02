@@ -95,6 +95,8 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 - **Overview**: a grid of cards (12 / 6 / 1 columns by the window's width), in the order of `[ui] order` (by severity, or fixed) and the layout. A
   card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
 - **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The AI page keeps its forms and CSRF.
+  The **CPU** page is built of components, not text: key figures, a meter per logical CPU, the temperatures, and the process table, whose column heads are
+  links (`p m t n u` do the same by keyboard) and whose rows are links to `sel=`; with a process selected its details sit beside the table (below it in a narrow window).
 - **Footer**: refresh − / +, pause, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
 - **Blocks**: the top bar (`__top`), the key figures (`__kpis`) and every card are elements with `data-card` and a `data-rev` that changes when,
   and only when, their HTML does. The Map, CPU, Health and AI pages are one block (`__view`, the bar above them and their body). The refresh

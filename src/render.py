@@ -1977,39 +1977,14 @@ def map_once(argv, w, h):
 
 SENSORS = os.environ.get("NUC_CONSOLE_SENSORS", os.path.join(nuc_config.RUN_DIR, "sensors.json"))  # written by the macOS/Windows collector
 SENSORS_STALE_S = 60  # an older sensors.json is not "now": it is ignored, and the screen says so
-CPU_SORTS = ("cpu", "mem", "time", "pid", "user")
-CPU_SORT_KEYS = {"p": "cpu", "m": "mem", "t": "time", "n": "pid", "u": "user"}  # htop's letters
-CPU_SORT_NAME = {"cpu": "CPU%", "mem": "memory", "time": "CPU time", "pid": "PID", "user": "user"}
-CPU_SORT_SHORT = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}  # what the footer calls them
-CPU_PANE_W = 140  # from this width up the process details sit beside the table, below it otherwise
 CPU_IDLE_S = MAP_IDLE_S  # left alone this long, the CPU screen gives the monitor back to the rotation
-CPU_STATES = {"R": "running", "S": "sleeping", "D": "uninterruptible (disk) wait", "Z": "zombie: exited, not yet collected",
-              "T": "stopped", "I": "idle", "U": "uninterruptible wait", "X": "dead"}
-CPU_PRESSURE = {"nominal": "32", "moderate": "33", "heavy": "31", "trapping": "31", "sleeping": "90"}  # macOS thermal pressure
-CPU_CELL_MIN_BAR, CPU_CELL_MAX_BAR = 10, 32
+# the CPU screen's constants and the helpers for what a producer hands over moved out of this file (screens.py, ui.py). Moved; kept for tests
+# and tools until the cleanup PR
+from screens import (CPU_CELL_MAX_BAR, CPU_CELL_MIN_BAR, CPU_PANE_W, CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS,  # noqa: E402,F401
+                     CPU_STATES, cpu_rows, cpu_select, cpu_sync, cpu_key)
+from ui import dd, dget, idict  # noqa: E402,F401
+import screens  # noqa: E402 - the view-models of the full screens
 
-
-def idict(d):
-    """{int: value} of a dict whose keys may be digits or strings (JSON keys are always strings); other keys are dropped."""
-    out = {}
-    for k, v in (d.items() if isinstance(d, dict) else ()):
-        try:
-            out[int(k)] = v
-        except (TypeError, ValueError):
-            pass
-    return out
-
-
-def dget(d, *keys):
-    """d[k1][k2]... or None when any step is missing or not a dict."""
-    for k in keys:
-        d = d.get(k) if isinstance(d, dict) else None
-    return d
-
-
-def dd(x):
-    """x when it is a dict, else an empty one: a producer's section that is not what the contract says is a section with nothing in it."""
-    return x if isinstance(x, dict) else {}
 
 
 def cpu_os():
@@ -2112,72 +2087,11 @@ class CpuFeed(object):
         return self.data
 
 
-class CpuView(object):
-    """The interactive CPU screen: the sort, the process under the cursor (its pid survives refreshes; its index is where the
-    cursor stays when that process vanishes), the scroll position, the details pane, when it was opened and last touched."""
+class CpuView(screens.CpuView):
+    """The interactive CPU screen's state (screens.CpuView, with the data source of this process). Moved; kept for tests and tools."""
 
     def __init__(self, now=None):
-        self.sort, self.cur, self.idx, self.top, self.details, self.page = "cpu", None, 0, 0, False, 10
-        self.feed = CpuFeed()
-        self.opened = self.touched = now or time.time()
-
-
-def cpu_rows(pl, sort="cpu"):
-    """The processes in the order of `sort`: CPU%, memory, CPU time (largest first), PID, user (smallest first). A process whose value
-    is unknown goes last, by PID."""
-    field = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}.get(sort, "cpu")
-    val = lambda p: (str(p["user"]).lower() if isinstance(p.get("user"), str) else None) if field == "user" else num(p.get(field))  # noqa: E731
-    known = [p for p in pl if val(p) is not None]
-    rest = sorted((p for p in pl if val(p) is None), key=lambda p: p["pid"])
-    if field in ("pid", "user"):
-        known.sort(key=lambda p: (val(p), p["pid"]))
-    else:
-        known.sort(key=lambda p: (-val(p), p["pid"]))
-    return known + rest
-
-
-def cpu_sync(cv, rows):
-    """The cursor back on its process: by pid, else the same index (clamped). Returns the index."""
-    i = next((j for j, p in enumerate(rows) if p["pid"] == cv.cur), None) if cv.cur is not None else None
-    cv.idx = i if i is not None else max(0, min(cv.idx, len(rows) - 1))
-    cv.cur = rows[cv.idx]["pid"] if rows else None
-    return cv.idx
-
-
-def cpu_key(cv, key, rows, page=10):
-    """One key on the CPU screen (what each key does: ui.KEYMAP, scope cpu). Returns 'back' (leave it: Esc or q when no details pane is
-    open), 'rows' (the sort changed: sort again, then cpu_sync) or ''."""
-    k = key.lower() if len(key) == 1 else key  # P and p are the same key
-    act = ui.action("cpu", key)
-    if act == "back":
-        if cv.details:
-            cv.details = False
-            return ""
-        return "back"
-    if act == "sort":
-        cv.sort = CPU_SORT_KEYS[k]
-        return "rows"
-    if act == "details":
-        cv.details = not cv.details
-        return ""
-    if not rows or act not in ("move", "page"):
-        return ""
-    i = cpu_sync(cv, rows)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(k, i)
-    cv.idx = max(0, min(i, len(rows) - 1))
-    cv.cur = rows[cv.idx]["pid"]
-    return ""
-
-
-def cpu_select(rows, cv, text):
-    """The cursor on the process whose pid is text, else on the first one whose name contains it (any case). False: none."""
-    t = text.strip().lower()
-    for hit in (lambda p: t == str(p["pid"]), lambda p: t in str(p.get("name")).lower()):
-        for p in rows:
-            if t and hit(p):
-                cv.cur = p["pid"]
-                return True
-    return False
+        screens.CpuView.__init__(self, CpuFeed(), now or time.time())
 
 
 # -- what is known about each logical CPU
@@ -2197,422 +2111,30 @@ def cpu_topology(ids):
 
 
 def cpu_core_of(d, ids):
-    """{logical CPU: physical core id} among the cores that have a temperature. The sampler's own `core_of` map when it gives one, else
-    sysfs' topology (Linux); without either, the logical CPUs of a core are taken to be next to each other (how Windows numbers
-    them) and the cores to be in the order of their sensors, which only holds when every core has one sensor and the same number
-    of threads. Otherwise unknown: nothing is invented."""
-    cpu = d["cpu"]
-    by_core = {k for k, v in idict(dget(cpu, "temps", "cores")).items() if num(v) is not None}
-    core_of = idict(cpu.get("core_of")) or cpu_topology(ids)
-    if core_of:
-        return {i: core_of[i] for i in ids if core_of.get(i) in by_core}
-    n = int(num(cpu.get("cores")) or 0)
-    if n and len(by_core) == n and len(ids) % n == 0 and ids == sorted(ids):
-        per, order = len(ids) // n, sorted(by_core)
-        return {i: order[j // per] for j, i in enumerate(ids)}
-    return {}
+    """screens.cpu_core_of with this machine's topology. Moved; kept for tests and tools."""
+    return screens.cpu_core_of(d, ids, cpu_topology)
 
 
 def cpu_core_temps(d, ids):
-    """{logical CPU: C}: the temperature of the physical core each one runs on."""
-    by_core = {k: float(v) for k, v in idict(dget(d["cpu"], "temps", "cores")).items() if num(v) is not None}
-    return {i: by_core[k] for i, k in cpu_core_of(d, ids).items()}
+    """screens.cpu_core_temps with this machine's topology. Moved; kept for tests and tools."""
+    return screens.cpu_core_temps(d, ids, cpu_topology)
 
 
-def cpu_tags(d, ids):
-    """{logical CPU: 'P' or 'E'}: from the sampler's kinds (ids), else from the cluster names of the Apple Silicon sensors."""
-    out = {}
-    kinds = dget(d["cpu"], "kinds")
-    for tag in ("P", "E"):
-        for i in (kinds.get(tag) if isinstance(kinds, dict) and isinstance(kinds.get(tag), (list, tuple)) else []):
-            if isinstance(i, int):
-                out[i] = tag
-    for cl in d["extra"]["clusters"]:
-        tag = str(cl.get("name") or "")[:1].upper()
-        out.update({i: tag for i in idict(cl.get("cpus")) if tag in ("P", "E")})
-    return {i: t for i, t in out.items() if i in ids}
-
-
-def cpu_mhz(d):
-    """{logical CPU: MHz}: the sampler's per-CPU clocks (an id of -1 is a whole-machine value, not a CPU), else the Apple clusters'."""
-    out = {i: float(v) for i, v in idict(dget(d["cpu"], "freq", "cur")).items() if i >= 0 and num(v) is not None}
-    for cl in d["extra"]["clusters"]:
-        for i, v in idict(cl.get("cpus")).items():
-            if num(v) is not None:
-                out.setdefault(i, float(v))
-    return out
-
-
-def cpu_usage_rows(d):
-    rows = dget(d["cpu"], "usage", "cores")
-    return sorted((r for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("id"), int)
-                   and not isinstance(r["id"], bool)), key=lambda r: r["id"])
-
-
-# -- drawing
-
-def cpu_bar(parts, w):
-    """A w-wide bar of consecutive segments [(percent, colour, glyph)], the rest idle: htop's CPU meter (user green, system red,
-    other busy blue, I/O wait grey; a different glyph for the wait, so that colour is not all that tells it)."""
-    out, done, acc = "", 0, 0.0
-    for pct, col, ch in parts:
-        acc += max(num(pct) or 0.0, 0.0)
-        end = min(w, int(round(acc * w / 100.0)))
-        if end > done:
-            out += c(col, ch * (end - done))
-            done = end
-    return out + c(90, "░" * (w - done))
-
-
-def cpu_parts(user, system, iowait, busy):
-    """The segments of one CPU's bar. Without the user/system split the whole busy part is one plain segment."""
-    user, system, iowait, busy = num(user), num(system), num(iowait), num(busy)
-    if busy is None:
-        return []
-    split = [(user, "32", "█"), (system, "31", "█"), (max(busy - (user or 0) - (system or 0), 0.0), "34", "█")] \
-        if user is not None and system is not None else [(busy, "36", "█")]
-    return split + ([(iowait, "90", "▒")] if iowait else [])
-
-
-def pct_col(p, warn=70, err=90):
-    p = num(p)
-    return "" if p is None else "31" if p >= err else "33" if p >= warn else ""
-
-
-def cpu_head(d, w, h):
-    """The title and the machine in a few lines: what it is, then what it is doing."""
-    cpu, pr = d["cpu"], d["procs"]
-    lab = lambda name, value: c(90, name + " ") + value  # noqa: E731
-    qi = lambda x: "?" if num(x) is None else str(int(num(x)))  # noqa: E731
-    model = safe(cpu.get("model") or "?")
-    ident = [lab("sockets", qi(cpu.get("sockets"))), lab("cores", qi(cpu.get("cores"))), lab("threads", qi(cpu.get("threads")))]
-    kinds = dd(cpu.get("kinds"))
-    if kinds:
-        cnt = lambda x: len(x) if isinstance(x, (list, tuple)) else qi(x)  # noqa: E731
-        ident.append(f"P {cnt(kinds.get('P'))} + E {cnt(kinds.get('E'))} " + ("threads" if isinstance(kinds.get("P"), (list, tuple)) else "cores"))
-    ident.append(lab("arch", safe(cpu.get("arch") or "?")))
-    cache = dd(cpu.get("cache"))
-    sizes = [f"{k} {fmt_size(cache[k])}" for k in ("L1d", "L1i", "L2", "L3") if k in cache]
-    ident.append(lab("cache", "  ".join(sizes) if sizes else "?"))
-    fr = dd(cpu.get("freq"))
-    gov = [safe(x) for x in (fr.get("governor"), fr.get("driver")) if isinstance(x, str) and x]
-    ident.append(lab("governor", "/".join(gov) if gov else "?"))
-    lo, hi, base = num(fr.get("min")), num(fr.get("max")), num(fr.get("base"))
-    clock = [x for x in idict(fr.get("cur")).items() if x[0] < 0 and num(x[1]) is not None]
-    ident.append(lab("clock", (f"{qf(lo)}-{qf(hi)} MHz" if lo is not None or hi is not None else "?") + (f" (base {qf(base)})" if base is not None else "")
-                     + (f" now {qf(clock[0][1])}" if clock else "")))
-    rates, load = dd(cpu.get("rates")), cpu.get("load")
-    tot = pr["total"]
-    run = rates.get("running") if num(rates.get("running")) is not None else tot.get("running")
-    up = num(cpu.get("uptime"))
-    act = [lab("up", fmt_dur(up) if up is not None else "?"),
-           lab("load", " ".join(qf(x, ".2f") for x in load[:3]) if isinstance(load, (list, tuple)) and len(load) >= 3 else "?"),
-           lab("ctxt", fmt_k(rates.get("ctxt")) + "/s"), lab("intr", fmt_k(rates.get("intr")) + "/s"),
-           lab("running", qf(run)), lab("blocked", qf(rates.get("blocked")))]
-    lines = [section("CPU", w, model)]
-    lines += wrap_items(ident, w, indent=1, sep="  ·  ", max_lines=1 if h < 28 else 2)
-    lines += wrap_items(act, w, indent=1, sep="  ·  ", max_lines=1)
-    return lines
-
-
-def cpu_cells(d):
-    """One dict per logical CPU: id, tag, busy/user/system/iowait, mhz, temp. None for what is not known."""
-    rows = cpu_usage_rows(d)
-    ids = [r["id"] for r in rows]
-    tags, mhz, temps = cpu_tags(d, ids), cpu_mhz(d), cpu_core_temps(d, ids)
-    return [{"id": r["id"], "tag": tags.get(r["id"], ""), "busy": num(r.get("busy")), "user": r.get("user"), "system": r.get("system"),
-             "iowait": r.get("iowait"), "mhz": mhz.get(r["id"]), "temp": temps.get(r["id"])} for r in rows]
-
-
-def cpu_limit(d):
-    """The package sensor's own limit (crit, else high): what the temperatures are measured against. None = not known."""
-    t = dd(d["cpu"].get("temps"))
-    return num(t.get("crit")) or num(t.get("high"))
-
-
-def temp_col(t, mx):
-    t = num(t)
-    return "" if t is None or not mx else "31" if t >= THERMAL_ERR * mx else "33" if t >= THERMAL_WARN * mx else ""
-
-
-def cpu_grid(d, w):
-    """(top lines, cell rows, cells per row, cells): the whole CPU as one bar with its split, then one cell per logical CPU in 2-4
-    columns, htop style: id, P/E, bar (user green, system red, I/O wait grey), busy %, GHz and °C where known."""
-    tot = dget(d["cpu"], "usage", "total")
-    cells = cpu_cells(d)
-    show_f, show_t = any(x["mhz"] is not None for x in cells), any(x["temp"] is not None for x in cells)
-    show_tag = any(x["tag"] for x in cells)
-    idw = max([len(str(x["id"])) for x in cells] + [2])
-    fixed = idw + (1 if show_tag else 0) + 1 + 1 + 4 + (6 if show_f else 0) + (6 if show_t else 0)  # id tag _ bar _ busy _GHz _temp
-    gap, room = 2, w - 1  # one column of margin
-    ncol = 1
-    for n in (4, 3, 2):
-        if n <= max(1, len(cells)) and (room - (n - 1) * gap) // n - fixed >= CPU_CELL_MIN_BAR:
-            ncol = n
-            break
-    cw = (room - (ncol - 1) * gap) // ncol
-    bw = max(4, min(CPU_CELL_MAX_BAR, cw - fixed))
-    top = []
-    if isinstance(tot, dict):
-        busy, user, system, iow = (num(tot.get(k)) for k in ("busy", "user", "system", "iowait"))
-        items = [c(32, "user") + " " + qf(user, ".1f"), c(31, "sys") + " " + qf(system, ".1f"), "nice " + qf(tot.get("nice"), ".1f"),
-                 c(90, "iowait") + " " + qf(iow, ".1f"), "irq " + qf(tot.get("irq"), ".1f"), "steal " + qf(tot.get("steal"), ".1f"),
-                 "idle " + qf(tot.get("idle"), ".1f")]
-        shown = cc(pct_col(busy), f"{busy:5.1f}%") if busy is not None else "    ?%"
-        top.append(fit_join(items, "  ", w, f" {c(1, 'ALL')} {cpu_bar(cpu_parts(user, system, iow, busy), bw)} {shown}  "))
-    if not cells:
-        return top + [msg("warn", "per-CPU usage: ? (the sampler gave none)")], [], 1, 0
-    mx = cpu_limit(d)
-    out = []
-    for x in cells:
-        busy = x["busy"]
-        s = f"{x['id']:>{idw}}"
-        if show_tag:
-            s += c("1;36", x["tag"]) if x["tag"] == "P" else c(90, x["tag"]) if x["tag"] else " "
-        s += " " + cpu_bar(cpu_parts(x["user"], x["system"], x["iowait"], busy), bw)
-        s += " " + (cc(pct_col(busy), f"{busy:3.0f}%") if busy is not None else "   ?")
-        if show_f:
-            s += " " + (f"{x['mhz'] / 1000:4.2f}G" if x["mhz"] is not None else "    ?")
-        if show_t:
-            s += " " + (cc(temp_col(x["temp"], mx), f"{x['temp']:3.0f}°C") if x["temp"] is not None else "    ?")
-        out.append(s)
-    rows = [" " + (" " * gap).join(pad(clip(x, cw), cw) for x in out[i:i + ncol]).rstrip() for i in range(0, len(out), ncol)]
-    return top, rows, ncol, len(cells)
-
-
-def cpu_grid_lines(grid, n):
-    """The grid in at most n lines: the whole-CPU bar first, then rows of cells; when some are left out the last line counts them."""
-    top, rows, ncol, ncells = grid
-    if len(top) + len(rows) <= n:
-        return top + rows
-    keep = max(n - len(top) - 1, 0)
-    return (top + rows[:keep] + [c(90, f" … +{max(ncells - keep * ncol, 0)} more CPUs")])[:n]
-
-
-def deg(x):
-    return "?" if num(x) is None else f"{num(x):.0f}°C"
-
-
-def cpu_temps(d, w):
-    """The temperatures block, most important line first: package with its limits, hottest core and throttling, then macOS pressure and
-    clusters, every sensor, and what is missing."""
-    cpu, extra = d["cpu"], d["extra"]
-    t = dd(cpu.get("temps"))
-    pkg, high, crit, mx = num(t.get("package")), num(t.get("high")), num(t.get("crit")), cpu_limit(d)
-    bw = max(10, min(40, w - 60))
-    lines = [section("TEMPERATURES", w, "source " + safe(t.get("source") or "?"))]
-    if pkg is None:
-        lines.append(f" {c(90, 'PKG')}   ?   {c(90, 'no package temperature')}")
-    elif mx:
-        lines.append(f" {c(90, 'PKG')}   {bar(pkg / mx, bw, THERMAL_WARN, THERMAL_ERR)} {pkg:.0f}°C/{mx:.0f}°C   "
-                     f"{c(90, 'high')} {deg(high)}  {c(90, 'crit')} {deg(crit)}")
-    else:
-        lines.append(f" {c(90, 'PKG')}   {pkg:.0f}°C   {c(90, 'high ?  crit ?')}")
-    ids = [r["id"] for r in cpu_usage_rows(d)]
-    by_core = {k: float(v) for k, v in idict(t.get("cores")).items() if num(v) is not None}
-    on_core = cpu_core_of(d, ids)
-    summary = []
-    if by_core:
-        core, hot = max(by_core.items(), key=lambda kv: (kv[1], -kv[0]))
-        cpus = [str(i) for i, k in on_core.items() if k == core]
-        summary.append(c(90, "hottest core ") + f"{core} " + cc(temp_col(hot, mx), f"{hot:.0f}°C")
-                       + (c(90, " (cpu " + ",".join(cpus[:4]) + ")") if cpus and len(cpus) <= 4 else ""))
-    else:
-        summary.append(c(90, "hottest core ") + "?")
-    th = dd(cpu.get("throttle"))
-    n, secs, cores = num(th.get("package")), num(th.get("package_s")), idict(th.get("cores"))
-    per = sorted(((k, num(v)) for k, v in cores.items() if num(v) is not None), key=lambda kv: (-kv[1], kv[0]))
-    if n is None and not per:
-        summary.append(c(90, "throttled ") + "?")
-    else:
-        txt = f"{n:.0f} events" if n is not None else "? events"
-        if secs is not None:
-            txt += f", {fmt_min(secs)} in all"
-        if per:
-            txt += "; cores " + ", ".join(f"{k}: {v:.0f}" for k, v in per[:3]) + (f" … +{len(per) - 3}" if len(per) > 3 else "")
-        hit = bool(n) or any(v for _, v in per)
-        summary.append(c(90, "throttled ") + c(33 if hit else 32, ("! " if hit else "✔ ") + txt))
-    lines.append(" " + "   ·   ".join(summary))
-    if cpu_os() == "darwin" or extra["pressure"] or extra["clusters"]:
-        pr = extra["pressure"]
-        parts = [c(90, "thermal pressure ") + (c(CPU_PRESSURE.get(pr.lower(), "33"), safe(pr)) if isinstance(pr, str) else "?")]
-        parts += [safe(cl.get("name") or "?") + " " + qf(cl.get("mhz")) + " MHz " + qf(cl.get("active")) + "% active" for cl in extra["clusters"]]
-        lines.append(" " + "   ·   ".join(parts))
-    sensors = [s for s in (t.get("sensors") or []) if isinstance(s, dict) and num(s.get("c")) is not None]
-    if sensors:
-        items = [safe(s.get("label") or "?") + " " + cc(temp_col(s["c"], num(s.get("crit")) or mx), f"{s['c']:.0f}°C") for s in sensors]
-        rows = wrap_items(items, w, indent=9, sep="  ·  ", max_lines=2)
-        rows[0] = " " + c(90, "sensors") + " " + rows[0][9:]
-        lines += rows
-    lines += [msg(lv, safe(text)) for lv, text in extra["notes"]]
-    return lines
-
-
-def cut_lines(lines, n, what="lines"):
-    """The first n lines; when some are left out the last one says how many ('… +3 more lines')."""
-    if len(lines) <= n:
-        return lines
-    return lines[:max(n - 1, 0)] + ([c(90, f" … +{len(lines) - n + 1} more {what}")] if n else [])
-
-
-# -- the processes
-
-CPU_COLS = (("pid", "PID", ">"), ("user", "USER", "<"), ("state", "S", "<"), ("nice", "NI", ">"), ("threads", "THR", ">"), ("cpu", "CPU%", ">"),
-            ("mem_pct", "MEM%", ">"), ("mem", "RSS", ">"), ("time", "TIME", ">"))
-CPU_COL_W = {"user": 9, "state": 1, "nice": 3, "cpu": 5, "mem_pct": 5, "mem": 6, "time": 8}
-CPU_SORT_COLS = {"cpu": ("cpu",), "mem": ("mem_pct", "mem"), "time": ("time",), "pid": ("pid",), "user": ("user",)}
-CPU_DROPPABLE = ("state", "nice", "threads")  # a column unknown for every process on this OS (Windows has no state or nice) is left out
-CPU_STATE_COL = {"R": "32", "D": "33", "Z": "31", "T": "33"}
-
-
-def cpu_cell_text(p, key):
-    v = p.get(key)
-    if key == "user":
-        s = safe(v) if isinstance(v, str) and v else "?"
-        return s if len(s) <= 9 else s[:8] + "+"
-    if key == "state":
-        return safe(v)[:1] if isinstance(v, str) and v else "?"
-    if key == "cpu":
-        return "?" if num(v) is None else f"{num(v):.1f}" if num(v) < 1000 else f"{num(v):.0f}"
-    if key == "mem_pct":
-        return qf(v, ".1f")
-    if key == "mem":
-        return fmt_size(v)
-    if key == "time":
-        return fmt_cputime(v)
-    return qf(v)  # pid, nice, threads
-
-
-def cpu_columns(rows, w, minname=12):
-    """[(key, title, align, width)] that fit in w columns beside a name of at least minname: dropped from the right, the name stays."""
-    wid = dict(CPU_COL_W)
-    wid["pid"] = max([len(str(p["pid"])) for p in rows] + [5])
-    wid["threads"] = max([len(cpu_cell_text(p, "threads")) for p in rows] + [3])
-    unknown = lambda p, k: num(p.get(k)) is None and not isinstance(p.get(k), str)  # noqa: E731
-    cols = [(k, t, a, wid[k]) for k, t, a in CPU_COLS if not (k in CPU_DROPPABLE and rows and all(unknown(p, k) for p in rows))]
-    while cols and 1 + sum(x[3] + 1 for x in cols) + minname > w:
-        cols.pop()
-    return cols
-
-
-def cpu_proc_line(p, cols, nw):
-    s = " "
-    for key, _, align, width in cols:
-        txt = cpu_cell_text(p, key)
-        cell = f"{txt:>{width}}" if align == ">" else f"{txt:<{width}}"
-        if key == "state":
-            cell = cc(CPU_STATE_COL.get(txt, ""), cell)
-        elif key == "cpu":
-            cell = cc(pct_col(p.get("cpu"), 50, 100), cell)
-        s += cell + " "
-    return s + safe(p.get("name") or "?")[:nw]
-
-
-def cpu_pane(p, rows, w, h, now, two=False):
-    """Everything known about one process in at most h lines of w columns: the contract's fields, the parent's name, '?' for what is
-    unknown. two: the fields in two columns (a pane under the table, which has few lines to spare)."""
-    ppid = p.get("ppid") if isinstance(p.get("ppid"), int) else None
-    parent = next((q for q in rows if q["pid"] == ppid), None) if ppid is not None else None
-    st = p.get("state") if isinstance(p.get("state"), str) and p.get("state") else None
-    start, mem = num(p.get("start")), num(p.get("mem"))
-    when = "?" if start is None else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start)) + (f" ({fmt_ago(now - start)} ago)" if now >= start else "")
-    items = [("parent", "?" if ppid is None else f"{ppid}  " + (safe(parent.get("name") or "?") if parent else "? (not in the list)")),
-             ("user", safe(p.get("user") or "?")), ("state", "?" if st is None else safe(st[:1]) + "  " + CPU_STATES.get(st[:1], "")),
-             ("threads", qf(p.get("threads"))), ("nice", qf(p.get("nice"))), ("priority", qf(p.get("prio"))),
-             ("CPU", qf(p.get("cpu"), ".1f", " %") + ("  (100 % = one core)" if num(p.get("cpu")) is not None else "")),
-             ("memory", qf(p.get("mem_pct"), ".1f", " %") + ("" if mem is None else f"  {fmt_size(mem)} resident")),
-             ("CPU time", fmt_cputime(p.get("time"))), ("started", when),
-             ("children", str(sum(1 for q in rows if q.get("ppid") == p["pid"])))]
-    out = [section(f"PROCESS {p['pid']}", w, safe(p.get("name") or "?"))]
-    if two:
-        half = (len(items) + 1) // 2
-        cw = (w - 2) // 2
-        for a, b in zip(items[:half], items[half:] + [None] * half):
-            out.append(" " + "".join(pad(clip(c(90, pad(x[0], 9)) + x[1], cw), cw + 1) if x else "" for x in (a, b)).rstrip())
-    else:
-        lw = 10
-        for label, value in items:
-            chunks = textwrap.wrap(value, max(8, w - lw - 1), break_on_hyphens=False) or [""]
-            out += [" " + (c(90, pad(label, lw)) if j == 0 else " " * lw) + x for j, x in enumerate(chunks)]
-    return cut_lines(out, h, "details")
-
-
-def cpu_procs(d, rows, w, avail, cur, top, sort):
-    """The process table in `avail` lines (title, column heads, rows). With a cursor it scrolls to keep it in sight; without one
-    (the rotation slide, a web page) what does not fit is counted on the last line.
-    -> (lines, first row shown, rows visible, [(line, pid)] of the rows drawn)."""
-    tot = d["procs"]["total"]
-    cnt = int(num(tot.get("count")) or len(rows))
-    run, thr, unread = num(tot.get("running")), num(tot.get("threads")), num(tot.get("unreadable"))
-    note = f"{cnt} total" + (f" · {run:.0f} running" if run is not None else "") + (f" · {thr:.0f} threads" if thr is not None else "") \
-        + (f" · {unread:.0f} unreadable" if unread else "") + f" · by {CPU_SORT_NAME.get(sort, sort)}"
-    if rows and all(num(p.get("cpu")) is None for p in rows):
-        note += " · CPU% ?: measuring"
-    lines = [section("PROCESSES", w, note)]
-    if not rows:
-        return (lines + [msg("warn", "processes: ? (the sampler gave none)")])[:avail], 0, 0, []
-    cols = cpu_columns(rows, w)
-    nw = max(4, w - 1 - sum(x[3] + 1 for x in cols))
-    head = " "
-    for key, title, align, width in cols:
-        mark = key in CPU_SORT_COLS.get(sort, ())  # the column the rows are in the order of: yellow, with an arrow for the direction
-        title = title + ("▼" if sort in ("cpu", "mem", "time") else "▲") if mark and key != "mem" else title
-        cell = f"{title:>{width}}" if align == ">" else f"{title:<{width}}"
-        head += c("1;33" if mark else "1;36", cell) + " "
-    lines.append(head + c("1;36", "NAME"))
-    vis = max(0, avail - 2)
-    i = next((j for j, p in enumerate(rows) if p["pid"] == cur), None) if cur is not None else None
-    rest = 0
-    if i is None:
-        top = 0
-        if len(rows) > vis:
-            vis = max(0, vis - 1)  # the last line says what is left out
-            rest = len(rows) - vis
-    else:
-        top = map_scroll(top, i, len(rows), vis) if vis else 0
-    shown = rows[top:top + vis]
-    pids = []
-    for j, p in enumerate(shown):
-        line = cpu_proc_line(p, cols, nw)
-        lines.append(c(7, pad(ANSI.sub("", clip(line, w)), w)) if i is not None and top + j == i else line)
-        pids.append((len(lines) - 1, p["pid"]))
-    if rest:
-        lines.append(c(90, f" … +{rest} more processes"))
-    return lines[:avail], top, len(shown), pids
+def cpu_ctx(full=None):
+    """What the CPU screen needs of this process (screens.CpuCtx): whose machine it describes, the topology, whether nothing is cut (full:
+    default, as the detail pages are being built), the clock."""
+    return screens.CpuCtx(cpu_os(), cpu_topology, FULL if full is None else full, time)
 
 
 def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
     """(the CPU screen's body: at most h lines, none wider than w; the first process shown; the processes in order; how many are
     visible; [(line, pid)] of the process rows). cur: the pid under the cursor (None: no cursor, the table is cut at the bottom);
-    details: the cursor's process in a pane (beside the table from CPU_PANE_W columns on, below it otherwise)."""
-    rows = cpu_rows(d["procs"]["procs"], sort)
-    head = cpu_head(d, w, h)
-    grid = cpu_grid(d, w)
-    n_grid = len(grid[0]) + len(grid[1])
-    temps = cpu_temps(d, w)
-    sel = next((p for p in rows if p["pid"] == cur), None) if details else None
-    side = sel is not None and w >= CPU_PANE_W
-    tw = w - (max(46, int(w * 0.42)) + 3 if side else 0)
-    pane = cpu_pane(sel, rows, w, 40, d["at"], two=w >= 70) if sel is not None and not side else []
-    free = h - len(head)
-    p_min = 2 + (5 if cur is not None else 3)
-    pane_h = min(len(pane), max(0, free // 2))
-    free -= pane_h
-    g_len = min(n_grid, max(min(n_grid, 3), free - p_min - min(len(temps), 3)))
-    free -= g_len
-    t_len = min(len(temps), max(0, free - p_min))
-    if t_len < min(len(temps), 3):  # not even the title and two lines: the processes get the room instead of a "… +N more"
-        t_len = 0
-    free -= t_len
-    lines = head + cpu_grid_lines(grid, g_len) + cut_lines(temps[1:] if t_len < len(temps) else temps, t_len)  # cut: no title, the lines say it
-    table, top, vis, pids = cpu_procs(d, rows, tw, max(free, 0), cur, top, sort)
-    pids = [(len(lines) + k, pid) for k, pid in pids]
-    if side:  # the pane may be taller than a short table: it has all the room the table could have had
-        beside = cpu_pane(sel, rows, w - tw - 3, max(free, 0), d["at"])
-        table = [pad(table[k] if k < len(table) else "", tw) + c(90, " │ ") + (beside[k] if k < len(beside) else "")
-                 for k in range(max(len(table), len(beside)))]
-    lines += table + (cut_lines(pane, pane_h, "details") if pane_h < len(pane) else pane)
-    return [clip(x, w) for x in lines[:h]], top, rows, vis, pids
+    details: the cursor's process in a pane (beside the table from CPU_PANE_W columns on, below it otherwise). screens.cpu_view makes
+    the components; this draws them."""
+    sc = screens.cpu_view(d, cpu_ctx(), w, h, sort, cur, details, top)
+    lines = [x for node in sc.nodes for x in ansi.render(node, w)[0]]
+    return [clip(x, w) for x in lines[:h]], sc.top, sc.rows, sc.vis, sc.pids
+
 
 
 def cpu_footer(cv, n, w):
