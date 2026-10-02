@@ -172,7 +172,7 @@ and these buttons in every card:
 |---|---|
 | ↑ / ↓ | the card one place earlier / later |
 | − / + | one column narrower / wider: `s1` to `s4`, a quarter to the whole width of the grid (shown as 1/4 … 4/4; on a narrow window the grid has fewer columns and the widths collapse, but the layout keeps them) |
-| ✕ | hide the card. A hidden card stays in the grid, dimmed and marked "hidden", with a **show** button; showing it puts it last, 1 column wide |
+| ✕ | hide the card. A hidden card stays in the grid, dimmed and marked "hidden", with a **show** button; showing it puts it last, as wide as it was (the cookie keeps a hidden card's width: `dbx` is 1 wide, `db3x` 3 wide; its place is not kept) |
 
 **Without JavaScript** every button is a link. A click is one `GET /?set=e<step><card>&back=…` (for example `/?set=edat&…`: ATTENTION later): the
 server applies that step to the layout in force (the cookie's, else `config.ini`'s, else the preset's), stores the **whole** layout in the `nuc_ui`
@@ -190,9 +190,9 @@ the other. If the server says anything but `204` the page goes back to the last 
 - **Keyboard**: Tab to a card, `Space` grabs it, arrows move it one place, `+` and `−` resize it, `x` hides or shows it, `Space` drops it, `Esc` puts it back
   where it was. The `#live` region announces each step (`exposure: position 3 of 12, width 2`). The help (`?`) lists the keys of the editor.
 
-**The order.** While the cookie (or `?ui=`) holds a layout of your own the cards stay in it, as if `order = fixed`, whatever `order` says: the editor
-says so on its page, and so does the Order setting. A layout from `config.ini` is the administrator's and does not change that. **Reset layout** gives
-the preset's back, with its order. The layout is **per browser**: to make it everyone's default copy the **Export** block of the settings into
+**The order.** While a layout is in force that somebody stated (the cookie, `?ui=` or `[ui] layout` in `config.ini`) the cards stay in it, as if
+`order = fixed`, unless `order = severity` is set explicitly (by the Order setting, `?ui=` or `config.ini`): the editor says so on its page, and so does the
+Order setting. The preset's own layout is not one: it moves by severity as before. **Reset layout** gives the preset's back, with its order. The layout is **per browser**: to make it everyone's default copy the **Export** block of the settings into
 `config.ini` (`layout =` and `hidden =` are in it).
 
 The editor page does not reload by itself and has no pause link: a page that moves under your hand is no editor. It carries `KEYS_JS`,
