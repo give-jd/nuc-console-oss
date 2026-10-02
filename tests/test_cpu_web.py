@@ -133,7 +133,7 @@ class Page(CpuPageCase):
         self.assertIn('<meta http-equiv="refresh" content="2">', body)
         self.assertIn("<title>demo-host · cpu · nuc-console</title>", body)
         txt = "\n".join(text_of(body))
-        for want in ("demo-host │ CPU │", "── CPU ", "12th Gen Intel(R) Core(TM) i7-1260P", "ALL ", "── TEMPERATURES", "source coretemp", "── PROCESSES",
+        for want in ("demo-host │ CPU │", "── CPU ", "AMD Ryzen 7 5800X 8-Core Processor", "ALL ", "── TEMPERATURES", "source k10temp", "── PROCESSES",
                      "PID USER", "NAME", "ffmpeg", "by CPU%", "processes listed"):
             self.assertIn(want, txt)
         self.assertIn('class="w bR B"', body)                                                     # the demo has problems: the red banner
@@ -211,7 +211,7 @@ class Page(CpuPageCase):
         self.assertIn("state     ?", txt)                                                            # Windows has no process state: '?'
         render.DEMO_OS = None
         self.srv.cache.clear()
-        self.assertIn("12th Gen", "\n".join(text_of(self.page("/?view=cpu"))))                      # and back: the feed follows the demo OS
+        self.assertIn("Ryzen 7 5800X 8-Core", "\n".join(text_of(self.page("/?view=cpu"))))                      # and back: the feed follows the demo OS
 
     def test_a_render_error_is_logged_not_shown(self):
         saved = render.cpu_problems

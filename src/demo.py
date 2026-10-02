@@ -3,13 +3,77 @@
 Invented: hostnames, users, containers, addresses (documentation ranges) and every figure of the machine itself (CPU, RAM, disk,
 uptime, load, temperatures, traffic). Nothing of the machine running it is shown, nothing is written and no real state is read, so the
 screen is the same on every machine and depends only on the clock.
+
+One machine per OS: MACHINES below is the single table every producer reads (the overview's SYSTEM block, the CPU screen, the AI
+hardware, BOOT and HEALTH), so the screens agree on cores, memory, uptime, load, temperatures, boot time and disks.
 """
 import math
 import random
 import time
 
 MiB = 2 ** 20
-UP_DEMO = 5 * 86400  # how long the demo machine has been up: the BOOT section's boot time and the SYSTEM block's uptime say the same
+GiB = 2 ** 30
+MACHINES = {
+    # An AMD desktop under Linux: 8 cores / 16 threads, 31.2 GiB, an RTX 3060, an NVMe system disk and a big data disk.
+    "linux": {
+        "cpu": {"model": "AMD Ryzen 7 5800X 8-Core Processor", "vendor": "AuthenticAMD", "arch": "x86_64", "sockets": 1, "cores": 8, "threads": 16,
+                "kinds": {}, "cache": {"L1d": 256 * 1024, "L1i": 256 * 1024, "L2": 4 * MiB, "L3": 32 * MiB},
+                "freq": {"min": 2200, "max": 4850, "base": 3800, "governor": "schedutil", "driver": "acpi-cpufreq"}, "flags": ["avx2"]},
+        "busy": [4, 2, 6, 1, 62, 4, 2, 1, 3, 2, 2, 1, 6, 1, 2, 1],                      # % per logical CPU: one busy thread, about one core in all
+        "ghz": [4.42, 4.40, 3.91, 3.88, 4.61, 4.58, 3.60, 3.60, 4.05, 4.02, 3.80, 3.79, 4.48, 4.45, 3.70, 3.69],
+        "ram_mib": 31949, "avail_mib": 21540, "cached_mib": 4915, "swap_mib": (8192, 8000),   # 31.2 GiB, 10.2 in use
+        "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce RTX 3060", "vram_mb": 12288, "vram_free_mb": 11264, "unified": False,
+                  "backend": "cuda", "source": "nvidia-smi"}],
+        "ai_notes": [],
+        "up": 5 * 86400, "load": (0.82, 0.64, 0.51),
+        "temp": {"cpu": 72.0, "high": 90.0, "crit": 100.0, "ccd": 66.5, "nvme": 44.0, "nvme_max": 84.85},
+        "boot": {"total": 58.4, "median": 23.0, "before": (21.8, 22.7, 23.0, 21.9, 24.6, 23.1, 23.5)},   # the last boot took 2.5x the median of 7
+        "disks": (("/", 180.0, 480.0), ("/data", 1660.4, 2000.0)),                        # GiB used, GiB total
+        "growth_gb_day": 27.4,                                                          # /data: 340 GB left, so full in about 12 days
+    },
+    # A Windows desktop: the same Ryzen with an RTX 3060 Ti (8 GB), only 16 GiB of RAM, up since yesterday morning.
+    "windows": {
+        "cpu": {"model": "AMD Ryzen 7 5800X 8-Core Processor", "vendor": "AuthenticAMD", "arch": "AMD64", "sockets": 1, "cores": 8, "threads": 16,
+                "kinds": {}, "cache": {"L1d": 256 * 1024, "L1i": 256 * 1024, "L2": 4 * MiB, "L3": 32 * MiB},
+                "freq": {"min": None, "max": 3801, "base": 3801, "governor": None, "driver": None}, "flags": ["avx2"]},
+        "busy": [22, 9, 61, 12, 18, 7, 33, 10, 15, 6, 41, 8, 12, 5, 19, 7],
+        "ghz": [4.42, 4.40, 4.61, 4.58, 3.80, 3.80, 4.48, 4.45, 3.80, 3.80, 4.52, 4.50, 3.80, 3.80, 4.21, 4.20],
+        "ram_mib": 16176, "avail_mib": 7410, "cached_mib": 3500, "swap_mib": (0, 0),      # 15.8 GiB, 8.6 in use
+        "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce RTX 3060 Ti", "vram_mb": 8192, "vram_free_mb": None, "unified": False,
+                  "backend": "cuda", "source": "registry"}],
+        "ai_notes": ["nvidia-smi not found: the free video memory could not be read"],
+        "up": 26 * 3600 + 33 * 60, "load": None,                                         # Windows has no load average
+        "temp": {"cpu": 74.5, "ccd": 69.25, "max_seen": 91.0},                          # the collector's sensors.json (LibreHardwareMonitor)
+        "boot": {"total": 23.3, "median": 24.0, "before": (24.1, 22.8, 25.0, 23.9, 26.2)},
+        "disks": (("C:", 180.0, 480.0), ("D:", 1200.0, 2000.0)),
+    },
+    # A Mac with Apple silicon: 8 cores (4 performance + 4 efficiency), 16 GiB of unified memory shared with the GPU.
+    "darwin": {
+        "cpu": {"model": "Apple M2", "vendor": "Apple", "arch": "arm64", "sockets": 1, "cores": 8, "threads": 8, "kinds": {"P": 4, "E": 4},
+                "cache": {"L1d": 128 * 1024, "L1i": 192 * 1024, "L2": 16 * MiB},
+                "freq": {"min": None, "max": None, "base": None, "governor": None, "driver": None}, "flags": ["neon"]},
+        "busy": [41, 37, 29, 22, 88, 52, 34, 17],
+        "ghz": [],
+        "ram_mib": 16384, "avail_mib": 9830, "cached_mib": 3174, "swap_mib": (2048, 1536),    # 16 GiB, 6.4 in use
+        "gpus": [{"vendor": "apple", "name": "Apple M2 (10-core GPU)", "vram_mb": None, "vram_free_mb": None, "unified": True,
+                  "backend": "metal", "source": "sysctl"}],
+        "ai_notes": [],
+        "up": 2 * 86400 + 6 * 3600, "load": (3.12, 2.87, 2.40),
+        "temp": {"cpu": 61.5, "max_seen": 74.0},
+        "boot": None,                                                                    # macOS: no boot timeline (no systemd-analyze)
+        "disks": (("/", 180.0, 480.0), ("/Volumes/Data", 1200.0, 2000.0)),
+    },
+}
+
+
+def machine(os_name=None):
+    """The demo machine of that OS (Linux for None and for any name the demo does not know)."""
+    return MACHINES.get(os_name) or MACHINES["linux"]
+
+
+def avg_ghz(os_name=None):
+    g = machine(os_name)["ghz"]
+    return sum(g) / len(g) if g else None
 LAN = "192.168.0"    # private range, generic (a public TEST-NET would be flagged as "not local")
 EXT = "198.51.100"   # TEST-NET-2
 TS = "100.64.0"      # CGNAT range used by Tailscale
@@ -110,12 +174,18 @@ def snapshot(now=None, os_name=None):
                {"name": "phone", "os": "android", "online": False, "last_seen": now - 7200, "direct": False, "relay": "fra", "exit": False, "exit_option": False,
                 "ips": [TS + ".3"]}]},
            "links": _links(now)}
-    boot = {"ts": now, "errors": {}, "absent": [], "kernel": "6.8.0-demo", "btime": int(now) - UP_DEMO,
-            "analyze": {"parts": {"firmware": 5.1, "loader": 2.0, "kernel": 1.2, "initrd": 1.1, "userspace": 12.4}, "total": 21.8},
-            "blame": [{"unit": u, "s": s} for u, s in (("docker.service", 6.2), ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
+    mach = machine(os_name)
+    total = mach["boot"]["total"] if mach["boot"] else 0.0
+    parts = {"firmware": 5.1, "loader": 2.0, "kernel": 1.2, "initrd": 1.1}
+    parts["userspace"] = round(total - sum(parts.values()), 1)  # the slow part: the network wait below (the boot is 2.5x the usual)
+    up = int(mach["up"])
+    boot = {"ts": now, "errors": {}, "absent": [], "kernel": "6.8.0-demo", "btime": int(now) - up,
+            "analyze": {"parts": parts, "total": total},
+            "blame": [{"unit": u, "s": s} for u, s in (("systemd-networkd-wait-online.service", 33.5), ("docker.service", 6.2),
+                                                       ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
             "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
-            "containers": [{"name": "shop-web-1", "started": int(now) - UP_DEMO + 40, "restart": "unless-stopped"},
+            "containers": [{"name": "shop-web-1", "started": int(now) - up + 40, "restart": "unless-stopped"},
                            {"name": "cache-1", "started": int(now) - 3600, "restart": "no"}],
             "docker_df": {"rows": [{"type": "Images", "count": "14", "active": "6", "size": "5.2GB", "reclaimable": "2.1GB (40%)"},
                                    {"type": "Containers", "count": "7", "active": "6", "size": "180MB", "reclaimable": "0B (0%)"},
@@ -131,6 +201,7 @@ def snapshot(now=None, os_name=None):
 def _native(net, boot, os_name, now):
     """The same machine as seen by the macOS/Windows collector: OS firewall verdicts per socket, no ufw/iptables/fail2ban."""
     win = os_name == "windows"
+    total = (machine(os_name)["boot"] or {}).get("total", 0.0)
     proxy = "com.docker.backend"
     allow = (lambda r: ["open", f'rule "{r}" (Private)']) if win else (lambda r: ["open", r])
     lst = lambda addr, port, proc, fw, proto="tcp": {"proto": proto, "addr": addr, "port": port, "proc": proc, "fw": fw}
@@ -149,7 +220,7 @@ def _native(net, boot, os_name, now):
               "networks": [{"alias": "Ethernet", "category": "Private"}],
               "profiles": {n: {"enabled": True, "inbound": 0, "block_all": False, "active": n == "Private"}
                            for n in ("Domain", "Private", "Public")}}
-        boot = dict(boot, analyze={"parts": {"main path": 14.2, "post boot": 9.1}, "total": 23.3}, kernel="Windows 11 (10.0.26100)",
+        boot = dict(boot, analyze={"parts": {"main path": 14.2, "post boot": round(total - 14.2, 1)}, "total": total}, kernel="Windows 11 (10.0.26100)",
                     enabled=[{"unit": f"Service{i}", "state": "active" if i % 6 else "inactive"} for i in range(40)],
                     journal={"err": 3, "warn": 12, "capped": False, "top": [
                         {"id": "Microsoft-Windows-DistributedCOM", "n": 9, "pr": 4, "last": "example DCOM warning"},
@@ -181,31 +252,13 @@ def _native(net, boot, os_name, now):
     return net, dict(boot, os=os_name, ts=now)
 
 
-# What the overview's SYSTEM, NETWORK TRAFFIC, SESSIONS and DISKS blocks and the System page show, per demo machine. Every number is invented
-# and fixed (the traffic moves with the clock, see _traffic): nothing of the machine running the demo gets in. Memory in MiB.
-_HOST = {
-    "linux": {
-        "cores": (0.18, 0.09, 0.41, 0.24),                                        # per logical CPU, 0..1: 23% in all
-        "mem": {"MemTotal": 16077, "MemAvailable": 6247, "Cached": 1229, "SwapTotal": 4096, "SwapFree": 3968},   # 9.6 GiB used of 15.7
-        "load": ["0.82", "0.64", "0.51"],
-        "disk": "/", "iface": "eth0", "rx": 1_900_000, "tx": 310_000, "rx_tot": 41_200 * MiB, "tx_tot": 6_500 * MiB,
-        # warm but not hot, like its CPU screen (package at 78 of 100), and nothing throttling now
-        "thermal": {"cpu": (78.0, 100.0), "nvme": (44.0, 84.85), "throttle": 1204, "throttle_s": 252.4, "clk": (3.1, 4.7), "recent": 0},
-    },
-    "windows": {
-        "cores": (0.22, 0.09, 0.61, 0.12, 0.18, 0.07, 0.33, 0.10),
-        "mem": {"MemTotal": 32695, "MemAvailable": 17540, "Cached": 5325, "SwapTotal": 0, "SwapFree": 0},      # 14.8 GiB used of 31.9
-        "load": [],                                                               # Windows has no load average
-        "disk": "C:", "iface": "Ethernet", "rx": 2_400_000, "tx": 520_000, "rx_tot": 88_300 * MiB, "tx_tot": 12_900 * MiB,
-        "thermal": {"throttle": None, "throttle_s": None, "clk": None},           # the sensors are the collector's (sensors.json)
-    },
-    "darwin": {
-        "cores": (0.41, 0.37, 0.29, 0.22, 0.88, 0.52, 0.34, 0.17),
-        "mem": {"MemTotal": 16384, "MemAvailable": 6554, "Cached": 3174, "SwapTotal": 2048, "SwapFree": 1536},  # 9.6 GiB used of 16
-        "load": ["1.12", "0.98", "0.87"],
-        "disk": "/", "iface": "en0", "rx": 1_300_000, "tx": 280_000, "rx_tot": 52_700 * MiB, "tx_tot": 8_100 * MiB,
-        "thermal": {"throttle": None, "throttle_s": None, "clk": None},
-    },
+# What the overview's SYSTEM, NETWORK TRAFFIC, SESSIONS and DISKS blocks and the System page show, per demo machine: the cores, memory,
+# uptime, load, temperatures and disks come from MACHINES (the same machine as every other screen); only the network is its own here.
+# Every number is invented and fixed (the traffic moves with the clock, see _traffic): nothing of the machine running the demo gets in.
+_NET = {
+    "linux": {"iface": "eth0", "rx": 1_900_000, "tx": 310_000, "rx_tot": 41_200 * MiB, "tx_tot": 6_500 * MiB},
+    "windows": {"iface": "Ethernet", "rx": 2_400_000, "tx": 520_000, "rx_tot": 88_300 * MiB, "tx_tot": 12_900 * MiB},
+    "darwin": {"iface": "en0", "rx": 1_300_000, "tx": 280_000, "rx_tot": 52_700 * MiB, "tx_tot": 8_100 * MiB},
 }
 _NET_POINTS = 30  # render.NET_HIST: the samples of a traffic sparkline (a test keeps the two equal)
 
@@ -216,35 +269,43 @@ def _traffic(now, base, salt):
     return [max(0.0, base * (1 + 0.5 * math.sin(t / 9.0 + salt) + _wob(t, salt, 15) / 100.0)) for t in ts]
 
 
+def _host_thermal(os_name):
+    """Sampler's "thermal": the CPU package and the NVMe against the sensors' own maximum (Linux only: the others have the collector's
+    sensors.json), the clock, and no throttling (the Ryzen has no counter for it)."""
+    m = machine(os_name)
+    if os_name not in ("windows", "darwin"):
+        t = m["temp"]
+        return {"cpu": (t["cpu"], t["crit"]), "nvme": (t["nvme"], t["nvme_max"]), "throttle": None, "throttle_s": None,
+                "clk": (round(avg_ghz(os_name), 1), m["cpu"]["freq"]["max"] / 1000.0), "recent": 0}
+    return {"throttle": None, "throttle_s": None, "clk": None}
+
+
 def sampler_data(os_name=None, now=None):
     """What Sampler.sample() returns on the demo machine of that OS: every figure invented, none read from the machine running the demo,
     so the screen is the same on every machine and depends only on the clock (the traffic moves a little, like the CPU screen's)."""
     now = now or time.time()
-    h = _HOST.get(os_name) or _HOST["linux"]
-    used, total, big = 180 * 2 ** 30, 480 * 2 ** 30, (1200 * 2 ** 30, 2000 * 2 ** 30)
+    os_name = os_name if os_name in ("windows", "darwin") else "linux"
+    m, h = MACHINES[os_name], _NET[os_name]
+    fs = [{"mount": mount, "used": int(round(used * GiB)), "total": int(total * GiB)} for mount, used, total in m["disks"]]
     rx, tx = _traffic(now, h["rx"], 1), _traffic(now, h["tx"], 2)
-    out = {"cpu": {f"cpu{i}": v for i, v in enumerate(h["cores"])}, "thermal": dict(h["thermal"]),
+    swap_total, swap_free = m["swap_mib"]
+    mem = {"MemTotal": m["ram_mib"], "MemAvailable": m["avail_mib"], "Cached": m["cached_mib"], "SwapTotal": swap_total, "SwapFree": swap_free}
+    out = {"cpu": {f"cpu{i}": b / 100.0 for i, b in enumerate(m["busy"])}, "thermal": _host_thermal(os_name),
            "net": {h["iface"]: {"rx": rx[-1], "tx": tx[-1], "rx_tot": h["rx_tot"], "tx_tot": h["tx_tot"], "hist_rx": rx, "hist_tx": tx}},
-           "mem": {k: v * MiB for k, v in h["mem"].items()}, "disk_root": (used, total, h["disk"]), "uptime": float(UP_DEMO),
-           "load": list(h["load"])}
+           "mem": {k: v * MiB for k, v in mem.items()}, "disk_root": (fs[0]["used"], fs[0]["total"], fs[0]["mount"]), "uptime": float(m["up"]),
+           "load": [] if m["load"] is None else ["%.2f" % x for x in m["load"]], "fs": fs}
     if os_name == "windows":
         out["sessions"] = {"local": [{"user": "alice", "tty": "Console"}], "ssh": [], "rdp": [LAN + ".20"]}
-        out["fs"] = [{"mount": "C:", "used": used, "total": total}, {"mount": "D:", "used": big[0], "total": big[1]}]
     elif os_name == "darwin":
         out["sessions"] = {"local": [{"user": "alice", "tty": "console"}], "ssh": [LAN + ".20"], "vnc": []}
-        out["fs"] = [{"mount": "/", "used": used, "total": total}, {"mount": "/Volumes/Data", "used": big[0], "total": big[1]}]
     else:
         out["sessions"] = {"local": [{"user": "alice", "tty": "tty1"}], "ssh": [LAN + ".20"]}
-        out["fs"] = [{"mount": "/", "used": used, "total": total}, {"mount": "/data", "used": big[0], "total": big[1]}]
     return out
 
 
-# ---- the CPU screen (render.py --view cpu): the three producers' data as they would read on three invented machines ---------
-# Linux: an Intel hybrid laptop (i7-1260P, 4 P-cores with two threads each + 8 E-cores). Windows: an AMD 8-core desktop.
-# macOS: an Apple M2. The figures move a little from one second to the next (the web page is alive), the same at the same time.
-
-UP_LINUX, UP_WINDOWS, UP_DARWIN = 3 * 86400 + 4 * 3600 + 12 * 60, 26 * 3600 + 33 * 60, 2 * 86400 + 6 * 3600
-
+# ---- the CPU screen (render.py --view cpu): the three producers' data as they would read on the three machines of MACHINES -----
+# Linux: an AMD 8-core desktop (16 threads, k10temp: package temperature only, no throttle counter). Windows: the same Ryzen. macOS: an Apple M2.
+# The figures move a little from one second to the next (the web page is alive), the same at the same time.
 
 def _wob(now, i, span):
     """A deterministic wobble in -span..span: the same at the same second, a little different two seconds later."""
@@ -267,51 +328,47 @@ def _usage(now, busy, iowait=None):
     return {"total": total, "cores": cores}
 
 
+def _cpu_common(os_name, now):
+    m = machine(os_name)
+    cpu = dict(m["cpu"])
+    cpu.pop("flags", None)
+    return cpu, m
+
+
 def _cpu_linux(now):
-    busy = [38, 14, 27, 9, 97, 44, 21, 8, 31, 17, 12, 9, 23, 6, 15, 5]
-    ghz = [3.92, 3.88, 3.41, 3.40, 4.38, 4.37, 2.95, 2.96, 2.81, 2.77, 2.12, 1.98, 3.05, 2.40, 1.86, 2.20]
-    core_of = {i: (i // 2) * 4 for i in range(8)}
-    core_of.update({8 + i: 16 + i for i in range(8)})
-    hot = {0: 63, 4: 66, 8: 94, 12: 68, 16: 57, 17: 58, 18: 55, 19: 59, 20: 56, 21: 58, 22: 54, 23: 57}
-    cores = {k: float(v + _wob(now, k, 1)) for k, v in hot.items()}
-    pkg = 78.0 + _wob(now, 99, 1)
-    return {"model": "12th Gen Intel(R) Core(TM) i7-1260P", "vendor": "GenuineIntel", "arch": "x86_64", "sockets": 1, "cores": 12,
-            "threads": 16, "kinds": {"P": list(range(8)), "E": list(range(8, 16))}, "core_of": core_of,
-            "cache": {"L1d": 448 * 1024, "L1i": 640 * 1024, "L2": 9 * MiB, "L3": 18 * MiB},
-            "freq": {"cur": {i: round(g * 1000 + _wob(now, i, 40)) for i, g in enumerate(ghz)}, "min": 400, "max": 4700, "base": 2100,
-                     "governor": "powersave", "driver": "intel_pstate"},
-            "usage": _usage(now, busy, {2: 6.0, 9: 3.0}), "load": [2.41, 1.98, 1.75],
-            "rates": {"ctxt": 18342 + 37 * _wob(now, 1, 9), "intr": 6127 + 11 * _wob(now, 2, 9), "running": 4, "blocked": 1},
-            "uptime": UP_LINUX + now % 60,
-            "temps": {"package": pkg, "cores": cores, "high": 100.0, "crit": 100.0, "source": "coretemp",
-                      "sensors": [{"label": "Package id 0", "c": pkg, "high": 100.0, "crit": 100.0}]
-                      + [{"label": f"Core {k}", "c": v, "high": 100.0, "crit": 100.0} for k, v in sorted(cores.items())]},
-            "throttle": {"package": 1204, "cores": {8: 812, 4: 37}, "package_s": 252.4}, "notes": []}
+    cpu, m = _cpu_common("linux", now)
+    t = m["temp"]
+    pkg = t["cpu"]                                          # a steady reading: the overview's TEMP bar says the same
+    fq = dict(cpu.pop("freq"))
+    freq = {"cur": {i: round(g * 1000 + _wob(now, i, 40)) for i, g in enumerate(m["ghz"])}, **fq}
+    sensors_ = [{"label": "Tctl", "c": pkg, "high": t["high"], "crit": t["crit"]}, {"label": "Tccd1", "c": t["ccd"], "high": t["high"], "crit": t["crit"]}]
+    cpu.update(core_of={i: i // 2 for i in range(cpu["threads"])}, freq=freq, usage=_usage(now, m["busy"], {2: 1.0, 9: 0.5}), load=list(m["load"]),
+               rates={"ctxt": 18342 + 37 * _wob(now, 1, 9), "intr": 6127 + 11 * _wob(now, 2, 9), "running": 2, "blocked": 0},
+               uptime=m["up"] + now % 60,
+               temps={"package": pkg, "cores": {}, "high": t["high"], "crit": t["crit"], "source": "k10temp", "sensors": sensors_},
+               throttle={"package": None, "cores": {}, "package_s": None}, notes=[])
+    return cpu
 
 
 def _cpu_windows(now):
-    busy = [22, 9, 61, 12, 18, 7, 33, 10, 15, 6, 41, 8, 12, 5, 19, 7]
-    ghz = [4.42, 4.40, 4.61, 4.58, 3.80, 3.80, 4.48, 4.45, 3.80, 3.80, 4.52, 4.50, 3.80, 3.80, 4.21, 4.20]
-    return {"model": "AMD Ryzen 7 5800X 8-Core Processor", "vendor": "AuthenticAMD", "arch": "AMD64", "sockets": 1, "cores": 8,
-            "threads": 16, "kinds": {}, "cache": {"L1d": 256 * 1024, "L1i": 256 * 1024, "L2": 4 * MiB, "L3": 32 * MiB},
-            "freq": {"cur": {i: round(g * 1000 + _wob(now, i, 30)) for i, g in enumerate(ghz)}, "min": None, "max": 3801, "base": 3801,
-                     "governor": None, "driver": None},
-            "usage": _usage(now, busy), "load": None,
-            "rates": {"ctxt": 24311 + 53 * _wob(now, 3, 9), "intr": 9877 + 17 * _wob(now, 4, 9), "running": None, "blocked": None},
-            "uptime": UP_WINDOWS + now % 60,
-            "temps": {"package": None, "cores": {}, "sensors": [], "high": None, "crit": None, "source": None},  # the collector's (sensors.json)
-            "throttle": {"package": None, "cores": {}, "package_s": None}, "notes": []}
+    cpu, m = _cpu_common("windows", now)
+    fq = dict(cpu.pop("freq"))
+    freq = {"cur": {i: round(g * 1000 + _wob(now, i, 30)) for i, g in enumerate(m["ghz"])}, **fq}
+    cpu.update(freq=freq, usage=_usage(now, m["busy"]), load=None,
+               rates={"ctxt": 24311 + 53 * _wob(now, 3, 9), "intr": 9877 + 17 * _wob(now, 4, 9), "running": None, "blocked": None},
+               uptime=m["up"] + now % 60,
+               temps={"package": None, "cores": {}, "sensors": [], "high": None, "crit": None, "source": None},  # the collector's (sensors.json)
+               throttle={"package": None, "cores": {}, "package_s": None}, notes=[])
+    return cpu
 
 
 def _cpu_darwin(now):
-    busy = [41, 37, 29, 22, 88, 52, 34, 17]
-    return {"model": "Apple M2", "vendor": "Apple", "arch": "arm64", "sockets": 1, "cores": 8, "threads": 8, "kinds": {"P": 4, "E": 4},
-            "cache": {"L1d": 128 * 1024, "L1i": 192 * 1024, "L2": 16 * MiB},
-            "freq": {"cur": {}, "min": None, "max": None, "base": None, "governor": None, "driver": None},
-            "usage": _usage(now, busy, iowait=None), "load": [3.12, 2.87, 2.40],
-            "rates": {"ctxt": None, "intr": None, "running": None, "blocked": None}, "uptime": UP_DARWIN + now % 60,
-            "temps": {"package": None, "cores": {}, "sensors": [], "high": None, "crit": None, "source": None},
-            "throttle": {"package": None, "cores": {}, "package_s": None}, "notes": []}
+    cpu, m = _cpu_common("darwin", now)
+    cpu.update(freq=dict(m["cpu"]["freq"], cur={}), usage=_usage(now, m["busy"], iowait=None), load=list(m["load"]),
+               rates={"ctxt": None, "intr": None, "running": None, "blocked": None}, uptime=m["up"] + now % 60,
+               temps={"package": None, "cores": {}, "sensors": [], "high": None, "crit": None, "source": None},
+               throttle={"package": None, "cores": {}, "package_s": None}, notes=[])
+    return cpu
 
 
 def cpu_sample(os_name=None, now=None):
@@ -327,13 +384,15 @@ def sensors(os_name=None, now=None):
     now = now or time.time()
     if os_name == "windows":
         cores = {1: 66.5, 2: 68.0, 3: 89.5, 4: 70.25, 5: 64.75, 6: 67.0, 7: 71.5, 8: 65.0}
-        cpu = {"package": 74.5 + _wob(now, 7, 1), "cores": {str(k): v for k, v in cores.items()},
-               "sensors": [{"label": "Core (Tctl/Tdie)", "c": 74.5}, {"label": "CCD1 (Tdie)", "c": 69.25}]
+        t = MACHINES["windows"]["temp"]
+        cpu = {"package": t["cpu"], "cores": {str(k): v for k, v in cores.items()},
+               "sensors": [{"label": "Core (Tctl/Tdie)", "c": t["cpu"]}, {"label": "CCD1 (Tdie)", "c": t["ccd"]}]
                + [{"label": f"Core #{k}", "c": v} for k, v in cores.items()],
                "source": "LibreHardwareMonitor", "pressure": None, "clusters": []}
         return {"ts": now - 4, "os": "windows", "cpu": cpu, "errors": {}, "absent": ["OpenHardwareMonitor"]}
     if os_name == "darwin":
-        cpu = {"package": 61.5 + _wob(now, 8, 1), "cores": {}, "sensors": [{"label": "CPU die (smctemp)", "c": 61.5}],
+        t = MACHINES["darwin"]["temp"]
+        cpu = {"package": t["cpu"], "cores": {}, "sensors": [{"label": "CPU die (smctemp)", "c": t["cpu"]}],
                "source": "smctemp", "pressure": "Moderate",
                "clusters": [{"name": "E-Cluster", "mhz": 2064.0, "active": 38.2, "cpus": {str(i): 2064.0 - 40 * i for i in range(4)}},
                             {"name": "P-Cluster", "mhz": 3204.0, "active": 61.5, "cpus": {str(i): 3204.0 + (36 if i == 4 else 0) for i in range(4, 8)}}]}
@@ -414,8 +473,7 @@ _PROCS_DARWIN = (
     (1021, 1, "alice", "rsync", "U", 1, 0, 8.9, 9, 310.0, 150000), (1100, 1, "alice", "Slack Helper", "S", 14, 0, 2.2, 240, 610.0, 9000),
     (1201, 1, "root", "softwareupdated", "S", 4, 0, 0.0, 28, 12.0, 20000), (1302, 1, "alice", "Spotlight", "S", 6, 0, 0.1, 44, 22.0, 20000),
     (1400, 1, None, "XprotectService", "S", None, None, None, None, None, None),
-    (1501, 816, "alice", "ffmpeg", "R", 12, 10, 236.0, 410, 4020.0, 200000))
-_RAM = {"linux": 16 * 2 ** 30, "windows": 32 * 2 ** 30, "darwin": 16 * 2 ** 30}
+    (1501, 816, "alice", "ffmpeg", "R", 12, 10, 236.0, 410, 4020.0, 190000))
 
 
 def proc_sample(os_name=None, now=None):
@@ -424,7 +482,8 @@ def proc_sample(os_name=None, now=None):
     now = now or time.time()
     os_name = os_name if os_name in ("windows", "darwin") else "linux"
     table = {"windows": _PROCS_WINDOWS, "darwin": _PROCS_DARWIN}.get(os_name, _PROCS_LINUX)
-    boot = now - {"linux": UP_LINUX, "windows": UP_WINDOWS, "darwin": UP_DARWIN}[os_name]
+    ram = MACHINES[os_name]["ram_mib"] * MiB
+    boot = now - MACHINES[os_name]["up"]
     prio = {"linux": lambda ni: 20 + ni, "windows": lambda ni: 8, "darwin": lambda ni: 31 - ni}[os_name]
     procs = []
     for i, (pid, ppid, user, name, state, thr, nice, cpu, rss, tm, start) in enumerate(table):
@@ -433,7 +492,7 @@ def proc_sample(os_name=None, now=None):
         procs.append({"pid": pid, "ppid": ppid, "user": user, "name": name, "state": state, "threads": thr, "nice": nice,
                       "prio": prio(nice or 0) if thr is not None else None, "cpu": cpu,
                       "mem": rss * MiB if rss is not None else None,
-                      "mem_pct": round(rss * MiB * 100.0 / _RAM[os_name], 1) if rss is not None else None,
+                      "mem_pct": round(rss * MiB * 100.0 / ram, 1) if rss is not None else None,
                       "time": tm, "start": boot + start if start is not None else None})
     unreadable = sum(1 for p in procs if p["cpu"] is None and p["mem"] is None)
     total = {"count": len(procs) + 1, "running": sum(p["state"] == "R" for p in procs) if os_name != "windows" else None,
@@ -481,13 +540,36 @@ def _times(n):
     return "1 time" if n == 1 else "%d times" % n
 
 
+def _disk_rows(os_name, days_to_full=None, extra=()):
+    """HEALTH's disks: the machine's own disks (used % from the same figures as the overview's DISKS block), `days_to_full` {mount: days}."""
+    rows = [{"mount": mount, "used_pct": round(used * 100.0 / total, 1), "days_to_full": (days_to_full or {}).get(mount)}
+            for mount, used, total in machine(os_name)["disks"]]
+    return rows + [{"mount": m, "used_pct": pct, "days_to_full": None} for m, pct in extra]
+
+
+def _boot_rows(now, os_name):
+    """The recorded boots, oldest first: seven or so ordinary ones, then the last (the machine's uptime ago, taking the BOOT section's time)."""
+    b = machine(os_name)["boot"]
+    if not b:
+        return []
+    totals = tuple(b["before"]) + (b["total"],)
+    last = int(now) - int(machine(os_name)["up"])
+    return [{"boot": last - (len(totals) - 1 - i) * 129600, "total_s": t} for i, t in enumerate(totals)]
+
+
 def _health_linux(now, days):
     scale = days / 7.0
     last = lambda h: int(now - h * 3600)  # noqa: E731
     when = lambda h: _when(last(h))  # noqa: E731
     span = "the last 24 hours" if days == 1 else "the last %d days" % days
+    mach = machine("linux")
+    ratio = mach["boot"]["total"] / mach["boot"]["median"]
+    data = mach["disks"][1]                                                  # /data: the one that fills up
+    growth = mach["growth_gb_day"]
+    to_full = round((data[2] - data[1]) / growth, 1)                           # 340 GB left at 27.4 GB/day
     oom_n, restarts, hot_h = max(1, round(3 * scale)), max(9, round(31 * scale)), max(2, round(14 * scale))
     hog_h, logins, noisy = max(6, round(31 * scale)), round(1204 * scale), round(18420 * scale)
+    max_c = 91.0                                                             # the hottest reading of the period: over the 90 C limit, now 72
     f = _finding
     found = [  # (the shortest period whose rules can say it, the finding)
         (1, f("oom", "shop-worker-1", "err", "Out of memory: shop-worker-1",
@@ -501,8 +583,9 @@ def _health_linux(now, days):
               {"max_restarts_24h": 9, "restarts": restarts, "exit_errors": 3, "last": last(2.4)},
               "docker ps -a; docker inspect <name> (State.ExitCode, State.OOMKilled); docker logs --tail 100 <name>; systemctl status <unit>; fix the "
               "cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU")),
-        (1, f("disk-full", "/data", "warn", "Disk filling up: /data", "/data is 83% full, growing 4.1 GB/day: full in about 12 days.",
-              {"used_gb": 1660.4, "total_gb": 2000.0, "growth_gb_day": 4.1, "fit_days": 30, "used_pct": 83.0, "days_to_full": 12.4},
+        (1, f("disk-full", "/data", "warn", "Disk filling up: /data", "/data is 83%% full, growing %.1f GB/day: full in about 12 days." % growth,
+              {"used_gb": data[1], "total_gb": data[2], "growth_gb_day": growth, "fit_days": 30, "used_pct": round(data[1] * 100.0 / data[2], 1),
+               "days_to_full": to_full},
               "df -h; du -xh --max-depth=1 / 2>/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); "
               "journalctl --vacuum-size=500M; apt clean")),
         (3, f("mem-leak", "node", "warn", "Memory keeps growing: node",
@@ -512,13 +595,14 @@ def _health_linux(now, days):
               "it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or MemoryMax=1G in a drop-in; then update it or report the leak")),
         (1, f("cpu-hog", "chrome", "warn", "Keeps the CPU busy: chrome",
               "chrome used over 80%% of one core for %d hours in %s (peak 143%%, busiest at %s)." % (hog_h, span, when(27)),
-              {"hours_over_80pct_core": hog_h, "hours_over_half_cores": 0, "cores": 4, "avg_pct": 62.3, "peak_pct": 143.0,
+              {"hours_over_80pct_core": hog_h, "hours_over_half_cores": 0, "cores": mach["cpu"]["threads"], "avg_pct": 62.3, "peak_pct": 143.0,
                "cpu_s": round(375000 * scale), "peak_hour": last(27)},
               "top (or htop) shows it now; docker stats / systemctl status <unit>; cap it: docker update --cpus 2 <name> or CPUQuota=200% in a "
               "systemd drop-in (systemctl edit <unit>); check its log for a loop")),
         (1, f("thermal", None, "warn", "Running hot",
-              "%d hours at or above the temperature limit in %s (about 2.0 h/day, max 91 C); busiest then: chrome, node, shop-worker-1." % (hot_h, span),
-              {"hours_hot": hot_h, "hours_per_day": 2.0, "max_c": 91.0, "apps": "chrome, node, shop-worker-1"},
+              "%d hours at or above the temperature limit (%.0f C) in %s (about 2.0 h/day, max %.0f C); busiest then: chrome, node, shop-worker-1."
+              % (hot_h, mach["temp"]["high"], span, max_c),
+              {"hours_hot": hot_h, "hours_per_day": 2.0, "max_c": max_c, "apps": "chrome, node, shop-worker-1"},
               "sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed")),
         (3, f("login-fail", "sshd", "warn", "Failed logins: sshd",
               "412 failed logins on 2026-09-28 against a median of 18 a day; %d in %s." % (logins, span),
@@ -535,8 +619,8 @@ def _health_linux(now, days):
               {"new_templates": 4, "top_unit": "kernel", "top_n": 412, "top_template": "nvme nvme<n>: I/O <n> QID <n> timeout, aborting"},
               "journalctl -p warning --since '24 hours ago' | tail -50; new messages after an update or a config change are normal, otherwise look "
               "at the unit that writes them")),
-        (7, f("boot-regression", None, "info", "Slower boot", "The last boot took 58 s, 2.5x the median of the 7 boots before (23 s).",
-              {"last_s": 58.4, "median_s": 23.0, "ratio": 2.54, "boots": 7},
+        (7, f("boot-regression", None, "info", "Slower boot", "The last boot took %.0f s, %.1fx the median of the 7 boots before (%.0f s)." % (mach["boot"]["total"], ratio, mach["boot"]["median"]),
+              {"last_s": mach["boot"]["total"], "median_s": mach["boot"]["median"], "ratio": round(ratio, 2), "boots": 7},
               "systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable <unit>)")),
     ]
     findings = [x for d, x in found if days >= d]
@@ -564,12 +648,11 @@ def _health_linux(now, days):
             ("snapd", "cannot refresh snap <str>: <str>", 38, True), ("cron", "(<str>) CMD (<path>)", 2016, False)]
     logs = sorted(({"source": "journal", "unit": u, "template": t, "n": max(1, round(k * scale)), "new": nw} for u, t, k, nw in logs),
                   key=lambda r: -r["n"])
-    disks = [{"mount": "/data", "used_pct": 83.0, "days_to_full": 12.4}, {"mount": "/", "used_pct": 37.5, "days_to_full": None},
-             {"mount": "/boot/efi", "used_pct": 6.0, "days_to_full": None}]
-    thermal = {"hours_hot": hot_h, "max": 91.0, "apps_when_hot": [
+    disks = sorted(_disk_rows("linux", {"/data": to_full}, extra=(("/boot/efi", 6.0),)), key=lambda d: d["mount"] != "/data")
+    thermal = {"hours_hot": hot_h, "max": max_c, "apps_when_hot": [
         {"app": "chrome", "cpu_s": round(41000 * scale, 1), "share": 0.38}, {"app": "node", "cpu_s": round(18000 * scale, 1), "share": 0.17},
         {"app": "shop-worker-1", "cpu_s": round(9000 * scale, 1), "share": 0.08}]}
-    boots = [{"boot": int(now) - (8 - i) * 86400 * 2, "total_s": t} for i, t in enumerate((21.8, 22.5, 23.1, 21.9, 24.6, 22.2, 23.0, 58.4))]
+    boots = _boot_rows(now, "linux")
     notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
     return findings, top_cpu, top_mem, events, logs, disks, thermal, boots, notes
 
@@ -624,9 +707,9 @@ def _health_windows(now, days):
             {"source": "System", "unit": "", "template": "Service Control Manager 7031", "n": max(1, round(3 * scale)), "new": False},
             {"source": "Application", "unit": "", "template": "Application Error 1000", "n": max(1, round(4 * scale)), "new": False},
             {"source": "System", "unit": "", "template": "Microsoft-Windows-Kernel-Power 41", "n": 1, "new": True}]
-    disks = [{"mount": "C:", "used_pct": 72.4, "days_to_full": None}, {"mount": "D:", "used_pct": 54.1, "days_to_full": None}]
-    thermal = {"hours_hot": 0, "max": None, "apps_when_hot": []}  # no temperature sensor file: the screen must say "no data", not "cool"
-    boots = [{"boot": int(now) - (6 - i) * 86400 * 2, "total_s": t} for i, t in enumerate((23.3, 24.1, 22.8, 25.0, 23.9, 26.2))]
+    disks = _disk_rows("windows")
+    thermal = {"hours_hot": 0, "max": machine("windows")["temp"]["max_seen"], "apps_when_hot": []}  # the collector's sensors.json: no limit to be over
+    boots = _boot_rows(now, "windows")
     notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
     return findings, top_cpu, top_mem, events, logs, disks, thermal, boots, notes
 
@@ -663,8 +746,8 @@ def _health_darwin(now, days):
                 "series": _series("mem" + a, n, av * 1024, 0.25, have)} for a, _, _, _, av, mx, tr in sorted(names, key=lambda x: -x[4])[:4]]
     events = {"oom": [_ev("Google Chrome Helper", 2, last(15), scale)], "crash": [_ev("photolibraryd", 5, last(7), scale)],
               "hang": [_ev("Finder", 1, last(120), scale)]}
-    disks = [{"mount": "/", "used_pct": 61.3, "days_to_full": None}, {"mount": "/Volumes/Data", "used_pct": 46.8, "days_to_full": None}]
-    thermal = {"hours_hot": 0, "max": 74.0, "apps_when_hot": []}
+    disks = _disk_rows("darwin")
+    thermal = {"hours_hot": 0, "max": machine("darwin")["temp"]["max_seen"], "apps_when_hot": []}
     notes = ["memory trends need a period of at least 3 days"] if days < 3 else []
     return findings, top_cpu, top_mem, events, [], disks, thermal, [], notes  # macOS: no log history, no boot time
 
@@ -698,9 +781,9 @@ def health_report(os_name=None, days=7, now=None, variant=""):
             "events": events, "logs": logs, "disks": disks, "thermal": thermal, "boots": boots, "notes": notes}
 
 
-# ---- AI: three invented machines and the catalog aisetup.catalog() would hand the AI screen for each ------------------------------
-# A Linux box with a 12 GB NVIDIA card, a Windows laptop (16 GB RAM, a 4 GB card, nothing installed yet) and an M2 with 16 GB of unified
-# memory. The models are the catalog's candidates with approximate sizes; the verdicts come from _ai_assess(), a small copy of the rules of
+# ---- AI: the three machines and the catalog aisetup.catalog() would hand the AI screen for each ------------------------------
+# The machines of MACHINES: a Linux desktop with a 12 GB NVIDIA card, a Windows desktop (16 GB RAM, an 8 GB card, nothing installed yet) and an M2 with
+# 16 GB of unified memory. The models are the catalog's candidates with approximate sizes; the verdicts come from _ai_assess(), a small copy of the rules of
 # aihw.assess() (the demo must not depend on that module and must give the same screen at every run).
 
 AI_OSES = ("linux", "windows", "darwin")
@@ -718,28 +801,16 @@ _AI_MODELS = (  # id, name, licence, params_b, active_b, quant, layers, ctx_max,
     ("qwen3-1.7b", "Qwen3 1.7B", "Apache-2.0", 1.7, None, "Q4_K_M", 28, 40960, 11, 1100, "runs anywhere; thinking mode: /no_think", True),
     ("qwen3-0.6b", "Qwen3 0.6B", "Apache-2.0", 0.6, None, "Q4_K_M", 28, 40960, 12, 400, "a toy: too small to give reliable advice", True),
 )
-_AI_MACHINES = {
-    "linux": {"os": "linux", "arch": "x86_64",
-              "cpu": {"model": "AMD Ryzen 7 5800X 8-Core Processor", "cores": 8, "threads": 16, "flags": ["avx2"]},
-              "ram": {"total_mb": 31923, "available_mb": 21540},
-              "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce RTX 3060", "vram_mb": 12288, "vram_free_mb": 11264, "unified": False,
-                        "backend": "cuda", "source": "nvidia-smi"}],
-              "notes": []},
-    "windows": {"os": "windows", "arch": "x86_64",
-                "cpu": {"model": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz", "cores": 6, "threads": 12, "flags": ["avx2"]},
-                "ram": {"total_mb": 16176, "available_mb": 7410},
-                "gpus": [{"vendor": "nvidia", "name": "NVIDIA GeForce GTX 1650", "vram_mb": 4096, "vram_free_mb": None, "unified": False,
-                          "backend": "cuda", "source": "registry"},
-                         {"vendor": "intel", "name": "Intel(R) UHD Graphics", "vram_mb": None, "vram_free_mb": None, "unified": True,
-                          "backend": "vulkan", "source": "registry"}],
-                "notes": ["nvidia-smi not found: the free video memory could not be read"]},
-    "darwin": {"os": "darwin", "arch": "arm64",
-               "cpu": {"model": "Apple M2", "cores": 8, "threads": 8, "flags": ["neon"]},
-               "ram": {"total_mb": 16384, "available_mb": 9830},
-               "gpus": [{"vendor": "apple", "name": "Apple M2 (10-core GPU)", "vram_mb": None, "vram_free_mb": None, "unified": True,
-                         "backend": "metal", "source": "sysctl"}],
-               "notes": []},
-}
+def _ai_machine(os_name):
+    """The hardware aihw.detect() would report on the demo machine of that OS: the machine of MACHINES, as the other screens show it."""
+    m = machine(os_name)
+    cpu = m["cpu"]
+    return {"os": os_name, "arch": {"AMD64": "x86_64"}.get(cpu["arch"], cpu["arch"]),
+            "cpu": {"model": cpu["model"], "cores": cpu["cores"], "threads": cpu["threads"], "flags": list(cpu["flags"])},
+            "ram": {"total_mb": m["ram_mib"], "available_mb": m["avail_mib"]}, "gpus": [dict(g) for g in m["gpus"]], "notes": list(m["ai_notes"])}
+
+
+_AI_MACHINES = {os_name: _ai_machine(os_name) for os_name in ("linux", "windows", "darwin")}
 _AI_STATE = {  # per machine: what is installed, the active model, the runtime, the advisor's [ai] settings and whether its server answers
     "linux": {"installed": ("qwen3-4b", "qwen3-1.7b"), "active": "qwen3-4b", "runtime": {"installed": True, "version": "0.10.6"},
               "dir": "/var/lib/nuc-console/ai", "enabled": True, "endpoint": "http://127.0.0.1:11434/v1",

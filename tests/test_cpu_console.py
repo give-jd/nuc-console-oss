@@ -112,6 +112,33 @@ class CpuCase(unittest.TestCase):
             change(d)
         return d
 
+    def hybrid_laptop(self):
+        """The Linux demo CPU becomes an Intel hybrid laptop (i7-1260P: 4 P cores with 2 threads + 8 E cores, coretemp, throttle counters):
+        the shape of data a coretemp machine gives, with P/E tags, a temperature per physical core and throttling. The default demo is an AMD
+        desktop (k10temp: the package only), so this is where those paths of the screen are covered. Undone in tearDown (demo.cpu_sample)."""
+        real = demo.cpu_sample
+
+        def sample(os_name=None, now=None):
+            d = real(os_name, now)
+            if os_name in ("windows", "darwin"):
+                return d
+            now = now or time.time()
+            core_of = {i: (i // 2) * 4 for i in range(8)}
+            core_of.update({8 + i: 16 + i for i in range(8)})
+            hot = {0: 63, 4: 66, 8: 94, 12: 68, 16: 57, 17: 58, 18: 55, 19: 59, 20: 56, 21: 58, 22: 54, 23: 57}
+            cores = {k: float(v + demo._wob(now, k, 1)) for k, v in hot.items()}
+            pkg = 78.0 + demo._wob(now, 99, 1)
+            d.update(model="12th Gen Intel(R) Core(TM) i7-1260P", vendor="GenuineIntel", cores=12, kinds={"P": list(range(8)), "E": list(range(8, 16))},
+                     core_of=core_of, cache={"L1d": 448 * 1024, "L1i": 640 * 1024, "L2": 9 * demo.MiB, "L3": 18 * demo.MiB},
+                     load=[2.41, 1.98, 1.75], throttle={"package": 1204, "cores": {8: 812, 4: 37}, "package_s": 252.4},
+                     temps={"package": pkg, "cores": cores, "high": 100.0, "crit": 100.0, "source": "coretemp",
+                            "sensors": [{"label": "Package id 0", "c": pkg, "high": 100.0, "crit": 100.0}]
+                            + [{"label": f"Core {k}", "c": v, "high": 100.0, "crit": 100.0} for k, v in sorted(cores.items())]})
+            d["freq"] = dict(d["freq"], min=400, max=4700, base=2100, governor="powersave", driver="intel_pstate")
+            d["rates"] = dict(d["rates"], running=4, blocked=1)
+            return d
+        demo.cpu_sample = sample
+
     def procs(self, d, **where):
         return next(p for p in d["procs"]["procs"] if all(p[k] == v for k, v in where.items()))
 
@@ -172,6 +199,11 @@ def grid_cells(lines):
             out[int(m.group(1))] = (m.group(2).strip(), int(m.group(3)), m.group(4).strip() if m.group(4) else None,
                                     int(m.group(5).strip()[:-2]) if m.group(5) else None)
     return out
+
+
+def rows_first(lines):
+    """The first process row of a screen."""
+    return process_lines(lines)[0]
 
 
 def process_lines(lines):
@@ -352,12 +384,36 @@ class Screens(CpuCase):
                         self.assertIn("PROCESSES", "\n".join(lines))
                         self.assertTrue(process_lines(lines), "no process row")
 
-    def test_the_linux_demo_shows_the_machine_the_cpus_the_temperatures_and_the_processes(self):
+    def test_the_linux_demo_is_the_ryzen_desktop_of_the_other_screens(self):
+        d = self.data()
+        s, lines = self.once([], 200, 50)
+        txt = "\n".join(lines)
+        for want in ("AMD Ryzen 7 5800X 8-Core Processor", "sockets 1", "cores 8", "threads 16", "arch x86_64", "L1d 256K  L1i 256K  L2 4M  L3 32M",
+                     "governor schedutil/acpi-cpufreq", "clock 2200-4850 MHz (base 3800)", "up 5d 0h", "load 0.82 0.64 0.51", "ctxt 18", "intr 6."):
+            self.assertIn(want, txt)
+        cells = grid_cells(lines)
+        self.assertEqual(sorted(cells), list(range(16)))
+        self.assertEqual({v[0] for v in cells.values()}, {""})                    # no P/E on this CPU
+        self.assertEqual({v[3] for v in cells.values()}, {None})                  # k10temp has no per-core temperature
+        for i, (tag, busy, ghz, temp) in cells.items():
+            self.assertEqual(busy, round(d["cpu"]["usage"]["cores"][i]["busy"]), i)
+            self.assertEqual(ghz, f"{d['cpu']['freq']['cur'][i] / 1000:4.2f}G".strip(), i)
+        self.assertRegex(txt, r"PKG +█+░* 72°C/100°C +high 90°C +crit 100°C")
+        self.assertIn("source k10temp", txt)
+        self.assertIn("Tctl 72°C", txt)
+        self.assertIn("Tccd1 66°C", txt)
+        self.assertIn("hottest core ?", txt)
+        self.assertIn("throttled ?", txt)                                         # no counter on this CPU: not "none", unknown
+        self.assertRegex(txt, r"41 total · 3 running · \d+ threads · 2 unreadable · by CPU%")
+        self.assertRegex(rows_first(lines), r"^\s+2210 alice +R +10 +18 +\d+\.\d +2\.0 +640M +2:32:00 ffmpeg")      # 640 MiB of 31.2 GiB
+
+    def test_a_hybrid_intel_laptop_shows_tags_core_temperatures_and_throttling(self):
+        self.hybrid_laptop()
         d = self.data()
         s, lines = self.once([], 200, 50)
         txt = "\n".join(lines)
         for want in ("12th Gen Intel(R) Core(TM) i7-1260P", "sockets 1", "cores 12", "threads 16", "P 8 + E 8 threads", "arch x86_64",
-                     "L1d 448K  L1i 640K  L2 9M  L3 18M", "governor powersave/intel_pstate", "clock 400-4700 MHz (base 2100)", "up 3d 4h",
+                     "L1d 448K  L1i 640K  L2 9M  L3 18M", "governor powersave/intel_pstate", "clock 400-4700 MHz (base 2100)", "up 5d 0h",
                      "load 2.41 1.98 1.75", "ctxt 18", "intr 6.", "running 4", "blocked 1"):
             self.assertIn(want, txt)
         cells = grid_cells(lines)
@@ -426,7 +482,10 @@ class Screens(CpuCase):
         self.assertEqual(render.cpu_core_of(d, ids), {i: 1 + i // 2 for i in ids if 1 + i // 2 != 3})
         self.assertNotIn(4, render.cpu_core_temps(d, ids))
         lin = self.data()
-        self.assertEqual(render.cpu_core_of(lin, list(range(16)))[9], 16 + 1)       # Linux: core ids as sysfs names them (the demo's map)
+        self.assertEqual(render.cpu_core_of(self.data("linux"), [0, 1, 2]), {})     # the Ryzen demo has no per-core temperature to map
+        self.hybrid_laptop()
+        lin = self.data()
+        self.assertEqual(render.cpu_core_of(lin, list(range(16)))[9], 16 + 1)       # Linux: core ids as sysfs names them (the hybrid laptop's map)
 
     def test_macos_shows_pressure_clusters_and_apple_cores(self):
         render.DEMO_OS = "darwin"
@@ -468,7 +527,7 @@ class Screens(CpuCase):
         for cols, rows in SIZES:
             lines = [render.ANSI.sub("", x) for x in render.cpu_view(d, cols - 1, rows - 2)[0]]
             widths[cols] = max(len(CELL.findall(x)) for x in lines)
-        self.assertEqual(widths, {79: 2, 120: 3, 200: 4, 226: 4})
+        self.assertEqual(widths, {79: 3, 120: 4, 200: 4, 226: 4})
 
     def test_the_height_is_shared_and_what_does_not_fit_is_counted(self):
         d = self.data()
@@ -759,11 +818,11 @@ class Details(CpuCase):
         txt = "\n".join(self.pane(2210, 200, 50))
         pane = txt[txt.index("── PROCESS 2210"):]
         for want in ("ffmpeg", "parent    1  systemd", "user      alice", "state     R  running", "threads   18", "nice      10", "priority  30",
-                     "CPU       ", "(100 % = one core)", "memory    3.9 %  640M resident", "CPU time  2:32:00", "children  0"):
+                     "CPU       ", "(100 % = one core)", "memory    2.0 %  640M resident", "CPU time  2:32:00", "children  0"):
             self.assertIn(want, pane)
         when = re.search(r"started   (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \((\d+) h ago\)", pane)
         self.assertTrue(when, pane)
-        self.assertEqual(when.group(2), "7")                                                    # started 24320 s before the reading
+        self.assertEqual(when.group(2), "51")                                                   # started 182000 s before the reading
         self.assertEqual(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p["start"])), when.group(1))
 
     def test_the_parent_is_named_and_the_children_are_counted(self):
@@ -1159,7 +1218,7 @@ class MainLoop(CpuCase):
         self.assertEqual(frames[1][0][-20:].strip(), frames[0][0][-20:].strip())
 
     def test_the_command_line_prints_the_cpu_screen_for_each_demo_os(self):
-        for os_name, note in (("windows", "LibreHardwareMonitor"), ("darwin", "thermal pressure Moderate"), ("", "coretemp")):
+        for os_name, note in (("windows", "LibreHardwareMonitor"), ("darwin", "thermal pressure Moderate"), ("", "k10temp")):
             argv = ["render.py", "--once", "--demo", "--view", "cpu", "--cols", "120", "--rows", "33", "--sort", "mem"]
             argv += ["--demo-os", os_name] if os_name else []
             out = io.StringIO()
