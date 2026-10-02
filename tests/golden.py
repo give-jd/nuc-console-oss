@@ -18,7 +18,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   sum, abs, math.hypot, in every src module: Python 3.12+ adds floats differently from the older ones, and the C library rounds hypot()
           (the abs of a complex number) differently on Linux, macOS and Windows: the figures would differ in the last digit (see _sum, _abs)
   socket.gethostname, os.cpu_count, nuc_config.PORTABLE
-  render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD,
+  render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD, CATALOG,
           KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
   render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
   aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
@@ -219,6 +219,7 @@ class FrozenWorld(object):
             self.set(render, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
             self.set(render, "PROBLEMS_CMD", "nuc-console-problems")
             self.set(render, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"})
+            self.set(render, "CATALOG", dict(render.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
             self.set(render, "KIOSK_HINT", "Alt+F4 closes · F11 leaves full screen")
             path = os.path.join(self._tmp.name, "accepted.json")  # not there: nothing accepted, whatever the host has
             if self.accepted:
