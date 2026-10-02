@@ -205,24 +205,24 @@ or `setfont Lat15-TerminusBold32x16` for a one-off test. To let the monitor slee
 The AI screen (console key `5`) and the **AI** page of the web view (`http://127.0.0.1:8787/?view=ai`, the **ai** link at the bottom) already tell
 you which local models this machine can run: RAM, GPU and GPU memory, one verdict per model. They are also where you set one up and let it
 explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules). **You only choose a model**:
-press **use this model** on the page (or `Enter` then `u` on the screen); the runtime and the model are downloaded (with a progress bar, SHA-256 checked),
-the model server is started on 127.0.0.1 and the AI is turned on. The **AI on / off** button at the top (console key `e`) starts and stops it, and
-the chat below it answers as soon as the server does. The files go to the folder the page shows (`/var/lib/nuc-console/ai`, a model is 0.4 to 19 GB).
+press **use this model** on the page (or `Enter` then `u` on the screen); the model server (Ollama, the build of this system, SHA-256 checked) and the model
+are downloaded with a progress bar, the server is started on 127.0.0.1 and the AI is turned on. The **AI on / off** button at the top (console key `e`) starts and stops it, and
+the chat below it answers as soon as the server does. The files go to the folder the page shows (`/var/lib/nuc-console/ai`, a model is 0.5 to 19 GB).
 
 The same from a terminal (as before; `nuc-console-ai` and `nuc-console-ask` are unchanged):
 
 ```bash
 nuc-console-ai models                         # the same table in a terminal; no root (/usr/local/sbin/nuc-console-ai if your PATH lacks sbin)
 sudo nuc-console-ai setup                     # the recommended model (or: setup qwen3-8b qwen3-4b); downloads once, SHA-256 checked
-sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only, on the GPU when the model fits there (or: nuc-console-ai serve, in the foreground)
+sudo nuc-console-ai serve --install-service   # a service on 127.0.0.1 only, on the GPU when one holds the model (or: nuc-console-ai serve, in the foreground)
 # set [ai] enabled = yes in /etc/nuc-console/config.ini, then:
 nuc-console-ask advise
 ```
 
 `install.sh` itself downloads nothing and starts no model server; the buttons and `setup` need the network once and download only what this release
-pins: the models are pinned; the runtime's SHA-256 is still to be confirmed, and until it is they stop and name it. To switch the installed service to another model (`sudo nuc-console-ai use
-qwen3-4b`) or after changing `[ai] gpu`, run `sudo nuc-console-ai serve --install-service` again: the service keeps what it was installed
-with. On a machine with a GPU the unit it writes lets the service see the GPU (`PrivateDevices=no`, the `render` and `video` groups).
+pins (the server's build of each system and the models' names). The service serves every installed model: `sudo nuc-console-ai use qwen3-4b` switches the
+advisor to another one without a restart; after changing `[ai] gpu`, run `sudo nuc-console-ai serve --install-service` again: the service keeps what it was
+installed with. On Linux the server's build is a `.tar.zst`: Python 3.14 reads it, an older Python needs the `zstd` tool (`apt install zstd`). On a machine with a GPU the unit it writes lets the service see the GPU (`PrivateDevices=no`, the `render` and `video` groups).
 
 What the installer changes for the buttons: `/var/lib/nuc-console/ai` belongs to `nuc-console` (the account of the web view and of the console), both units may
 write there (`ReadWritePaths=-/var/lib/nuc-console/ai`), and the web unit has `TasksMax=512` and `MemoryMax=85%` because the model server it starts lives in its

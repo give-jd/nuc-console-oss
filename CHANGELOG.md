@@ -21,6 +21,24 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   `install.sh` asks `notify.py --needed` (new; `--enabled` still says only whether the notifications are on). Run the installer again to get the
   inbox folder and the web unit's group.
 - `nuc-console-telegram --status` says whether the alerts were switched on from the web page and whether the page may change them.
+- **The local AI runs on Ollama.** The model server that the AI page, the AI screen and `nuc-console-ai` download and start is now
+  [Ollama](https://github.com/ollama/ollama) 0.35.0 (MIT) instead of llamafile, which did not use the GPU on Windows and needed the Xcode Command Line Tools on
+  Apple silicon. *Use this model* still does everything with one click: it downloads the Ollama build of this system and processor (pinned by SHA-256, the release's
+  own `sha256sum.txt`), unpacks it into the AI folder, starts it on 127.0.0.1 as a child of nuc-console (no installer, no administrator, an Ollama you installed
+  yourself is left alone), pulls the model from the Ollama library with a progress bar, loads it and turns the advisor on. Ollama finds the GPU by itself (NVIDIA,
+  AMD and Intel through CUDA or Vulkan, Apple silicon through Metal) and falls back to the CPU. One server serves every installed model: choosing another model
+  loads it without a restart, and `nuc-console-ai use` needs no new `serve --install-service`.
+- `[ai] gpu = no` now hides the GPUs from the server (CPU only); `auto` lets Ollama decide how many layers fit. `nuc-console-ai serve` gets `--cpu`; `--threads`
+  and `--gpu-layers` are only accepted from services installed by an older version.
+- The models are pulled by their Ollama names (Qwen3, gpt-oss, Phi-4, Granite 3.3; SmolLM3 from its GGUF repository): Ollama checks every layer against the
+  registry's SHA-256; the version of a model is the registry's, not a commit pinned by nuc-console. The server's archive stays pinned by size and SHA-256 and every
+  member is checked before it is unpacked.
+
+### Upgrade notes
+
+- Models downloaded for llamafile are not used by Ollama: choose a model again on the AI page (or `sudo nuc-console-ai setup`), and delete the old files with
+  *delete everything* (or `sudo nuc-console-ai remove`). A service installed by an older version needs `sudo nuc-console-ai serve --install-service` again.
+- On Linux the Ollama build is a `.tar.zst`: Python 3.14 reads it, an older Python needs the `zstd` tool (`apt install zstd`).
 
 ## [2.0.0] - 2026-10-02
 

@@ -260,10 +260,13 @@ def _http(info, method, path, body=None, timeout=120.0):
 
 def list_models(info, timeout=10.0):
     _, obj = _http(info, "GET", "/models", None, timeout)
-    data = obj.get("data")
+    data = obj.get("data", False)
+    if data is None:  # Ollama with no model yet
+        data = []
     if not isinstance(data, list):
         raise AdvisorError("the model server did not list its models: is [ai] endpoint an OpenAI-compatible /v1 URL?")
-    return [clean_line(m.get("id"), 80) for m in data[:50] if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    ids = [clean_line(m.get("id"), 80) for m in data[:50] if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    return [x[:-7] if x.endswith(":latest") else x for x in ids]  # Ollama names a model with its default tag; [ai] model does not
 
 
 def _model(cfg, info, timeout):
@@ -276,13 +279,41 @@ def _model(cfg, info, timeout):
     return models[0]
 
 
+_OLLAMA, OLLAMA_TTL = {}, 600.0  # (host, port) -> (is an Ollama, when it was asked): asked again after OLLAMA_TTL seconds
+
+
+def is_ollama(info, timeout=3.0):
+    """Is the server an Ollama (GET /api/version beside its /v1)? Asked once per server and kept OLLAMA_TTL seconds; no answer = no."""
+    key = (info["host"], info["port"])
+    hit = _OLLAMA.get(key)
+    if hit and time.monotonic() - hit[1] < OLLAMA_TTL:
+        return hit[0]
+    try:
+        _, obj = _http(dict(info, base=""), "GET", "/api/version", None, min(timeout, 3.0))
+        yes = isinstance(obj.get("version"), str)
+    except AdvisorError:
+        yes = False
+    _OLLAMA[key] = (yes, time.monotonic())
+    return yes
+
+
 def chat(info, model, messages, tools=None, max_tokens=MAX_TOKENS_ASK, timeout=120.0):
-    """POST /chat/completions -> the reply message dict ({"content": ..., "tool_calls": ...})."""
+    """POST /chat/completions -> the reply message dict ({"content": ..., "tool_calls": ...}). An Ollama is asked not to think
+    (reasoning_effort "none"): a model that thinks by default (Qwen3) would spend the tokens of the answer on its thinking and answer
+    nothing; a server or a model that refuses that is asked again without it."""
     body = {"model": model, "messages": messages, "temperature": TEMPERATURE, "max_tokens": max_tokens, "stream": False}
     if tools:
         body["tools"] = tools
+    if is_ollama(info, timeout):
+        body["reasoning_effort"] = "none"
     try:
-        _, obj = _http(info, "POST", "/chat/completions", body, timeout)
+        try:
+            _, obj = _http(info, "POST", "/chat/completions", body, timeout)
+        except AdvisorError as e:
+            if isinstance(e, ToolsUnsupported) or "reasoning_effort" not in body or not re.search(r"reason|think", str(e), re.I):
+                raise
+            body.pop("reasoning_effort")
+            _, obj = _http(info, "POST", "/chat/completions", body, timeout)
     except ToolsUnsupported as e:
         if tools:
             raise

@@ -252,12 +252,12 @@ a test parses every fragment and checks the same lists.
 
 | POST | Fields | Does |
 |---|---|---|
-| `/ai/use` | `model` | the one action: download what is missing (runtime, model: pinned, SHA-256 checked), start the model server, wait until it answers, turn the advisor on with it |
+| `/ai/use` | `model` | the one action: download what is missing (the model server: pinned, SHA-256 checked; the model, pulled through it), start the server, load the model, turn the advisor on with it |
 | `/ai/on` | (`model`, `confirm=yes`) | AI on with the model chosen before; with none chosen it redirects to a question naming the recommended model and its size, and only `confirm=yes` with that `model` goes on |
 | `/ai/off` | | stops the model server this process started, turns the advisor off |
 | `/ai/cancel` | | stops the download or the start that runs (what was fetched is kept) |
 | `/ai/delete` | `model`, `confirm=yes` | deletes that model's files; without `confirm=yes` it only redirects to the question |
-| `/ai/delete-all` | `confirm=yes` | deletes the runtime and every model; the same |
+| `/ai/delete-all` | `confirm=yes` | deletes the model server and every model; the same |
 | `/ai/ask` | `q` (500 characters at most) | a question, answered by the model in the background |
 | `/ai/advise` | `days` = 1, 7 or 30 | advice on the HEALTH findings of that period, written now |
 

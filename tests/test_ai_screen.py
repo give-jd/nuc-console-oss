@@ -88,7 +88,7 @@ def catalog(change=None):
     models = [model("m-gpu", "gpu", "Alpha GPU", 1, 5000), model("m-part", "partial", "Beta Partial", 2, 12000, 11000, active_b=2.0),
               model("m-ram", "ram", "Gamma RAM", 3, 3000, 2600, installed=True), model("m-slow", "slow", "Delta Slow", 4, 9000, 8000),
               model("m-no", "no", "Epsilon Big", 5, 40000, 38000, pinned=False)]
-    cat = {"hw": demo.ai_catalog(None)["hw"], "dir": "/var/lib/nuc-console-ai", "runtime": {"installed": True, "version": "0.10.6"},
+    cat = {"hw": demo.ai_catalog(None)["hw"], "dir": "/var/lib/nuc-console-ai", "runtime": {"installed": True, "name": "Ollama", "version": "0.35.0"},
            "recommended": "m-gpu", "active": "m-ram", "models": models}
     if change:
         change(cat)
@@ -677,7 +677,7 @@ class Once(AiCase):
         self.assertIn("endpoint  http://127.0.0.1:8080/v1", txt, "the server this machine runs: where the advisor asks")
         self.assertIn("server    ✔ answering · 1 model: qwen3-4b", txt)
         self.assertIn("model     ● qwen3-4b  in the catalog", txt)
-        self.assertIn("runtime   ✔ installed (0.10.6)", txt)
+        self.assertIn("runtime   ✔ installed (Ollama 0.35.0)", txt)
         self.assertIn("files     /var/lib/nuc-console/ai", txt)
         render.DEMO_OS = "windows"
         txt = "\n".join(self.screen([], 200, 50)[1])
@@ -1110,7 +1110,7 @@ class MainLoop(AiCase):
         self.assertRegex(ai[1][-1], r"Delete the runtime and every downloaded model \(\d+\.\d GB\)\?  \[y/n\]", "80 columns: short")
         self.assertNotIn("Delete the runtime", ai[2][-1])
         wide, _ = self.run_main([b"a", b"X", b"\x1b"], cols=120)
-        self.assertRegex([f for f in wide if self.is_ai(f)][1][-1], r"every downloaded model \(4\.0 GB\)\?  y: yes   any other key: no")
+        self.assertRegex([f for f in wide if self.is_ai(f)][1][-1], r"every downloaded model \(5\.0 GB\)\?  y: yes   any other key: no")
 
     def test_c_cancels_and_says_when_there_is_nothing_to_cancel(self):
         self.engine()

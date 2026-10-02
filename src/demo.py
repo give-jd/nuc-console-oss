@@ -812,13 +812,13 @@ def _ai_machine(os_name):
 
 _AI_MACHINES = {os_name: _ai_machine(os_name) for os_name in ("linux", "windows", "darwin")}
 _AI_STATE = {  # per machine: what is installed, the active model, the runtime, the advisor's [ai] settings and whether its server answers
-    "linux": {"installed": ("qwen3-4b", "qwen3-1.7b"), "active": "qwen3-4b", "runtime": {"installed": True, "version": "0.10.6"},
+    "linux": {"installed": ("qwen3-4b", "qwen3-1.7b"), "active": "qwen3-4b", "runtime": {"installed": True, "name": "Ollama", "version": "0.35.0"},
               "dir": "/var/lib/nuc-console/ai", "enabled": True, "endpoint": "http://127.0.0.1:11434/v1",
               "probe": {"state": "answering", "msg": "", "models": ["qwen3-4b"]}},
-    "windows": {"installed": (), "active": None, "runtime": {"installed": False, "version": ""},
+    "windows": {"installed": (), "active": None, "runtime": {"installed": False, "name": "Ollama", "version": ""},
                 "dir": r"C:\ProgramData\nuc-console\ai", "enabled": False, "endpoint": "http://127.0.0.1:11434/v1",
                 "probe": {"state": "off", "msg": "[ai] enabled = no in config.ini", "models": []}},
-    "darwin": {"installed": ("qwen3-8b",), "active": "qwen3-8b", "runtime": {"installed": True, "version": "0.10.6"},
+    "darwin": {"installed": ("qwen3-8b",), "active": "qwen3-8b", "runtime": {"installed": True, "name": "Ollama", "version": "0.35.0"},
                "dir": "/Library/Application Support/nuc-console/ai", "enabled": True, "endpoint": "http://127.0.0.1:8080/v1",
                "probe": {"state": "down", "msg": "no server on 127.0.0.1:8080: start Ollama or run nuc-console-ai serve", "models": []}},
 }
