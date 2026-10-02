@@ -2,6 +2,8 @@
 allows only its SHA-256, so what matters here is that it can do nothing beyond what the module promises (no markup built
 from data, no network, nothing loaded, no navigation but the reload and a node's own link), that it cannot break out of its
 <script> element, that it touches only the DOM contract's ids, classes and attributes, and that the hash is stable.
+The rules themselves are shared with the web shell's scripts (tests/jsrules.py, applied to those in tests/test_webjs.py); what
+is left here is what only this script has: its own contract (jsrules.POLICIES["graph"]) and its geometry helpers.
 It runs without a browser; the behaviour (drag, zoom, pan, refresh, storage) was checked in a real one."""
 import base64
 import hashlib
@@ -13,33 +15,44 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import graphjs  # noqa: E402
+import jsrules  # noqa: E402
 
 S = graphjs.SCRIPT
+P = jsrules.POLICIES["graph"]
 
-# the DOM contract (web.py's graph page), and what the script may add to it
-IDS = {"gv", "gsvg", "gvp"}
-READ_SELECTORS = {"a.n[data-k]", "line.e[data-a][data-b]", "a.n", "circle", "text"}
-READ_ATTRS = {"data-k", "data-a", "data-b", "data-state", "data-refresh", "data-paused", "cx", "cy", "r", "x", "y", "href",
-              "marker-end"}
-WRITE_ATTRS = {"transform", "cx", "cy", "x", "y", "x1", "y1", "x2", "y2"}
-CLASSES = {"js", "drag", "hov", "hv", "pin"}  # set by the script: documented at its top for the server's CSS
-STYLES = {"touchAction", "userSelect", "webkitUserSelect"}
+# the DOM contract (web.py's graph page), and what the script may add to it: jsrules.POLICIES["graph"]
+IDS = P.ids
+READ_SELECTORS = P.selectors
+READ_ATTRS = P.attrs_read
+WRITE_ATTRS = P.attrs_write
+CLASSES = P.classes_set  # set by the script: documented at its top for the server's CSS
+STYLES = P.styles
+strings = jsrules.strings
 
 
-def strings(pattern, text=S):
-    return set(re.findall(pattern, text))
+def problems(*rules):
+    """What the shared rules find in the script, from the rule groups named (empty: it obeys them)."""
+    return [p for rule in rules for p in rule(S, P)]
+
+
+class Shared(unittest.TestCase):
+    def test_obeys_every_shared_rule(self):
+        self.assertEqual(jsrules.check("graph", S), [])
 
 
 class Forbidden(unittest.TestCase):
     def test_no_markup_from_data(self):
+        self.assertEqual(problems(jsrules.rule_global, jsrules.rule_caps), [])
         for api in ("innerHTML", "outerHTML", "insertAdjacentHTML", "insertAdjacentElement", "document.write", "createElement",
                     "createElementNS", "createContextualFragment", "DOMParser", "appendChild", "insertBefore", "cloneNode",
                     "textContent", "innerText", "srcdoc", "importNode"):
             self.assertNotIn(api, S, api)
 
     def test_no_code_from_strings(self):
+        self.assertEqual(problems(jsrules.rule_global), [])
         self.assertIsNone(re.search(r"\beval\b", S))
         self.assertIsNone(re.search(r"\bFunction\b", S))  # new Function(...), Function(...), the constructor's other doors
         self.assertIsNone(re.search(r"\b(setTimeout|setInterval|requestAnimationFrame)\(\s*[\"'`]", S))
@@ -49,6 +62,7 @@ class Forbidden(unittest.TestCase):
         self.assertNotIn("javascript:", S.lower())
 
     def test_no_network_and_nothing_loaded(self):
+        self.assertEqual(problems(jsrules.rule_global, jsrules.rule_caps, jsrules.rule_network), [])
         for api in ("fetch", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "navigator", "Image(", "Audio(",
                     "postMessage", "BroadcastChannel", "SharedWorker", "serviceWorker", "caches", "indexedDB", "localStorage",
                     "document.cookie", "window.open", "window.name", "document.domain", "opener", "<link", "<img", "@import"):
@@ -57,7 +71,8 @@ class Forbidden(unittest.TestCase):
         self.assertIsNone(re.search(r"\.(src|srcset|action|data)\s*=[^=]", S))
 
     def test_navigation_is_only_reload_and_a_node_link(self):
-        self.assertEqual(strings(r"\blocation\.(\w+)"), {"reload", "assign"})
+        self.assertEqual(problems(jsrules.rule_navigation), [])
+        self.assertEqual(strings(r"\blocation\.(\w+)", S), {"reload", "assign"})
         self.assertEqual(S.count("location.assign("), 1)
         self.assertIn("location.assign(href)", S)  # href: the node's own link, read from the page
         self.assertIsNone(re.search(r"\bhistory\b", S))
@@ -65,12 +80,13 @@ class Forbidden(unittest.TestCase):
         self.assertIsNone(re.search(r"\.href\s*=[^=]", S))
 
     def test_storage_only_in_try(self):
+        self.assertEqual(problems(jsrules.rule_storage), [])
         lines = [ln for ln in S.splitlines() if "sessionStorage" in ln and not ln.lstrip().startswith("//")]
         self.assertEqual(len(lines), 2)  # save and restore, nothing else
         for ln in lines:
             self.assertIn("try {", ln)
         self.assertIn("catch", S)
-        self.assertEqual(strings(r"sessionStorage\.(\w+)"), {"setItem", "getItem"})
+        self.assertEqual(strings(r"sessionStorage\.(\w+)", S), {"setItem", "getItem"})
 
 
 class Shape(unittest.TestCase):
@@ -85,8 +101,10 @@ class Shape(unittest.TestCase):
         self.assertNotIn("\r", S)
         self.assertLess(len(S.encode("utf-8")), 16 * 1024)
         self.assertLessEqual(len(S.splitlines()), 300)
+        self.assertEqual([p for p in jsrules.rule_shape(S, P) if "bytes" in p or "lines" in p or "ASCII" in p], [])
 
     def test_strict_iife_no_globals(self):
+        self.assertEqual(jsrules.rule_shape(S, P), [])
         code = "\n".join(ln for ln in S.splitlines() if not ln.startswith("//"))
         self.assertTrue(code.startswith("(function main() {\n  \"use strict\";\n"), code[:60])
         self.assertTrue(code.rstrip().endswith("})();"))
@@ -96,7 +114,7 @@ class Shape(unittest.TestCase):
             self.assertTrue(ln.startswith(" ") or not ln.strip(), ln)
         for ln in code.splitlines():
             self.assertIsNone(re.match(r"\s*(var|window\.\w+\s*=|this\.\w+\s*=)", ln), ln)  # let/const only
-        self.assertEqual(strings(r"\bvar\b"), set())
+        self.assertEqual(strings(r"\bvar\b", S), set())
 
     def test_documented_at_the_top(self):
         head = S[:S.index("(function")]
@@ -106,35 +124,39 @@ class Shape(unittest.TestCase):
 
 
 class Contract(unittest.TestCase):
+    def test_shared_contract_rule(self):
+        self.assertEqual(problems(jsrules.rule_contract), [])
+
     def test_ids(self):
-        self.assertEqual(strings(r"getElementById\(\"([^\"]*)\"\)"), IDS)
+        self.assertEqual(strings(r"getElementById\(\"([^\"]*)\"\)", S), IDS)
         self.assertNotIn("getElementsBy", S)
 
     def test_selectors(self):
-        used = strings(r"(?:querySelectorAll|querySelector|closest|matches)\(\"([^\"]*)\"\)")
+        used = strings(r"(?:querySelectorAll|querySelector|closest|matches)\(\"([^\"]*)\"\)", S)
         self.assertTrue(used)
         self.assertLessEqual(used, READ_SELECTORS)
         self.assertIsNone(re.search(r"(querySelectorAll|querySelector|closest)\([^\"]", S))  # only literal selectors
 
     def test_attributes(self):
-        read = strings(r"(?:getAttribute|hasAttribute)\(\"([^\"]*)\"\)")
+        read = strings(r"(?:getAttribute|hasAttribute)\(\"([^\"]*)\"\)", S)
         self.assertLessEqual(read, READ_ATTRS)
         for must in ("data-k", "data-a", "data-b", "data-state", "data-refresh", "data-paused", "marker-end"):
             self.assertIn(must, read)
         # num(el, "cx"), put(el, "x1", v): the helpers' calls name the geometry attributes
-        geo = strings(r"\b(?:num|put)\([^,()]+(?:\([^)]*\))?,\s*\"([^\"]*)\"")
+        geo = strings(r"\b(?:num|put)\([^,()]+(?:\([^)]*\))?,\s*\"([^\"]*)\"", S)
         self.assertLessEqual(geo, {"cx", "cy", "r", "x", "y", "x1", "y1", "x2", "y2"})
-        wrote = strings(r"setAttribute\(\"([^\"]*)\"") | {a for a in geo if a != "r"}
+        wrote = strings(r"setAttribute\(\"([^\"]*)\"", S) | {a for a in geo if a != "r"}
         self.assertLessEqual(wrote, WRITE_ATTRS)
         self.assertIn("transform", wrote)
         dyn = [ln for ln in S.splitlines() if re.search(r"setAttribute\([^\"]", ln)]  # only the geometry helper takes a name
         self.assertEqual(len(dyn), 1, dyn)
         self.assertIn("const put = (el, name, v) => el.setAttribute(name, v.toFixed(1));", dyn[0])
+        self.assertEqual([ln.strip() for ln in dyn], list(P.dynamic_setattr))
         self.assertNotIn("removeAttribute", S)
         self.assertNotIn("dataset", S)
 
     def test_classes(self):
-        used = strings(r"classList\.(?:toggle|add|remove|contains)\(\"([^\"]*)\"")
+        used = strings(r"classList\.(?:toggle|add|remove|contains)\(\"([^\"]*)\"", S)
         self.assertTrue(used)
         self.assertLessEqual(used, CLASSES)
         self.assertEqual(used, CLASSES)  # all of them are really used, so the header's list is the whole list
@@ -142,7 +164,7 @@ class Contract(unittest.TestCase):
         self.assertNotIn("className", S)
 
     def test_styles_and_nothing_else(self):
-        self.assertEqual(strings(r"\.style\.(\w+)"), STYLES)
+        self.assertEqual(strings(r"\.style\.(\w+)", S), STYLES)
         self.assertNotIn("style.cssText", S)
         self.assertNotIn("styleSheets", S)
 
