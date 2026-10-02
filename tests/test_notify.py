@@ -37,6 +37,7 @@ import render  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 REAL_SERVICE_CONTROL = notify.service_control  # Base replaces it in every test: this is the real one
+REAL_LISTENING = notify.listening  # Base makes it False (it depends on the OS): the tests of the web page's requests turn it on
 SECRET = "Zq9" * 12  # the secret half of the fake token: it must never show up anywhere
 TOKEN = "123456789:" + SECRET
 CHAT_ID = 4242424242
@@ -124,7 +125,8 @@ class Base(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.cfg_path, "NUC_CONSOLE_NOTIFY_DIR": self.dir})
         env.start()
         self.addCleanup(env.stop)
-        for what in (mock.patch.object(notify, "NOTIFY_DIR", self.dir), mock.patch.object(notify, "service_control", return_value=(True, ""))):
+        for what in (mock.patch.object(notify, "NOTIFY_DIR", self.dir), mock.patch.object(notify, "service_control", return_value=(True, "")),
+                     mock.patch.object(notify, "listening", return_value=False)):
             what.start()
             self.addCleanup(what.stop)
 
@@ -565,7 +567,8 @@ class Service(Base):
             self.assertNotIn(secret, raw)
             self.assertNotIn(secret, out)
         st = json.loads(raw)
-        self.assertEqual(set(st), {"ts", "enabled", "paired", "username", "last_sent_ts", "last_error", "failing_since"})
+        self.assertEqual(set(st), {"ts", "enabled", "paired", "username", "last_sent_ts", "last_error", "failing_since", "by", "listening", "request"})
+        self.assertEqual((st["by"], st["listening"], st["request"]), ("config", False, None))
         self.assertEqual((st["enabled"], st["paired"], st["username"]), (True, True, "alice"))
         self.assertIsInstance(st["last_sent_ts"], int)
         self.assertIn("HTTP 401", st["last_error"])
@@ -950,7 +953,7 @@ class Setup(Base):
         cfg = slurp(self.cfg_path)
         self.assertIn("# my settings", cfg)
         self.assertIn("map = no", cfg)
-        self.assertEqual(nuc_config.load()["telegram"], {"enabled": True, "username": "alice", "detail": "full", "resolved": True})
+        self.assertEqual(nuc_config.load()["telegram"], {"enabled": True, "username": "alice", "detail": "full", "resolved": True, "web_actions": True})
         self.assertIn("username = @alice", cfg)
         (method, payload), = [c for c in fake.calls if c[0] == "sendMessage"]
         self.assertEqual(payload["chat_id"], 777)
@@ -1249,6 +1252,281 @@ class Wrappers(unittest.TestCase):
 
 
 REAL_SECRET_DIR = notify.secret_dir
+
+
+class WebPage(Base):
+    """The web view's Telegram page talks to the service through the inbox (src/tgweb.py writes the requests): pair, on, off, test."""
+
+    def setUp(self):
+        super().setUp()
+        self.n = 0
+
+    def request(self, action, ts=None, rid=None, **fields):
+        """A request file as the web page writes it."""
+        self.n += 1
+        rid = rid or "%013d-%08x" % (int(Clock().t * 1000) + self.n, self.n)
+        box = notify.inbox_dir(self.dir)
+        os.makedirs(box, exist_ok=True)
+        path = os.path.join(box, "r-%s.json" % rid)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dict({"v": 1, "id": rid, "action": action, "ts": int(Clock().t if ts is None else ts)}, **fields), f)
+        return path
+
+    def pair_request(self, user="Bob_99", token=TOKEN, chat_id=777, bot="my_bot"):
+        return self.request("pair", token=token, chat_id=chat_id, username=user, bot=bot)
+
+    def serve(self, rounds=(), cycles=1, fake=None, clock=None, listen=True):
+        clock, fake = clock or Clock(), fake or Fake()
+        seq = iter(list(rounds) + [[]] * 50)
+        out = io.StringIO()
+        with mock.patch.object(notify, "listening", return_value=listen), contextlib.redirect_stdout(out):
+            rc = notify.serve(self.dir, clock=clock, sleep=clock.sleep, records=lambda: next(seq), transport=fake, cycles=cycles)
+        return rc, fake, out.getvalue()
+
+    def inbox(self):
+        box = notify.inbox_dir(self.dir)
+        return sorted(os.listdir(box)) if os.path.isdir(box) else []
+
+    def web(self):
+        return json.loads(slurp(self.dir, "web.json"))
+
+    def test_listening_needs_the_switch_an_installation_and_a_web_view(self):
+        def cfg(web=False, mode="browser", actions=True):
+            c = nuc_config.load()
+            c["web"]["enabled"], c["display"]["mode"], c["telegram"]["web_actions"] = web, mode, actions
+            return c
+        with mock.patch.object(nuc_config, "PORTABLE", ""):
+            with mock.patch.object(nuc_config, "LINUX", True):
+                self.assertFalse(REAL_LISTENING(cfg()))  # Linux: the web view is off unless [web] enabled
+                self.assertTrue(REAL_LISTENING(cfg(web=True)))
+                self.assertFalse(REAL_LISTENING(cfg(web=True, actions=False)))
+            with mock.patch.object(nuc_config, "LINUX", False):  # macOS, Windows: the web view is the dashboard
+                self.assertTrue(REAL_LISTENING(cfg()))
+                self.assertFalse(REAL_LISTENING(cfg(mode="none")))
+                self.assertTrue(REAL_LISTENING(cfg(web=True, mode="none")))
+        with mock.patch.object(nuc_config, "PORTABLE", "/somewhere"):
+            self.assertFalse(REAL_LISTENING(cfg(web=True)))  # a portable run has no notifier service
+
+    def test_a_pairing_made_on_the_page_is_stored_here_and_turned_on(self):
+        self.config(enabled="no")
+        self.pair_request()
+        rc, fake, out = self.serve()
+        self.assertEqual((rc, self.inbox()), (0, []))
+        self.assertEqual(notify.read_token(self.dir), TOKEN)
+        chat = notify.read_chat(self.dir)
+        self.assertEqual((chat["chat_id"], chat["username"], chat["bot"]), (777, "bob_99", "my_bot"))
+        self.assertEqual(self.web(), {"v": 1, "enabled": True, "username": "bob_99"})
+        t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual((t["enabled"], t["by"], t["username"]), (True, "web", "bob_99"))
+        (method, payload), = fake.calls
+        self.assertEqual((method, payload["chat_id"]), ("sendMessage", 777))
+        self.assertIn("paired from the web view", payload["text"])
+        st = self.status()
+        self.assertEqual((st["enabled"], st["paired"], st["by"], st["listening"]), (True, True, "web", True))
+        self.assertEqual((st["request"]["action"], st["request"]["ok"]), ("pair", True))
+        self.assertIn("paired with @bob_99", st["request"]["said"])
+        for secret in (SECRET, "777"):
+            self.assertNotIn(secret, slurp(self.dir, "status.json"))
+            self.assertNotIn(secret, slurp(self.dir, "web.json"))
+        self.assertNotIn(SECRET, out)
+        self.assertEqual(slurp(self.cfg_path), "[telegram]\nenabled = no\n")  # config.ini is root's: never written by the service
+        if POSIX:
+            for name in ("token", "chat.json"):
+                self.assertEqual(os.stat(os.path.join(notify.secret_dir(self.dir), name)).st_mode & 0o777, 0o600)
+            self.assertEqual(os.stat(os.path.join(self.dir, "web.json")).st_mode & 0o777, 0o644)
+
+    def test_the_chat_paired_before_is_told_and_the_new_one_starts_with_a_summary(self):
+        self.pair_files()
+        notify.put(notify.secret_dir(self.dir), "sent.json", json.dumps({"keys": {"ufw-off|x": 1}}), 0o600)
+        other = "987654321:" + "Ab1" * 12
+        self.pair_request(token=other, bot="other_bot")
+        rc, fake, _ = self.serve()
+        (_, told), (_, hello) = fake.calls
+        self.assertEqual((told["chat_id"], hello["chat_id"]), (CHAT_ID, 777))
+        self.assertIn("now sends its alerts to @bob_99", told["text"])
+        self.assertIn("web view", told["text"])
+        self.assertEqual(notify.read_token(self.dir), other)
+        self.assertFalse(os.path.exists(os.path.join(notify.secret_dir(self.dir), "sent.json")))
+        self.assertEqual(nuc_config.telegram(nuc_config.load(), self.dir)["username"], "bob_99")
+
+    def test_on_and_off_from_the_page_and_the_chat_hears_of_off(self):
+        self.config(enabled="no", username="@alice")
+        self.pair_files()
+        self.request("on")
+        self.serve()
+        self.assertEqual(self.web(), {"v": 1, "enabled": True})
+        self.assertEqual((self.status()["enabled"], self.status()["by"], self.status()["request"]["said"]), (True, "web", "on"))
+        self.request("off")
+        rc, fake, _ = self.serve()
+        (method, payload), = fake.calls
+        self.assertEqual((method, payload["chat_id"]), ("sendMessage", CHAT_ID))
+        self.assertIn("switched off from this machine's web view", payload["text"])
+        self.assertEqual(self.web(), {"v": 1, "enabled": False})
+        self.assertIs(self.status()["enabled"], False)
+
+    def test_on_by_config_ini_cannot_be_switched_off_from_the_page(self):
+        self.pair_files()
+        self.request("off")
+        rc, fake, _ = self.serve()
+        st = self.status()
+        self.assertEqual((st["enabled"], st["by"], st["request"]["ok"]), (True, "config", False))
+        self.assertIn("config.ini", st["request"]["said"])
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "web.json")))
+
+    def test_a_test_message_from_the_page(self):
+        self.pair_files()
+        self.request("test")
+        rc, fake, _ = self.serve()
+        (method, payload), = fake.calls
+        self.assertIn("test message, from the web view", payload["text"])
+        self.assertEqual(self.status()["request"]["said"], "test message sent to @alice")
+        os.remove(os.path.join(notify.secret_dir(self.dir), "token"))
+        self.request("test")
+        self.serve()
+        self.assertIs(self.status()["request"]["ok"], False)
+        self.assertIn("no bot token", self.status()["request"]["said"])
+
+    def test_listening_it_stays_when_off_and_comes_back_at_once_for_a_request(self):
+        self.config(enabled="no")
+        clock = Clock()
+        rc, fake, out = self.serve(cycles=3, clock=clock)
+        self.assertEqual((rc, fake.calls), (0, []))
+        self.assertEqual(clock.t, Clock().t + 2 * notify.CYCLE_S)
+        st = self.status()
+        self.assertEqual((st["enabled"], st["listening"]), (False, True))
+        self.assertEqual(out.count("are off"), 1)  # said once, not every cycle
+        svc, clock = notify.Service(self.dir, Clock()), Clock()
+        svc.clock, svc.listening = clock, True
+        naps, sent = [], []
+
+        def nap(sec):
+            naps.append(sec)
+            clock.sleep(sec)
+            if len(naps) == 2 and not sent:
+                sent.append(self.request("test"))
+        svc.sleep = nap
+        self.config(enabled="no", username="@alice")
+        self.pair_files()
+        fake = Fake()
+        svc.make = lambda token: fake
+        svc.wait(notify.CYCLE_S)
+        self.assertEqual(naps, [notify.INBOX_S, notify.INBOX_S])  # the request is done at the first look after it arrived
+        self.assertEqual((fake.methods, svc.answer["action"], self.inbox()), (["sendMessage"], "test", []))
+        with open(os.path.join(notify.inbox_dir(self.dir), "notes.txt"), "w") as f:
+            f.write("not a request")
+        naps.clear()
+        svc.wait(notify.CYCLE_S)  # nothing to do: it sleeps until the next cycle
+        self.assertEqual(sum(naps), notify.CYCLE_S)
+
+    def test_a_request_that_cannot_be_deleted_is_never_done(self):
+        self.pair_files()
+        self.request("test")
+        with mock.patch.object(notify.os, "remove", side_effect=PermissionError("denied")):
+            self.assertEqual(notify.take_requests(self.dir, Clock().t), [])
+        self.assertEqual(len(self.inbox()), 1)
+
+    def test_not_listening_it_reads_no_request_and_drops_them(self):
+        self.config(enabled="no")
+        self.pair_request()
+        rc, fake, _ = self.serve(listen=False, cycles=None)
+        self.assertEqual((rc, fake.calls, self.inbox()), (0, [], []))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "web.json")))
+        self.assertFalse(os.path.exists(os.path.join(notify.secret_dir(self.dir), "token")))
+
+    def test_what_is_not_a_request_is_deleted_unread(self):
+        now = Clock().t
+        stale = self.request("test", ts=now - notify.REQ_MAX_AGE - 1)
+        moved = self.request("test")
+        os.rename(moved, os.path.join(notify.inbox_dir(self.dir), "r-%013d-%08x.json" % (1, 1)))  # the name says one thing, the content another
+        self.request("dance")
+        self.request("pair", username="bob_99", chat_id=777, bot="my_bot", token="not-a-token")
+        self.request("pair", username="b", chat_id=777, bot="my_bot", token=TOKEN)
+        self.request("pair", username="bob_99", chat_id=True, bot="my_bot", token=TOKEN)
+        big = self.request("test")
+        with open(big, "a", encoding="utf-8") as f:
+            f.write(" " * notify.REQ_MAX)
+        with open(os.path.join(notify.inbox_dir(self.dir), "notes.txt"), "w") as f:
+            f.write("not mine")
+        self.assertEqual(notify.take_requests(self.dir, now), [])
+        self.assertEqual(self.inbox(), ["notes.txt"])  # only what has a request's name is the service's to delete
+        self.assertFalse(os.path.exists(stale))
+
+    def test_a_request_being_written_waits_and_an_old_broken_one_goes(self):
+        now = Clock().t
+        path = self.request("test")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"v": 1, "id"')
+        os.utime(path, (now - 2, now - 2))
+        self.assertEqual(notify.take_requests(self.dir, now), [])
+        self.assertTrue(os.path.exists(path))
+        os.utime(path, (now - notify.REQ_SETTLE_S - 1,) * 2)
+        self.assertEqual(notify.take_requests(self.dir, now), [])
+        self.assertFalse(os.path.exists(path))
+
+    def test_requests_come_oldest_first_and_carry_only_checked_fields(self):
+        self.request("on")
+        self.pair_request()
+        got = notify.take_requests(self.dir, Clock().t)
+        self.assertEqual([r["action"] for r in got], ["on", "pair"])
+        self.assertEqual(set(got[1]), {"id", "action", "token", "chat_id", "username", "bot"})
+        self.assertEqual(got[1]["username"], "bob_99")
+
+    @unittest.skipUnless(POSIX, "links: POSIX")
+    def test_a_link_in_the_inbox_is_not_followed(self):
+        target = os.path.join(self.dir, "elsewhere.json")
+        with open(target, "w") as f:
+            json.dump({"v": 1, "id": "%013d-%08x" % (1000000000, 1), "action": "on", "ts": int(Clock().t)}, f)
+        os.makedirs(notify.inbox_dir(self.dir))
+        os.symlink(target, os.path.join(notify.inbox_dir(self.dir), "r-%013d-%08x.json" % (1000000000, 1)))
+        self.assertEqual(notify.take_requests(self.dir, Clock().t), [])
+        self.assertEqual((self.inbox(), os.path.exists(target)), ([], True))
+
+    def test_the_settings_in_force_lay_web_json_over_config_ini(self):
+        self.config(enabled="no", username="@alice")
+        t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual((t["enabled"], t["by"], t["username"]), (False, "", "alice"))
+        notify.write_web(self.dir, enabled=True, username="bob_99")
+        t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual((t["enabled"], t["by"], t["username"]), (True, "web", "bob_99"))
+        self.config(enabled="yes", username="@alice")
+        notify.write_web(self.dir, enabled=False)
+        t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual((t["enabled"], t["by"]), (True, "config"))  # the page cannot turn config.ini's yes off
+        self.config(enabled="no", web_actions="no")
+        notify.write_web(self.dir, enabled=True)
+        t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual((t["enabled"], t["username"]), (False, ""))  # locked: web.json counts for nothing
+        with open(os.path.join(self.dir, "web.json"), "w") as f:
+            f.write("[1, 2]")
+        self.assertEqual(nuc_config.telegram_web(self.dir), {})
+
+    @unittest.skipUnless(POSIX, "modes: POSIX")
+    def test_a_web_json_others_could_have_written_counts_for_nothing(self):
+        notify.write_web(self.dir, enabled=True)
+        self.assertEqual(nuc_config.telegram_web(self.dir), {"enabled": True})
+        os.chmod(os.path.join(self.dir, "web.json"), 0o666)
+        self.assertEqual(nuc_config.telegram_web(self.dir), {})
+
+    def test_the_command_line_takes_over_and_keeps_the_pairing_made_on_the_page(self):
+        self.config(enabled="no", username="@alice")
+        self.pair_files(user="bob_99")
+        notify.write_web(self.dir, enabled=True, username="bob_99")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(notify.main(["notify.py", "--off"]), 0)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "web.json")))
+        self.assertEqual((nuc_config.load()["telegram"]["enabled"], nuc_config.load()["telegram"]["username"]), (False, "bob_99"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(notify.main(["notify.py", "--on"]), 0)
+        self.assertIsNone(notify.load_credentials(self.dir, nuc_config.load()["telegram"]["username"])[2])
+
+    def test_off_and_forget_keep_the_service_running_while_it_listens(self):
+        self.pair_files()
+        with mock.patch.object(notify, "listening", return_value=True), contextlib.redirect_stdout(io.StringIO()):
+            notify.main(["notify.py", "--off"])
+            notify.service_control.assert_called_with("restart")
+            notify.main(["notify.py", "--forget"])
+            notify.service_control.assert_called_with("restart")
+            self.assertEqual(notify.main(["notify.py", "--enabled"]), 0)  # off, but the installers start it: it waits for the page
 
 
 class SecretsFolder(unittest.TestCase):

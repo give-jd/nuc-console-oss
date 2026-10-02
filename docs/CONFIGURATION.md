@@ -186,9 +186,10 @@ enabled = no
 username = your_telegram_name
 detail = titles
 resolved = yes
+web_actions = yes
 ```
 
-New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you create yourself (free). It only sends: no listener, no webhook, it never reads messages, no commands. Set-up in three steps, what leaves the machine and the threat model: [TELEGRAM.md](TELEGRAM.md).
+New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you create yourself (free). It only sends: no listener, no webhook, it never reads messages, no commands. Set it up on the web view's **Telegram page** (settings › Telegram page) or with `sudo nuc-console-telegram --setup`. Set-up in three steps, what leaves the machine and the threat model: [TELEGRAM.md](TELEGRAM.md).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -196,6 +197,7 @@ New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you 
 | `username` | empty | Your Telegram `@username` (5–32 letters, digits, `_`; the `@` is optional): the only person who gets the messages. `sudo nuc-console-telegram --setup` asks for it and writes it here |
 | `detail` | `titles` | `titles`: only the title of each problem and the host name leave the machine ("Container unhealthy"). `full`: the text too, with container names and ports; it is then stored by Telegram |
 | `resolved` | `yes` | Also send a message when a problem goes away |
+| `web_actions` | `yes` | The web view's Telegram page may pair, switch on and off and send a test; `no`: it only shows (a post is refused with `403`). What the page chooses is kept in the notifier's `web.json`, never here: it turns on what this file leaves off, and the paired `@username` replaces `username`; `enabled = yes` here cannot be switched off from the page. The command line (`--setup`, `--on`, `--off`, `--forget`) writes the page's choice back here and deletes `web.json` ([TELEGRAM.md](TELEGRAM.md#from-the-web-view)) |
 
 The bot **token** is never in `config.ini` (it is world-readable): it lives in the notifier's own folder (`/var/lib/nuc-console-notify`, Windows `%ProgramData%\nuc-console\notify\private`), readable only by the notifier's own account (Linux `nuc-console-notify`, macOS `_nuc-console`, Windows NETWORK SERVICE), never by the web view's.
 

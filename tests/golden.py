@@ -23,6 +23,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
   aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
           web.json would go); web.Server's CSRF token (a fixed one)
+  tgweb: nothing: web.Server makes the demo's engine of the Telegram page (in memory, its clock the frozen one); it is put back on exit
 Whatever is read from the host outside the demo's data (a file, a command, the environment) has to be faked here.
 """
 import contextlib
@@ -47,6 +48,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # before render is imported: 
 # the modules the renderer imports on demand are imported now, so that FrozenWorld finds them (and their `time`) when it freezes the clock
 import advisor  # noqa: E402,F401
 import aiweb  # noqa: E402
+import tgweb  # noqa: E402
 import aisetup  # noqa: E402,F401
 import ansi  # noqa: E402,F401
 import collector  # noqa: E402,F401
@@ -229,6 +231,8 @@ class FrozenWorld(object):
             self.set(render, "ACCEPTED_PATH", path)
             self.set(render, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
             self._freeze_ai()
+            self.set(tgweb, "_ENGINE", None)  # web.Server makes the demo's
+            self.set(tgweb, "_BIND", dict(tgweb._BIND))
             for name in ("DEMO", "DEMO_OS", "DEMO_HEALTH"):  # --demo and web.Server set them: put back on exit
                 self.set(render, name, getattr(render, name))
             for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
@@ -453,6 +457,9 @@ def _cases():
                         ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
         add("web-shell-" + name, query=query)
     add("web-shell-ai-locked", query="app=1&view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
+    # the Telegram page: off and not paired (the steps and the form, with the masked CSRF token); locked by the admin: no form
+    add("web-shell-telegram", query="app=1&view=telegram")
+    add("web-shell-telegram-locked", query="app=1&view=telegram", cfg={"telegram": {"web_actions": False}})
     return out
 
 

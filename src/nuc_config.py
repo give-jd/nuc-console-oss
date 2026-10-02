@@ -6,7 +6,9 @@ A missing file means defaults (everything on).
 A broken file never stops the dashboard: the problem goes to stderr and defaults apply for the bad keys.
 """
 import configparser
+import json
 import os
+import stat
 import sys
 import threading
 
@@ -37,6 +39,7 @@ SECTIONS = ("attention", "exposure", "webapps", "firewall", "system", "container
 # notify.py (Telegram): its own folder, owned by the unprivileged service user: bot token, paired chat (0600), status.json (0644)
 NOTIFY_DIR = os.environ.get("NUC_CONSOLE_NOTIFY_DIR") or (os.path.join(BASE_DIR, "notify") if WINDOWS or PORTABLE else "/var/lib/nuc-console-notify")  # portable: under data/
 TELEGRAM_DETAILS = ("titles", "full")  # titles: only the problem's title leaves the machine; full: its text too (names, ports)
+TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page chose (on/off, the paired @username); written by the notifier
 
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
@@ -65,7 +68,7 @@ def load(path=None):
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
-    cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True}  # notify.py; the bot token is never here
+    cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["ui"] = {"web": "app", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -162,7 +165,7 @@ def load(path=None):
     cfg["web"]["refresh_seconds"] = cfg["refresh_seconds"] if dash_refresh or web_refresh is None else web_refresh
     if cp.has_section("telegram"):  # notify.py: ATTENTION changes sent to one Telegram user (docs/TELEGRAM.md)
         t = cfg["telegram"]
-        for key in ("enabled", "resolved"):
+        for key in ("enabled", "resolved", "web_actions"):  # web_actions: the web view's Telegram page may pair, switch and test (no = it only shows)
             try:
                 t[key] = cp.getboolean("telegram", key, fallback=t[key])
             except ValueError:
@@ -218,6 +221,47 @@ def load(path=None):
     except Exception as e:  # noqa: BLE001  (a bug in the optional interface settings must never take the collector or the screen down)
         print(f"nuc-console: {path}: [ui] ignored: {e}", file=sys.stderr)
     return cfg
+
+
+def telegram_web(d=None):
+    """The valid keys of NOTIFY_DIR/web.json, what the web view's Telegram page chose: {"enabled": bool, "username": str}. The notifier writes it
+    (0644) when the page asks; {} when there is none, or when it could have been written by someone else: not a regular file, too big, writable by
+    group or others, owned by neither root nor the owner of the folder (the notifier's account). Never raises."""
+    path = os.path.join(d or NOTIFY_DIR, TELEGRAM_WEB)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode) or st.st_size > 4096:
+                return {}
+            if not WINDOWS and (st.st_mode & 0o022 or st.st_uid not in (0, os.stat(os.path.dirname(path)).st_uid)):
+                return {}
+            data = json.loads(f.read(4097).decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    out = {}
+    if isinstance(data, dict) and data.get("v") == 1:
+        if isinstance(data.get("enabled"), bool):
+            out["enabled"] = data["enabled"]
+        user = data.get("username")
+        if isinstance(user, str) and 5 <= len(user) <= 32 and user.isascii() and all(ch.isalnum() or ch == "_" for ch in user):
+            out["username"] = user.lower()
+    return out
+
+
+def telegram(cfg, d=None):
+    """[telegram] as it is in force: config.ini with what the web view's Telegram page chose (web.json) laid over it. On when config.ini says
+    enabled = yes OR the page turned it on (config's yes cannot be turned off from the page); the @username the page paired in place of
+    config.ini's. "by" says where "on" comes from: "config", "web" or "". `[telegram] web_actions = no` and a portable run: config.ini alone."""
+    t = dict(cfg["telegram"], by="config" if cfg["telegram"]["enabled"] else "")
+    if not t.get("web_actions", True) or PORTABLE:
+        return t
+    web = telegram_web(d)
+    if web.get("username"):
+        t["username"] = web["username"]
+    if web.get("enabled") and not t["enabled"]:
+        t["enabled"], t["by"] = True, "web"
+    return t
 
 
 _CURRENT, _CURRENT_LOCK = None, threading.Lock()

@@ -21,19 +21,57 @@ the message the current problems would send, without sending anything.
 a username ending in `bot`. BotFather answers with a **token** (`123456789:AA…`): copy it. Optional: send `/setjoingroups` and choose
 *Disable*, so nobody can add your bot to a group. The token is a password: whoever has it can write as your bot.
 
-**2. Pair it with this machine.** From the machine, as an administrator:
+**2. Pair it with this machine.** On the web view's **Telegram page** (the ⚙ settings › *Telegram page*, or `/?view=telegram`): paste the
+token and your @username and press **Pair** ([below](#from-the-web-view)). Or from the machine, as an administrator:
 
 ```bash
 sudo nuc-console-telegram --setup          # Windows: nuc-console-telegram.cmd --setup  (administrator prompt)
 ```
 
 It asks for the **token** and for **your Telegram @username** (the one shown in Telegram > Settings; if you have none, set one there first),
-then prints a link: `https://t.me/<your_bot>?start=<code>`.
+then prints a link: `https://t.me/<your_bot>?start=<code>` (the page shows the same link, with an *Open in Telegram* button).
 
 **3. Tap the link on your phone and press Start.** The machine notices it by itself, stores the chat and says *paired*. That is all: no numbers
-to type, no chat id to look up. The notifier is on from now on (`--off` switches it off).
+to type, no chat id to look up. The notifier is on from now on (`--off`, or *Switch off* on the page, switches it off).
 
 The notifier is a service of an **installed** nuc-console: a portable run (`run.sh` / `run.cmd`, [PORTABLE.md](PORTABLE.md)) does not start it.
+
+## From the web view
+
+The **Telegram page** of the web view (`/?view=telegram`, linked from the settings page) does what the command line does, without a terminal:
+it shows whether the alerts are on and reach someone (and the notifier's last message and last error), pairs (the token, your @username, then
+the link to press Start on, with *Cancel*), switches on and off, and sends a test. It reloads by itself only while a pairing waits or an
+answer is due.
+
+**The token goes one way.** The page checks the token with Telegram (`getMe`), makes the one-time link and waits for your Start (the same
+code as `--setup`), then hands the pairing to the notifier service and forgets it: the web view never stores it and can never read it again.
+The handover is a file in the notifier's `inbox/` folder, where the web view's account may **create files and do nothing else**:
+
+| | |
+|---|---|
+| Linux | `/var/lib/nuc-console-notify/inbox`, mode 2730, owner and group `nuc-console-notify`; the web view's unit is in that group (`SupplementaryGroups=`, `ReadWritePaths=`), so it can add a file but not list or read the folder. The notifier (another account) reads each request, deletes it, keeps the token in its own 0600 file |
+| macOS | `/var/lib/nuc-console-notify/inbox` (0700): the web view and the notifier are the same account, `_nuc-console`, as for the token |
+| Windows | `%ProgramData%\nuc-console\notify\inbox`: LOCAL SERVICE (the web view) may only add files (`W` on the folder), NETWORK SERVICE (the notifier) reads and deletes them |
+
+The notifier says what it did in `status.json` (the page shows it) and keeps what the page chose in `web.json` next to it (0644, no secret:
+`{"v": 1, "enabled": true, "username": "your_name"}`), laid over `config.ini`: the alerts are on when `config.ini` says `enabled = yes`
+**or** the page switched them on, and the @username the page paired replaces `username`. `config.ini`'s `enabled = yes` cannot be switched
+off from the page (it says *on by config.ini*). The command line has the last word: `--setup`, `--on`, `--off` and `--forget` write the page's
+choice into `config.ini` and delete `web.json`.
+
+**Nothing changes silently.** Pairing again from the page first tells the chat paired until then (*this machine now sends its alerts to
+@…*), and *Switch off* tells the paired chat before it goes quiet: someone who can open the web view cannot quietly take the alerts away.
+
+**Who can do it:** whoever can open the web view, as for the AI page's buttons: on Linux the web view is off unless you enable it, then
+loopback (with `tailscale serve`: your tailnet) or a token; on macOS and Windows it listens on 127.0.0.1 (every local user and program).
+The forms carry the page's CSRF token and the same checks as the AI page ([WEB.md](WEB.md#the-telegram-pages-buttons)). If that is more
+than you want, `[telegram] web_actions = no`: the page only shows, a post is refused with `403`, and the notifier reads no request.
+
+**The service waits for the page.** While the page may set it up (`web_actions = yes` and a web view runs here: `[web] enabled`, or on
+macOS and Windows the dashboard), the notifier keeps running when it is off or not paired, writes its status every 30 s and looks at its
+inbox every 2 s; otherwise it exits as before. On Linux the web view's unit starts it (`Wants=`). If the page says the notifier does not
+take its requests, start it: `sudo systemctl restart nuc-console-notify` (macOS `sudo launchctl kickstart -k system/com.nuc-console.notify`,
+Windows: run the installer again).
 
 ## Switch it on and off, test it
 
@@ -56,14 +94,16 @@ enabled = no
 username = your_telegram_name
 detail = titles
 resolved = yes
+web_actions = yes
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `enabled` | `no` | The switch (`--on` / `--off` edit it). Nothing is sent while it is `no` or while the chat is not paired |
+| `enabled` | `no` | The switch (`--on` / `--off` edit it; the web page can switch on what this leaves off). Nothing is sent while it is off or while the chat is not paired |
 | `username` | empty | Your Telegram `@username` (5-32 letters, digits, `_`): the only person who gets the messages. `--setup` writes it |
 | `detail` | `titles` | `titles`: only the **title** of the problem and the host name leave the machine. `full`: also its text (container names, ports, process names) |
 | `resolved` | `yes` | Also send a message when a problem is gone |
+| `web_actions` | `yes` | The web view's Telegram page may pair, switch and test; `no`: it only shows, and the notifier reads no request ([above](#from-the-web-view)) |
 
 The **token is never in `config.ini`** (it is world-readable, and so is `config.ini.dist`). It lives in the notifier's own folder, next to the paired chat:
 
@@ -94,7 +134,7 @@ Windows `nuc-console-telegram.cmd --on` from an administrator prompt: it stops a
 | Never | |
 |---|---|
 | a listener | no port is opened: the notifier is an HTTPS **client** (the systemd unit allows only outgoing connections, no `AF_NETLINK`, no capabilities). No webhook |
-| reading messages | the **service** never asks Telegram for anything you wrote and has **no commands**: you cannot control the machine from the chat. Only `--setup`, a command you run yourself, asks Telegram once for the single `/start` message that carries your one-time code, then stops |
+| reading messages | the **service** never asks Telegram for anything you wrote and has **no commands**: you cannot control the machine from the chat. Only a pairing you start (`--setup`, or *Pair* on the web page) asks Telegram for the single `/start` message that carries your one-time code, then stops. The page's requests reach the service as files in its inbox, never through Telegram |
 | the token in `config.ini`, logs, `status.json` or the screen | it is read from its 0600 file by the service user only; the dashboard and the status file show an error, never the token |
 | a central server | there is none: your bot, your token, your chat. Nothing is sent to this project or anyone else |
 | root | the service runs as an unprivileged user (Linux `nuc-console-notify`, macOS `_nuc-console`, Windows NETWORK SERVICE) with the same hardening as the web view; on Linux and Windows it is not the web view's account, so a web view reachable on the LAN cannot read the token |
@@ -115,7 +155,7 @@ with its host name.
 
 1. `nuc-console-telegram --status`: is it on, paired, when did the last message go out, what was the last error?
 2. The dashboard says it too, in ATTENTION (and `nuc-console-problems` explains the fix):
-   - **`telegram-unpaired`**, *Telegram notifications on, but not paired*: `enabled = yes` but no chat yet (or after `--forget`). Run `--setup` and press Start on the link, in the chat with **your** bot (not with @BotFather).
+   - **`telegram-unpaired`**, *Telegram notifications on, but not paired*: `enabled = yes` but no chat yet (or after `--forget`). Pair it (the web view's Telegram page, or `--setup`) and press Start on the link, in the chat with **your** bot (not with @BotFather).
    - **`telegram-failing`**, *Telegram notifier not running* (no sign of life for 5 minutes) or *Telegram notifications failing for N min: reason* (sends failing for 10 minutes: no Internet, wrong or revoked token, you blocked the bot).
 3. `sudo nuc-console-telegram --test` sends one message and prints Telegram's answer. `Unauthorized` = the token is wrong or revoked: `--setup` again with the new one. A message that never arrives although the answer is `ok` means you pressed Start on another bot, or muted the chat.
 4. Logs: Linux `journalctl -u nuc-console-notify` · macOS `/var/log/nuc-console/notify.log` · Windows `%ProgramData%\nuc-console\logs\notify.log`.

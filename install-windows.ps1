@@ -171,6 +171,11 @@ New-Item -ItemType Directory -Force -Path "$Data\notify", "$Data\notify\private"
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify" }
 & icacls.exe "$Data\notify\private" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\private" }
+# notify\inbox\: the web view's Telegram page leaves its requests there. LOCAL SERVICE may create files in it and nothing else (W, this folder
+# only: no list, no read); the files inherit NETWORK SERVICE's modify, so the notifier reads and deletes them (docs/TELEGRAM.md)
+New-Item -ItemType Directory -Force -Path "$Data\notify\inbox" | Out-Null
+& icacls.exe "$Data\notify\inbox" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' '*S-1-5-19:(W)' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\inbox" }
 
 # ---- 2. private Python ---------------------------------------------------------------------------------------------------
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -239,8 +244,8 @@ if ($web) {
     Set-Content -Path $Shortcut -Value "[InternetShortcut]`r`nURL=$url" -Encoding ASCII  # Start menu: opens the default browser
 } elseif (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
 
-# the Telegram notifier: always registered; it exits at once (and stays idle) unless [telegram] enabled = yes and the chat is paired.
-# Outbound HTTPS to api.telegram.org only, as LOCAL SERVICE; its folder (token, chat) is the one locked above
+# the Telegram notifier: always registered; it exits at once when it has nothing to do (off or not paired, and no web view whose Telegram
+# page may set it up). Outbound HTTPS to api.telegram.org only, as NETWORK SERVICE; its folder (token, chat) is the one locked above
 Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log' 'nuc-console Telegram notifier: outbound only (NETWORK SERVICE)'
 Start-ScheduledTask -TaskPath $TaskPath -TaskName 'notify'
 

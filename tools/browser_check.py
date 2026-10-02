@@ -30,13 +30,13 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-VIEWS = ("overview", "map", "map-graph", "cpu", "health", "ai", "settings", "layout")
+VIEWS = ("overview", "map", "map-graph", "cpu", "health", "ai", "settings", "telegram", "layout")
 THEMES = (("auto", "a"), ("dark", "d"), ("light", "l"), ("high-contrast", "h"))
 DENSITIES = (("wall", "w"), ("desk", "k"), ("compact", "c"))
 # the graph is paused: its script reloads the page when the refresh is due, and a reload inside --virtual-time-budget keeps some Chrome
 # builds (154 on the CI runner) from ever finishing the dump; paused, the same script runs (drawing, physics) and only the reload is off
 VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph&pause=1", "cpu": "&view=cpu", "health": "&view=health",
-              "ai": "&view=ai", "settings": "&view=settings", "layout": "&edit=1"}
+              "ai": "&view=ai", "settings": "&view=settings", "telegram": "&view=telegram", "layout": "&edit=1"}
 WINDOW = "1440,900"
 VIRTUAL_TIME_MS = 4000  # the scripts fetch, poll and replace blocks: let the page run this long (virtual time, so it does not wait)
 
@@ -59,6 +59,7 @@ VIEW_LANDMARKS = {
     "health": (("the findings", ('class="hv"',)),),
     "ai": (("the AI screen", ('class="scr av"',)),),
     "settings": (("the settings", ('class="settings"',)),),
+    "telegram": (("the Telegram page", ('id="tg"',)), ("its pairing form", ('action="/telegram/pair"',))),
     "layout": (("the layout editor", ("data-edit",)), ("a card", ('<article class="card',))),
     "wall": (("the key figures", ('class="kpis"',)), ("a card", ('<article class="card',))),
 }

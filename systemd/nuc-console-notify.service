@@ -1,5 +1,5 @@
 [Unit]
-Description=nuc-console Telegram notifier (does nothing unless [telegram] enabled = yes in config.ini and paired)
+Description=nuc-console Telegram notifier (sends nothing unless it is on and paired; with the web view on it waits for its Telegram page)
 After=network-online.target nuc-console-collector.service
 Wants=network-online.target
 
@@ -11,10 +11,12 @@ User=nuc-console-notify
 Group=nuc-console-notify
 UMask=0077
 ExecStart=/usr/bin/python3 -B /opt/nuc-console/notify.py
-# exit 0 when disabled or not paired: no restart loop (sudo nuc-console-telegram --setup / --on starts it)
+# exit 0 when it has nothing to do (off or not paired, and no web view whose Telegram page may set it up): no restart loop
+# (sudo nuc-console-telegram --setup / --on starts it, and so does the web view: Wants= in nuc-console-web.service)
 Restart=on-failure
 RestartSec=30
-# /var/lib/nuc-console-notify: the bot token and the paired chat (0600), status.json (0644); nobody else can list it
+# /var/lib/nuc-console-notify: the bot token and the paired chat (0600), status.json and web.json (0644); nobody else can list it.
+# Its inbox/ (2730, made by install.sh) holds the web view's requests: only this service lists and reads them
 StateDirectory=nuc-console-notify
 StateDirectoryMode=0711
 NoNewPrivileges=yes

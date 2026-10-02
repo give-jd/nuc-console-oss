@@ -104,6 +104,10 @@ install -d /var/lib/nuc-console
 # (the units' ReadWritePaths). Empty until you choose a model there; what an earlier `sudo nuc-console-ai setup` put in it stays root's, and stays usable.
 install -d -o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai /var/lib/nuc-console/ai/runtime /var/lib/nuc-console/ai/models
 install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
+# its inbox: the web view's Telegram page leaves its requests there (its unit is in this group: SupplementaryGroups); the group may create
+# files and nothing else (no read, no list), and the setgid bit gives them the group, so only the notifier reads them (docs/TELEGRAM.md)
+install -d -m 2730 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify/inbox
+chmod 2730 /var/lib/nuc-console-notify/inbox
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service
 # restart, not --now: on an upgrade the service is already running and would keep the old code
@@ -120,7 +124,8 @@ for _ in $(seq 1 60); do [ "$(stat -c %Y /run/nuc-console/net.json 2>/dev/null |
 # optional web view (read-only; only the AI page has buttons): only if [web] enabled = yes in config.ini (never opens a port otherwise)
 if "$PY" "$DEST/web.py" --enabled; then systemctl enable nuc-console-web.service && systemctl restart nuc-console-web.service
 else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
-# optional Telegram notifier (outbound HTTPS only): always installed, it idles (exit 0) until [telegram] enabled = yes and paired
+# optional Telegram notifier (outbound HTTPS only): always installed; it exits 0 while it has nothing to do (off, and no web view whose
+# Telegram page may set it up), otherwise it runs: it sends when it is on and paired, and takes the web page's requests
 systemctl enable nuc-console-notify.service
 if "$PY" "$DEST/notify.py" --enabled; then systemctl restart nuc-console-notify.service
 else systemctl stop nuc-console-notify.service 2>/dev/null || true; fi

@@ -3,6 +3,24 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+
+- **Telegram from the web view.** A Telegram page (`/?view=telegram`, linked from the settings) pairs the notifier with your own bot without a terminal
+  (paste the token and your @username, tap the link it shows, press Start), switches the alerts on and off and sends a test, with the notifier's last
+  message and error. The token goes one way: the web view hands it to the notifier through a folder it can write into but never read
+  (`/var/lib/nuc-console-notify/inbox`, 2730; Windows `notify\inbox`, create only) and forgets it. A new pairing and *off* are told to the chat paired
+  until then. New key `[telegram] web_actions` (default `yes`; `no`: the page only shows). What the page chooses is kept in the notifier's `web.json`,
+  laid over `config.ini`; `--setup`, `--on`, `--off` and `--forget` write it back into `config.ini`. [docs/TELEGRAM.md](docs/TELEGRAM.md#from-the-web-view)
+
+### Changed
+
+- With a web view on this machine and `[telegram] web_actions = yes`, the notifier service keeps running while it is off or not paired, to take the web
+  page's requests (it looks at its inbox every 2 s and writes its status every 30 s); on Linux the web view's unit starts it (`Wants=`). Run the installer
+  again to get the inbox folder and the web unit's group.
+- `nuc-console-telegram --status` says whether the alerts were switched on from the web page and whether the page may change them.
+
 ## [2.0.0] - 2026-10-02
 
 A new web interface, the default from this release, built from the same model as the console; the console gets a tab bar, key figures and

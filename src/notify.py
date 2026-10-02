@@ -8,9 +8,13 @@ THE MACHINE SENDS, NOTHING ELSE. What you can audit in this file:
   nothing anyone writes to the bot can make this machine do anything;
 - `--setup` is the only code that reads updates, once, to pair: it accepts ONE message, `/start <random code>` sent from the
   configured @username in a private chat, and silently ignores everything else;
-- the bot token lives in NOTIFY_DIR/token (0600, owned by the service user), never in config.ini, a log, status.json or an error.
-Off unless `[telegram] enabled = yes` in config.ini. The service is `notify.py` with no argument; `nuc-console-telegram` is the
-command line (`--help`).
+- the bot token lives in NOTIFY_DIR/token (0600, owned by the service user), never in config.ini, a log, status.json or an error;
+- the web view's Telegram page (src/tgweb.py) talks to the service through files, never through Telegram: it leaves requests in
+  NOTIFY_DIR/inbox, where its account may create files and do nothing else (it cannot list or read them): store the pairing the page
+  made, switch on, switch off, send a test. The service reads and deletes each one, does it, says what it did in status.json and keeps the
+  page's choices in web.json (nuc_config.telegram() lays it over config.ini). `[telegram] web_actions = no` and it reads none.
+Off unless `[telegram] enabled = yes` in config.ini or the web page turned it on. The service is `notify.py` with no argument;
+`nuc-console-telegram` is the command line (`--help`).
 """
 import collections
 import getpass
@@ -21,6 +25,7 @@ import re
 import secrets
 import socket
 import ssl
+import stat
 import subprocess
 import sys
 import time
@@ -56,6 +61,15 @@ TEXT_CHARS = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f" + BIDI + "]")  # everyth
 SEV_RANK = {"port-change": 3, "error": 2, "warning": 1}
 LOUD = ("port-change", "error")  # these get the ‼ marker
 LABEL = {"NEW": "NEW  ", "OK": "OK   ", "OPEN": "OPEN ", "CHANGED": "CHANGED "}
+INBOX = "inbox"  # in NOTIFY_DIR: the web page's requests (Linux 2730: its account may create files there, only the service lists and reads them)
+REQ_NAME = re.compile(r"r-([0-9]{13}-[0-9a-f]{8})\.json")  # r-<milliseconds>-<random>.json: sorted by name, the oldest first
+ACTIONS = ("pair", "on", "off", "test")  # what the web page may ask
+REQ_MAX = 4096  # bytes of a request
+REQ_MAX_AGE = 600  # seconds: an older request is dropped unread (made before a restart, a lock, a clock jump)
+REQ_SETTLE_S = 10  # a file that is not JSON yet may still be being written: it is left there until it is this old
+REQ_BATCH = 8  # requests done in one look
+INBOX_S = 2  # while it takes requests, the service looks at the inbox this often
+BOT_RE = re.compile(r"[A-Za-z0-9_]{3,64}")  # a bot's @username, without the @
 TEXT_KEYED = render.NOT_ACCEPTABLE | render.COUNT_MATTERS  # problems for which one more or another item is a new problem
 OWN = "telegram-"  # the ids of the notifier's own problems (the dashboard shows them): never announced, it would only talk to itself
 POSIX = not nuc_config.WINDOWS
@@ -76,10 +90,11 @@ The machine only sends. It never reads your messages and listens on no port.
   nuc-console-telegram --off        turn it off (stops the service; the pairing stays) *
   nuc-console-telegram --forget     delete the token and the pairing, turn it off *
   nuc-console-telegram --preview    print the message the current problems would send (nothing is sent; --demo: invented data)
-  nuc-console-telegram --enabled    exit code 0 when [telegram] enabled = yes (for the installers)
+  nuc-console-telegram --enabled    exit code 0 when the service has something to do: on, or the web page may set it up (installers)
   notify.py [--log FILE]            the service itself (no argument), with its output in a file (Windows, macOS)
 * needs root (Windows: an administrator prompt)
-Settings: [telegram] in config.ini (enabled, username, detail = titles|full, resolved). The token is never in config.ini.
+The web view's Telegram page (settings > Telegram) does the same without a terminal, unless [telegram] web_actions = no.
+Settings: [telegram] in config.ini (enabled, username, detail = titles|full, resolved, web_actions). The token is never in config.ini.
 """
 INTRO = """nuc-console will send you the ATTENTION changes of this machine on Telegram. It only sends: it never reads your messages.
 You need a bot of your own (free): open @BotFather in Telegram, send /newbot, and keep the token it gives you.
@@ -242,10 +257,13 @@ def load_credentials(d, username):
     return token, chat, None
 
 
-def status_dict(now, enabled, paired, username, last_sent, error, failing_since):
-    """status.json: read by the dashboard (world-readable), so no token, no chat id, no message text."""
+def status_dict(now, enabled, paired, username, last_sent, error, failing_since, by=None, listening=False, request=None):
+    """status.json: read by the dashboard and the web page (world-readable), so no token, no chat id, no message text. by: where "on" comes
+    from ("config", "web"); listening: the service takes the web page's requests; request: what it did with the last one
+    ({"id", "action", "ok", "said", "ts"})."""
     return {"ts": int(now), "enabled": bool(enabled), "paired": bool(paired), "username": username or None,
-            "last_sent_ts": last_sent, "last_error": (clean(error, 160) or None) if error else None, "failing_since": failing_since}
+            "last_sent_ts": last_sent, "last_error": (clean(error, 160) or None) if error else None, "failing_since": failing_since,
+            "by": by or None, "listening": bool(listening), "request": request}
 
 
 def write_status(d, data):
@@ -255,6 +273,100 @@ def write_status(d, data):
         return True
     except OSError:
         return False
+
+
+def write_web(d, **change):
+    """web.json in folder d: what the web page chose ({"enabled": bool, "username": str}; None removes a key), 0644 (the dashboard and the web page
+    read it, nuc_config.telegram_web), written by the service for the page. Raises OSError."""
+    cur = nuc_config.telegram_web(d)
+    cur.update(change)
+    data = dict({"v": 1}, **{k: v for k, v in cur.items() if v is not None})
+    put(d, nuc_config.TELEGRAM_WEB, json.dumps(data) + "\n", 0o644)
+
+
+def clear_web(d):
+    """No web.json: config.ini alone is in force. Raises OSError (not when there is none)."""
+    try:
+        os.remove(os.path.join(d, nuc_config.TELEGRAM_WEB))
+    except FileNotFoundError:
+        pass
+
+
+def inbox_dir(d):
+    return os.path.join(d, INBOX)
+
+
+def valid_request(req, rid, now):
+    """The request a file holds, checked: {"id", "action"} and, for "pair", "token", "chat_id", "username", "bot"; None when it is not one."""
+    if not isinstance(req, dict) or req.get("v") != 1 or req.get("id") != rid or req.get("action") not in ACTIONS:
+        return None
+    ts = req.get("ts")
+    if isinstance(ts, bool) or not isinstance(ts, int) or abs(now - ts) > REQ_MAX_AGE:
+        return None
+    out = {"id": rid, "action": req["action"]}
+    if req["action"] == "pair":
+        token, cid, user, bot = (req.get(k) for k in ("token", "chat_id", "username", "bot"))
+        if not (isinstance(token, str) and TOKEN_RE.fullmatch(token) and isinstance(cid, int) and not isinstance(cid, bool)
+                and isinstance(user, str) and USER_RE.fullmatch(user) and isinstance(bot, str) and BOT_RE.fullmatch(bot)):
+            return None
+        out.update(token=token, chat_id=cid, username=user.lower(), bot=bot)
+    return out
+
+
+def take_requests(d, now, limit=REQ_BATCH):
+    """The requests waiting in the inbox of folder d, the oldest first, each read and deleted: [dict]. A file that is not a request (a link,
+    not a regular file, too big, not JSON once it is REQ_SETTLE_S old, stale, malformed) is deleted unread; one that cannot be deleted is left
+    alone and never done. Never raises."""
+    box = inbox_dir(d)
+    try:
+        names = sorted(n for n in os.listdir(box) if REQ_NAME.fullmatch(n))
+    except OSError:
+        return []
+    out = []
+    for name in names[:limit]:
+        path, req = os.path.join(box, name), None
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            with os.fdopen(fd, "rb") as f:
+                st = os.fstat(f.fileno())
+                raw = f.read(REQ_MAX + 1) if stat.S_ISREG(st.st_mode) else b""
+            try:
+                req = json.loads(raw.decode("utf-8")) if len(raw) <= REQ_MAX else None
+            except (ValueError, RecursionError):
+                if now - st.st_mtime < REQ_SETTLE_S:  # the page may be writing it right now
+                    continue
+        except OSError:
+            pass  # a link (O_NOFOLLOW refuses it), or gone meanwhile
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            continue  # a request that cannot be taken away is never done: it would be done again at every look
+        req = valid_request(req, REQ_NAME.fullmatch(name).group(1), now)
+        if req:
+            out.append(req)
+    return out
+
+
+def requests_waiting(d):
+    try:
+        return any(REQ_NAME.fullmatch(n) for n in os.listdir(inbox_dir(d)))
+    except OSError:
+        return False
+
+
+def drop_requests(d):
+    """Nobody may ask ([telegram] web_actions = no): what waits in the inbox is deleted unread."""
+    try:
+        names = [n for n in os.listdir(inbox_dir(d)) if not n.startswith(".")]
+    except OSError:
+        return
+    for n in names:
+        try:
+            os.remove(os.path.join(inbox_dir(d), n))
+        except OSError:
+            pass
 
 
 def load_sent(d):
@@ -609,45 +721,181 @@ class Notifier:
         return status_dict(self.clock(), True, paired, cfg["username"], self.last_sent, self.problem or self.error, self.failing_since)
 
 
+def listening(cfg):
+    """The service takes the web page's requests: [telegram] web_actions (default yes), an installed nuc-console (not a portable run) and a web
+    view that runs here ([web] enabled; on macOS and Windows the web view is also the dashboard, unless [display] mode = none)."""
+    return bool(cfg["telegram"].get("web_actions", True)) and not nuc_config.PORTABLE and bool(
+        cfg["web"]["enabled"] or (not nuc_config.LINUX and cfg["display"]["mode"] != "none"))
+
+
+class Service:
+    """The service, one look at a time (serve() loops): the ATTENTION changes while it is on and paired, and, while the web page may set it up,
+    that page's requests (pair, on, off, test), with what it did in status.json."""
+
+    def __init__(self, d, clock=time.time, sleep=time.sleep, records=None, make_transport=None, log=None):
+        self.d, self.clock, self.sleep = d, clock, sleep
+        self.make = make_transport or HttpsTransport
+        self.log = log or (lambda text: print(text, flush=True))
+        self.thermal = ThermalHistory()
+        self.records = records or (lambda: current_records(self.thermal))
+        self.nt = self.key = self.said = self.answer = None  # the notifier of the paired chat, its (token, chat id), the last log line, the last request
+        self.listening = False
+
+    def say(self, text):
+        """A line in the log when the state changes, not one every cycle."""
+        if text != self.said:
+            self.log(text)
+            self.said = text
+
+    def status(self, data, t):
+        data.update(by=t["by"] or None, listening=self.listening, request=self.answer)
+        write_status(self.d, data)
+
+    def look(self, t):
+        """One cycle with the settings in force (nuc_config.telegram): True when it is on and paired, False when it has nothing to send."""
+        if not t["enabled"]:
+            self.nt = self.key = None
+            self.status(status_dict(self.clock(), False, False, t["username"], None, None, None), t)
+            self.say("Telegram notifications are off ([telegram] enabled = no in config.ini" + (", and the web page has not turned them on)" if self.listening else ")"))
+            return False
+        token, chat, problem = load_credentials(self.d, t["username"])
+        if problem:
+            self.nt = self.key = None
+            self.status(status_dict(self.clock(), True, False, t["username"], None, problem, None), t)
+            self.say(problem)
+            return False
+        if self.key != (token, chat["chat_id"]):  # the first look, or paired again: a notifier for that chat (sent.json says what it was told)
+            self.nt = Notifier(SendOnly(self.make(token)), chat["chat_id"], self.d, clock=self.clock, sleep=self.sleep, log=self.log)
+            self.key = (token, chat["chat_id"])
+            self.say(f"nuc-console notify: sending to @{chat['username']} (detail = {t['detail']}), looking every {CYCLE_S} s")
+        nt = self.nt
+        try:
+            recs, nt.problem = self.records(), None
+        except Exception as e:  # noqa: BLE001 - an unexpected state is a line in status.json, never a crash loop
+            nt.problem = clean(redact(f"cannot list the problems: {type(e).__name__}: {e}", str(chat["chat_id"])), 160)
+        else:
+            try:
+                nt.cycle(recs, t)
+            except Exception as e:  # noqa: BLE001 - same here
+                nt.problem = clean(redact(f"internal error: {type(e).__name__}: {e}", str(chat["chat_id"])), 160)
+        self.status(nt.status(t), t)
+        return True
+
+    def wait(self, total):
+        """Until the next look; while it listens, a look at the inbox every INBOX_S: a request is done at once, and the next look comes at once
+        too (it writes the answer into status.json)."""
+        end = self.clock() + total
+        while True:
+            left = end - self.clock()
+            if left <= 0:
+                return
+            self.sleep(min(INBOX_S, left) if self.listening else left)
+            if self.listening and requests_waiting(self.d) and self.requests():
+                return
+
+    def requests(self, cfg=None):
+        """Does what the web page asked (take_requests): the answer to the last one goes into status.json. -> True when there was one."""
+        cfg = cfg or nuc_config.load()
+        reqs = take_requests(self.d, self.clock())
+        for req in reqs:
+            t = nuc_config.telegram(cfg, self.d)
+            try:
+                ok, said = self.do(req, t)
+            except (OSError, ValueError) as e:  # a folder that cannot be written: said, never fatal
+                ok, said = False, f"cannot do it: {e}"
+            except Exception as e:  # noqa: BLE001 - a request never stops the service
+                ok, said = False, f"internal error: {type(e).__name__}: {e}"
+            said = clean(redact(said, req.get("token"), str(req.get("chat_id") or "")), 200)
+            self.answer = {"id": req["id"], "action": req["action"], "ok": bool(ok), "said": said, "ts": int(self.clock())}
+            self.log(f"web page: {req['action']}: {said}")
+        return bool(reqs)
+
+    def send(self, token, chat_id, text, attempts=ATTEMPTS):
+        call(SendOnly(self.make(token)), "sendMessage", message_payload(chat_id, text), self.sleep, attempts=attempts)
+
+    def tell_old(self, t, text):
+        """One message to the chat paired now (best effort): what the web page changed reaches the person who had the alerts until then."""
+        token, chat, problem = load_credentials(self.d, t["username"])
+        if not problem:
+            try:
+                self.send(token, chat["chat_id"], f"nuc-console {hostname()}: {text}", attempts=1)
+            except TelegramError:
+                pass
+        return None if problem else chat
+
+    def do(self, req, t):
+        """One request -> (ok, what to tell the page)."""
+        act = req["action"]
+        if act == "test":
+            token, chat, problem = load_credentials(self.d, t["username"])
+            if problem:
+                return False, problem
+            try:
+                self.send(token, chat["chat_id"], f"nuc-console {hostname()}: test message, from the web view. If you read this, the notifications work.")
+            except TelegramError as e:
+                return False, "not sent: " + str(e)
+            return True, f"test message sent to @{chat['username']}"
+        if act == "on":
+            if t["by"] == "config":
+                return True, "already on ([telegram] enabled = yes in config.ini)"
+            write_web(self.d, enabled=True)
+            return True, "on" + (", but not paired yet" if load_credentials(self.d, t["username"])[2] else "")
+        if act == "off":
+            if t["by"] == "config":
+                return False, "on by config.ini ([telegram] enabled = yes): switch it off there, or with nuc-console-telegram --off"
+            if t["enabled"]:
+                self.tell_old(t, "Telegram notifications were switched off from this machine's web view.")
+            write_web(self.d, enabled=False)
+            return True, "off"
+        return self.pair_from_web(req, t)
+
+    def pair_from_web(self, req, t):
+        """The pairing the web page made (it checked the token and saw the Start from @username): stored here, where only this account and root
+        can read it, and on. The chat paired until now is told first, so that a pairing nobody asked for does not go unnoticed."""
+        token, cid, user = req["token"], req["chat_id"], req["username"]
+        old_token, old_chat, problem = load_credentials(self.d, t["username"])
+        if not problem and (old_chat["chat_id"], old_token) != (cid, token):
+            self.tell_old(t, f"this machine now sends its alerts to @{user}: it was paired again from its web view. If that was not you, "
+                             "check who can open the web view.")
+        sd = secret_dir(self.d)
+        prepare_dir(self.d)
+        if problem or (old_chat["chat_id"], old_token) != (cid, token):  # another chat or bot: the first message is a summary of what is open
+            try:
+                os.remove(os.path.join(sd, "sent.json"))
+            except FileNotFoundError:
+                pass
+        put(sd, "token", token + "\n", 0o600)
+        put(sd, "chat.json", json.dumps({"chat_id": cid, "username": user, "bot": req["bot"], "paired_ts": int(self.clock())}) + "\n", 0o600)
+        write_web(self.d, enabled=True, username=user)
+        try:
+            self.send(token, cid, f"nuc-console {hostname()}: paired from the web view. You will receive the ATTENTION changes of this machine; "
+                                  "it never reads your messages.")
+        except TelegramError as e:
+            return True, f"paired with @{user}, but the greeting could not be sent: {e}"
+        return True, f"paired with @{user}: a greeting was sent to that chat"
+
+
 def serve(d=None, clock=time.time, sleep=time.sleep, records=None, transport=None, cycles=None):
-    """The service. Returns the exit code: 0 also when there is nothing to do (off, not paired), so no supervisor restarts it in a loop."""
+    """The service. It looks every CYCLE_S. Off or not paired, it exits 0 (no supervisor restarts it in a loop), unless it listens to the web
+    page (listening()): then it stays, writes its status every cycle and looks at the inbox every INBOX_S. cycles: stop after that many (tests)."""
     d = d or NOTIFY_DIR
-    cfg = nuc_config.load()["telegram"]
-    if not cfg["enabled"]:
-        write_status(d, status_dict(clock(), False, False, cfg["username"], None, None, None))
-        print("Telegram notifications are off ([telegram] enabled = no in config.ini)", flush=True)
-        return 0
-    token, chat, problem = load_credentials(d, cfg["username"])
-    if problem:
-        write_status(d, status_dict(clock(), True, False, cfg["username"], None, problem, None))
-        print(problem, flush=True)
-        return 0
-    nt = Notifier(SendOnly(transport or HttpsTransport(token)), chat["chat_id"], d, clock=clock, sleep=sleep)
-    thermal = ThermalHistory()
-    records = records or (lambda: current_records(thermal))
-    print(f"nuc-console notify: sending to @{chat['username']} (detail = {cfg['detail']}), looking every {CYCLE_S} s", flush=True)
+    svc = Service(d, clock, sleep, records, (lambda token: transport) if transport else None)
     done = 0
     try:
         while True:
-            cfg = nuc_config.load()["telegram"]  # the settings are read again every cycle
-            if not cfg["enabled"] or cfg["username"] != chat["username"].lower():
-                write_status(d, status_dict(clock(), cfg["enabled"], False, cfg["username"], nt.last_sent, None, None))
-                print("Telegram notifications stopped: switched off or paired with someone else", flush=True)
-                return 0
-            try:
-                recs, nt.problem = records(), None
-            except Exception as e:  # noqa: BLE001 - an unexpected state is a line in status.json, never a crash loop
-                nt.problem = clean(redact(f"cannot list the problems: {type(e).__name__}: {e}", str(chat["chat_id"])), 160)
+            cfg = nuc_config.load()  # the settings are read again every cycle
+            svc.listening = listening(cfg)
+            if svc.listening:
+                svc.requests(cfg)
             else:
-                try:
-                    nt.cycle(recs, cfg)
-                except Exception as e:  # noqa: BLE001 - same here
-                    nt.problem = clean(redact(f"internal error: {type(e).__name__}: {e}", str(chat["chat_id"])), 160)
-            write_status(d, nt.status(cfg))
+                drop_requests(d)
+            active = svc.look(nuc_config.telegram(cfg, d))
             done += 1
+            if not active and not svc.listening:
+                return 0
             if cycles is not None and done >= cycles:
                 return 0
-            sleep(CYCLE_S)
+            svc.wait(CYCLE_S)
     except KeyboardInterrupt:
         return 0
 
@@ -668,13 +916,14 @@ def match_start(update, code, username):
     return {"chat_id": cid, "username": username}
 
 
-def pair(transport, code, username, clock=time.time, sleep=time.sleep, wait=PAIR_S):
-    """Long polling until the right message arrives -> {"chat_id", "username"}, or None after `wait` seconds. Everything else that
-    is written to the bot is ignored without a trace. The updates read are confirmed at the end, so they are not delivered again."""
+def pair(transport, code, username, clock=time.time, sleep=time.sleep, wait=PAIR_S, poll=POLL_S, stop=None):
+    """Long polling until the right message arrives -> {"chat_id", "username"}, or None after `wait` seconds (or as soon as stop() is
+    true: the web page's Cancel; poll is the longest wait of one request). Everything else that is written to the bot is ignored without a
+    trace. The updates read are confirmed at the end, so they are not delivered again. --setup and the web page (tgweb.py) pair with it."""
     deadline, offset, errors, found = clock() + wait, None, 0, None
     try:
-        while found is None and deadline - clock() > 0:
-            payload = {"timeout": int(max(1, min(POLL_S, deadline - clock()))), "allowed_updates": ["message"], "limit": 20}
+        while found is None and deadline - clock() > 0 and not (stop and stop()):
+            payload = {"timeout": int(max(1, min(poll, deadline - clock()))), "allowed_updates": ["message"], "limit": 20}
             if offset is not None:
                 payload["offset"] = offset
             try:
@@ -750,6 +999,22 @@ def set_config(term, **values):
     return True
 
 
+def take_over(term, d, **values):
+    """The command line has the last word: `values` and the @username the web page paired go into config.ini, and web.json (what the page
+    chose) is deleted, so that config.ini alone is in force again. -> True when both were done."""
+    web = nuc_config.telegram_web(d)
+    if web.get("username") and "username" not in values:
+        values["username"] = "@" + web["username"]  # the pairing stays the paired person's
+    if not set_config(term, **values):
+        return False
+    try:
+        clear_web(d)
+    except OSError as e:
+        term.say(f"cannot delete {nuc_config.TELEGRAM_WEB} in {d}: {clean(e, 120)}: what the web page chose stays in force")
+        return False
+    return True
+
+
 def service_user():
     """(uid, gid) of the unprivileged service user the installer creates, or None."""
     try:
@@ -816,7 +1081,7 @@ def setup(term, make_transport, d=None, clock=time.time, sleep=time.sleep, wait=
             term.say("Telegram did not name the bot: is this the token of a bot?")
             return 1
         term.say(f"bot @{bot} found")
-        default = nuc_config.load()["telegram"]["username"]
+        default = nuc_config.telegram(nuc_config.load(), d)["username"]
         user = (term.ask(f"Your Telegram @username [{'@' + default if default else ''}]: ").strip().lstrip("@") or default).lower()
         if not USER_RE.fullmatch(user):
             term.say("a Telegram @username has 5 to 32 letters, digits or _")
@@ -848,7 +1113,7 @@ def setup(term, make_transport, d=None, clock=time.time, sleep=time.sleep, wait=
         term.say(f"cannot write in {d}: {clean(redact(e, token), 120)}")
         return 1
     term.say(f"paired with @{user}")
-    written = set_config(term, enabled="yes", username="@" + user)
+    written = take_over(term, d, enabled="yes", username="@" + user)
     try:
         call(tg, "sendMessage", message_payload(chat["chat_id"], f"nuc-console {hostname()}: paired. You will receive the ATTENTION changes of "
                                                                  "this machine; it never reads your messages."), sleep)
@@ -873,7 +1138,7 @@ def read_status(d):
 
 def status_report(d, now=None):
     """What --status shows (no secret in it): the settings in force, status.json, and whether the notifier looks alive."""
-    now, cfg, st = now or time.time(), nuc_config.load()["telegram"], read_status(d)
+    now, cfg, st = now or time.time(), nuc_config.telegram(nuc_config.load(), d), read_status(d)
     bot = None
     try:
         bot = read_chat(d).get("bot")
@@ -882,7 +1147,8 @@ def status_report(d, now=None):
     ts = (st or {}).get("ts")
     alive = isinstance(ts, (int, float)) and 0 <= now - ts < STALE_S
     st = st or {}
-    return {"enabled": cfg["enabled"], "username": cfg["username"] or None, "detail": cfg["detail"], "resolved": cfg["resolved"],
+    return {"enabled": cfg["enabled"], "by": cfg["by"] or None, "web_actions": cfg["web_actions"], "username": cfg["username"] or None,
+            "detail": cfg["detail"], "resolved": cfg["resolved"],
             "paired": bool(st["paired"]) if "paired" in st else None, "bot": bot if isinstance(bot, str) else None, "running": alive,
             "ts": ts, "last_sent_ts": st.get("last_sent_ts"), "last_error": (clean(st["last_error"], 160) or None) if st.get("last_error") else None,
             "failing_since": st.get("failing_since")}
@@ -902,7 +1168,7 @@ def print_status(d, as_json=False, now=None):
 
     def when(ts):
         return f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))} ({ago(now - ts)} ago)" if isinstance(ts, (int, float)) else "never"
-    print("Telegram notifications: " + ("on" if s["enabled"] else "off"))
+    print("Telegram notifications: " + ("on" + (" (turned on in the web view's Telegram page)" if s["by"] == "web" else "") if s["enabled"] else "off"))
     print(f"  username:    {'@' + s['username'] if s['username'] else '(not set)'}")
     if s["paired"] is None:
         paired = "unknown (the notifier has not written its status yet)"
@@ -918,12 +1184,13 @@ def print_status(d, as_json=False, now=None):
     print("  notifier:    " + notifier)
     print(f"  last sent:   {when(s['last_sent_ts'])}")
     print(f"  last error:  {s['last_error'] or 'none'}" + (f" (failing since {when(s['failing_since'])})" if s["failing_since"] else ""))
+    print("  web page:    " + ("may pair, switch and test ([telegram] web_actions = yes)" if s["web_actions"] else "only shows ([telegram] web_actions = no)"))
     return 0
 
 
 def send_test(term, make_transport, d=None, sleep=time.sleep):
     d = d or NOTIFY_DIR
-    token, chat, problem = load_credentials(d, nuc_config.load()["telegram"]["username"])
+    token, chat, problem = load_credentials(d, nuc_config.telegram(nuc_config.load(), d)["username"])
     if problem:
         term.say(problem)
         return 1
@@ -938,17 +1205,18 @@ def send_test(term, make_transport, d=None, sleep=time.sleep):
 
 
 def switch(term, on, d=None):
-    """--on / --off: enabled = yes|no in config.ini, and the service follows."""
+    """--on / --off: enabled = yes|no in config.ini, and the service follows (off, it keeps running while it listens to the web page)."""
+    d = d or NOTIFY_DIR
     refusal = need_admin("--on" if on else "--off")
     if refusal:
         term.say(refusal)
         return 2
-    if not set_config(term, enabled="yes" if on else "no"):
+    if not take_over(term, d, enabled="yes" if on else "no"):
         return 1
     term.say("Telegram notifications are " + ("on" if on else "off"))
-    if on and load_credentials(d or NOTIFY_DIR, nuc_config.load()["telegram"]["username"])[2]:
+    if on and load_credentials(d, nuc_config.telegram(nuc_config.load(), d)["username"])[2]:
         term.say("not paired yet: run nuc-console-telegram --setup")
-    apply_service(term, "restart" if on else "stop")
+    apply_service(term, "restart" if on or listening(nuc_config.load()) else "stop")
     return 0
 
 
@@ -969,11 +1237,13 @@ def forget(term, d=None):
         except OSError as e:
             term.say(f"cannot delete {name}: {clean(e, 120)}")
             failed = True
-    cfg = nuc_config.load()["telegram"]
-    if not set_config(term, enabled="no"):
+    if not take_over(term, d, enabled="no"):
         failed = True
+    cfg = nuc_config.telegram(nuc_config.load(), d)
     write_status(d, status_dict(time.time(), False, False, cfg["username"], None, None, None))
     term.say("token and pairing deleted, notifications off. To undo the pairing on Telegram: /revoke in @BotFather, or delete the bot.")
+    if listening(nuc_config.load()):  # it waits for the web page again
+        apply_service(term, "restart")
     return 1 if failed else 0
 
 
@@ -1028,8 +1298,9 @@ def main(argv):
         return 2
     cmd, opts = parsed
     term = Terminal()
-    if cmd == "--enabled":  # for the installers
-        return 0 if nuc_config.load()["telegram"]["enabled"] else 1
+    if cmd == "--enabled":  # for the installers: start the service, or leave it stopped
+        cfg = nuc_config.load()
+        return 0 if nuc_config.telegram(cfg)["enabled"] or listening(cfg) else 1
     if cmd == "--status":
         return print_status(NOTIFY_DIR, opts["json"])
     if cmd == "--preview":
