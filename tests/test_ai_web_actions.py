@@ -1704,7 +1704,7 @@ class ConsoleKeys(WebBase):
         snap = self.eng.snapshot()
         self.assertEqual((snap["state"][0], snap["server"]["model"], snap["switch"]["on"]), ("running", "tiny", True))
         data, av, rows = self.view()
-        txt = self.screen(av, data)
+        txt = self.screen(av, data, cols=240)  # wide: macOS's temporary folders are long, and the line would be cut before "free on that disk"
         self.assertIn("● ON", txt)
         self.assertIn("tiny runs here and answers at http://127.0.0.1:", txt)
         self.assertIn("tiny is in use", txt, "the answer to the key is on the screen")
