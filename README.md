@@ -41,7 +41,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 📦 **Download, run, update** | one archive per system on the [releases page](https://github.com/give-jd/nuc-console-oss/releases/latest), built and attested by CI, with `SHA256SUMS`; the Windows ZIP carries its Python, so it installs offline. `./run.sh` / `run.cmd` run it without installing (everything stays in `./data`); `nuc-console-update` updates only when *you* run it, hash and build provenance checked ([Download](#download)) |
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
-| 🌍 **Web view** | optional: the same screen in a browser over Tailscale/LAN, read-only except the AI page's buttons ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only; `[ai] web_actions = no` makes it read-only for good |
+| 🌍 **Web view** | optional: a shell of cards in a browser (overview, MAP, CPU, HEALTH, AI; dark, light, wall display) over Tailscale/LAN, read-only except the AI page's buttons ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only; `[ai] web_actions = no` makes it read-only for good |
 | 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
@@ -56,6 +56,12 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <summary><b>The MAP: who reaches what, and what is behind it</b> (200×46, details of a container open)</summary>
 <br>
 <img src="docs/img/map.svg" alt="nuc-console MAP screen: zones, open ports (with the reach declared in config.ini) and the containers behind them as a tree, with the details pane of one container, demo data" width="100%">
+</details>
+
+<details>
+<summary><b>The web view</b> (the overview as a grid of cards, key figures on top; <code>python3 src/web.py --demo</code>)</summary>
+<br>
+<img src="docs/img/web.png" alt="nuc-console web view in a browser: a top bar with the status and the five screens, a row of key figures and the overview as a grid of cards (attention, exposure, system, containers, disks and more), dark theme, demo data" width="100%">
 </details>
 
 <details>
@@ -294,7 +300,7 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 ## Web view (optional)
 
-Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; no JavaScript except the small, hash-pinned script that lets you drag and zoom the MAP's graph view.
+Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; the pages work with scripts off, and the few small first-party scripts (partial refresh, keys, the layout editor, the MAP graph's drag and zoom) are pinned by their hashes in the page's CSP. The page is the new shell (cards, key figures, five screens, appearance settings, a layout editor, a wall display for a monitor): the older "classic" pages are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will be removed.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
 
 ## Telegram alerts (optional)

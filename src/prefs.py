@@ -378,11 +378,11 @@ def _show(text):
 def parse_ui(section, sections_default=None):
     """config.ini [ui] (a dict of the section's keys) -> (ui, warnings). Never raises: a bad value is a warning and that key is not set.
 
-    ui always has "web" (classic | app) and "sections" ([dashboard] sections, completed), and then only the keys the file sets and
+    ui always has "web" (app | classic; app by default) and "sections" ([dashboard] sections, completed), and then only the keys the file sets and
     that are valid: theme, density, start_view, preset, order (str), kpis (ids), layout [(card, width)] and hidden [card].
     Unknown names are dropped with a warning; a blank value sets nothing, except `hidden =` (nothing is hidden)."""
     warns = []
-    ui = {"web": "classic", "sections": _section_order(sections_default)}
+    ui = {"web": "app", "sections": _section_order(sections_default)}
     sec = {}
     for k, v in (section.items() if isinstance(section, dict) else ()):
         sec[str(k).strip().lower()] = "" if v is None else str(v)

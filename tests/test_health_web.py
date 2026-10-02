@@ -21,6 +21,8 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 
 ESC, BEL = chr(27), chr(7)
 EVIL = '<script>alert(1)</script>"onmouseover=alert(1) \'x ' + ESC + "[2J" + ESC + "]0;pwn" + BEL
@@ -34,6 +36,7 @@ def serve():
     return srv
 
 
+@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)

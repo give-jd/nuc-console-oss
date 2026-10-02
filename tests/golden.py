@@ -338,6 +338,7 @@ SELECTED = {  # what a case selects: the key of a MAP row (graph.path_key of its
     "row": "99ae4e80a5", "node": "881afd34cb", "finding": "mem-leak:node", "pid": "1610"}
 ROTATION = {"map_in_rotation": True, "cpu_in_rotation": True, "health_in_rotation": True}  # the slides: ..., Map, CPU, Health
 LOCKED = {"ai": {"web_actions": False}}  # merged into the default [ai]
+CLASSIC = {"ui": {"web": "classic"}}  # [ui] web = classic: the classic pages (kept for one release); the default is the shell
 ACCEPTED = (("container-exited", 1, "1 container exited with an error"),
             ("docker-bypass", 1, "1 Docker port bypassing ufw (DOCKER-USER empty)"))
 
@@ -435,9 +436,9 @@ def _cases():
              ("ai-confirm-delete", "view=ai&sel=qwen3-1.7b&confirm=delete"), ("ai-confirm-delete-all", "view=ai&confirm=delete-all"),
              ("ai-no-question", "view=ai&sel=qwen3-8b&confirm=delete"))  # delete of what is not installed: no question, the plain page
     for name, query in pages:
-        add("web-" + name, query=query)
-    add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # a locked page has no forms and the stricter CSP
-    add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
+        add("web-" + name, query=query, cfg=CLASSIC)
+    add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=dict(LOCKED, **CLASSIC))  # a locked page has no forms and the stricter CSP
+    add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=dict(LOCKED, **CLASSIC))  # and no question: nothing to confirm
     # the new shell (?app=1): the overview, the settings (appearance, export, about), the CPU, Map, Health and AI screens (native: the AI forms and CSRF as on the classic page)
     for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b"),
                         ("cpu", "app=1&view=cpu"), ("cpu-details", f"app=1&view=cpu&sort=mem&sel={SELECTED['pid']}"),

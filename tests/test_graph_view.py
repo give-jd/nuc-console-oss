@@ -22,6 +22,8 @@ import graphlayout  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 
 ZONES = {"root:internet", "root:lan", "root:tailnet", "root:local"}
 HEX = re.compile(r"[0-9a-f]{10}")
@@ -36,6 +38,7 @@ def serve():
     return srv
 
 
+@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=30)
     c.request("GET", path)
@@ -163,6 +166,7 @@ class GraphPage(unittest.TestCase):
         self.assertNotIn("data-refresh", tree)
         self.assertNotIn("<noscript>", tree)
 
+    @classic_default()
     def test_tree_mode_ignores_the_graph_parameters(self):
         """The graph's filters mean nothing to the tree: not in its links, not in its cache key (the very same page)."""
         plain = self.srv.page(**web.view_params(web.parse_qs("view=map&all=1")))

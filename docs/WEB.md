@@ -1,9 +1,7 @@
 # Web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only, no
-JavaScript** — with three exceptions, each boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
-switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the MAP's graph view carries one small script, pinned by its hash
-(see below), and the **new shell** carries three small first-party scripts per page (four in all, with the layout editor's), also pinned by their hashes ([below](#the-shells-scripts)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only.** The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and three exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the classic MAP graph view one small script, pinned the same way ([below](#the-one-script-graph-view)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -60,6 +58,8 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 
 ## What it serves
 
+**The shell is what `/` serves by default** ([below](#the-shell-the-default-web-interface)); this table lists the **classic** pages, which `[ui] web = classic` or `app=0` (`/?app=0&view=cpu`) still give for this release. The query parameters that name a view (`view=`, `sort=`, `sel=`, `period=`, `all=`, `as=graph` ...) work on both.
+
 | Path | |
 |---|---|
 | `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` every `[dashboard] refresh_seconds` |
@@ -81,10 +81,11 @@ Security headers, on every response: strict CSP (`default-src 'none'`), `no-stor
 `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`; the AI page differs in two, see below.
 No access log (URLs may carry a token).
 
-## The new shell (preview, opt-in)
+## The shell (the default web interface)
 
-A second interface, made of cards, is served beside the classic one. It is **off by default**: the classic pages stay what they were.
-Ask for it for one URL with `?app=1`, or for every page with `[ui] web = app` in `config.ini` (`?app=0` then gives the classic page back).
+The web view is a shell made of cards. It is **the default** (`[ui] web = app`). The classic pages, the older interface, are kept for one release as a
+fallback and will be removed: `[ui] web = classic` in `config.ini` serves them for every page, `?app=0` for one URL (`?app=1` gives the shell back when
+`web = classic`).
 Every control is a link or a form, so it works with scripts off, and the page then reloads by `<meta refresh>` (inside `<noscript>`) like the
 classic one. With scripts on, three small inline ones refresh it in place and add keys and instant preferences ([below](#the-shells-scripts)).
 
@@ -109,9 +110,9 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 
 | Path | |
 |---|---|
-| `/?app=1` | the shell (every view above takes it: `/?view=cpu&app=1`) |
+| `/` | the shell (every view above takes it: `/?view=cpu`); `?app=1` forces it when `[ui] web = classic`, `?app=0` gives the classic page |
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
-| `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?app=1&edit=1` or, with `[ui] web = app`, `/?edit=1`. Only on the overview: with `app=0` or on another view it is ignored |
+| `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?edit=1` (`/?app=1&edit=1` when `[ui] web = classic`). Only on the overview: with `app=0` or on another view it is ignored |
 | `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
 | `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403`. The layout editor's links are fields too (`euat`: move ATTENTION one place earlier; [below](#edit-the-layout)) |
 | `/?set=<field>&frag=1` | what the preferences script sends: the same cookie, but the answer is `204` (no redirect, no body) with `Set-Cookie` and `X-Nuc-Prefs: <the canonical cookie string>`, which the script keeps in `localStorage`. `<field>` may also be that whole string (`1.tl.dw`): the script sends it back, once in a while, when the browser sent no cookie. Same checks as above |
@@ -119,7 +120,7 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 | `/?ui=<string>` | the same grammar for this URL only (a bookmark, a kiosk link); an invalid string is ignored |
 | `/s/app.<sha8>.css` | the style sheet (themes `dark`, `light`, `high-contrast`, `auto` by the system's own settings and contrast, forced colours; densities `wall`, `desk`, `compact`). The name carries the first 8 digits of its SHA-256: `Cache-Control: private, max-age=31536000, immutable`, `nosniff`; an unknown name or hash is `404`; the same `Host` and token checks as the pages |
 
-**The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-new-interface-being-built)
+**The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-screens)
 (`1.tl.dw.pv`), at most 256 bytes; the server validates and canonicalises it on every request and ignores a value that is wrong, a field at a time.
 Only the browser keeps it: the server writes nothing for the interface. Pages vary by it (`Vary: Cookie`) and the cache key holds the canonical preferences.
 The shell's pages have the strict CSP of the classic ones with `style-src 'self' 'unsafe-inline'` (the page loads its style sheet from `/s/`) and the
@@ -151,9 +152,9 @@ Only that combination (not the settings page, not the editor) changes the page:
   macOS: `Cmd+Q`) and the time of the last update; no pause, edit, size, theme or density links.
 - Without JavaScript the `<noscript>` meta refresh still reloads the page every refresh interval; it shows the first screen (nothing scrolls; there is no server-side paging). `rotate=1` (the classic page's "take turns") does nothing here.
 
-`[ui] web = app` makes the display open it: `render.py --kiosk` (`[display] mode = fullscreen`) starts the full-screen window on
+The display opens it (`[ui] web = app`, the default): `render.py --kiosk` (`[display] mode = fullscreen`) starts the full-screen window on
 `http://127.0.0.1:<port>/?app=1&ui=1.dw&kiosk=1` and `render.py --open` (a normal window) on `/?app=1`, with the token as before; with `web = classic`
-(the default) they open the classic page as always. The fallback page written to a file (`--file`, or a `[web] token_file` this user cannot read) is the classic one.
+they open the classic page as before. The fallback page written to a file (`--file`, or a `[web] token_file` this user cannot read) is the classic one.
 
 ### Edit the layout
 
@@ -207,9 +208,9 @@ Always `default-src 'none'; base-uri 'none'; frame-ancestors 'none'`. The script
 and Firefox only for inline scripts). To verify a page: take each `<script>…</script>` body of the page, hash its UTF-8 bytes and compare:
 
 ```sh
-curl -s 'http://127.0.0.1:8787/?app=1' | python3 -c 'import sys,re,hashlib,base64
+curl -s 'http://127.0.0.1:8787/' | python3 -c 'import sys,re,hashlib,base64
 for s in re.findall(r"<script>(.*?)</script>", sys.stdin.read(), re.S): print("sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())'
-curl -sI 'http://127.0.0.1:8787/?app=1' | grep -i '^content-security-policy'
+curl -sI 'http://127.0.0.1:8787/' | grep -i '^content-security-policy'
 ```
 
 The two lists are the same. `tests/test_webshell.py` checks that for every shell page, and `tests/jsrules.py` / `tests/test_webjs.py` what the scripts may do.
@@ -262,7 +263,7 @@ carries `csrf` (this process's random token) and `back` (the view to come back t
 
 ## The one script (graph view)
 
-Every page is plain HTML except the MAP's graph view, which carries one small inline script (`src/graphjs.py`, ~16 KB, no
+The classic pages are plain HTML except the MAP's graph view, which carries one small inline script (`src/graphjs.py`, ~16 KB, no
 library) for dragging, zooming and panning. It is the only exception, and it is boxed in:
 
 - its SHA-256 is in that page's CSP (`script-src 'sha256-…'`): no other script, inline or loaded, can run, and every other
