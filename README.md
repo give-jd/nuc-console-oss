@@ -13,7 +13,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 [![Windows 10/11](https://img.shields.io/badge/windows-10%20%7C%2011-0078d4?style=flat-square)](docs/INSTALL.md#windows)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-8957e5?style=flat-square)](#security)
 
-[**Download**](#download) · [**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md)
+[**Download**](#download) · [**Quick start**](#quick-start) · [**Install guide**](docs/INSTALL.md) · [**Configuration**](#configuration) · [**How it works**](#how-it-works) · [**Security**](SECURITY.md) · [**Roadmap**](docs/ROADMAP.md)
 
 <a href="docs/img/overview.svg"><img src="docs/img/overview.svg" alt="nuc-console on a wide console: three-column overview with synthetic demo data" width="100%"></a>
 
