@@ -10,6 +10,7 @@ import unittest
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import check_hygiene as ch  # noqa: E402
+import json  # noqa: E402
 
 DIPADA = "57390069+dipada@users.noreply.github.com"
 SID = "session_" + "01AbCdEfGhIjKlMnOpQrSt"  # built here: the shape of a session id, none real
@@ -105,15 +106,18 @@ class OnARepository(unittest.TestCase):
         self.git("checkout", "-q", "-b", "feat/x")
         self.cwd = os.getcwd()
         os.chdir(self.d)
-        self.env = {k: os.environ.pop(k) for k in ("PR_TITLE", "PR_BODY") if k in os.environ}
 
     def tearDown(self):
         os.chdir(self.cwd)
-        os.environ.update(self.env)
-        for k in ("PR_TITLE", "PR_BODY"):
-            if k not in self.env:
-                os.environ.pop(k, None)
         self.tmp.cleanup()
+
+    def event(self, body, title="feat: x"):
+        """The pull_request event file GitHub gives the workflow ($GITHUB_EVENT_PATH)."""
+        p = os.path.join(self.tmp.name, "event.json")
+        base, head = self.git("rev-parse", "main").strip(), self.git("rev-parse", "HEAD").strip()
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"pull_request": {"title": title, "body": body, "base": {"sha": base}, "head": {"sha": head}}}, f)
+        return p
 
     def run_main(self, *a):
         import contextlib
@@ -125,18 +129,20 @@ class OnARepository(unittest.TestCase):
 
     def test_a_clean_branch_passes(self):
         self.write_commit("a.txt", "fine\n", "feat: a fine change\n\nWhy it is needed.")
-        os.environ["PR_BODY"] = "What and why.\n\nTests: all pass."
-        self.assertEqual(self.run_main("--base", "main", "--head", "HEAD"), (0, ""))
+        self.assertEqual(self.run_main("--event", self.event("What and why.\n\nTests: all pass.")), (0, ""))
+        self.assertEqual(self.run_main("--event", self.event(None)), (0, ""))  # a pull request without a description
 
     def test_a_footer_a_line_an_author_and_the_description_are_each_found(self):
         self.write_commit("a.txt", "see /tmp/claude-0/s/scratchpad/x\n", "feat: x\n\nCo-Authored-By: A Tool <tool@example.com>",
                           env={"GIT_AUTHOR_EMAIL": "tool@example.com"})
-        os.environ["PR_BODY"] = "body\n\nhttps://example.com/code/" + SID
-        rc, out = self.run_main("--base", "main", "--head", "HEAD")
+        rc, out = self.run_main("--event", self.event("body\n\nhttps://example.com/code/" + SID, title="feat: by a sub-agent"))
         self.assertEqual(rc, 1)
         for what in ("author tool@example.com", "message, line 3: a co-author trailer", "a.txt, line 1: a path",
-                     "pull request body, line 3: a session id"):
+                     "pull request description, line 3: a session id", "pull request title, line 1: how the work was split"):
             self.assertIn(what, out)
+        for secret in (SID, "scratchpad", "Co-Authored-By", "sub-agent"):
+            self.assertNotIn(secret, out, "a finding never repeats what it refuses: the CI log is public")
+        self.assertEqual(self.run_main("--base", "main", "--head", "HEAD")[0], 1)  # the same branch, without the event
 
     def test_a_text_file_and_the_usage(self):
         p = os.path.join(self.d, "draft.md")
@@ -159,12 +165,11 @@ class Workflow(unittest.TestCase):
         self.assertIn("fetch-depth: 0", self.src)
         self.assertIn("contents: read", self.src)
 
-    def test_the_text_is_passed_in_the_environment_never_pasted_into_the_script(self):
+    def test_the_text_is_read_from_the_event_file_never_pasted_nor_put_in_the_printed_environment(self):
         runs = [ln for ln in self.src.splitlines() if ln.strip().startswith("run:")]
-        self.assertEqual(runs, ['        run: python3 tools/check_hygiene.py --base "$BASE" --head "$HEAD"'])
-        self.assertFalse([ln for ln in runs if "${{" in ln])
-        for k in ("PR_TITLE: ${{ github.event.pull_request.title }}", "PR_BODY: ${{ github.event.pull_request.body }}"):
-            self.assertIn(k, self.src)
+        self.assertEqual(runs, ['        run: python3 tools/check_hygiene.py --event "$GITHUB_EVENT_PATH"'])
+        for never in ("pull_request.body", "pull_request.title", "env:"):
+            self.assertNotIn(never, self.src)
 
     def test_the_action_is_pinned_by_commit_like_the_release(self):
         self.assertTrue(re.search(r"uses: actions/checkout@[0-9a-f]{40} # v\d", self.src))

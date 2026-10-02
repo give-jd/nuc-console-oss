@@ -4,12 +4,13 @@ it adds say (CONTRIBUTING.md, "Branches, commits and pull requests").
 
     python3 tools/check_hygiene.py --base origin/main --head HEAD     # the commits of a branch and the lines it adds
     python3 tools/check_hygiene.py --text draft.md                    # a description or a comment before posting it
+    python3 tools/check_hygiene.py --event "$GITHUB_EVENT_PATH"       # CI: a pull_request event (base, head, title, description)
 
-CI (.github/workflows/hygiene.yml) runs the first form on every pull request, with the title and description in PR_TITLE / PR_BODY.
+The findings say where and why, never the text found: CI logs are public, and a finding must not publish what it refuses.
 Exit 0 when nothing is found, 1 with one line per finding, 2 on a usage error. Standard library only, Python 3.8+.
 """
 import argparse
-import os
+import json
 import re
 import subprocess
 import sys
@@ -41,7 +42,7 @@ def text_findings(text, where):
     for rx, why in FORBIDDEN:
         for m in rx.finditer(text or ""):
             line = text[:m.start()].count("\n") + 1
-            out.append("%s, line %d: %s (%r)" % (where, line, why, m.group(0).strip()[:40]))
+            out.append("%s, line %d: %s" % (where, line, why))
     return out
 
 
@@ -98,7 +99,14 @@ def main(argv=None):
     ap.add_argument("--base", help="the branch the change goes into (origin/main); with --head: its commits and added lines")
     ap.add_argument("--head", help="the tip of the change (HEAD)")
     ap.add_argument("--text", action="append", default=[], help="a file to check as it is (a description or a comment); repeatable")
+    ap.add_argument("--event", help="a GitHub pull_request event file: its base, head, title and description")
     a = ap.parse_args(argv)
+    texts = []
+    if a.event:
+        with open(a.event, encoding="utf-8") as f:
+            pr = json.load(f)["pull_request"]
+        a.base, a.head = pr["base"]["sha"], pr["head"]["sha"]
+        texts = [("pull request title", pr.get("title") or ""), ("pull request description", pr.get("body") or "")]
     if bool(a.base) != bool(a.head) or not (a.base or a.text):
         ap.print_usage(sys.stderr)
         return 2
@@ -110,8 +118,8 @@ def main(argv=None):
         except subprocess.CalledProcessError:  # no common ancestor (a branch started from nothing): all of it is added
             diff = git("diff", "-U0", "--no-color", a.base, a.head)
         found += diff_findings(diff)
-    for name in ("PR_TITLE", "PR_BODY"):  # set by the workflow; the text is data, never run
-        found += text_findings(os.environ.get(name, ""), "pull request " + name[3:].lower())
+    for where, text in texts:
+        found += text_findings(text, where)
     for path in a.text:
         with open(path, encoding="utf-8") as f:
             found += text_findings(f.read(), path)
