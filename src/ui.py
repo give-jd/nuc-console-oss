@@ -365,10 +365,11 @@ class KV(_Component):
 class Bar(_Component):
     """A fraction of a whole (0..1): its state is read off the thresholds (warn, err), and a fraction that is None (it could not be
     read) is state 'unknown' with the text '?': never an empty bar that looks fine. w: the console's width in columns (the web sizes it
-    in CSS)."""
-    __slots__ = ("frac", "value_text", "warn", "err", "w")
+    in CSS). tone: a token that colours the fill whatever the fraction is (a share of a total, not a level); None follows the state."""
+    __slots__ = ("frac", "value_text", "warn", "err", "w", "tone")
 
-    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10):
+    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10, tone=None):
+        self.tone = _tone(tone)  # None: the colour follows the state; a token: a bar that is not a level (the slowest units, a share)
         self.w = max(1, int(w))
         f = num(frac)
         self.frac = None if f is None else min(max(f, 0.0), 1.0)
@@ -443,6 +444,72 @@ class Details(_Component):
 
     def __init__(self, summary, body=(), open=False):
         self.summary, self.body, self.open = _inline(summary), list(body), bool(open)
+
+
+# ---- components for the system, container, database and boot cards ----------------------------------------------------------------
+# (cards.py: system_card, containers_card, databases_card, boot_card; ansi.py and htmlview.py draw them in their own blocks)
+
+def fmt_s(x):
+    """Seconds as the boot blocks write them: '12.3s'."""
+    return f"{x:.1f}s"
+
+
+class Head(_Component):
+    """The heading of a part of a card (the console's section rule, a <h3> on the web): title and an optional note."""
+    __slots__ = ("title", "note")
+
+    def __init__(self, title, note=""):
+        self.title, self.note = _text(title), _text(note)
+
+
+class Indent(_Component):
+    """Children the console draws n columns further in (the web ignores it: its CSS indents)."""
+    __slots__ = ("children", "n")
+
+    def __init__(self, children=(), n=2):
+        self.children, self.n = list(children), max(0, int(n))
+
+
+class Grid(_Component):
+    """Items of one line each (a Line with a Bar: one CPU core) in columns: the console pads each to cw columns and puts per of them on
+    a line; the web lays them out in a CSS grid."""
+    __slots__ = ("items", "cw", "per")
+
+    def __init__(self, items=(), cw=20, per=1):
+        self.items, self.cw, self.per = [_inline(x) for x in items], max(1, int(cw)), max(1, int(per))
+
+
+class Timeline(_Component):
+    """Stacked segments of a whole: parts [(name, seconds)] drawn side by side in proportion (the stages of a boot), then a legend.
+    total: the whole in seconds (what the segments are a share of); w: the console's width in columns."""
+    __slots__ = ("parts", "total", "w")
+
+    def __init__(self, parts=(), total=1.0, w=40):
+        self.parts = [(_text(n), v) for n, v in ((n, num(v)) for n, v in parts) if v is not None]
+        self.total, self.w = max(num(total) or 0.0, 0.001), max(1, int(w))
+
+
+class NoteTable(_Component):
+    """A Table whose rows may have lines under them: notes[i] is the list of components (a Line, a Flow) that belong to row i. The
+    console puts them right under the row, the web in a row of their own that spans the table."""
+    __slots__ = ("cols", "rows", "notes", "head")
+
+    def __init__(self, cols, rows=(), notes=None, head=False):
+        self.cols, self.rows, self.head = list(cols), list(rows), bool(head)
+        for r in self.rows:
+            if len(r.cells) != len(self.cols):
+                raise ValueError(f"a row has {len(r.cells)} cells for {len(self.cols)} columns")
+        self.notes = [list(x) for x in (notes or [])] + [[] for _ in range(len(self.rows) - len(notes or []))]
+
+
+class Flow(_Component):
+    """Facts that flow over several lines without being split, after a lead mark (a Span such as '→') on the first line. cut: the console
+    cuts each fact to that many columns."""
+    __slots__ = ("items", "lead", "indent", "sep", "cut")
+
+    def __init__(self, items=(), lead=None, indent=8, sep="   ", cut=None):
+        self.items, self.lead = [_inline(x) for x in items], None if lead is None else _inline(lead)
+        self.indent, self.sep, self.cut = max(2, int(indent)), sep, None if cut is None else int(cut)
 
 
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------

@@ -245,7 +245,7 @@ class RegistryTests(unittest.TestCase):
             lines, _hid = ansi.card_lines(card, 80)
             self.assertTrue(lines and all(isinstance(x, str) for x in lines))
             # the cards built of components are not Raw; the others still draw the lines render.py has always drawn
-            self.assertEqual(isinstance(card.body[0], ui.Raw), id not in ("disks", "docker_disk", "sessions", "tailscale", "network_traffic"))
+            self.assertEqual(isinstance(card.body[0], ui.Raw), id not in ("disks", "docker_disk", "sessions", "tailscale", "network_traffic", "system", "containers", "databases", "boot"))
 
     def test_the_card_is_what_the_section_draws(self):
         ctx = demo_ctx()
@@ -257,8 +257,9 @@ class RegistryTests(unittest.TestCase):
     def test_a_broken_section_becomes_a_message_not_an_exception(self):
         ctx = demo_ctx(s={"cpu": "nonsense"})
         card = cards.build("system", ctx, 0, cards.Caps(80))
-        self.assertIn("SYSTEM", card.lines[0])
-        self.assertEqual(len(card.lines), 2)
+        self.assertEqual(ansi.card_lines(card, 80)[0][0], ansi.section("SYSTEM", 80))
+        self.assertEqual(card.body[0].level, "err")
+        self.assertEqual(len(ansi.card_lines(card, 80)[0]), 2)
 
     # ---- the problems of a card
     def test_every_problem_has_its_cards_and_they_exist(self):
