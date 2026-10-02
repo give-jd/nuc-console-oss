@@ -97,8 +97,528 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view" data-refresh="2" data-frag="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;app=1&amp;frag=1">
-<div class="vb" data-card="__view" data-rev="dafd69f427">
-<p class="sm">the map could not be drawn (see the service log)</p>
+<div class="vb" data-card="__view" data-rev="860fcb0f01">
+<div class="scr mapv">
+<header class="st">
+<h2>MAP</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">27 nodes</span>
+</span>
+<span class="bit">
+<span class="t-muted">14 links</span>
+</span>
+<span class="bit">
+<span class="t-err">✖ 7 need attention</span>
+</span>
+</p>
+<ul class="legend lgd">
+<li>
+<span class="t-strong">━━►</span> seen</li>
+<li>
+<span>╌╌►</span> declared</li>
+<li>
+<span class="t-muted">┄┄►</span> same network</li>
+<li>
+<span class="t-strong">◄━━</span> connected to it</li>
+</ul>
+<div class="seg" role="group" aria-label="expand">
+<span aria-current="true">expand all</span>
+<a href="/?view=map&amp;sel=99ae4e80a5&amp;app=1" data-key="c" title="key c">collapse all</a>
+</div>
+<div class="seg" role="group" aria-label="paths">
+<span aria-current="true">all paths</span>
+<a href="/?view=map&amp;all=1&amp;only=1&amp;sel=99ae4e80a5&amp;app=1" data-key="p" title="key p">problems only</a>
+</div>
+<div class="seg" role="group" aria-label="view">
+<span aria-current="true">tree</span>
+<a href="/?view=map&amp;as=graph&amp;app=1&amp;sel=881afd34cb">graph</a>
+</div>
+</header>
+<p class="ln">
+<span class="t-muted">  · connections sampled every 30 s, remembered 24 h (watching since 1h)</span>
+</p>
+<div class="split">
+<div class="sp-l">
+<section class="grp">
+<ul class="ol">
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=9b8010b9d8&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-9b8010b9d8">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=9b8010b9d8&amp;app=1" data-row data-k="o-9b8010b9d8">
+<span class="sym">✖</span> <span class="t-err b">INTERNET</span>  <span class="t-muted">reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=3dab9c429f&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-3dab9c429f">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3dab9c429f&amp;app=1" data-row data-k="o-3dab9c429f">
+<span class="sym">✖</span> <span class="t-err">:8444/tcp</span>  <span class="t-strong">node</span>  <span class="t-muted">FUNNEL: public</span>  <span class="t-err">declared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=e0978bd430&amp;app=1" data-row data-k="o-e0978bd430">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=f22f98b733&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-f22f98b733">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=f22f98b733&amp;app=1" data-row data-k="o-f22f98b733">
+<span class="sym">✖</span> <span class="t-err b">LAN</span>  <span class="t-muted">open on the LAN (and on the tailnet)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=5c58dcd8b6&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-5c58dcd8b6">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5c58dcd8b6&amp;app=1" data-row data-k="o-5c58dcd8b6">
+<span class="sym">✖</span> <span class="t-err">:5432/tcp</span>  <span class="t-strong">shop-db-1</span>  <span class="t-muted">docker: bypasses ufw</span>  <span class="t-err">declared local in config.ini, reachable from the LAN and the tailnet</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=47d434c982&amp;app=1" data-row data-k="o-47d434c982">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 192.168.0.50 :5432  <span class="t-muted">LAN</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=4cc5ea0e7a&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-4cc5ea0e7a">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=4cc5ea0e7a&amp;app=1" data-row data-k="o-4cc5ea0e7a">
+<span class="sym">!</span> <span class="t-warn">:8080/tcp</span>  <span class="t-strong">shop-web-1</span>  <span class="t-warn">docker: bypasses ufw</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=f19336912f&amp;app=1" data-row data-k="o-f19336912f">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 100.64.0.2 :8080  <span class="t-muted">tailnet · laptop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=cc4e8f7cfc&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-cc4e8f7cfc">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=cc4e8f7cfc&amp;app=1" data-row data-k="o-cc4e8f7cfc">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">shop-api-1</span> :3000  <span class="t-muted">container · shop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c3c4b8f599&amp;app=1" data-row data-k="o-c3c4b8f599">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=bfffb726c2&amp;app=1" data-row data-k="o-bfffb726c2">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d6bc8661f6&amp;app=1" data-row data-k="o-d6bc8661f6">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=66bf7b9e31&amp;app=1" data-row data-k="o-66bf7b9e31">
+<span class="sym">!</span> <span class="t-muted">┄┄►</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8279e0d665&amp;app=1" data-row data-k="o-8279e0d665">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=d6a7fd958b&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-d6a7fd958b">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d6a7fd958b&amp;app=1" data-row data-k="o-d6a7fd958b">
+<span class="sym">·</span> :22/tcp  <span class="t-strong">sshd</span>  <span class="t-muted">LAN only 192.168.0.0/24</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3f00958dcb&amp;app=1" data-row data-k="o-3f00958dcb">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 192.168.0.20 :22  <span class="t-muted">LAN</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=93ed95f8e5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-93ed95f8e5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=93ed95f8e5&amp;app=1" data-row data-k="o-93ed95f8e5">
+<span class="sym">·</span> <span class="t-accent b">LOCAL</span>  <span class="t-muted">this machine only</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b96bcd7a28&amp;app=1" data-row data-k="o-b96bcd7a28">
+<span class="sym">·</span> :5433/tcp  <span class="t-strong">blog-db-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=59b5097c06&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-59b5097c06">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=59b5097c06&amp;app=1" data-row data-k="o-59b5097c06">
+<span class="sym">·</span> :5678/tcp  <span class="t-strong">node</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5663d86e9b&amp;app=1" data-row data-k="o-5663d86e9b">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=60dc00592e&amp;app=1" data-row data-k="o-60dc00592e">
+<span class="sym">·</span> :6379/tcp  <span class="t-strong">cache-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=c242c96ccd&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-c242c96ccd">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c242c96ccd&amp;app=1" data-row data-k="o-c242c96ccd">
+<span class="sym">·</span> :8081/tcp  <span class="t-strong">blog-app-1</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3622aa39b3&amp;app=1" data-row data-k="o-3622aa39b3">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">blog-db-1</span> :5432  <span class="t-muted">postgres · blog</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=575ffc23c4&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-575ffc23c4">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=575ffc23c4&amp;app=1" data-row data-k="o-575ffc23c4">
+<span class="sym">✖</span> <span class="t-err b">IMPACT</span>  <span class="t-muted">what is down or failing, and what depends on it</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d51eee07ec&amp;app=1" data-row data-k="o-d51eee07ec">
+<span class="sym">✖</span> <span class="t-err">admin-console</span>  <span class="t-muted">web app · expected on :9443</span>  <span class="t-warn">declared in [webapps] but nothing listens on :9443</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=575b2e7f06&amp;app=1" data-row data-k="o-575b2e7f06">
+<span class="sym">✖</span> <span class="t-err">worker-1</span>  <span class="t-muted">container · shop</span>  <span class="t-err">exited with code 137</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=b13e1bbec0&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-b13e1bbec0">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b13e1bbec0&amp;app=1" data-row data-k="o-b13e1bbec0">
+<span class="sym">·</span> <span class="t-accent b">STACKS</span>  <span class="t-muted">compose projects and their containers</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=46c79ece35&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-46c79ece35">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=46c79ece35&amp;app=1" data-row data-k="o-46c79ece35">
+<span class="sym">✔</span> <span class="t-ok">blog</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=d42ceec40f&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-d42ceec40f">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d42ceec40f&amp;app=1" data-row data-k="o-d42ceec40f">
+<span class="sym">✔</span> <span class="t-ok">blog-app-1</span>  <span class="t-muted">container · blog</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=ada02aae31&amp;app=1" data-row data-k="o-ada02aae31">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">blog-db-1</span> :5432  <span class="t-muted">postgres · blog</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5e2223f24a&amp;app=1" data-row data-k="o-5e2223f24a">
+<span class="sym">✔</span> <span class="t-ok">blog-db-1</span>  <span class="t-muted">postgres · blog</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=a9b5a9adec&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-a9b5a9adec">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=a9b5a9adec&amp;app=1" data-row data-k="o-a9b5a9adec">
+<span class="sym">✖</span> <span class="t-err">shop</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=bfec987788&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-bfec987788">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=bfec987788&amp;app=1" data-row data-k="o-bfec987788">
+<span class="sym">✖</span> <span class="t-err">worker-1</span>  <span class="t-muted">container · shop</span>  <span class="t-err">exited with code 137</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=98b3bebc8d&amp;app=1" data-row data-k="o-98b3bebc8d">
+<span class="sym">!</span> ╌╌► <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8f82a561e6&amp;app=1" data-row data-k="o-8f82a561e6">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8320aadf16&amp;app=1" data-row data-k="o-8320aadf16">
+<span class="sym">!</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok sel" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=99ae4e80a5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-99ae4e80a5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;app=1" data-row data-k="o-99ae4e80a5" aria-current="true">
+<span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d1c89c618a&amp;app=1" data-row data-k="o-d1c89c618a">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=68e2641548&amp;app=1" data-row data-k="o-68e2641548">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=1ee138ffa4&amp;app=1" data-row data-k="o-1ee138ffa4">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=4434075ebf&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-4434075ebf">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=4434075ebf&amp;app=1" data-row data-k="o-4434075ebf">
+<span class="sym">✔</span> <span class="t-ok">shop-web-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<a class="tg" href="/?view=map&amp;shut=1663e193b5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-1663e193b5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=1663e193b5&amp;app=1" data-row data-k="o-1663e193b5">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">shop-api-1</span> :3000  <span class="t-muted">container · shop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c8b64dca5c&amp;app=1" data-row data-k="o-c8b64dca5c">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=6100e76d6a&amp;app=1" data-row data-k="o-6100e76d6a">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d73902be6b&amp;app=1" data-row data-k="o-d73902be6b">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5252dffe10&amp;app=1" data-row data-k="o-5252dffe10">
+<span class="sym">!</span> <span class="t-muted">┄┄►</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=90623b4bdb&amp;app=1" data-row data-k="o-90623b4bdb">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=04d7137448&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-04d7137448">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=04d7137448&amp;app=1" data-row data-k="o-04d7137448">
+<span class="sym">✔</span> <span class="t-ok">standalone</span>  <span class="t-muted">containers without a project</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=40998da50f&amp;app=1" data-row data-k="o-40998da50f">
+<span class="sym">✔</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=98180ef894&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-98180ef894">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=98180ef894&amp;app=1" data-row data-k="o-98180ef894">
+<span class="sym">·</span> <span class="t-accent b">OUTBOUND</span>  <span class="t-muted">connections this machine opens to other hosts</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=2f98a6d30e&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-2f98a6d30e">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=2f98a6d30e&amp;app=1" data-row data-k="o-2f98a6d30e">
+<span class="sym">✔</span> <span class="t-ok">node</span>  <span class="t-muted">n8n.service</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=a84a1a042a&amp;app=1" data-row data-k="o-a84a1a042a">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=b9314fbc23&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-b9314fbc23">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b9314fbc23&amp;app=1" data-row data-k="o-b9314fbc23">
+<span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=9256f1b5eb&amp;app=1" data-row data-k="o-9256f1b5eb">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+</ul>
+</section>
+</div>
+<div class="sp-r">
+<section class="grp">
+<aside class="props">
+<div class="ph">
+<h3 class="sub">DETAILS</h3>
+<a href="/?view=map&amp;all=1&amp;app=1">close ✕</a>
+</div>
+<dl>
+<dt>container</dt>
+<dd class="lv-ok top">shop-api-1  ·  container · shop</dd>
+<dt>kind</dt>
+<dd>container</dd>
+<dt>image</dt>
+<dd>example/shop-api:1.4</dd>
+<dt>compose</dt>
+<dd>shop / api</dd>
+<dt>state</dt>
+<dd>Up 3 days</dd>
+<dt>health</dt>
+<dd>healthy</dd>
+<dt>restart policy</dt>
+<dd>unless-stopped</dd>
+<dt>networks</dt>
+<dd>shop_default 172.18.0.3</dd>
+<dt>listens inside</dt>
+<dd>3000 (seen in its network namespace)</dd>
+<dt>memory</dt>
+<dd>520 MiB</dd>
+<dt>◄ from</dt>
+<dd>shop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop]</dd>
+<dt>► to</dt>
+<dd>shop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside the database))  [postgres · shop]</dd>
+<dt>► to</dt>
+<dd>198.51.100.25 :443  seen now  [Internet]</dd>
+<dt>► to</dt>
+<dd>cache-1  declared  (named in its environment)  [redis]</dd>
+</dl>
+</aside>
+</section>
+</div>
+</div>
+</div>
 </div>
 </main>
 <footer class="foot">refresh every <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;refresh=3&amp;app=1">+</a>
