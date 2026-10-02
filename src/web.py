@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """nuc-console web view: the dashboard screen in a browser. Read-only, opt-in, stdlib only; the AI page has buttons.
 
+Two interfaces: the classic one (the screen as text, the default) and the shell (`[ui] web = app` or `?app=1`: a top bar, key figures and cards, with
+the Map, CPU, Health and AI pages inside the same frame; /s/app.<sha8>.css is its style sheet, `/?set=` writes the appearance cookie). Neither runs a
+script of its own here; the shell's scripts are a later step.
+
 Off unless `[web] enabled = yes` in config.ini. Runs as the unprivileged user, reads the same state as the tty
 renderer and serves one HTML page (no JavaScript, except the one fixed script of the MAP's graph view, pinned by its hash
 in the Content-Security-Policy). GET only, except the forms of the AI page (`/?view=ai`): POST /ai/<action>, form-encoded, answered
@@ -29,11 +33,16 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import advisor
 import aiweb
 import aisetup
+import cards
 import graph
 import graphjs
 import graphlayout
+import htmlview
 import nuc_config
+import prefs
 import render
+import ui
+import webcss
 from htmlview import AI_CSS, CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
@@ -42,6 +51,11 @@ MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
 CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 AI_CSP = CSP.replace("form-action 'none'", "form-action 'self'")  # the AI page only: its forms post to this server and nowhere else; still no script
+SHELL_CSP = CSP.replace("style-src 'unsafe-inline'", "style-src 'self' 'unsafe-inline'")  # the shell loads /s/app.<sha8>.css; still no script-src
+SHELL_AI_CSP = SHELL_CSP.replace("form-action 'none'", "form-action 'self'")  # the AI page in the shell: the same forms, the same rule
+ASSET_FILES = {"%s.%s.css" % (name, sha[:8]): (body, ctype) for name, (body, ctype, sha) in webcss.ASSETS.items()}  # /s/<name>.<sha8>.<ext>
+ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the hash: a changed sheet is another URL
+UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise")  # POST /ai/<action>
 AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
@@ -79,10 +93,10 @@ LABEL_MAX = 24       # characters of a label under its circle (the full name is 
 GRAPH_SCRIPT = graphjs.SCRIPT  # sent as is, never built from request data
 
 
-def script_csp(script):
+def script_csp(script, base=CSP):
     """CSP that lets exactly this inline script run (by its SHA-256), and nothing else."""
     digest = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii")
-    return f"{CSP}; script-src 'sha256-{digest}'"
+    return f"{base}; script-src 'sha256-{digest}'"
 
 
 GRAPH_CSP = script_csp(GRAPH_SCRIPT) if GRAPH_SCRIPT else CSP  # computed once: the script is a constant
@@ -93,6 +107,45 @@ class Page(str):
     form) and the Referrer-Policy (the AI page sends its own address to itself, so that the browser's Origin on a post is the real one)."""
     csp = CSP
     referrer = "no-referrer"
+
+
+class View(object):
+    """What a page gives the shell instead of a document: its body, its own controls (the toolbar above it), the URL parameters that make the view
+    (the footer's links change one of them), whether it reloads (and how soon, when `wait` says), its script and the style it needs, and whether it
+    has forms (the CSP then allows them to post here). grid: the body is the overview's cards; legacy: it is one of the pages made before the
+    shell (their classes are styled in webcss.py)."""
+    __slots__ = ("body", "tools", "here", "live", "script", "forms", "wait", "style", "grid", "legacy")
+
+    def __init__(self, body, tools=(), here=None, live=True, script="", forms=False, wait=0, style="", grid=False, legacy=True):
+        self.body, self.tools, self.here, self.live, self.script, self.forms = body, list(tools), here, live, script, forms
+        self.wait, self.style, self.grid, self.legacy = wait, style, grid, legacy
+
+
+TAB_TITLES = {name: title for name, _feature, title in ui.SCREENS}
+THEMES = tuple((name, name.replace("-", " "), prefs.THEME_CODES[name]) for name in prefs.THEMES)  # (value, the word, the code of ?set=t<code>)
+DENSITIES = tuple((name, name, prefs.DENSITY_CODES[name]) for name in prefs.DENSITIES)
+DETAIL_K = {"wall": 1, "desk": -2, "compact": 0}  # the detail level a card is drawn at (render.page_overview's k: -2 is the richest)
+CARD_COLS = {1: 42, 2: 90, 3: 138, 4: 186}  # the width in columns the console's text of a card is laid out for, by the card's width in the grid
+STATE_RANK = {"err": 0, "down": 0, "warn": 1, "unknown": 2, "ok": 3, "info": 4}  # by severity: what needs you first
+KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", "beyond": "exposure", "db_lan": "exposure", "firewall": "firewall",
+            "cpu": "system", "ram": "system", "temp": "system", "load": "system", "uptime": "system", "disk": "disks", "containers": "containers",
+            "unhealthy": "containers", "failed_units": "boot", "ssh": "sessions", "tailnet": "tailscale", "rx": "network_traffic", "tx": "network_traffic"}
+KPI_VIEW = {"health": "health", "ai": "ai"}  # the key figures that open a screen
+STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "stale-net", "collector-boot")  # a collector that is not running
+SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
+
+
+def set_url(field, back):
+    """/?set=<field>&back=<the view's query>: the link that stores one preference and comes back (Handler._set)."""
+    return "/?" + urlencode([("set", field), ("back", back)])
+
+
+def set_link(field, back, text, current, **data):
+    """A preference as a link (the chosen one is the plain, current text); data: the data-* attributes that say what it switches to."""
+    if current:
+        return f'<span class="lnk" aria-current="true">{html.escape(text)}</span>'
+    attrs = "".join(f' data-{k}="{html.escape(v)}"' for k, v in data.items())
+    return f'<a class="lnk" data-set{attrs} href="{html.escape(set_url(field, back))}">{html.escape(text)}</a>'
 
 
 def is_loopback(bind):
@@ -172,11 +225,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):  # no access log: URLs may carry a token
         pass
 
-    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP, referrer="no-referrer"):
+    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP, referrer="no-referrer", cache="no-store"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        for k, v in (("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", referrer),
+        for k, v in (("Cache-Control", cache), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", referrer),
                      ("Content-Security-Policy", csp), ("X-Frame-Options", "DENY")) + tuple(extra):
             self.send_header(k, v)
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")  # no other site can embed or read this
@@ -195,6 +248,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return v
         return (query.get("token") or [""])[0]
 
+    def _cookie(self, name):
+        for part in self.headers.get("Cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def _set(self, q):
+        """/?set=<field>&back=<view>: one appearance preference into the nuc_ui cookie (validated by prefs.apply_set, nothing else is stored), then
+        a redirect to the view `back` names, rebuilt from its validated parameters (never the text given: no open redirect). set=reset clears it."""
+        field = (q.get("set") or [""])[0]
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None and site not in ("same-origin", "none"):  # a link on another site does not change this one's look
+            return self._send(403, b"a link of another site cannot change the preferences\n")
+        if field != "reset" and ("." in field or not prefs.parse_cookie("1." + field)):
+            return self._send(400, b"not a preference\n")
+        value = prefs.apply_set(self._cookie(prefs.COOKIE_NAME), field)
+        try:
+            back = parse_qs((q.get("back") or [""])[0][:400], max_num_fields=40)
+        except ValueError:
+            back = {}
+        keep = (f"{prefs.COOKIE_NAME}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={UI_COOKIE_AGE}" if value != prefs.COOKIE_VERSION
+                else f"{prefs.COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")  # nothing left to remember: the cookie goes
+        self._send(302, extra=(("Location", view_url(view_params(back))), ("Set-Cookie", keep)))
+
+    def _asset(self, path):
+        """/s/<name>.<sha8>.css: the shell's style sheet, immutable (an unknown name or hash: 404)."""
+        hit = ASSET_FILES.get(path[3:])
+        if hit is None:
+            return self._send(404, b"not found\n")
+        self._send(200, hit[0], hit[1], cache=ASSET_CACHE)
+
     def do_GET(self):  # noqa: N802
         u = urlsplit(self.path)
         q = parse_qs(u.query)
@@ -203,7 +288,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, b"ok\n")
         if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS:
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
-        if u.path != "/":
+        if u.path != "/" and not u.path.startswith("/s/"):
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
@@ -211,11 +296,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             given = self._token_from(q)
             if not hmac.compare_digest(given.encode(), srv.token.encode()):
                 return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
-            if "token" in q:  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
+            if "token" in q and u.path == "/":  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
                 return self._send(302, extra=(("Location", view_url(view_params(q))), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
-        page = srv.page(**view_params(q))
-        self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"))
+        if u.path != "/":
+            return self._asset(u.path)
+        if "set" in q:
+            return self._set(q)
+        page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
+        self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
+                   extra=(("Vary", "Cookie"),))
 
     def do_POST(self):  # noqa: N802 - the forms of the AI page, and nothing else
         u = urlsplit(self.path)
@@ -282,11 +372,13 @@ def view_params(q):
     view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
     report does not have), pause=1 no reload.
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
-    confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel)."""
+    confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel).
+    The shell: app=1 (0: the classic page, whatever [ui] web says), ui=<the preferences string> for this URL only (prefs.parse_cookie: an invalid one
+    is dropped), view=settings (the settings page), card=<id> (one card of the overview in full), pause=1 (the overview too)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health", "ai") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings") else ""
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
         str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
@@ -295,6 +387,8 @@ def view_params(q):
             "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
             "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
             "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0,  # 0 = config
+            "app": one("app") if one("app") in ("0", "1") else "", "ui": ui_oneshot(one("ui")),
+            "card": one("card") if not view and one("card") in prefs.CARDS else "",
             "view": view, "open": map_keys(one("open")), "shut": map_keys(one("shut")),
             "all": one("all") == "1", "sel": sel, "only": one("only") == "1", "pause": one("pause") == "1",
             "as": "graph" if one("as") == "graph" else "", "stacks": one("stacks") == "1",
@@ -306,16 +400,22 @@ def view_params(q):
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else ""} if view == "ai" else {})}
 
 
-HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh")  # the size and refresh parameters every view has
+HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause")}  # and what each view reads besides (the dashboard: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card",)}  # and what each view reads besides (settings: nothing)
+
+
+def ui_oneshot(raw):
+    """?ui= -> the canonical preferences string it holds ('' when invalid or empty): it is part of the URL, so of the cache key."""
+    got = prefs.parse_cookie(raw)
+    return prefs.dump_cookie(got) if got else ""
 
 
 def view_url(p):
     """The address of a view as view_params() read it, for the redirect that follows ?token=: only validated values of the parameters that
     view reads (an unknown one, `token` included, is not echoed), the defaults left out, like the links of the pages."""
     p = map_mode(p) if p["view"] == "map" else p
-    p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ())}
+    p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ()) + (("pause",) if p["app"] == "1" and p["view"] == "" else ())}  # the shell's overview pauses too
     p.update({k: ".".join(p[k]) for k in ("open", "shut") if k in p})  # row keys: 'k1.k2', like the pages' own links
     return page_url(p).rstrip("?")  # nothing left: "/"
 
@@ -394,27 +494,46 @@ class Server(http.server.ThreadingHTTPServer):
         """Characters of the cached pages (the cached map graph is not a page: it counts 0)."""
         return sum(len(v) for _, v in self.cache.values() if isinstance(v, (str, bytes)))
 
-    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0, view="", **state):
+    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0, view="", app="", ui="", card="", cookie="", **state):
         """zoom/refresh 0 = the configured ones: only what the viewer changed is written in the links.
-        view='map': the MAP page, state = its open/shut/all/sel/only/pause parameters (see view_params)."""
+        view='map': the MAP page, state = its open/shut/all/sel/only/pause parameters (see view_params).
+        The shell (uses_shell) draws the same views in its own frame; cookie is the nuc_ui cookie the request came with (prefs.effective checks it)."""
         r = refresh or self.cfg["refresh_seconds"]
-        here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh}
+        here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh, "app": app, "ui": ui}
         zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
         self.cpu_feed.max_age = r  # processes are read at most once per refresh interval, however many viewers and pages ask
+        shell = self.uses_shell(view, app, card)
+        pause = bool(state.get("pause"))
+        if shell:
+            eff, _src = prefs.effective(render.CFG.get("ui"), cookie, ui)
+            cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing)
+            norm = {"": {"pause": pause}, "settings": {}}.get(view, {})
+        else:
+            norm = {}
+
+        def serve(key, ttl, build):
+            """The classic page build(False), or the shell's page of the same view (build(True) is its View); one render at a time, kept ttl seconds."""
+            if not shell:
+                return self.cached(key, ttl, lambda: build(False))
+            skey = ("shell", view, card, zoom, r, prefs.dump_cookie(eff), cookie) + tuple(here.items()) + tuple(sorted(norm.items()))
+            return self.cached(skey, ttl, lambda: self.shell_render(view, build, here, zoom, r, eff, cookie, pause, card))
         if view == "cpu":
+            norm = {"sort": state.get("sort", ""), "sel": state.get("sel", ""), "pause": pause}
             key = ("cpu", zoom, r) + tuple(here.items()) + (state.get("sort", ""), state.get("sel", ""))
-            return self.cached(key, r / 2, lambda: self.cpu_page(here, zoom, r, state.get("sort", "") or "cpu", state.get("sel", "")))
+            return serve(key, r / 2, lambda sh: self.cpu_page(here, zoom, r, state.get("sort", "") or "cpu", state.get("sel", ""), sh))
         if view == "map":
             state = map_mode(state)
+            norm = dict(state)
             key = ("map", zoom, r) + tuple(here.items()) + tuple(sorted(state.items()))
-            return self.cached(key, r / 2, lambda: self.map_page(here, state, zoom, r))
+            return serve(key, r / 2, lambda sh: self.map_page(here, state, zoom, r, sh))
         if view == "health":  # the period and the selected finding are checked here, so that the cache key holds only values that exist
             days = state.get("period") if state.get("period") in render.HEALTH_DAYS else 7
             on = render.CFG["features"].get("health", True)
             ids = {f["id"] for f in render.health_findings(render.health_data(days)["report"])} if on else set()  # one report a minute per period
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
+            norm = {"days": days, "sel": sel, "pause": pause}
             key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
-            return self.cached(key, r / 2, lambda: self.health_page(here, days, sel, pause, zoom, r))
+            return serve(key, r / 2, lambda sh: self.health_page(here, days, sel, pause, zoom, r, sh))
         if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
             rows = render.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
@@ -423,9 +542,252 @@ class Server(http.server.ThreadingHTTPServer):
             if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
                     or confirm == "delete-all" and not any(m["installed"] for m in rows):
                 confirm = ""
+            norm = {"sel": sel, "pause": pause, "confirm": confirm, "version": aiweb.version()}
             key = ("ai", zoom, r, sel, pause, confirm, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
-            return self.cached(key, min(r / 2, 1.0), lambda: self.ai_page(here, sel, pause, confirm, zoom, r))  # a job's progress moves: never older than a second
-        return self.cached((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda: self.dashboard(here, zoom, r))
+            return serve(key, min(r / 2, 1.0), lambda sh: self.ai_page(here, sel, pause, confirm, zoom, r, sh))  # a job's progress moves: never older than a second
+        return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
+
+    # ---- the shell: `[ui] web = app` or ?app=1 --------------------------------------------------------------------------------------
+
+    def uses_shell(self, view, app, card):
+        """The shell is the page for ?app=1, for the settings and a single card (they exist only there), and for every page when [ui] web = app
+        (?app=0 asks for the classic page anyway)."""
+        return view == "settings" or bool(card) or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
+
+    def shell_frame(self, r):
+        """The data of a shell page (cards.Ctx), read once per half refresh interval whatever the number of viewers."""
+        return self.cached(("shell frame", r), r / 2, self.read_frame)
+
+    def read_frame(self):
+        st, sm = render.snapshot(0), render.host_sample(self.smp)
+        if render.DEMO:
+            render.demo_defaults()
+        pb = render.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+        feats, health, ai = render.CFG["features"], None, None
+        try:
+            health = render.health_data(7) if feats.get("health", True) else None
+            ai = render.ai_status() if feats.get("ai", True) else None
+        except Exception as e:  # noqa: BLE001 - a KPI whose source fails is '?', the page stays
+            print("nuc-console web: shell data error:", repr(e)[:200], file=sys.stderr)
+        return cards.Ctx(s=sm, cont=st["cont"], net=st["net"], boot=st["boot"], problems=pb, cfg=render.CFG, now=time.time(), baseline=st["baseline"],
+                         new=render.new_ports(st["net"], st["cont"], st["baseline"]), health=health, ai=ai)
+
+    def shell_render(self, view, build, here, zoom, r, eff, cookie, pause, card):
+        """One page of the shell: the top bar and the key figures (blocks the page is refreshed by), the view, the footer and the help. `build(True)`
+        gives the View of a Map, CPU, Health or AI page (the page's own builder, which then returns its body and its controls, not a document)."""
+        ctx = self.shell_frame(r)
+        feats = lambda f: render.CFG["features"].get(f, True)  # noqa: E731
+        visible = [c for c, _w in prefs.visible_cards(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])]
+        if view == "settings":
+            v = self.settings_view(here, eff, cookie, r)
+        elif view == "":
+            v = self.overview_view(here, eff, ctx, r, pause, card, visible)
+        else:
+            v = build(True)
+        vhere = dict(v.here) if v.here is not None else dict({"view": view}, **here)
+        pause = bool(vhere.get("pause", pause))
+        if pause:
+            vhere["pause"] = True
+        host = socket.gethostname()
+        link = lambda text, **kw: f'<a href="{html.escape(page_url(vhere, **kw))}">{text}</a>'  # noqa: E731
+        back = urlsplit(page_url(vhere)).query
+        setlink = lambda field, text, cur, **data: set_link(field, back, text, cur, **data)  # noqa: E731
+        clock = time.strftime("%H:%M:%S")
+        # the key figures, each a link to the card (or the view) it is about
+        here_home = dict(here)
+        tiles = []
+        for k in cards.kpis(ctx, eff["kpis"]):
+            if k.id in KPI_VIEW:
+                href = page_url(dict(here_home, view=KPI_VIEW[k.id])) if feats(KPI_VIEW[k.id]) else ""
+            elif KPI_CARD.get(k.id) in visible:
+                href = ("" if view == "" and not card else page_url(here_home)) + "#c-" + KPI_CARD[k.id]
+            else:
+                href = ""
+            tiles.append(htmlview.kpi_tile(k, href))
+        stale = {pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS)
+        note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
+                               f'restart it: <code class="cmd">{html.escape(render.CMD.get("restart", ""))}</code>') if stale else ""
+        top = htmlview.topbar(host, *self.shell_pill(ctx.problems), self.shell_tabs(ctx, here, view, r, feats), clock, "#help",
+                              page_url(dict(here, view="settings")), view == "settings")
+        kpis = "" if view == "settings" else htmlview.kpis_block(tiles, note)
+        # the page
+        r_live = int(v.wait or r) if v.live and not pause else 0
+        tools = "".join(f'<span class="tl">{t}</span>' for t in v.tools)
+        attrs = ""
+        if r_live and not v.script:  # a graph reloads itself with its own script
+            attrs = f' data-refresh="{r_live}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
+        if pause:
+            attrs += ' data-paused="1"'
+        if v.grid:
+            main = f'<main class="grid"{attrs}>{v.body}</main>'
+        else:
+            inner = v.body.replace("<main ", "<div ").replace("</main>", "</div>") if v.legacy else v.body  # one <main> a page: the old bodies' became <div>
+            main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>' + (f'<div class="toolbar">{tools}</div>' if tools else "") + inner + "</main>"
+        groups = ["refresh every " + self.every(link, r) if view != "settings" else "",
+                  f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
+                  + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" else "",
+                  "text " + self.sizes(link, zoom),
+                  '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
+                  '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
+                  "read-only · AI actions" if render.CFG["features"].get("ai", True) and advisor.web_actions_on(render.CFG) else "read-only"]
+        if here["kiosk"]:
+            groups.append(html.escape(render.KIOSK_HINT))
+        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view == "settings" else "overview"
+        helps = htmlview.help_dialog(ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause))
+        body = top + kpis + '<div id="stale" class="stale-banner" role="status" hidden></div>' + main + htmlview.foot([g for g in groups if g], clock) + helps
+        name = {"": "overview", "settings": "settings"}.get(view, view)
+        page = Page(htmlview.shell_doc(f"{host} · {name} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], zoom,
+                                       int(time.time() // 600) % 3, here["kiosk"], "url" if here["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
+                                       cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.style, v.script, pause))
+        base = SHELL_AI_CSP if v.forms else SHELL_CSP
+        page.csp = script_csp(v.script, base) if v.script else base
+        page.referrer = "same-origin" if v.forms else "no-referrer"
+        return page
+
+    @staticmethod
+    def shell_pill(pb):
+        """(state class, text) of the status pill: always there, the symbol besides the colour."""
+        text, _code = render.status_pill(pb or [])
+        state = "ok" if not pb else "err" if any(sev >= 2 for sev, _ in pb) else "warn"
+        return state, text
+
+    def shell_tabs(self, ctx, here, view, r, feats):
+        """The tabs: a link per screen with its key, a badge where there is something to say (the Map's problems, the Health findings, the AI)."""
+        badges = {}
+        try:
+            if feats("map") and view != "settings":
+                n = graph.counts(self.map_graph(r)[0])["problems"]
+                badges["map"] = str(n) if n else ""
+            rep = ((ctx.health or {}).get("report") or {}).get("findings") if feats("health") else None
+            if isinstance(rep, list):
+                err, warn = (sum(1 for f in rep if isinstance(f, dict) and f.get("level") == lv) for lv in ("err", "warn"))
+                badges["health"] = " ".join(x for x in (f'<span class="s-err">✖{err}</span>' if err else "", f'<span class="s-warn">!{warn}</span>' if warn else "") if x)
+            ai = ctx.ai if feats("ai") and isinstance(ctx.ai, dict) else {}
+            if ai.get("enabled"):
+                answer = (ai.get("probe") or {}).get("state") if isinstance(ai.get("probe"), dict) else None
+                badges["ai"] = '<span class="s-ok">●</span> on' if answer == "answering" else '<span class="s-err">✖</span> down' if answer == "down" else '<span class="s-unknown">?</span>'
+        except Exception as e:  # noqa: BLE001 - a badge is a nicety: the tab stays
+            print("nuc-console web: badge error:", repr(e)[:200], file=sys.stderr)
+        out = []
+        for digit, name in ui.screen_keys(feats):
+            href = page_url(dict(here, view=name)) if name != "overview" else page_url(here)
+            out.append(htmlview.tab(digit, TAB_TITLES[name], href, view == ("" if name == "overview" else name), badges.get(name, "")))
+        return out
+
+    def overview_view(self, here, eff, ctx, r, pause, only, visible):
+        """The overview: the cards in the order the preferences give (by severity, or fixed), each the body the console draws for it (the
+        components come later), in a grid. only: one card in full (?card=)."""
+        k = DETAIL_K.get(eff["density"], -2)
+        if only:
+            order = [(only, 4)] if cards.enabled(only, render.CFG) else []
+        else:
+            order = prefs.visible_cards(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])
+        built = [self.shell_card(ctx, cid, w, k, here, bool(only)) for cid, w in order]
+        if eff["order"] == "severity" and not only:
+            built.sort(key=lambda x: STATE_RANK.get(x[0], 3))  # stable: equal states keep the layout's order
+        body = "".join(x[1] for x in built)
+        vhere = dict(here, pause=pause, card=only)
+        if only:
+            body = body or '<p class="sm">this card is not shown: its feature is off in config.ini ([features])</p>'
+        return View(body, ['<a href="%s">&larr; overview</a>' % html.escape(page_url(here))] if only else [], vhere, True, grid=True, legacy=False)
+
+    def shell_card(self, ctx, cid, size, k, here, full):
+        """(state, the article) of one card: the lines the console has always drawn for it (cards.build), colours as spans. A card that fails is
+        shown unknown, with the reason in the log."""
+        saved = render.FULL
+        render.FULL = bool(full)  # the console's own switch: nothing is cut in the full card
+        try:
+            card = cards.build(cid, ctx, k if not full else -2, cards.Caps(CARD_COLS.get(size, 104), bool(full), render.EXPAND, render.TRUNC))
+            note, inner = htmlview.ansi_card(card.lines)
+            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if card.truncated and not full else ""
+            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more)
+        except Exception as e:  # noqa: BLE001 - a broken card must not take the page down
+            print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
+            entry = cards.CARDS.get(cid)
+            return "unknown", htmlview.card_article(cid, entry.title if entry else cid, "", "unknown", size, '<p class="sm">this card could not be drawn (see the service log)</p>')
+        finally:
+            render.FULL = saved
+
+    def settings_view(self, here, eff, cookie, r):
+        """The settings page: the appearance (every choice a link: /?set=), what to export, and what this machine is (read-only)."""
+        vhere = dict(here, view="settings")
+        back = urlsplit(page_url(vhere)).query
+        esc = html.escape
+        href = lambda field: esc(set_url(field, back))  # noqa: E731
+        _, source = prefs.effective(render.CFG.get("ui"), cookie if cookie != prefs.COOKIE_VERSION else "", here["ui"])
+        where = lambda f: f'<span class="src sm">{esc(SOURCE_WORDS[source[f]])}</span>'  # noqa: E731
+
+        def group(title, field, options, hint=""):
+            opts = [(text, set_url(code, back), eff[field] == value, " data-set" + "".join(f' data-{k}="{esc(v)}"' for k, v in data.items()))
+                    for text, code, value, data in options]
+            return (f'<div class="fs"><span class="lab">{esc(title)} {where(field)}</span>' + htmlview.seg(title, opts)
+                    + (f'<p class="hintl">{esc(hint)}</p>' if hint else "") + "</div>")
+        theme = group("Theme", "theme", [(label.capitalize(), "t" + code, name, {"theme": name}) for name, label, code in THEMES])
+        dens = group("Density", "density", [(label.capitalize(), "d" + code, name, {"density": name}) for name, label, code in DENSITIES],
+                     "Wall hides the small print and cuts long lists to 3 lines; compact fits more.")
+        preset = group("Preset", "preset", [(name.capitalize(), "p" + prefs.PRESET_CODES[name], name, {}) for name in prefs.PRESETS],
+                       "A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.")
+        order = group("Order", "order", [("By severity", "o" + prefs.ORDER_CODES["severity"], "severity", {}), ("Fixed", "o" + prefs.ORDER_CODES["fixed"], "fixed", {})],
+                      "By severity: what needs you comes first. Fixed: the layout's order, nothing moves.")
+        start = group("Start view", "start_view", [(TAB_TITLES[n], "v" + prefs.VIEW_CODES[n], n, {}) for n in prefs.VIEWS])
+        cur, boxes = list(eff["kpis"]), []
+        for kid in prefs.KPI_IDS:
+            label, on = esc(cards.KPI_LABELS.get(kid, kid)), kid in cur
+            new = [x for x in cur if x != kid] if on else cur + [kid]
+            ok = bool(new) and len(new) <= prefs.MAX_KPIS
+            inner = f'<span class="box" aria-hidden="true">{"✔" if on else "+"}</span> {label}'
+            link_ = (f'<a href="{href("k" + "_".join(prefs.KPI_CODES[x] for x in new))}" data-set>{inner}</a>' if ok
+                     else f'<span aria-disabled="true">{inner}</span>')
+            boxes.append(f'<li class="{"on" if on else "off"}">{link_}' + (f'<span class="o">{cur.index(kid) + 1}</span>' if on else "") + "</li>")
+        kpis = (f'<div class="fs"><span class="lab">Key figures (at most {prefs.MAX_KPIS}, shown in the order chosen) {where("kpis")}</span>'
+                f'<ul class="kchk">{"".join(boxes)}</ul></div>')
+        export = prefs.export_ini(dict(eff, web="app"))
+        appearance = (f'<section class="sec" aria-labelledby="sec-app"><h3 class="sech" id="sec-app">Appearance</h3>{theme}{dens}{preset}{order}{start}{kpis}'
+                      f'<div class="fs expo"><span class="lab" id="exp-lab">Export</span><pre id="export" tabindex="0" aria-labelledby="exp-lab">{esc(export)}</pre>'
+                      f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'
+                      f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
+                      f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
+        return View(f'<div class="settings">{appearance}{self.about_html()}</div>', [], vhere, False, legacy=False)
+
+    def about_html(self):
+        """'About this machine': what the machine is and how it is set up, read-only (this page changes nothing on it)."""
+        esc, cfg = html.escape, render.CFG
+        code = lambda t: f'<code class="cmd">{esc(t)}</code>'  # noqa: E731
+        portable = nuc_config.PORTABLE
+        conf = os.environ.get("NUC_CONSOLE_CONFIG") or (os.path.join(os.path.abspath(portable), "config.ini") if portable else nuc_config.DEFAULT_PATH)
+        upd = "bin/nuc-console-update" if portable else "nuc-console-update"
+        rows = [("version", f"<b>nuc-console {esc(nuc_config.VERSION)}</b> <span class=\"sm\">to update, run {code(upd)} yourself: nothing here goes online</span>"),
+                ("mode", ("portable run: config, state and baseline are in " + code(os.path.abspath(portable))) if portable
+                 else "installed on this machine"),
+                ("config", code(conf) + " " + ('<span class="s-err">unreadable: %s</span>' % esc(cfg["config_error"]) if cfg.get("config_error")
+                                               else '<span class="s-ok">read, no errors</span>' if os.path.exists(conf)
+                                               else '<span class="sm">no file: the defaults are in use</span>'))]
+        bind = self.server_address[0]
+        loop = is_loopback(bind)
+        rows.append(("web access", ("loopback only (" + esc(bind) + ")" if loop else esc(bind)) + (", a token is required" if self.token else
+                                                                                               ", no token" if loop else "")))
+        d = cfg.get("display") or {}
+        rows.append(("display", f'mode {esc(d.get("mode", "browser"))} · zoom {int(self.zoom)}%'))
+        rows.append(("Telegram", esc(self.telegram_text())))
+        locked = not advisor.web_actions_on(cfg)
+        rows.append(("AI buttons", ('<span class="s-warn">locked by the admin</span> ([ai] web_actions = no): the AI page only shows' if locked else
+                                    "allowed ([ai] web_actions = yes): the AI page can switch the AI on and off, ask and delete models")
+                     if cfg["features"].get("ai", True) else "the AI screen is off ([features] ai = no)"))
+        dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows)
+        return (f'<section class="sec" aria-labelledby="sec-about"><h3 class="sech" id="sec-about">About this machine</h3>'
+                f'<p class="sm">Read-only: this page changes nothing on the machine.</p><dl class="about">{dl}</dl></section>')
+
+    @staticmethod
+    def telegram_text():
+        """The notifier as the settings say it: off, or what its status.json shows (render.telegram_state)."""
+        if not render.CFG["telegram"]["enabled"]:
+            return "off ([telegram] enabled = no)"
+        if nuc_config.PORTABLE:
+            return "on in config.ini, but a portable run sends no message: install nuc-console (docs/TELEGRAM.md)"
+        state, why = render.telegram_state(time.time())
+        return {"ok": "on, paired and sending", "unreadable": "on; this account cannot read its status",
+                "unpaired": "on, but not paired: run nuc-console-telegram --setup", "down": "on, but the notifier is not running"}.get(
+            state, "failing for " + why)
 
     def grid(self, here, zoom):
         """(columns, rows, CSS) of a screen page: the text fills the window (fit) or is a fixed grid whose font grows with the zoom."""
@@ -474,12 +836,14 @@ class Server(http.server.ThreadingHTTPServer):
         lo, hi = nuc_config.REFRESH_MIN, nuc_config.REFRESH_MAX  # − = more often, + = less often
         return (link("−", refresh=r - 1) if r > lo else "−") + f" {r}s " + (link("+", refresh=r + 1) if r < hi else "+")
 
-    def cpu_page(self, here, zoom, r, sort, sel):
+    def cpu_page(self, here, zoom, r, sort, sel, shell=False):
         """The CPU screen as a page: the console's own screen through the ANSI path, its process rows links (sel= shows that process's
         details), the sort as links in the bottom bar. The processes are read once per refresh interval, whoever asks (cpu_feed)."""
         esc = html.escape
 
-        def doc(body, foot, style="", refresh=True):  # the host name after cpu_problems(): --demo names the host there
+        def doc(body, foot, style="", refresh=True, tools=(), vhere=None):  # the host name after cpu_problems(): --demo names the host there
+            if shell:
+                return View(body, tools, vhere, refresh)
             return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
                     + f'<title>{esc(socket.gethostname())} · cpu · nuc-console</title><style>{CSS}{CPU_CSS}{style}</style>{body}'
@@ -505,21 +869,23 @@ class Server(http.server.ThreadingHTTPServer):
         link = lambda text, **kw: f'<a href="{esc(page_url(chere, **kw))}">{text}</a>'  # noqa: E731
         sorts = " ".join(f"<b>{name}</b>" if key == sort else link(name, sort="" if key == "cpu" else key)
                          for key, name in (("cpu", "cpu"), ("mem", "mem"), ("time", "time"), ("pid", "pid"), ("user", "user")))
+        tools = ["sort " + sorts, link("close details", sel="") if sel else "a process: its details"]
         bar = [dash] + ([f'<a href="{esc(page_url(dict({"view": "map"}, **here)))}">map</a>'] if render.CFG["features"].get("map", True) else [])
-        bar += ["sort " + sorts, link("close details", sel="") if sel else "a process: its details", "text " + self.sizes(link, zoom),
-                "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
+        bar += tools + ["text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(esc(render.KIOSK_HINT))
-        return doc(body, bar, style)
+        return doc(body, bar, style, tools=tools, vhere=chere)
 
     def map_graph(self, r):
         """render.map_graph() for as long as a page lives (r/2), shared by every map view: a new sel/open/shut walks the
         tree again, it does not rebuild the graph (bounded CPU)."""
         return self.cached(("map graph",), r / 2, lambda: render.map_graph(self.smp))
 
-    def map_page(self, here, state, zoom, r):
+    def map_page(self, here, state, zoom, r, shell=False):
         """The MAP as real HTML (rows of links, not a screen): the URL holds the whole view, so the reload keeps it."""
-        def doc(body, foot, refresh=True):  # the host name after map_graph(): --demo names the host there
+        def doc(body, foot, refresh=True, tools=(), vhere=None):  # the host name after map_graph(): --demo names the host there
+            if shell:
+                return View(body, tools, vhere, refresh)
             return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
                     + f'<title>{html.escape(socket.gethostname())} · map · nuc-console</title><style>{CSS}{MAP_CSS}'
@@ -528,7 +894,7 @@ class Server(http.server.ThreadingHTTPServer):
         if not render.CFG["features"].get("map", True):
             return doc("<p>map disabled in config.ini (<b>[features] map = no</b>)</p>", [dash, "read-only"], refresh=False)
         if state.get("as") == "graph":
-            return self.graph_page(here, state, zoom, r, dash)
+            return self.graph_page(here, state, zoom, r, dash, shell)
         pause, st, sel = state.get("pause", False), map_state(state), state.get("sel", "")
         found = {}
         try:
@@ -541,17 +907,17 @@ class Server(http.server.ThreadingHTTPServer):
             mhere, body, found = map_here(here, st, sel, pause), "<pre>render error (see the service log)</pre>", {}
         anchor = f"#r-{sel}" if sel else ""  # the footer's links keep the selected row in sight
         link = lambda text, **kw: f'<a href="{html.escape(page_url(mhere, **kw) + anchor)}">{text}</a>'  # noqa: E731
-        bar = [dash, mode_switch(None, graph_url(found, st.only, pause, here)),
-               link("expand all", **state_params(graph.State(all=True, only=st.only))),
-               link("collapse all", **state_params(graph.State(only=st.only))),
-               link("all paths", only=False) if st.only else link("problems only", only=True),
-               "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+        tools = [mode_switch(None, graph_url(found, st.only, pause, here)),
+                 link("expand all", **state_params(graph.State(all=True, only=st.only))),
+                 link("collapse all", **state_params(graph.State(only=st.only))),
+                 link("all paths", only=False) if st.only else link("problems only", only=True)]
+        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
                "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause)
+        return doc(body, bar, refresh=not pause, tools=tools, vhere=mhere)
 
-    def graph_page(self, here, state, zoom, r, dash):
+    def graph_page(self, here, state, zoom, r, dash, shell=False):
         """The MAP as a graph: circles (nodes) and lines (edges) in an SVG, every node a link that selects it, the details
         of the selected one beside it. It works without a script; with GRAPH_SCRIPT (pinned by its hash in this page's
         CSP, the only page that has one) nodes can be dragged and the drawing zoomed and panned, and the script reloads
@@ -577,13 +943,16 @@ class Server(http.server.ThreadingHTTPServer):
             body, tree = "<pre>render error (see the service log)</pre>", page_url(map_here(here, graph.State(only=only), "", pause))
         link = lambda text, **kw: f'<a href="{html.escape(page_url(gh, **kw))}">{text}</a>'  # noqa: E731
         url = lambda **kw: page_url(gh, **kw)  # noqa: E731
-        bar = [dash, mode_switch(tree, None), link("all nodes", only=False) if only else link("problems only", only=True),
-               "remote addresses " + choice([("on", url(ext="") if ext else None), ("off", None if ext else url(ext="0"))]),
-               "stacks " + choice([("on", None if stacks else url(stacks=True)), ("off", url(stacks=False) if stacks else None)]),
-               "zoom " + zoom_steps(link, z), "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+        tools = [mode_switch(tree, None), link("all nodes", only=False) if only else link("problems only", only=True),
+                 "remote addresses " + choice([("on", url(ext="") if ext else None), ("off", None if ext else url(ext="0"))]),
+                 "stacks " + choice([("on", None if stacks else url(stacks=True)), ("off", url(stacks=False) if stacks else None)]),
+                 "zoom " + zoom_steps(link, z)]
+        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
                "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
+        if shell:  # the drawing's own size is in the style sheet's variable (no inline style of its own): see View.style
+            return View(body, tools, gh, not pause, script=script, style="#gsvg{width:%s}" % (f"{z}%" if z else "100%;max-height:calc(100vh - 150px)"))
         page = Page(graph_doc(r, zoom, z, body, bar, not pause, script))
         if script:
             page.csp = GRAPH_CSP
@@ -603,10 +972,12 @@ class Server(http.server.ThreadingHTTPServer):
             return pos
 
 
-    def health_page(self, here, days, sel, pause, zoom, r):
+    def health_page(self, here, days, sel, pause, zoom, r, shell=False):
         """The HEALTH page: the console screen's parts as HTML. The findings are links (sel=<id>) whose details show beside or under the
         list; the sections of tables are the console's, drawn at the page's width. The URL holds the whole view, so the reload keeps it."""
-        def doc(body, foot, refresh=True):
+        def doc(body, foot, refresh=True, tools=(), vhere=None):
+            if shell:
+                return View(body, tools, vhere, refresh)
             return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                     + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
                     + f'<title>{html.escape(socket.gethostname())} · health · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}'
@@ -625,14 +996,14 @@ class Server(http.server.ThreadingHTTPServer):
         anchor = f"#f-{sel_index(data, sel)}" if sel else ""  # the footer's links keep the selected finding in sight
         link = lambda text, **kw: f'<a href="{html.escape(page_url(hhere, **kw) + anchor)}">{text}</a>'  # noqa: E731
         periods = " ".join(f"<b>{lab}</b>" if d == days else link(lab, period=d if d != 7 else 0) for d, lab in ((1, "24h"), (7, "7d"), (30, "30d")))
-        bar = [dash, "period " + periods, link("compact", cols=100), link("wide", cols=200),
-               "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+        tools = ["period " + periods, link("compact", cols=100), link("wide", cols=200)]
+        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
                "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause)
+        return doc(body, bar, refresh=not pause, tools=tools, vhere=hhere)
 
-    def ai_page(self, here, sel, pause, confirm, zoom, r):
+    def ai_page(self, here, sel, pause, confirm, zoom, r, shell=False):
         """The AI page: the AI switch and what it is doing at the top, the chat under it (the model answers as soon as the server does), then what
         this machine can run: the models as a table (a button per model: use it), their details, the hardware and the status. Forms post to /ai/*
         (see do_POST); the page reloads by itself only while something runs, so that a question being typed is not lost. The URL holds the whole
@@ -641,7 +1012,9 @@ class Server(http.server.ThreadingHTTPServer):
         snap = eng.snapshot()
         live = snap["busy"] or snap["locked"]   # idle with forms: no reload (a locked page has none: it reloads as the others do)
 
-        def doc(body, foot, refresh=True):
+        def doc(body, foot, refresh=True, tools=(), vhere=None):
+            if shell:  # the shell reloads (a job runs: soon) only while something runs; a page with forms is not reloaded under a question being typed
+                return View(body, tools, vhere, bool(refresh and live), forms=not snap["locked"], wait=2 if snap["busy"] else 0)
             meta = f'<meta http-equiv="refresh" content="{2 if snap["busy"] else r}">' if refresh and live else ""
             page = Page('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                         + meta + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
@@ -663,15 +1036,17 @@ class Server(http.server.ThreadingHTTPServer):
             body = "<pre>render error (see the service log)</pre>"
         anchor = f"#m-{next((i for i, m in enumerate(rows) if m['id'] == sel), 0)}" if sel else ""  # the footer's links keep the selected model in sight
         link = lambda text, **kw: f'<a href="{html.escape(page_url(ahere, **kw) + anchor)}">{text}</a>'  # noqa: E731
+        tools = [link("compact", cols=100), link("wide", cols=200)]
         if snap["locked"]:  # the page as it was: read-only, and it reloads like the others
-            bar = [dash, link("compact", cols=100), link("wide", cols=200), "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+            bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
                    "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only (locked by config.ini)", time.strftime("%H:%M:%S")]
         else:  # forms: no reload while idle, so that a question being typed is not lost; it reloads by itself while a job or an answer runs
-            bar = [dash, link("compact", cols=100), link("wide", cols=200), "text " + self.sizes(link, zoom),
-                   "paused " + link("live", pause=False) if pause else "reloads by itself while something runs · " + link("reload"), time.strftime("%H:%M:%S")]
+            tools.append(link("reload"))
+            bar = [dash, tools[0], tools[1], "text " + self.sizes(link, zoom),
+                   "paused " + link("live", pause=False) if pause else "reloads by itself while something runs · " + tools[2], time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause)
+        return doc(body, bar, refresh=not pause, tools=tools, vhere=ahere)
 
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).
@@ -722,7 +1097,7 @@ class Server(http.server.ThreadingHTTPServer):
         with self.lock:
             self.cache.clear()  # the page that comes next shows what this did
         back = view_params(parse_qs(one("back", 400)))
-        here = {k: back[k] for k in ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh")}
+        here = {k: back[k] for k in HERE_KEYS}
         return page_url(dict({"view": "ai", "sel": sel or (back.get("sel") if back.get("view") == "ai" else ""), "confirm": confirm}, **here)) + anchor
 
 
