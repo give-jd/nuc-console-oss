@@ -116,7 +116,7 @@ class AiFolderIsTheWebAccounts(unittest.TestCase):
         at = src.index("-o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai")
         self.assertLess(at, src.index("systemctl daemon-reload", at), "before the units are read again and the services restarted")
         self.assertNotRegex(src, r"chown -R .*/var/lib/nuc-console\b(?!/ai)", "nothing else of the state folder is handed over")
-        self.assertNotIn("chmod -R", src)
+        self.assertNotRegex(src, r"chmod -R .*/var/lib/nuc-console", "nor are its permissions loosened")  # the archive's Python in $DEST is another matter
 
     def test_linux_both_units_may_write_the_ai_folder_and_the_web_unit_keeps_its_sandbox(self):
         web, tty = unit_lines("nuc-console-web.service"), unit_lines("nuc-console.service")

@@ -54,7 +54,7 @@ def runtime_script(kind="serve"):
     """The bytes of a fake llamafile for `/bin/sh runtime --server --host H --port N -m FILE -a ID ...`: serve = answers GET /v1/models on that port
     until it is stopped; die = writes a line and exits; stubborn = ignores SIGTERM. Windows starts `runtime.exe --server ...`: serve and stubborn
     are then the Python source itself, which Base.popen hands to this interpreter (a script cannot be an .exe)."""
-    serve = ("import faulthandler, http.server, json, signal, sys\\nif hasattr(signal, \"SIGUSR1\"): faulthandler.register(signal.SIGUSR1)\\n"  # Unix: where it is (Base.where)
+    serve = ("import faulthandler, http.server, json, signal, socketserver, sys\\nif hasattr(signal, \"SIGUSR1\"): faulthandler.register(signal.SIGUSR1)\\n"  # Unix: where it is (Base.where)
              "a = sys.argv[1:]\\nport = int(a[a.index(\"--port\") + 1])\\nmodel = a[a.index(\"-a\") + 1]\\n"
              "print(\"fake runtime up on\", port, flush=True)\\n"
              "class H(http.server.BaseHTTPRequestHandler):\\n"
@@ -62,7 +62,9 @@ def runtime_script(kind="serve"):
              "    def do_GET(self):\\n"
              "        b = json.dumps({\"data\": [{\"id\": model}]}).encode()\\n"
              "        self.send_response(200); self.send_header(\"Content-Length\", str(len(b))); self.end_headers(); self.wfile.write(b)\\n"
-             "s = http.server.ThreadingHTTPServer((\"127.0.0.1\", port), H)\\nprint(\"listening\", flush=True)\\ns.serve_forever()\\n")
+             "class S(http.server.ThreadingHTTPServer):\\n"
+             "    def server_bind(self): socketserver.TCPServer.server_bind(self)\\n"  # not HTTPServer's: its socket.getfqdn() hangs on macOS runners
+             "s = S((\"127.0.0.1\", port), H)\\nprint(\"listening\", flush=True)\\ns.serve_forever()\\n")
     stubborn = ("import signal, time\\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\\nprint(\"up\", flush=True)\\n"
                 "while True:\\n    time.sleep(0.05)\\n")
     if kind == "die":
@@ -1702,7 +1704,7 @@ class ConsoleKeys(WebBase):
         snap = self.eng.snapshot()
         self.assertEqual((snap["state"][0], snap["server"]["model"], snap["switch"]["on"]), ("running", "tiny", True))
         data, av, rows = self.view()
-        txt = self.screen(av, data)
+        txt = self.screen(av, data, cols=240)  # wide: macOS's temporary folders are long, and the line would be cut before "free on that disk"
         self.assertIn("● ON", txt)
         self.assertIn("tiny runs here and answers at http://127.0.0.1:", txt)
         self.assertIn("tiny is in use", txt, "the answer to the key is on the screen")
