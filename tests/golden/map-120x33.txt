@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ Map │ 14:13:20                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m MAP [0m [90m27 nodes · 14 links · [0m[31m✖ 7 need attention[0m [36m────────[0m [1m━━►[0m [90mseen[0m  ╌╌► [90mdeclared[0m  [90m┄┄►[0m [90msame network[0m  [1m◄━━[0m [90mconnected to it[0m[0m[0m[0m[K
+[90m  · connections sampled every 30 s, remembered 24 h (watching since 1h)[0m[0m[0m[0m[K
+[36m▾[0m [1;36mLOCAL[0m  [90mthis machine only[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m :5433/tcp  [1mblog-db-1[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m :5678/tcp  [1mnode[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m :6379/tcp  [1mcache-1[0m[0m[0m[0m[K
+[90m└─ [0m[36m▸[0m :8081/tcp  [1mblog-app-1[0m[0m[0m[0m[K
+[36m▾[0m [1;31mIMPACT[0m  [90mwhat is down or failing, and what depends on it[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m [31m✖ admin-console[0m  [90mweb app · expected on :9443[0m  [33mdeclared in [webapps] but nothing listens on :9443[0m[0m[0m[0m[K
+[90m└─ [0m[90m·[0m [31m✖ worker-1[0m  [90mcontainer · shop[0m  [31mexited with code 137[0m[0m[0m[0m[K
+[36m▾[0m [1;36mSTACKS[0m  [90mcompose projects and their containers[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [32mblog[0m  [90mcompose project[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [31mshop[0m  [90mcompose project[0m[0m[0m[0m[K
+[90m└─ [0m[36m▸[0m [32mstandalone[0m  [90mcontainers without a project[0m[0m[0m[0m[K
+[36m▾[0m [1;36mOUTBOUND[0m  [90mconnections this machine opens to other hosts[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [32mnode[0m  [90mn8n.service[0m[0m[0m[0m[K
+[7m└─ ▸ shop-api-1  container · shop                                                                                      [0m[0m[0m[K
+[36m──[0m[1;36m DETAILS [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
+[90mcontainer       [0m[1;32mshop-api-1  ·  container · shop[0m[0m[0m[K
+[90mkind            [0mcontainer[0m[0m[K
+[90mimage           [0mexample/shop-api:1.4[0m[0m[K
+[90mcompose         [0mshop / api[0m[0m[K
+[90mstate           [0mUp 3 days[0m[0m[K
+[90mhealth          [0mhealthy[0m[0m[K
+[90mrestart policy  [0munless-stopped[0m[0m[K
+[90mnetworks        [0mshop_default 172.18.0.3[0m[0m[K
+[90mlistens inside  [0m3000 (seen in its network namespace)[0m[0m[K
+[90mmemory          [0m520 MiB[0m[0m[K
+[90m◄ from          [0mshop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop][0m[0m[K
+[90m► to            [0mshop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside[0m[0m[K
+[90m … +3 more lines[0m[0m[0m[K
+[90m 21/21  ↑↓: move  ←→: open  Enter: hide  e/c: all  p: problems  m: back[0m[0m[0m

@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ Network & firewall 2/2 │ 14:13:20                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[0m[K
+   [90mufw          [0min deny  ·  out allow  ·  fwd deny   log: on (low)[0m[K
+   [90miptables     [0mINPUT DROP (5 rules)   FORWARD DROP (0 rules)[0m[K
+   [90mtailscale    [0m[32mts-input accepts tailscale0[0m[0m[K
+   [90mfail2ban     [0msshd: 2 ban  198.51.100.7 198.51.100.9[0m[K
+   [90mdrop 1h      [0m41[0m[K
+   [90m  ports      [0m23×25  445×16[0m[K
+   [90m  sources    [0m198.51.100.9×30  198.51.100.44×11[0m[K
+[0m[K
+[1m   UFW INBOUND RULES (3)[0m[0m[K
+[1m   TO                          ACTION        FROM[0m[0m[K
+   22/tcp                      ALLOW IN      192.168.0.0/24[0m[K
+   Anywhere on tailscale0      ALLOW IN      Anywhere[0m[K
+[33m   41641/udp                   ALLOW IN      Anywhere[0m[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m screen 3/4   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 120x33[0m[0m

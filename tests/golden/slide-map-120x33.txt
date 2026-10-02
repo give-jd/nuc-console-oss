@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ Map │ 14:13:20                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m MAP [0m [90m27 nodes · 14 links · [0m[31m✖ 7 need attention[0m [36m────────[0m [1m━━►[0m [90mseen[0m  ╌╌► [90mdeclared[0m  [90m┄┄►[0m [90msame network[0m  [1m◄━━[0m [90mconnected to it[0m[0m[0m[0m[K
+[90m  · connections sampled every 30 s, remembered 24 h (watching since 1h)[0m[0m[0m[0m[K
+[36m▾[0m [1;31mINTERNET[0m  [90mreachable from the Internet (Tailscale Funnel)[0m[0m[0m[0m[K
+[90m└─ [0m[36m▾[0m [31m:8444/tcp[0m  [1mnode[0m  [90mFUNNEL: public[0m  [31mdeclared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)[0m[0m[0m[0m[K
+[90m   └─ [0m[90m·[0m [1m━━►[0m 198.51.100.80 :443  [90mInternet[0m  [90m25m ago[0m[0m[0m[0m[K
+[36m▾[0m [1;31mLAN[0m  [90mopen on the LAN (and on the tailnet)[0m[0m[0m[0m[K
+[90m├─ [0m[36m▾[0m [31m:5432/tcp[0m  [1mshop-db-1[0m  [90mdocker: bypasses ufw[0m  [31mdeclared local in config.ini, reachable from the LAN and the tailnet[0m[0m[0m[0m[K
+[90m│  └─ [0m[90m·[0m [1m◄━━[0m 192.168.0.50 :5432  [90mLAN[0m  [90mnow[0m[0m[0m[0m[K
+[90m├─ [0m[36m▾[0m [33m:8080/tcp[0m  [1mshop-web-1[0m  [33mdocker: bypasses ufw[0m[0m[0m[0m[K
+[90m│  ├─ [0m[90m·[0m [1m◄━━[0m 100.64.0.2 :8080  [90mtailnet · laptop[0m  [90mnow[0m[0m[0m[0m[K
+[90m│  ├─ [0m[36m▸[0m [1m━━►[0m [32mshop-api-1[0m :3000  [90mcontainer · shop[0m  [90mnow[0m[0m[0m[0m[K
+[90m│  ├─ [0m[90m·[0m [90m┄┄►[0m [33mshop-db-1[0m  [90mpostgres · shop[0m  [31mclients from outside connect to it directly: 192.168.0.50[0m[0m[0m[0m[K
+[90m│  └─ [0m[90m·[0m [90m┄┄►[0m [32mcache-1[0m  [90mredis[0m[0m[0m[0m[K
+[90m└─ [0m[36m▾[0m :22/tcp  [1msshd[0m  [90mLAN only 192.168.0.0/24[0m[0m[0m[0m[K
+[90m   └─ [0m[90m·[0m [1m◄━━[0m 192.168.0.20 :22  [90mLAN[0m  [90mnow[0m[0m[0m[0m[K
+[36m▾[0m [1;36mLOCAL[0m  [90mthis machine only[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m :5433/tcp  [1mblog-db-1[0m[0m[0m[0m[K
+[90m├─ [0m[36m▾[0m :5678/tcp  [1mnode[0m[0m[0m[0m[K
+[90m│  └─ [0m[90m·[0m [1m━━►[0m 198.51.100.80 :443  [90mInternet[0m  [90m25m ago[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m :6379/tcp  [1mcache-1[0m[0m[0m[0m[K
+[90m└─ [0m[36m▸[0m :8081/tcp  [1mblog-app-1[0m[0m[0m[0m[K
+[36m▾[0m [1;31mIMPACT[0m  [90mwhat is down or failing, and what depends on it[0m[0m[0m[0m[K
+[90m├─ [0m[90m·[0m [31m✖ admin-console[0m  [90mweb app · expected on :9443[0m  [33mdeclared in [webapps] but nothing listens on :9443[0m[0m[0m[0m[K
+[90m└─ [0m[90m·[0m [31m✖ worker-1[0m  [90mcontainer · shop[0m  [31mexited with code 137[0m[0m[0m[0m[K
+[36m▾[0m [1;36mSTACKS[0m  [90mcompose projects and their containers[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [32mblog[0m  [90mcompose project[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [31mshop[0m  [90mcompose project[0m[0m[0m[0m[K
+[90m└─ [0m[36m▸[0m [32mstandalone[0m  [90mcontainers without a project[0m[0m[0m[0m[K
+[36m▾[0m [1;36mOUTBOUND[0m  [90mconnections this machine opens to other hosts[0m[0m[0m[0m[K
+[90m├─ [0m[36m▸[0m [32mnode[0m  [90mn8n.service[0m[0m[0m[0m[K
+[90m└─ [0m[36m▸[0m [32mshop-api-1[0m  [90mcontainer · shop[0m[0m[0m[0m[K
+[90m screen 3/5   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 120x33[0m[0m

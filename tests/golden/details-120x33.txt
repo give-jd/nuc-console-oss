@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ Details │ 14:13:20                                                                         ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m ATTENTION [0m[36m────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[K
+   [31m✖[0m 1 DB/broker open on LAN[0m[K
+   [31m✖[0m 2 services reach beyond config.ini: n8n :8444 Internet > tailnet, shop-db :5432 LAN > local[0m[K
+   [33m![0m 1 container exited with an error[0m[K
+   [33m![0m 2 errors in this boot's journal[0m[K
+   [33m![0m 1 Docker port bypassing ufw (DOCKER-USER empty)[0m[K
+   [33m![0m 1 service public on the Internet (Funnel :8444)[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m screen 2/2   m: map   c: cpu   h: health   a: ai   details: everything the overview cut ('… +N more')   keys 1-3: jump[0m

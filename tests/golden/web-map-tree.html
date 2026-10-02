@@ -1,0 +1,177 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none' -->
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="2">
+<title>demo-host · map · nuc-console</title>
+<style>html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{margin:0;overflow-x:auto}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}.m{color:#bc8cff}.c{color:#39c5cf}.w{color:#f0f6fc}.d{color:#6e7681}.k{color:#0d1117}.B{font-weight:700}.bR{background:#da3633}.bY{background:#d29922}.rv{background:#c9d1d9;color:#0d1117}footer{position:sticky;bottom:0;margin-top:10px;padding:8px 0;background:#0d1117;border-top:1px solid #30363d;color:#6e7681;font:12px sans-serif}a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}.hd{display:flex;justify-content:space-between;gap:2ch;white-space:pre;padding:0 1ch}.hd>span:first-child{overflow:hidden;text-overflow:ellipsis}.lg{margin:8px 0 2px;color:#8b949e}.nt{margin:2px 0;color:#8b949e}.n{color:#c9d1d9}.mp{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 28px;margin-top:8px}.tree{min-width:0}.ro{display:grid;grid-template-columns:auto minmax(0,1fr);padding:0 4px;border-radius:3px;scroll-margin:30vh 0}.ro:hover{background:#161b22}.ro:target{outline:1px solid #30363d}.sel,.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.tr{white-space:pre;color:#6e7681}.bd{white-space:pre-wrap;overflow-wrap:anywhere}.tg{display:inline-block;width:1.6em;text-align:center;text-decoration:none}a.lb{text-decoration:none}a.lb:hover{text-decoration:underline}.dp{align-self:start;border:1px solid #30363d;border-radius:6px;padding:8px 12px;scroll-margin:8px}.dh{display:flex;justify-content:space-between;gap:2ch;margin-bottom:6px;font-weight:700}.dp table{border-collapse:collapse;width:100%}.dp th{text-align:left;font-weight:400;color:#8b949e;padding:1px 2ch 1px 0;vertical-align:top;white-space:nowrap}.dp td{padding:1px 0;overflow-wrap:anywhere}.dp th.in{padding-left:2ch}.dp tr.top td{font-weight:700}.dl{display:none}@media(min-width:1000px){.mp.two{grid-template-columns:minmax(0,1fr) minmax(340px,40%)}.dp{position:sticky;top:8px;max-height:calc(100vh - 80px);overflow:auto}}@media(max-width:999px){.mp.two .dl{display:inline}}.mv{display:inline-flex;vertical-align:middle;border:1px solid #30363d;border-radius:4px;overflow:hidden}.mv>*{padding:0 7px;line-height:18px}.mv>*+*{border-left:1px solid #30363d}.mv>b{background:#1f6feb40;color:#f0f6fc;font-weight:600}.mv>a{text-decoration:none}.mv>a:hover{background:#161b22}body{font-size:14.0px}</style>
+<div class="hd w bR B">
+<span> demo-host │ MAP │ 14:13:20</span>
+<span>✖ 6 PROBLEMS </span>
+</div>
+<div class="lg">27 nodes · 14 links · <span class="r">7 need attention</span> │ <span class="w B">━━►</span> seen  <span class="n">╌╌►</span> declared  <span class="d">┄┄►</span> same network  <span class="w B">◄━━</span> connected to it  <span class="r">✖ down</span>  <span class="y">? unknown</span>  ▸ ▾ open/close · a name: its details</div>
+<div class="nt">· connections sampled every 30 s, remembered 24 h (watching since 1h)</div>
+<main class="mp">
+<div class="tree">
+<div class="ro" id="r-9b8010b9d8">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=9b8010b9d8#r-9b8010b9d8">▾</a>
+<a class="lb r" href="/?view=map&amp;sel=9b8010b9d8#r-9b8010b9d8">INTERNET</a>  <span class="d">reachable from the Internet (Tailscale Funnel)</span>
+</span>
+</div>
+<div class="ro" id="r-3dab9c429f">
+<span class="tr">└─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=3dab9c429f#r-3dab9c429f">▸</a>
+<a class="lb r" href="/?view=map&amp;sel=3dab9c429f#r-3dab9c429f">:8444/tcp</a> <b class="n">node</b>  <span class="d">FUNNEL: public</span>  <span class="r">declared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)</span>
+</span>
+</div>
+<div class="ro" id="r-f22f98b733">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=f22f98b733#r-f22f98b733">▾</a>
+<a class="lb r" href="/?view=map&amp;sel=f22f98b733#r-f22f98b733">LAN</a>  <span class="d">open on the LAN (and on the tailnet)</span>
+</span>
+</div>
+<div class="ro" id="r-5c58dcd8b6">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=5c58dcd8b6#r-5c58dcd8b6">▸</a>
+<a class="lb r" href="/?view=map&amp;sel=5c58dcd8b6#r-5c58dcd8b6">:5432/tcp</a> <b class="n">shop-db-1</b>  <span class="d">docker: bypasses ufw</span>  <span class="r">declared local in config.ini, reachable from the LAN and the tailnet</span>
+</span>
+</div>
+<div class="ro" id="r-4cc5ea0e7a">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 4 below" href="/?view=map&amp;open=4cc5ea0e7a#r-4cc5ea0e7a">▸</a>
+<a class="lb y" href="/?view=map&amp;sel=4cc5ea0e7a#r-4cc5ea0e7a">:8080/tcp</a> <b class="n">shop-web-1</b>  <span class="y">docker: bypasses ufw</span>
+</span>
+</div>
+<div class="ro" id="r-d6a7fd958b">
+<span class="tr">└─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=d6a7fd958b#r-d6a7fd958b">▸</a>
+<a class="lb n" href="/?view=map&amp;sel=d6a7fd958b#r-d6a7fd958b">:22/tcp</a> <b class="n">sshd</b>  <span class="d">LAN only 192.168.0.0/24</span>
+</span>
+</div>
+<div class="ro" id="r-93ed95f8e5">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=93ed95f8e5#r-93ed95f8e5">▾</a>
+<a class="lb n" href="/?view=map&amp;sel=93ed95f8e5#r-93ed95f8e5">LOCAL</a>  <span class="d">this machine only</span>
+</span>
+</div>
+<div class="ro" id="r-b96bcd7a28">
+<span class="tr">├─ </span>
+<span class="bd">
+<span class="tg d" title="nothing below">·</span>
+<a class="lb n" href="/?view=map&amp;sel=b96bcd7a28#r-b96bcd7a28">:5433/tcp</a> <b class="n">blog-db-1</b>
+</span>
+</div>
+<div class="ro" id="r-59b5097c06">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=59b5097c06#r-59b5097c06">▸</a>
+<a class="lb n" href="/?view=map&amp;sel=59b5097c06#r-59b5097c06">:5678/tcp</a> <b class="n">node</b>
+</span>
+</div>
+<div class="ro" id="r-60dc00592e">
+<span class="tr">├─ </span>
+<span class="bd">
+<span class="tg d" title="nothing below">·</span>
+<a class="lb n" href="/?view=map&amp;sel=60dc00592e#r-60dc00592e">:6379/tcp</a> <b class="n">cache-1</b>
+</span>
+</div>
+<div class="ro" id="r-c242c96ccd">
+<span class="tr">└─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=c242c96ccd#r-c242c96ccd">▸</a>
+<a class="lb n" href="/?view=map&amp;sel=c242c96ccd#r-c242c96ccd">:8081/tcp</a> <b class="n">blog-app-1</b>
+</span>
+</div>
+<div class="ro" id="r-575ffc23c4">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=575ffc23c4#r-575ffc23c4">▾</a>
+<a class="lb r" href="/?view=map&amp;sel=575ffc23c4#r-575ffc23c4">IMPACT</a>  <span class="d">what is down or failing, and what depends on it</span>
+</span>
+</div>
+<div class="ro" id="r-d51eee07ec">
+<span class="tr">├─ </span>
+<span class="bd">
+<span class="tg d" title="nothing below">·</span>
+<a class="lb r" href="/?view=map&amp;sel=d51eee07ec#r-d51eee07ec">✖ admin-console</a>  <span class="d">web app · expected on :9443</span>  <span class="y">declared in [webapps] but nothing listens on :9443</span>
+</span>
+</div>
+<div class="ro" id="r-575b2e7f06">
+<span class="tr">└─ </span>
+<span class="bd">
+<span class="tg d" title="nothing below">·</span>
+<a class="lb r" href="/?view=map&amp;sel=575b2e7f06#r-575b2e7f06">✖ worker-1</a>  <span class="d">container · shop</span>  <span class="r">exited with code 137</span>
+</span>
+</div>
+<div class="ro" id="r-b13e1bbec0">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=b13e1bbec0#r-b13e1bbec0">▾</a>
+<a class="lb n" href="/?view=map&amp;sel=b13e1bbec0#r-b13e1bbec0">STACKS</a>  <span class="d">compose projects and their containers</span>
+</span>
+</div>
+<div class="ro" id="r-46c79ece35">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 2 below" href="/?view=map&amp;open=46c79ece35#r-46c79ece35">▸</a>
+<a class="lb g" href="/?view=map&amp;sel=46c79ece35#r-46c79ece35">blog</a>  <span class="d">compose project</span>
+</span>
+</div>
+<div class="ro" id="r-a9b5a9adec">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 4 below" href="/?view=map&amp;open=a9b5a9adec#r-a9b5a9adec">▸</a>
+<a class="lb r" href="/?view=map&amp;sel=a9b5a9adec#r-a9b5a9adec">shop</a>  <span class="d">compose project</span>
+</span>
+</div>
+<div class="ro" id="r-04d7137448">
+<span class="tr">└─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=04d7137448#r-04d7137448">▸</a>
+<a class="lb g" href="/?view=map&amp;sel=04d7137448#r-04d7137448">standalone</a>  <span class="d">containers without a project</span>
+</span>
+</div>
+<div class="ro" id="r-98180ef894">
+<span class="tr">
+</span>
+<span class="bd">
+<a class="tg" title="close" href="/?view=map&amp;shut=98180ef894#r-98180ef894">▾</a>
+<a class="lb n" href="/?view=map&amp;sel=98180ef894#r-98180ef894">OUTBOUND</a>  <span class="d">connections this machine opens to other hosts</span>
+</span>
+</div>
+<div class="ro" id="r-2f98a6d30e">
+<span class="tr">├─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=2f98a6d30e#r-2f98a6d30e">▸</a>
+<a class="lb g" href="/?view=map&amp;sel=2f98a6d30e#r-2f98a6d30e">node</a>  <span class="d">n8n.service</span>
+</span>
+</div>
+<div class="ro" id="r-b9314fbc23">
+<span class="tr">└─ </span>
+<span class="bd">
+<a class="tg" title="open: 1 below" href="/?view=map&amp;open=b9314fbc23#r-b9314fbc23">▸</a>
+<a class="lb g" href="/?view=map&amp;sel=b9314fbc23#r-b9314fbc23">shop-api-1</a>  <span class="d">container · shop</span>
+</span>
+</div>
+</div>
+</main>
+<footer>
+<a href="/?">dashboard</a> · <span class="mv">
+<b>tree</b>
+<a href="/?view=map&amp;as=graph">graph</a>
+</span> · <a href="/?view=map&amp;all=1">expand all</a> · <a href="/?view=map">collapse all</a> · <a href="/?view=map&amp;only=1">problems only</a> · <a href="/?view=map&amp;pause=1">pause</a> · text <a href="/?view=map&amp;zoom=90">A−</a> 100% <a href="/?view=map&amp;zoom=110">A+</a> · refresh every <a href="/?view=map&amp;refresh=1">−</a> 2s <a href="/?view=map&amp;refresh=3">+</a> · read-only · 14:13:20</footer>
+</html>
