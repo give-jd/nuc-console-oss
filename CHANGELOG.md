@@ -73,6 +73,9 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   and `-` resize, `x` hides, Esc puts it back, announced in a live region), and saves every change at once. Only the layout and the hidden cards of the
   `nuc_ui` cookie change (still 256 bytes at most). While you have a layout of your own the cards keep its order instead of moving by severity. The
   settings page's Export gives the `layout =` and `hidden =` lines for `config.ini`. See [docs/WEB.md](docs/WEB.md#edit-the-layout).
+- In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
+  (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
+  events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
 
 **Windows and macOS**
 

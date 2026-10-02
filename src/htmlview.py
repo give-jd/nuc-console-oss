@@ -235,8 +235,26 @@ def _meter_svg(m):
             f'preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>{"".join(rects)}</svg>')
 
 
+_SERIES_H = 16
+
+
+def _series_svg(sr):
+    """Bars, one per value, scaled to the series' own maximum; a gap (None) is a gap. (ui.Series)"""
+    n = len(sr.values)
+    width = max(4 * n - 1, 1)
+    top = max([v for v in sr.values if v is not None] or [0])
+    bars = []
+    for i, v in enumerate(sr.values):
+        if v is not None:
+            h = max(1.0, v / top * (_SERIES_H - 2)) if top > 0 else 1.0
+            bars.append(f'<rect x="{4 * i}" y="{_SERIES_H - h:.1f}" width="3" height="{h:.1f}"/>')
+    label = "trend" if bars else "no data"
+    return (f'<svg{_cls("series", "t-" + sr.tone if sr.tone else "")} viewBox="0 0 {width} {_SERIES_H}" width="{width}" height="{_SERIES_H}" role="img" '
+            f'aria-label="{label}" preserveAspectRatio="none">{"".join(bars)}</svg>')
+
+
 def _inline(x):
-    """A Span, a Line, a Bar, a Meter or a Spark as markup that sits in a line or a cell."""
+    """A Span, a Line, a Bar, a Meter, a Spark or a Series as markup that sits in a line or a cell."""
     if isinstance(x, ui.Span):
         return _span(x)
     if isinstance(x, ui.Line):
@@ -247,6 +265,8 @@ def _inline(x):
         return _spark_svg(x)
     if isinstance(x, ui.Meter):
         return _meter_svg(x)
+    if isinstance(x, ui.Series):
+        return _series_svg(x)
     return '<span class="st-unknown">?</span>'
 
 
@@ -413,7 +433,55 @@ def _tiles_html(t):
     return '<div class="kpis tiles">' + "".join(html(k) for k in t.items) + "</div>"
 
 
+# ---- the components of the full screens (ui.py: Seg, Title, Series, Cols, Split, Pane, Finding, Advice) ------------------------------
+#   <header class="st"><h2>      Title (its parts in <span class="bit">, then the Seg)        <div class="seg">   Seg: links with data-key
+#   <div class="cols"><div class="col">   Cols       <div class="split">   Split       <svg class="series"><rect>   Series
+#   <div class="fd lv-LEVEL" data-k><details data-k><summary>   Finding, its Pane inside as <dl class="pane">
+#   <div class="advice [advice-shared|advice-error|advice-none]">   Advice: <p class="advice-head">, paragraphs, <p class="advice-cites|advice-tools">
+
+def _seg_html(sg):
+    return seg(sg.label, [(text, _href(href), chosen, f' data-key="{_e(key)}" title="key {_e(key)}"' if key else "")
+                          for text, key, chosen, href in sg.options])
+
+
+def _title_html(t):
+    bits = "".join(f'<span class="bit">{_inline(p)}</span>' for p in t.parts)
+    return f'<header class="st"><h2>{_e(t.label)}</h2><p class="bits">{bits}</p>{_seg_html(t.seg) if t.seg is not None else ""}</header>'
+
+
+def _pane_html(p):
+    facts = ('<dt>facts</dt><dd><ul class="facts">' + "".join(f'<li><span class="k">{_e(k)}</span> <b>{_e(v)}</b></li>' for k, v in p.facts)
+             + "</ul></dd>") if p.facts else ""
+    return f'<dl{_cls("pane", "lv-" + p.level)}><dt>what</dt><dd>{_e(p.what)}</dd>{facts}<dt>fix</dt><dd>{_e(p.fix)}</dd></dl>'
+
+
+_TAG = {"err": "\u2716 ERR", "warn": "! WARN", "info": "\u00b7 INFO"}
+
+
+def _finding_html(f):
+    key = f"f-{f.id}"
+    summary = (f'<summary><span class="tag {_e(f.level)}">{_TAG[f.level]}</span> <strong class="ft">{_e(f.title)}</strong> '
+               f'<span class="fx">{_e(f.text)}</span></summary>')
+    body = _pane_html(f.detail) if f.detail is not None else ""
+    return (f'<div{_cls("fd", "lv-" + f.level)} data-k="{_e(key)}"><details data-k="{_e(key + "-d")}"{" open" if f.open else ""}>{summary}{body}</details></div>')
+
+
+def _advice_html(a):
+    if not (a.head or a.paras or a.notes):
+        return ""
+    paras = "".join("<p>" + "<br>".join(_e(x) for x in p) + "</p>" for p in a.paras)
+    notes = "".join(f'<p{_cls("advice-" + k)}>{_e(t)}</p>' for k, t in a.notes)
+    return f'<div{_cls("advice", "advice-" + a.kind if a.kind != "advice" else "")}><p class="advice-head">{_e(a.head)}</p>{paras}{notes}</div>'
+
+
 _HTML = {
+    ui.Title: _title_html,
+    ui.Seg: _seg_html,
+    ui.Series: _series_svg,
+    ui.Cols: lambda n: '<div class="cols">' + "".join(f'<div class="col">{html(c)}</div>' for c, _w in n.children) + "</div>",
+    ui.Pane: _pane_html,
+    ui.Finding: _finding_html,
+    ui.Advice: _advice_html,
     ui.Head: lambda n: f'<h3 class="sub">{_e(n.title)}' + (f' <span class="note">{_e(n.note)}</span>' if n.note else "") + "</h3>",
     ui.Indent: lambda n: '<div class="ind">' + "".join(html(c) for c in n.children) + "</div>",
     ui.Grid: lambda n: '<ul class="grid">' + "".join(_grid_item(x) for x in n.items) + "</ul>",

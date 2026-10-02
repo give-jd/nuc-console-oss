@@ -138,6 +138,33 @@ def sparkline(values, width, floor=1024):
     return c(ui.sgr("muted"), "▁" * (width - len(vals))) + "".join(SPARK[min(7, int(v / top * 8))] for v in vals)
 
 
+def scroll(top, i, n, rows, margin=2):
+    """First row of a list of n shown, so that row i stays in sight, a few rows from the edges when there is room."""
+    m = min(margin, max(0, (rows - 1) // 2))
+    top = max(min(top, i - m), i + m + 1 - rows)
+    return max(0, min(top, n - rows))
+
+
+def hbucket(vals, n):
+    """vals as at most n values: the mean of each group (None when a group has no value)."""
+    if len(vals) <= n:
+        return list(vals)
+    step = len(vals) / float(n)
+    out = []
+    for i in range(n):
+        g = [v for v in vals[int(i * step):int((i + 1) * step) or 1] if v is not None]
+        out.append(sum(g) / len(g) if g else None)
+    return out
+
+
+def hspark(vals, width):
+    """vals (None = not recorded) as small bars scaled to their own maximum, `width` columns; none recorded: blank."""
+    vals = hbucket([ui.hnum(v, None) if v is not None else None for v in vals], width)
+    top = max([v for v in vals if v is not None] or [0])
+    bars = "".join(" " if v is None else SPARK[0] if top <= 0 else SPARK[min(7, int(v / top * 7.999))] for v in vals)
+    return pad(bars, width)
+
+
 def cell(v, warn=False, net=False, loc=False):
     """One cell of the exposure matrix: 0 closed, 1 open, 2 filtered by source, 3 unknown (warn: a database; net: the Internet column;
     loc: the 'this machine' column, where open is not an alarm)."""
@@ -233,13 +260,18 @@ def inline(x, tone=None):
     if isinstance(x, ui.Span):
         return style(x.text, x.tone or tone, x.bold)
     if isinstance(x, ui.Line):
-        return "".join(inline(p, tone) for p in x.spans)
+        text = "".join(inline(p, tone) for p in x.spans)
+        return text if x.clip is None else clip(text, x.clip)
     if isinstance(x, ui.Bar):
         return _bar(x)
     if isinstance(x, ui.Spark):
         return sparkline(x.values, x.w, x.floor)
     if isinstance(x, ui.Meter):
         return meter(x.parts, x.w)
+    if isinstance(x, ui.Series):
+        return style(hspark(x.values, x.w), x.tone)
+    if isinstance(x, ui.Seg):
+        return " ".join(style(f" {key}:{text} ", "sel" if chosen else "muted") for text, key, chosen, _href in x.options)
     return style("?", "unknown")
 
 
@@ -280,12 +312,44 @@ def _head_cell(t, j, last):
     return style(label, "warn" if col.sort else t.head_tone, bool(col.sort))
 
 
+def _aligned(col, text, last, padlast=False):
+    """A table cell in its column: a w pads it (right-aligned: on the left, centred: on both sides); the last cell is left as it is
+    unless padlast."""
+    if col.w is not None and col.align == "r":
+        return " " * (col.w - vlen(text)) + text
+    if col.w is not None and col.align == "c":
+        room = col.w - vlen(text)
+        left = room // 2 + (room & col.w & 1) if room > 0 else 0  # str.center's own arithmetic
+        return " " * left + text + " " * max(0, room - left)
+    if col.w is not None and (padlast or not last):
+        return pad(text, col.w)
+    return text
+
+
+def _fit_lines(t, w):
+    """A Table with fit: every row alone loses its last cells until it is no wider than w (one cell stays); a cell with no text and no w is not there."""
+    lead, lines = " " * t.indent, []
+    for r in t.rows:
+        items = []
+        for col, cell_ in zip(t.cols, r.cells):
+            text = inline(cell_, r.tone)
+            if text or col.w is not None:
+                items.append((_aligned(col, clip(text, col.clip) if col.clip is not None else text, False, True), col.gap))
+        line = lambda: lead + "".join(x + " " * g for x, g in items[:-1]) + (items[-1][0] if items else "")  # noqa: E731
+        while len(items) > 1 and vlen(line()) > w:
+            items.pop()
+        lines.append(line())
+    return lines
+
+
 def _table_lines(t, w):
     """A Table as lines: a column with a w is padded to it (right-aligned: on the left, centred: on both sides), the others are the text as
     it is; gap spaces follow every column but the last, and t.indent spaces come before the first. When a line is wider than w the columns
     with a prio go, the biggest prio first (the one on the right first among equals), until it fits or only the columns that are never
     dropped are left. A column with a clip is cut to it first (a cut cell ends the colour it was in). Groups: a muted label before its first
     row, or, titled, a blank line and a bold title with the number of its rows."""
+    if t.fit:
+        return _fit_lines(t, w)
     cols = list(range(len(t.cols)))
     lead = " " * t.indent
     while True:
@@ -302,14 +366,7 @@ def _table_lines(t, w):
                 col, last = t.cols[j], n == len(cols) - 1
                 if col.clip is not None:
                     text = clip(text, col.clip)
-                if col.w is not None and col.align == "r":
-                    text = " " * (col.w - vlen(text)) + text
-                elif col.w is not None and col.align == "c":
-                    room = col.w - vlen(text)
-                    left = room // 2 + (room & col.w & 1) if room > 0 else 0  # str.center's own arithmetic
-                    text = " " * left + text + " " * max(0, room - left)
-                elif col.w is not None and not last:
-                    text = pad(text, col.w)
+                text = _aligned(col, text, last)
                 parts.append(text + ("" if last else " " * col.gap))
             line = lead + "".join(parts)
             if tone and t.solid is not None:  # the cursor row: its own colours go, it is as wide as the list
@@ -342,9 +399,7 @@ def render(node, w):
         return list(node.lines), False
     if isinstance(node, ui.Card):
         return card_lines(node, w)
-    if isinstance(node, ui.Line) and node.clip is not None:
-        return [clip(inline(node), node.clip)], False
-    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark, ui.Meter)):
+    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark, ui.Meter)):  # a Line's clip is applied by inline()
         return [inline(node)], False  # as it is: a line carries its own indent (a coloured line starts with its space)
     if isinstance(node, ui.Problem):
         return msg_wrap(node.level, node.text, w), False  # the long ones go on under their text, at the commas
@@ -494,19 +549,89 @@ def _cap_lines(node, w):
     return cut_lines(lines, node.n, node.what), hid
 
 
-def _split_lines(node, w):
-    left, hl = _many(node.left, node.lw)
-    right, hr = _many(node.right, max(1, w - node.lw - 3))
-    rule = c(ui.sgr("muted"), " │ ")
-    return [pad(left[k] if k < len(left) else "", node.lw) + rule + (right[k] if k < len(right) else "")
-            for k in range(max(len(left), len(right)))], hl or hr
-
-
 def _only_lines(node, w):
     return _many(node.children, w) if node.surface == "console" else ([], False)
 
+# ---- the components of the full screens, drawn (ui.py: Seg, Title, Series, Cols, Split, Pane, Finding, Advice) -------------------------
+
+_PILL = {"err": ("\u2716 ERR ", "banner_err"), "warn": ("! WARN", "banner_warn"), "info": ("\u00b7 INFO", "muted")}  # a symbol besides the colour
+
+
+def _title_line(t, w):
+    left = style("\u2500\u2500", "accent") + style(f" {t.label} ", "accent_strong") + " "
+    right = inline(t.seg) if t.seg is not None else ""
+    bits, sep = [inline(p) for p in t.parts], style(" \u00b7 ", "muted")
+    while len(bits) > 1 and vlen(left + sep.join(bits)) + vlen(right) + 3 > w:
+        bits.pop(1)
+    text = left + sep.join(bits) + " "
+    return clip(text + style("\u2500" * max(0, w - vlen(text) - vlen(right) - (1 if right else 0)), "accent") + (" " + right if right else ""), w)
+
+
+def cut_to(lines, n, w):
+    """lines as at most n lines: the last one, cut to w, says how many were left out."""
+    if len(lines) <= n:
+        return lines
+    return lines[:max(0, n - 1)] + ([style(clip(f" \u2026 +{len(lines) - n + 1} more lines", w), "muted")] if n else [])
+
+
+def _cols_lines(n, w):
+    cols = []
+    for node, cw in n.children:
+        cw = w if cw is None else cw
+        lines = [clip(x, cw) if x else x for x in render(node, cw)[0]]  # a blank line between two parts stays blank
+        cols.append((cut_to(lines, n.h, cw) if n.h is not None else lines, cw))
+    if len(cols) == 1:
+        return cols[0][0], False
+    return columns(cols, w, gap=n.gap), False
+
+
+def _split_lines(n, w):
+    """left and right side by side, the rule between them; as tall as h when there is one (the right part is cut to it), else as the taller."""
+    left, hl = _many(n.left, n.lw)
+    right, hr = _many(n.right, max(1, w - n.lw - len(n.sep)))
+    return [pad(left[i] if i < len(left) else "", n.lw) + style(n.sep, "muted") + (right[i] if i < len(right) else "")
+            for i in range(max(len(left), n.h) if n.h else max(len(left), len(right)))], hl or hr
+
+
+def _pane_lines(p, w):
+    lw = 7
+    out = [section("DETAILS", w), " " + style(p.title, p.level, True)]
+    for label, body in (("what", p.what), ("facts", ""), ("fix", p.fix)):
+        if label == "facts":
+            rows = _wrap([f"{k} {c(1, v)}" for k, v in p.facts], w, lw + 1, "  \u00b7  ", None)[0] if p.facts else []
+            out += [" " + style(label.ljust(lw), "muted") + r[lw + 1:] if i == 0 else r for i, r in enumerate(rows)]
+            continue
+        chunks = textwrap.wrap(body, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
+        out += [(" " + style(label.ljust(lw), "muted") if i == 0 else " " * (lw + 1)) + x for i, x in enumerate(chunks)]
+    if p.h is not None:
+        out = cut_to(out, p.h, w)
+    return [clip(x, w) for x in out], False
+
+
+def finding_text(f, w):
+    """' [ERR] title  text' as one line, not cut to w: the title and the text as far as they fit."""
+    label, tone = _PILL[f.level]
+    title = ui.hclean(f.title, max(10, w - 12))
+    room = w - 11 - len(title)
+    return " " + style(" " + label + " ", tone) + " " + style(title, None, True) \
+        + ("  " + style(f.text if len(f.text) <= room - 2 else f.text[:room - 3] + "\u2026", "muted") if room >= 14 else "")
+
+
+def _finding_row(f, w):
+    """The finding's row cut to w; the cursor's row in reverse video, without its colours."""
+    row = clip(finding_text(f, w), w)
+    return style(pad(ANSI.sub("", row), w), "sel") if f.cursor else row
+
 
 _DRAW = {
+    ui.Title: lambda n, w: ([_title_line(n, w)], False),
+    ui.Seg: lambda n, w: ([inline(n)], False),
+    ui.Series: lambda n, w: ([inline(n)], False),
+    ui.Cols: _cols_lines,
+    ui.Split: _split_lines,
+    ui.Pane: _pane_lines,
+    ui.Finding: lambda n, w: ([_finding_row(n, w)], False),
+    ui.Advice: lambda n, w: (([section("ADVICE", w)] + list(n.lines)) if n.lines else [], False),
     ui.Head: lambda n, w: ([section(n.title, w, n.note)], False),
     ui.Indent: _indent_lines,
     ui.Grid: _grid_lines,
@@ -514,7 +639,6 @@ _DRAW = {
     ui.NoteTable: _notetable_lines,
     ui.Flow: _flow_lines,
     ui.Cap: _cap_lines,
-    ui.Split: _split_lines,
     ui.Only: _only_lines,
     ui.Tiles: lambda n, w: ([], False),  # the web's key figures
 }

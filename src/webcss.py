@@ -507,6 +507,56 @@ svg.meter .m-user{fill:var(--ok)}svg.meter .m-system{fill:var(--err)}svg.meter .
 @container panel (max-width:24em){.scr th.p1,.scr td.p1{display:none}}
 """
 
+# the Health screen drawn from components (screens.health_model; htmlview: Title, Seg, Finding, Pane, Advice, Cols, Series): everything under .hv
+HEALTH_VIEW = """
+.hv{display:grid;gap:var(--gap);min-width:0}
+.hv>*{min-width:0}
+.hv>.ln,.hv>.msg{margin:0}
+.hv .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
+.hv .st h2{margin:0;font:650 .8em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.hv .bits{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2em 1.1em;margin:0;min-width:0;flex:1 1 18em;color:var(--muted)}
+.hv .bit{white-space:nowrap}
+.hv .st .seg{margin-left:auto}
+.hv>section.grp,.hv .col{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:var(--pad);min-width:0;overflow-x:auto}
+.hv section.grp>*+*{margin-top:0}
+.hv h3.sub{margin:1.2em 0 .5em;padding-bottom:.3em;border-bottom:1px solid var(--line);font:650 .72em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.hv h3.sub:first-child{margin-top:0}
+.hv h3.sub .note{margin-left:.8em;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.hv .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,30em),1fr));gap:var(--gap);align-items:start}
+.hv .col>section.grp>.ln,.hv .col>section.grp>.msg{margin:.2em 0}
+.hv .fd{border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.hv h3.sub+.fd,.hv h3.sub+.msg+.fd{border-top:0}
+.fd details>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15em .65em;padding:.5em .3em;border-radius:4px;cursor:pointer;list-style:none}
+.fd details>summary::-webkit-details-marker{display:none}
+.fd details>summary::before{content:"\\25B8";color:var(--muted);width:.9em;flex:none;text-align:center}
+.fd details[open]>summary::before{content:"\\25BE"}
+.fd details>summary:hover{background:var(--surface-2)}
+.fd .ft{color:var(--fg-strong);font-weight:600}
+.fd .fx{flex:1 1 16em;min-width:0;color:var(--muted)}
+.fd details[open]{background:var(--accent-bg);border-radius:6px}
+.fd .tag{min-width:5.2em;text-align:center}
+.fd .tag.info{background:var(--surface-2)}
+dl.pane{display:grid;grid-template-columns:4.5em minmax(0,1fr);gap:.3em .9em;margin:.1em .6em .8em 2.2em;font-size:.92em}
+dl.pane dt{color:var(--muted)}
+dl.pane dd{margin:0;min-width:0;overflow-wrap:anywhere}
+ul.facts{display:flex;flex-wrap:wrap;gap:.2em 1.4em;margin:0;padding:0;list-style:none}
+ul.facts .k{color:var(--muted)}
+.hv .advice{padding:.75em 1em;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}
+.hv .advice p{margin:.35em 0;overflow-wrap:anywhere}
+.hv .advice-head{margin:0 0 .5em;color:var(--accent);font:600 .86em var(--mono)}
+.hv .advice-error{border-left-color:var(--warn)}
+.hv .advice-error .advice-head{color:var(--warn)}
+.hv .advice-none,.hv .advice-shared{border-left-style:dashed}
+.hv .advice-cites,.hv .advice-tools{color:var(--muted);font-size:.86em}
+.hv table.tbl{table-layout:auto}
+.hv td.n,.hv td.r{text-align:right}
+svg.bar.t-accent .fg{fill:var(--accent)}
+svg.series{display:inline-block;width:min(100%,9em);height:1.1em;vertical-align:middle;color:var(--accent)}
+svg.series rect{fill:currentColor}
+.hv .bit .t-banner-err{font-size:.9em}
+@container app (max-width:45.7em){.hv .st .seg{margin-left:0}dl.pane{margin-left:.4em;grid-template-columns:minmax(0,1fr)}dl.pane dd{margin-bottom:.3em}}
+"""
+
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
 ANSI = """
 .r{color:var(--err)}.g{color:var(--ok)}.y{color:var(--warn)}.b{color:var(--accent)}.m{color:var(--magenta)}.c{color:var(--cyan)}
@@ -581,7 +631,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

@@ -267,8 +267,8 @@ def _tone(tone):
 
 
 def _inline(x):
-    """What fits in a line or a table cell: a Span, a Line, a Bar or a Spark; anything else is text."""
-    return x if isinstance(x, (Span, Line, Bar, Spark, Meter)) else Span(x)
+    """What fits in a line or a table cell: a Span, a Line, a Bar, a Spark, a Meter or a Series; anything else is text."""
+    return x if isinstance(x, (Span, Line, Bar, Spark, Meter, Series)) else Span(x)
 
 
 class Span(_Component):
@@ -282,13 +282,14 @@ class Span(_Component):
 
 
 class Line(_Component):
-    """One line of Spans (strings are made Spans); a Bar or a Spark may sit in it between the text. No spans at all is a blank line on
-    the console and nothing on the web. clip: the console cuts the line to that many columns (None: as it is); the web ignores it."""
+    """One line of Spans (strings are made Spans); a Bar, a Spark, a Series or another Line may sit in it between the text. No spans at all is
+    a blank line on the console and nothing on the web. clip: the console cuts the line to that many columns, wherever it sits (None: as it
+    is); the web ignores it."""
     __slots__ = ("spans", "clip")
 
     def __init__(self, spans=(), clip=None):
-        self.spans = [x if isinstance(x, (Span, Bar, Spark, Meter)) else Span(x)
-                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark, Meter)) else spans)]
+        self.spans = [x if isinstance(x, (Span, Bar, Spark, Meter, Series, Line)) else Span(x)
+                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark, Meter, Series, Line)) else spans)]
         self.clip = None if clip is None else int(clip)
 
     @property
@@ -387,14 +388,18 @@ class Table(_Component):
     text, in place of the labels), titled (each group is a bold title with its row count after a blank line; the web adds the count),
     fill (a row with a tone is drawn in that colour from end to end, the spaces between the cells too), head_tone (the labels are drawn in
     that tone, the one of a sorted column warn and bold, with its arrow: the labels are padded inside their colour) and solid (a row with a
-    tone is cut to that many columns, stripped of the colours of its cells and padded to them: the cursor row of a list).
+    tone is cut to that many columns, stripped of the colours of its cells and padded to them: the cursor row of a list) and fit (each row on
+    its own: a row wider than the console loses its last cells one by one, at least one stays, instead of the columns with a prio going from
+    every row; a cell with no text and no w is not there at all, its gap neither, and a cell with a w is padded to it even when it is the last
+    one).
     A row with a link (Row.href) is a row of a list: the web marks it data-row, and the one with the tone 'sel' aria-current."""
-    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill", "head_tone", "solid")
+    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill", "head_tone", "solid", "fit")
 
-    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False, head_tone=None, solid=None):
+    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False, head_tone=None, solid=None, fit=False):
         self.head = bool(head) or head_line is not None
         self.indent, self.head_line, self.titled, self.fill = int(indent), None if head_line is None else _text(head_line), bool(titled), bool(fill)
         self.head_tone, self.solid = _tone(head_tone), None if solid is None else int(solid)
+        self.fit = bool(fit)
         self.cols, self.rows = list(cols), list(rows)
         for r in self.rows:
             if len(r.cells) != len(self.cols):
@@ -649,15 +654,6 @@ class Cap(_Component):
         self.children, self.n, self.what = list(children), max(0, int(n)), None if what is None else _text(what)
 
 
-class Split(_Component):
-    """Two blocks side by side: left (lw columns wide on the console) and right (the rest, less the 3 of the rule between them). The web
-    puts them in a grid that stacks them in a narrow window."""
-    __slots__ = ("left", "right", "lw")
-
-    def __init__(self, left=(), right=(), lw=40):
-        self.left, self.right, self.lw = list(left), list(right), max(1, int(lw))
-
-
 class Only(_Component):
     """Children one surface draws and the other does not: surface 'console' or 'web' (the key figures of the web have the header lines of
     the console as their counterpart)."""
@@ -675,6 +671,100 @@ class Tiles(_Component):
 
     def __init__(self, items=()):
         self.items = list(items)
+
+# ---- components of the full screens (screens.py: the Health screen) ------------------------------------------------------------------
+# What a screen has that a card has not: a heading with a choice of periods, a list of findings that open, the advisor's answer, parts side
+# by side. The console fields (w, h, clip, fit ...) are the console's own and the web ignores them, as in the components above.
+
+class Seg(_Component):
+    """A choice between a few options, one of them chosen (a period): options [(text, key, chosen, href)]. key is the key that picks the
+    option (the keymap's), href where the web goes (None: no link). The console draws ' d:24h ' for each, the chosen one in reverse video;
+    the web a group of links with data-key and aria-current."""
+    __slots__ = ("label", "options")
+
+    def __init__(self, label, options=()):
+        self.label = _text(label)
+        self.options = [(_text(t), _text(k), bool(c), None if h is None else str(h)) for t, k, c, h in options]
+
+
+class Title(_Component):
+    """The heading of a screen: its label, parts (Span / Line: what it is about, and the figures) and seg (a Seg, or None). The console draws
+    '-- LABEL  part · part ------ seg' on one line and, when it is too wide for the console, drops the parts from the second on, one by one,
+    last of them first, until it fits (the first one always stays)."""
+    __slots__ = ("label", "parts", "seg")
+
+    def __init__(self, label, parts=(), seg=None):
+        self.label, self.parts, self.seg = _text(label), [_inline(p) for p in parts], seg
+
+
+class Series(_Component):
+    """Values over time, oldest first, None where nothing was recorded (a gap, not a zero), scaled to their own maximum: the console draws
+    them as small bars w columns wide (the mean of each group when there are more values than columns), the web as an SVG of bars. tone:
+    the token that colours it."""
+    __slots__ = ("values", "w", "tone")
+
+    def __init__(self, values=(), w=10, tone="accent"):
+        self.values = [None if v is None else hnum(v, None) for v in values]
+        self.w, self.tone = max(1, int(w)), _tone(tone)
+
+
+class Cols(_Component):
+    """Parts side by side: children [(node, w)]. The console draws each in its w columns (every line cut to them), gap spaces between, and a
+    column that is longer than h lines is cut there (the last line says how many were left out; h None: no cut). The web lays the children
+    out in a grid, in the order given, whatever the w."""
+    __slots__ = ("children", "gap", "h")
+
+    def __init__(self, children=(), gap=3, h=None):
+        self.children, self.gap, self.h = [(n, None if w is None else int(w)) for n, w in children], int(gap), None if h is None else int(h)
+
+
+class Split(_Component):
+    """Two parts with a rule between them, the console's side by side: left and right [nodes]; left is drawn lw columns wide, sep stands
+    between the two; with h the two are as tall as h lines (the left made as tall, the right cut to it), without as the taller of them. The web
+    draws both, one after the other (its CSS puts them next to each other when there is room, and stacks them in a narrow window)."""
+    __slots__ = ("left", "right", "lw", "h", "sep")
+
+    def __init__(self, left=(), right=(), lw=40, h=0, sep=" \u2502 "):
+        self.left, self.right, self.lw, self.h, self.sep = list(left), list(right), int(lw), int(h), sep
+
+
+class Pane(_Component):
+    """Everything known about one finding: level (err, warn, info), title, what (the text), facts [(name, value)] and fix. h: the console
+    cuts it to that many lines (the last says how many were left out; None: not cut)."""
+    __slots__ = ("level", "title", "what", "facts", "fix", "h")
+
+    def __init__(self, level, title, what, facts=(), fix="", h=None):
+        self.level, self.title, self.what, self.fix = check_level(level), _text(title), _text(what), _text(fix)
+        self.facts, self.h = [(_text(k), _text(v)) for k, v in facts], None if h is None else int(h)
+
+
+class Finding(_Component):
+    """One finding of a report: id (stable), level (err, warn, info), title, text (one line of what it is) and detail (a Pane, or None).
+    cursor: the console draws the row in reverse video (the keyboard's cursor); open: the web has its details open. The console's row is
+    ' [LEVEL] title  text', the text as far as it fits."""
+    __slots__ = ("id", "level", "title", "text", "detail", "cursor", "open")
+
+    def __init__(self, id, level, title, text, detail=None, cursor=False, open=False):
+        self.id, self.level, self.title, self.text = _text(id), check_level(level), _text(title), _text(text)
+        self.detail, self.cursor, self.open = detail, bool(cursor), bool(open)
+
+
+class Advice(_Component):
+    """The advisor's answer under the findings: head (its first line), paras (paragraphs, each a list of lines), notes ([(kind, text)]:
+    'cites' and 'tools'), kind ('advice', 'shared' for an older answer, 'error', 'none' when there is none yet). The console draws lines
+    (ANSI text, the advisor's own wrapping and cut) under a section rule; the web draws the parts as a highlighted block."""
+    __slots__ = ("head", "paras", "notes", "kind", "lines")
+
+    def __init__(self, head="", paras=(), notes=(), kind="advice", lines=()):
+        self.head, self.paras = _text(head), [[_text(x) for x in p] for p in paras]
+        self.notes, self.kind, self.lines = [(_text(k), _text(t)) for k, t in notes], kind if kind in ("advice", "shared", "error", "none") else "advice", list(lines)
+
+
+def check_level(level):
+    """level, when it is err, warn or info (what a finding has); ValueError otherwise."""
+    if level not in ("err", "warn", "info"):
+        raise ValueError(f"unknown level {level!r}: one of err, warn, info")
+    return level
 
 
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------
