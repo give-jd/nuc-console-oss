@@ -682,13 +682,62 @@ def banner(sym, bold, small=""):
     return f'<div class="stale-banner" role="status"><span class="sym">{esc(sym)}</span> <b>{esc(bold)}</b>' + (f' <span class="sm">{small}</span>' if small else "") + "</div>"
 
 
-def card_article(card, title, note, state, size, inner, more="", tools="", off=False):
+ROW_UNIT = 0.5  # em: the grid's implicit rows (webcss.GRID); a card spans as many as its estimated height needs
+ROW_MAX = 200  # the style sheet has one class per span, r1..rROW_MAX (webcss.row_classes): a taller card spans no more (its rows grow with it)
+CHARS_PER_COL = 44  # characters of text that fit one line of a card per grid quarter at the narrowest width a quarter gets: wrapping is never underestimated
+_BLOCK_END = re.compile(r"</(?:tr|p|li|div|h3|h4|pre|summary|details|dd|dt|dl|table|ul|ol|section)>|<br\s*/?>")
+_CELL_END = re.compile(r"</t[dh]>")
+_MARKUP = re.compile(r"<[^>]*>")
+
+
+def _flow(m):
+    """The items of a chip list (ul.wrap) or of a grid of small cells (ul.grid) run together in a line: marked so that they are one text, and weighted."""
+    return "<q>" + m.group(2).replace("</li>", " ").replace("<li", "<i") + "</q>"
+
+
+_WALL_HIDDEN = re.compile(r'<details class="(?:fix|dt)".*?</details>|<ul class="grid".*?</ul>|<(\w+) class="[^"]*\b(?:why|hint|sm)\b[^"]*"[^>]*>.*?</\1>', re.S)  # as the style sheet hides them
+_FLOWS = re.compile(r'<ul class="(wrap|grid)"[^>]*>(.*?)</ul>', re.S)
+
+
+def est_rows(inner, size, note="", wall=False):
+    """How many ROW_UNIT rows a card of this body needs, as a cheap estimate for the grid's dense packing (the server cannot measure): the
+    text is cut into lines at the ends of the block elements, a line longer than the card is wide wraps, a table row costs a little more than
+    a line, chips (a ul.wrap) run together and cost more per line, and the header and the paddings are added. The rows are `auto` tracks:
+    a card that turns out taller than its span only makes its rows taller (it never overlaps the next card), one that is shorter leaves a
+    hole of the difference, so the weights aim at the real height and the estimate is rounded up."""
+    if wall:  # the wall's page is a 6-column grid (its text is large) and hides what only a reader needs: fixes, hints, the small print, lists of cells
+        size = min(4, size * 2)
+        inner = _WALL_HIDDEN.sub("", inner)
+    cpl = max(12, CHARS_PER_COL * max(1, min(4, size)))
+    chips = 0.0
+    def run(m):
+        nonlocal chips
+        text = html.unescape(_MARKUP.sub("", m.group(1))).strip()
+        chips += 1.9 * (-(-int(len(text) * 1.35) // cpl))
+        return "\n"
+    flowed = _FLOWS.sub(_flow, inner)
+    flowed = re.sub(r"<q>(.*?)</q>", run, flowed, flags=re.S)
+    text = _CELL_END.sub(" ", flowed)
+    em = 3.6 + chips  # header, the padding of the body, the gap below the card
+    for line in _MARKUP.sub("", _BLOCK_END.sub("\n", text)).split("\n"):
+        line = html.unescape(line).strip()
+        if line:
+            em += 1.3 * (-(-len(line) // cpl))
+    em += 0.7 * flowed.count("<tr") + 0.4 * flowed.count("<li")  # a table row or a list item has its own padding
+    em += 0.9 * (flowed.count(' class="msg') + flowed.count(" bl\"")) + 1.2 * flowed.count('class="bx"')  # a message, a bar line and the note under it
+    if len(note) > cpl:
+        em += 0.4 * (-(-len(note) // cpl) - 1)
+    return max(1, min(ROW_MAX, int(-(-em // ROW_UNIT))))
+
+
+def card_article(card, title, note, state, size, inner, more="", tools="", off=False, rows=0):
     """A card of the grid: width class sN, state class st-..., the header (title, note, state chip) and the body (inner is built by the caller).
     tools: the layout editor's buttons (built by the page): they come between the header and the body, and the body is then inert (a
-    preview: nothing in it can be clicked or focused while the cards are being arranged). off: the card is hidden in the layout (the editor lists it dimmed)."""
+    preview: nothing in it can be clicked or focused while the cards are being arranged). off: the card is hidden in the layout (the editor lists it dimmed).
+    rows: the estimated height in grid rows (est_rows): the class rN makes the card span that many, so that the overview packs without holes."""
     body = f'<div class="ch"><h3>{esc(title)}</h3>' + (f'<span class="note">{esc(note)}</span>' if note else "") + f"{state_chip(state)}</div>" + tools
     body += f'<div class="cb"{" inert" if tools else ""}>{inner}' + (f'<p class="more">{more}</p>' if more else "") + "</div>"
-    return block("article", card, f"card s{size} st-{state}" + (" off" if off else ""), body, f' id="c-{esc(card)}" data-state="{esc(state)}"' + (f' data-title="{esc(title)}"' if tools else ""))
+    return block("article", card, f"card s{size} st-{state}" + (" off" if off else "") + (f" r{rows}" if rows else ""), body, f' id="c-{esc(card)}" data-state="{esc(state)}"' + (f' data-title="{esc(title)}"' if tools else ""))
 
 
 TITLE_LINE = re.compile(r"\s*\u2500{2} (.+?) \u2500{2,}(?:  (.*))?")  # ansi.section(): '\u2500\u2500 TITLE \u2500\u2500\u2500\u2500  note'

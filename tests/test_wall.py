@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import render  # noqa: E402
 import web  # noqa: E402
+import webcss  # noqa: E402
 import webjs  # noqa: E402
 from test_web import get_any as get, serve  # noqa: E402
 
@@ -70,6 +71,26 @@ class WallPage(unittest.TestCase):
             self.assertNotIn(word, foot)
         _, desk = self.page("/?app=1&ui=1.dd")
         self.assertIn("Edit layout", desk)  # the same page without the kiosk keeps its controls
+
+    def test_a_wall_has_nothing_to_click_in_its_cards(self):
+        _, body = self.page(WALL)
+        self.assertNotIn("the whole card", body)  # the link to /?card= is not even sent
+        self.assertNotIn("?card=", body)
+        _, desk = self.page("/?app=1&ui=1.dd")
+        self.assertIn("the whole card", desk)
+        css = webcss.CSS
+        for rule in ('html[data-density="wall"] .card p.more', 'html[data-density="wall"] details.fix',
+                     'html[data-density="wall"] details.more>summary{pointer-events:none',
+                     'html[data-density="wall"] .cb a{pointer-events:none'):
+            self.assertIn(rule, css)
+
+    def test_the_wall_keeps_its_scroll_position_across_the_ten_minute_reload(self):
+        js = webjs.REFRESH_JS
+        self.assertIn('sessionStorage.setItem("nuc-wall-y"', js)
+        self.assertIn('sessionStorage.getItem("nuc-wall-y")', js)
+        self.assertIn('nav.type === "reload"', js)  # a fresh visit starts at the top
+        self.assertIn("setTimeout(again, 600000", js)  # the periodic reload goes through the function that saves the position
+        self.assertNotIn("setTimeout(() => location.reload()", js)
 
     def test_without_scripts_the_meta_refresh_stays(self):
         _, body = self.page(WALL)

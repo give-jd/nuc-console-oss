@@ -837,8 +837,10 @@ class Server(http.server.ThreadingHTTPServer):
             else:  # built of components: the web draws them itself, whatever the card is
                 parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
                 note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
-            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full else ""
-            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more, tools, off)
+            wall = k == DETAIL_K["wall"]  # nobody can click on a wall: no link to the whole card
+            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full and not wall else ""
+            rows = 0 if tools or full else htmlview.est_rows(inner + (f"<p>{more}</p>" if more else ""), size, card.note or note, wall)  # the editor's cards and a card on its own do not pack
+            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more, tools, off, rows)
         except Exception as e:  # noqa: BLE001 - a broken card must not take the page down
             print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
             entry = cards.CARDS.get(cid)
