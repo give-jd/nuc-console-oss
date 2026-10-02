@@ -475,7 +475,8 @@ def _branch_html(b):
     inner = f'<span class="sym">{_e(ui.SYMBOLS[b.state])}</span> {_inline(b.body)}'
     cur = ' aria-current="true"' if b.cursor else ""
     row = (f'<a class="oa" href="{_e(link)}" data-row data-k="o-{k}"{cur}>{inner}</a>' if link else f'<span class="oa"{cur}>{inner}</span>')
-    return f'<li{_cls("ob", "st-" + b.state, "sel" if b.cursor else "")} data-depth="{d}">{mark}{row}</li>'
+    near = f'<li class="ob-d">{html(b.after)}</li>' if b.after is not None else ""  # the details under the row: shown by CSS where there is no pane beside the tree
+    return f'<li{_cls("ob", "st-" + b.state, "sel" if b.cursor else "")} data-depth="{d}">{mark}{row}</li>{near}'
 
 
 def _props_html(p):
