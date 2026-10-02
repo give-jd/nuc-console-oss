@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import advisor
 import aiweb
 import aisetup
+import ansi  # same directory: the console's drawing of a card, kept in the shell's cards for now
 import cards
 import graph
 import graphjs
@@ -697,9 +698,11 @@ class Server(http.server.ThreadingHTTPServer):
         saved = render.FULL
         render.FULL = bool(full)  # the console's own switch: nothing is cut in the full card
         try:
-            card = cards.build(cid, ctx, k if not full else -2, cards.Caps(CARD_COLS.get(size, 104), bool(full), render.EXPAND, render.TRUNC))
-            note, inner = htmlview.ansi_card(card.lines)
-            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if card.truncated and not full else ""
+            width = CARD_COLS.get(size, 104)
+            card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
+            lines, cut = ansi.card_lines(card, width)  # the console's drawing of the card, built of components or not
+            note, inner = htmlview.ansi_card(lines)
+            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full else ""
             return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more)
         except Exception as e:  # noqa: BLE001 - a broken card must not take the page down
             print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
