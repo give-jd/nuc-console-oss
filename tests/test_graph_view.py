@@ -459,18 +459,17 @@ class GraphPage(unittest.TestCase):
 
     @contextlib.contextmanager
     def script(self, text):
-        saved = graphjs.SCRIPT, web.GRAPH_SCRIPT, web.GRAPH_CSP
+        saved = graphjs.SCRIPT, web.GRAPH_SCRIPT
         graphjs.SCRIPT = web.GRAPH_SCRIPT = text
-        web.GRAPH_CSP = web.script_csp(text) if text else web.CSP
         self.srv.cache.clear()
         try:
             yield
         finally:
-            graphjs.SCRIPT, web.GRAPH_SCRIPT, web.GRAPH_CSP = saved
+            graphjs.SCRIPT, web.GRAPH_SCRIPT = saved
             self.srv.cache.clear()
 
     def test_the_csp_pins_the_one_script_of_the_graph_page(self):
-        self.assertEqual(web.GRAPH_CSP, web.script_csp(graphjs.SCRIPT) if graphjs.SCRIPT else web.CSP)  # at import
+        self.assertEqual(web.page_csp([graphjs.SCRIPT]), web.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
         fake = "/* nuc-console ✓ */ document.documentElement.dataset.ok = '1';"
         with self.script(fake):
             st, h, page = get(self.srv, "/?view=map&as=graph&sel=" + key("ct:shop-db-1"))
@@ -497,7 +496,7 @@ class GraphPage(unittest.TestCase):
             for path in ("/?view=map&as=graph&sel=%3Cscript%3E", "/?view=map&as=graph&ext=0&only=1&z=50&x=</script>"):
                 st, h, body = get(self.srv, path)
                 self.assertEqual(Drawing(body).scripts, [fake], path)
-                self.assertEqual(h["Content-Security-Policy"], web.GRAPH_CSP)
+                self.assertEqual(h["Content-Security-Policy"], web.page_csp([fake]))
 
     def test_the_real_script_can_be_inlined(self):
         """Inline, the script ends at the first '</script' and '<!--' changes how the browser reads it: neither may be in it."""

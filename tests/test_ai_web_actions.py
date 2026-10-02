@@ -1640,7 +1640,7 @@ class WebToken(WebBase):
 class WebHttpHeaders(WebBase):
     def test_the_responses_carry_the_policy_of_the_page_that_made_them(self):
         st, h, _b = self.get()
-        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.AI_CSP, "same-origin"))
+        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.page_csp(forms=True), "same-origin"))
         st, h, _b = self.post("off")
         self.assertEqual((st, h["Referrer-Policy"], h["Cache-Control"]), (303, "same-origin", "no-store"))
         self.assertIn("form-action 'none'", h["Content-Security-Policy"], "a redirect has no form: the strict one")

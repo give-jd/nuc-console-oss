@@ -57,6 +57,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
 - The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.
   The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-new-shell-preview-opt-in).
+- The shell has three small first-party scripts, inline and pinned by their hashes in each page's CSP (`script-src`, `connect-src 'self'`, Trusted Types):
+  **partial refresh** (it polls the page's fragment, `&frag=1` with an `ETag` and `304`, and replaces only the cards that changed; the focus, the open
+  details and the scroll stay; a stopped server shows *stale since HH:MM:SS*, never fresh numbers), **keys** (1-5, `Z`, `?`, arrows and `j`/`k` over lists, from the
+  server's own keymap) and **preferences** (theme and density apply without a reload; a **Copy** button on the settings page). Without scripts everything
+  works as before and the page reloads by `<meta refresh>` inside `<noscript>`. The classic pages are unchanged and still have no script.
+  See [docs/WEB.md](docs/WEB.md#the-shells-scripts) and [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
 
 **Windows and macOS**
 

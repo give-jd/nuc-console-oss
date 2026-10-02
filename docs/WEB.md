@@ -1,9 +1,9 @@
 # Web view
 
 The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only, no
-JavaScript** — with two exceptions, each boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
-switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), and the MAP's graph view carries one small script, pinned by its hash
-(see below). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
+JavaScript** — with three exceptions, each boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the MAP's graph view carries one small script, pinned by its hash
+(see below), and the **new shell** carries three small first-party scripts, also pinned by their hashes ([below](#the-shells-scripts)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -85,7 +85,8 @@ No access log (URLs may carry a token).
 
 A second interface, made of cards, is served beside the classic one. It is **off by default**: the classic pages stay what they were.
 Ask for it for one URL with `?app=1`, or for every page with `[ui] web = app` in `config.ini` (`?app=0` then gives the classic page back).
-It has no script yet: every control is a link or a form, and the page reloads by `<meta refresh>` like the classic one.
+Every control is a link or a form, so it works with scripts off, and the page then reloads by `<meta refresh>` (inside `<noscript>`) like the
+classic one. With scripts on, three small inline ones refresh it in place and add keys and instant preferences ([below](#the-shells-scripts)).
 
 - **Top bar**: the host, the status pill (✔ ALL OK, ! warnings, ✖ problems, with its symbol), the five screens as tabs (keys 1–5; badges for the
   Map's problems, the Health findings and the AI), the clock, `?` (the keys, `#help`, shown by the browser's `:target`) and ⚙ (the settings).
@@ -95,6 +96,9 @@ It has no script yet: every control is a link or a form, and the page reloads by
   card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
 - **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The AI page keeps its forms and CSRF.
 - **Footer**: refresh − / +, pause, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
+- **Blocks**: the top bar (`__top`), the key figures (`__kpis`) and every card are elements with `data-card` and a `data-rev` that changes when,
+  and only when, their HTML does. The Map, CPU, Health and AI pages are one block (`__view`, the bar above them and their body). The refresh
+  script replaces the blocks whose `data-rev` changed, nothing else.
 
 | Path | |
 |---|---|
@@ -102,14 +106,65 @@ It has no script yet: every control is a link or a form, and the page reloads by
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
 | `/?view=settings` | **Appearance** (theme, density, preset, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
 | `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403` |
+| `/?set=<field>&frag=1` | what the preferences script sends: the same cookie, but the answer is `204` (no redirect, no body) with `Set-Cookie` and `X-Nuc-Prefs: <the canonical cookie string>`, which the script keeps in `localStorage`. `<field>` may also be that whole string (`1.tl.dw`): the script sends it back, once in a while, when the browser sent no cookie. Same checks as above |
+| `<any shell page>&frag=1` | the **fragment** of that page ([below](#the-fragment-endpoint)) |
 | `/?ui=<string>` | the same grammar for this URL only (a bookmark, a kiosk link); an invalid string is ignored |
 | `/s/app.<sha8>.css` | the style sheet (themes `dark`, `light`, `high-contrast`, `auto` by the system's own settings and contrast, forced colours; densities `wall`, `desk`, `compact`). The name carries the first 8 digits of its SHA-256: `Cache-Control: private, max-age=31536000, immutable`, `nosniff`; an unknown name or hash is `404`; the same `Host` and token checks as the pages |
 
 **The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-new-interface-being-built)
 (`1.tl.dw.pv`), at most 256 bytes; the server validates and canonicalises it on every request and ignores a value that is wrong, a field at a time.
 Only the browser keeps it: the server writes nothing for the interface. Pages vary by it (`Vary: Cookie`) and the cache key holds the canonical preferences.
-The shell's pages have the same CSP as the classic ones (`default-src 'none'`, no `script-src`) except `style-src 'self' 'unsafe-inline'`, which lets
-the page load its style sheet from `/s/`.
+The shell's pages have the strict CSP of the classic ones with `style-src 'self' 'unsafe-inline'` (the page loads its style sheet from `/s/`) and the
+policy for their scripts, composed per page by `web.page_csp()` ([below](#the-shells-scripts)).
+
+### The shell's scripts
+
+Three first-party scripts, each an inline `<script>` at the end of every shell page (`src/webjs.py`; ASCII, strict mode, no library, no global, ~18 KB together).
+They only ever **GET**: nothing they do sends a form, and the AI page's POSTs stay native forms. Every control still works without them.
+
+| Script | What it does |
+|---|---|
+| `REFRESH_JS` | polls the page's fragment every `refresh` seconds and replaces the blocks whose `data-rev` changed, keeping the focus, the open `<details>` and the scroll. It waits while the tab is hidden, while the page is paused and while you type or select; a failed poll backs off (2 s to 60 s) and the banner under the top bar says **stale since HH:MM:SS** (the numbers are never shown as fresh); a lost session (`401`) says *session expired*. A fragment that is not on its allowlists makes it reload the page, at most once in 15 seconds. The pause link becomes a toggle that does not navigate |
+| `KEYS_JS` | a key press clicks the link or button the server marked with `data-key` (the keymap is the server's, the script has none: `1`–`5`, `Z`, `?`, `Escape`, ...); arrows, `j`/`k`, PageUp/PageDown, Home/End move over the rows of a list (`data-row`) |
+| `PREFS_JS` | a click on a theme or density link is sent to the server in the background (`/?set=…&frag=1`, `204`) and applied at once, without a reload; if that fails the link is followed as it is. It keeps the preferences string in `localStorage` and the **Copy** button of the settings page copies the `[ui]` block. It never touches `document.cookie` (the cookie is `HttpOnly`) |
+
+The layout editor (`BUILDER_JS`, `?edit=1`) is not part of the pages yet.
+
+**The CSP of each page** is built by one function, `web.page_csp(scripts, shell, forms)`, from what the page carries:
+
+| Page | `script-src` | `connect-src` | `require-trusted-types-for 'script'; trusted-types nuc-frag` | `form-action` |
+|---|---|---|---|---|
+| classic pages | none (`default-src 'none'`) | none | no | `'none'` |
+| classic AI page | none | none | no | `'self'` (not when locked) |
+| classic map graph | the graph script's hash | none | no | `'none'` |
+| shell pages | the hashes of `REFRESH_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | yes | `'none'` |
+| shell AI page | the same three | `'self'` | yes | `'self'` (not when locked) |
+| shell map graph | the same three and the graph script's | `'self'` | yes | `'none'` |
+
+Always `default-src 'none'; base-uri 'none'; frame-ancestors 'none'`. The scripts are inline and pinned (a hash source is honoured reliably by Safari
+and Firefox only for inline scripts). To verify a page: take each `<script>…</script>` body of the page, hash its UTF-8 bytes and compare:
+
+```sh
+curl -s 'http://127.0.0.1:8787/?app=1' | python3 -c 'import sys,re,hashlib,base64
+for s in re.findall(r"<script>(.*?)</script>", sys.stdin.read(), re.S): print("sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())'
+curl -sI 'http://127.0.0.1:8787/?app=1' | grep -i '^content-security-policy'
+```
+
+The two lists are the same. `tests/test_webshell.py` checks that for every shell page, and `tests/jsrules.py` / `tests/test_webjs.py` what the scripts may do.
+
+### The fragment endpoint
+
+`GET <shell page URL>&frag=1` (the page's own address, which `main[data-frag]` says) answers:
+
+- `200`, `Content-Type: text/html`, `X-Nuc-Fragment: 1`, `ETag: "…"` (a hash of the blocks), `Vary: Cookie`, `Cache-Control: no-store`,
+  `Content-Security-Policy: default-src 'none'`; the body is the page's blocks, in the page's order, byte for byte as in the full page, with nothing else
+  (no `<html>`, no script, no style);
+- `304` when `If-None-Match` carries the current tag;
+- `401` without the token, `421` for an unknown `Host`: the same checks as the page. `HEAD` works.
+
+A classic page ignores `frag`. The refresh script parses the fragment inertly and takes over only the tags and attributes of two allowlists
+(`webjs.FRAG_TAGS`, `webjs.FRAG_ATTRS`: no script, style, link, image, frame, `on…`, `style`; `href` only `/?…` or `#`; `action` only a path of this server);
+a test parses every fragment and checks the same lists.
 
 ## The AI page's buttons
 
@@ -168,7 +223,8 @@ The page shows your topology (ports, container names, client IPs seen on databas
 With a token, anyone holding the token can. It cannot change the machine, with one exception on the AI page: whoever can open it can set up the local model
 (download the pinned files into the AI folder, start the model server on 127.0.0.1, turn the advisor on and off, delete those files) and ask it questions, as the
 unprivileged web account, within the unit's sandbox; `[ai] web_actions = no` removes that. Rendering is cached for half the refresh interval per layout size.
-The graph view's script runs in your browser and cannot send anything anywhere (the CSP forbids connections).
+The graph view's script runs in your browser and cannot send anything anywhere (the CSP forbids connections). The shell's scripts may connect
+to this server only (`connect-src 'self'`), and the page's only way to put markup into the DOM is Trusted Types' one policy, whose input is checked against an allowlist first.
 
 ## macOS and Windows
 

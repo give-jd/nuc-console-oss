@@ -36,12 +36,13 @@ Everything a script looks up is a literal selector, id or attribute name listed 
     data-refresh   seconds between polls (1..3600); absent or 0: no polling
     data-frag      the URL to poll, must start with "/?" (the page's own URL plus frag=1); anything else is refused
     data-rotate    kiosk only: seconds between one-screen scrolls (>= 3)
-    data-paused    "1" when the page starts paused (REFRESH_JS keeps it in step when the toggle is used)
+    data-paused    "1" when the page starts paused (REFRESH_JS keeps it in step when the toggle is used); the page then still has
+                   data-refresh and data-frag, so that the toggle can resume it. Without data-refresh the toggle is left to the server
     data-edit      (main.grid[data-edit]) the layout editor page: REFRESH_JS does nothing there, BUILDER_JS starts
 
 Blocks: every card is an element with data-card="<id>" and data-rev="<revision>" (the revision changes when, and only when, the
     card's HTML changes). Ids are unique: the 13 card ids of nuc_config.SECTIONS plus "__top" (the top bar: host, status pill, tabs,
-    clock) and "__kpis" (the KPI row). A fragment holds the same blocks in the same order as the page; if the set or the order
+    clock), "__kpis" (the KPI row) and "__view" (the body and toolbar of the Map, CPU, Health and AI pages: one block). A fragment holds the same blocks in the same order as the page; if the set or the order
     differs (a card appeared, went or moved) REFRESH_JS reloads the page. Inside a block:
     data-k="<key>"      a stable key (links, rows, details): focus and the open state of <details> survive a refresh by it
     data-row            a row of a list: KEYS_JS moves the focus over them and Enter follows the link of the focused row
@@ -113,12 +114,12 @@ FRAG_TAGS = (
 # Attribute names, case as the parser reports them (viewBox). No on*, no style, no src/srcset/srcdoc/formaction/target/rel/ping.
 # Values: href starts with "/?" or "#", action with "/" and not "//", method is get or post (REFRESH_JS checks).
 FRAG_ATTRS = (
-    "action", "aria-controls", "aria-current", "aria-describedby", "aria-expanded", "aria-hidden", "aria-label", "aria-labelledby",
+    "action", "aria-controls", "aria-disabled", "aria-current", "aria-describedby", "aria-expanded", "aria-hidden", "aria-label", "aria-labelledby",
     "aria-live", "aria-pressed", "aria-sort", "aria-valuemax", "aria-valuemin", "aria-valuenow", "autocomplete", "checked", "class",
     "colspan", "cx", "cy", "d", "data-card", "data-copy", "data-density", "data-depth", "data-done", "data-fail", "data-k", "data-key", "data-kpi",
     "data-max-lines", "data-pause", "data-rev", "data-row", "data-set", "data-state", "data-theme", "datetime", "disabled", "fill", "for", "height", "high", "href",
     "id", "lang", "low", "max", "maxlength", "method", "min", "name", "open", "optimum", "placeholder", "points",
-    "preserveAspectRatio", "r", "readonly", "required", "role", "rowspan", "rx", "ry", "scope", "selected", "stroke",
+    "preserveAspectRatio", "r", "readonly", "required", "role", "rowspan", "rx", "ry", "scope", "selected", "size", "stroke",
     "stroke-linecap", "stroke-linejoin", "stroke-width", "tabindex", "title", "transform", "type", "value", "viewBox", "width",
     "x", "x1", "x2", "y", "y1", "y2",
 )
@@ -267,7 +268,7 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
     const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
     if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
     const b = e.target.closest("[data-pause]");
-    if (!b || !plain(e)) return;
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
     e.preventDefault();
     paused = !paused;
     root.classList.toggle("paused", paused);
@@ -387,7 +388,7 @@ _PREFS = r"""// nuc-console web view: preferences (src/webjs.py PREFS_JS). A cli
 
   const mine = root.getAttribute("data-prefs"), kept = read(KEY);
   if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
-  else if (root.getAttribute("data-prefs-src") === "config" && kept && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
     write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
     load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
   }
