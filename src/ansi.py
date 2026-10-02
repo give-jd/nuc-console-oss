@@ -192,6 +192,9 @@ def style(text, tone=None, bold=False):
 def _bar(b):
     if b.frac is None:
         return pad(style("?", "unknown"), b.w)
+    if b.tone:  # a share, not a level: the fill is the tone's whatever the fraction is
+        n = round(b.frac * b.w)
+        return c(ui.sgr(b.tone), "█" * n) + c(ui.sgr("muted"), "░" * (b.w - n)) + (" " + b.value_text if b.value_text else "")
     return bar(b.frac, b.w, b.warn, b.err) + (" " + b.value_text if b.value_text else "")
 
 
@@ -301,6 +304,9 @@ def render(node, w):
             lines += ["  " + x for x in part]
             hid = hid or h
         return lines, hid
+    drawn = _DRAW.get(type(node))
+    if drawn is not None:
+        return drawn(node, w)
     return [" " + style("?", "unknown")], False
 
 
@@ -316,6 +322,64 @@ def card_lines(card, w):
         lines += got
         hid = hid or h
     return lines, hid or card.truncated
+
+
+# ---- the components of the system, container, database and boot cards, drawn ------------------------------------------------------
+# (ui.py: Head, Indent, Grid, Timeline, NoteTable, Flow). render() reaches them through _DRAW, filled below.
+
+STAGE_COLORS = {"firmware": 35, "loader": 34, "kernel": 36, "initrd": 33, "userspace": 32, "main path": 36, "post boot": 32}  # the boot stages: raw codes
+
+
+def _timeline_lines(t, w):
+    widths = [(name, max(1, round(t.w * v / t.total))) for name, v in t.parts]
+    bar_ = "   " + "".join(c(STAGE_COLORS.get(name, 37), "█" * n) for name, n in widths)
+    legend, _ = _wrap([c(STAGE_COLORS.get(name, 37), "■") + f" {name} {ui.fmt_s(v)}" for name, v in t.parts], w, 3, "  ", None)
+    return [bar_] + legend, False
+
+
+def _notetable_lines(t, w):
+    lines = _table_lines(ui.Table(t.cols, t.rows, None, t.head), w)
+    out, first = [], 1 if t.head else 0
+    out += lines[:first]
+    for i, line in enumerate(lines[first:]):
+        out.append(line)
+        for note in t.notes[i]:
+            out += render(note, w)[0]
+    return out, False
+
+
+def _flow_lines(f, w):
+    items = [inline(x) for x in f.items]
+    if f.cut is not None:
+        items = [clip(x, f.cut) for x in items]
+    lines, hid = _wrap(items, w, f.indent, f.sep, None)
+    if lines and f.lead is not None:
+        lines[0] = " " * (f.indent - 2) + inline(f.lead) + lines[0][f.indent - 1:]
+    return lines, hid
+
+
+def _indent_lines(node, w):
+    out, hid = [], False
+    for child in node.children:
+        part, h = render(child, max(1, w - node.n))
+        out += [" " * node.n + x for x in part]
+        hid = hid or h
+    return out, hid
+
+
+def _grid_lines(g, w):
+    cells = [pad(inline(x), g.cw) for x in g.items]
+    return ["".join(cells[i:i + g.per]) for i in range(0, len(cells), g.per)], False
+
+
+_DRAW = {
+    ui.Head: lambda n, w: ([section(n.title, w, n.note)], False),
+    ui.Indent: _indent_lines,
+    ui.Grid: _grid_lines,
+    ui.Timeline: _timeline_lines,
+    ui.NoteTable: _notetable_lines,
+    ui.Flow: _flow_lines,
+}
 
 
 # ---- the theme of a whole frame ------------------------------------------------------------------------------------------------

@@ -205,7 +205,7 @@ def _bar_svg(b):
     if b.frac is None:
         return '<span class="st-unknown" role="img" aria-label="unknown">?</span>'
     pct = round(b.frac * 100)
-    svg = (f'<svg{_cls("bar", "st-" + b.state)} viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="img" '
+    svg = (f'<svg{_cls("bar", "st-" + b.state, "t-" + b.tone if b.tone else "")} viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="img" '
            f'aria-label="{pct}%" preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>'
            f'<rect class="fg" x="0" y="0" width="{round(b.frac * _BAR_W, 1):g}" height="{_BAR_H}"/></svg>')
     return svg + (f'<span class="n">{_e(b.value_text)}</span>' if b.value_text else "")
@@ -235,7 +235,7 @@ def _inline(x):
     return '<span class="st-unknown">?</span>'
 
 
-def _table(t):
+def _table(t, notes=None):
     heads = "".join(f'<th{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")} scope="col">'
                     f"{_e(c.label)}</th>" for c in t.cols)
     marks = {i: label for label, i in (t.groups or ())}
@@ -252,6 +252,8 @@ def _table(t):
             cells.append(f'<td{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")}>{inner}</td>')
         key = f' data-key="{_e(r.key)}"' if r.key is not None else ""
         body.append(f'<tr{_cls("t-" + r.tone if r.tone else "")}{key}>{"".join(cells)}</tr>')
+        if notes and notes[i]:  # NoteTable: what belongs to the row, in a row of its own under it
+            body.append(f'<tr class="sub"><td colspan="{len(t.cols)}">{"".join(html(x) for x in notes[i])}</td></tr>')
     colgroup = "<colgroup>" + "".join(f"<col{_cls('c-' + c.key)}>" for c in t.cols) + "</colgroup>"
     return f'<table class="tbl">{colgroup}<thead><tr>{heads}</tr></thead><tbody>{"".join(body)}</tbody></table>'
 
@@ -297,7 +299,45 @@ def html(node):
     if isinstance(node, ui.Details):
         return (f'<details class="dt"{" open" if node.open else ""}><summary>{_inline(node.summary)}</summary>'
                 + "".join(html(c) for c in node.body) + "</details>")
+    drawn = _HTML.get(type(node))
+    if drawn is not None:
+        return drawn(node)
     return '<span class="st-unknown">?</span>'
+
+
+# ---- the components of the system, container, database and boot cards (ui.py: Head, Indent, Grid, Timeline, NoteTable, Flow) -----------
+#   <h3 class="sub">     Head          <div class="ind">   Indent        <ul class="grid"><li>   Grid (one core a cell)
+#   <figure class="timeline"><svg class="tl"><rect class="seg seg-NAME" x width>   Timeline, then <ul class="legend">
+#   <tr class="sub">     the notes of a NoteTable row, spanning the table      <p class="flow"><span class="lead">   Flow
+
+_TL_W, _TL_H = 100, 8
+
+
+def _timeline_html(tl):
+    x, rects = 0.0, []
+    for name, v in tl.parts:
+        w = min(max(v / tl.total * _TL_W, 0.0), _TL_W - x)
+        rects.append(f'<rect{_cls("seg", "seg-" + name)} x="{x:.1f}" y="0" width="{w:.1f}" height="{_TL_H}"/>')
+        x += w
+    svg = (f'<svg class="tl" viewBox="0 0 {_TL_W} {_TL_H}" width="{_TL_W}" height="{_TL_H}" role="img" aria-label="boot timeline" '
+           f'preserveAspectRatio="none">{"".join(rects)}</svg>')
+    legend = "".join(f'<li{_cls("seg-" + name)}><span class="sw"></span> {_e(name)} <span class="n">{_e(ui.fmt_s(v))}</span></li>' for name, v in tl.parts)
+    return f'<figure class="timeline">{svg}<ul class="legend">{legend}</ul></figure>'
+
+
+def _flow_html(f):
+    lead = f'<span class="lead">{_inline(f.lead)}</span> ' if f.lead is not None else ""
+    return f'<p class="flow">{lead}' + "".join(f'<span class="fi">{_inline(x)}</span>' for x in f.items) + "</p>"
+
+
+_HTML = {
+    ui.Head: lambda n: f'<h3 class="sub">{_e(n.title)}' + (f' <span class="note">{_e(n.note)}</span>' if n.note else "") + "</h3>",
+    ui.Indent: lambda n: '<div class="ind">' + "".join(html(c) for c in n.children) + "</div>",
+    ui.Grid: lambda n: '<ul class="grid">' + "".join(f"<li>{_inline(x)}</li>" for x in n.items) + "</ul>",
+    ui.Timeline: _timeline_html,
+    ui.NoteTable: lambda n: _table(ui.Table(n.cols, n.rows, None, n.head), n.notes),
+    ui.Flow: _flow_html,
+}
 
 
 html.escape, html.unescape = _stdhtml.escape, _stdhtml.unescape

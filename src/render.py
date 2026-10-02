@@ -377,28 +377,10 @@ def read_load():
     return [] if load is None else load if len(load) == 3 else None
 
 
-def fmt_up(sec):
-    """'5d 0h', or '?' when the uptime is not known."""
-    return "?" if sec is None else fmt_dur(sec)
+fmt_up, fmt_load, up_load_note = cards.fmt_up, cards.fmt_load, cards.up_load_note  # the figures of the SYSTEM card (cards.py)
 
 
-def fmt_load(load):
-    """The three load averages, '?' when they could not be read; '' (nothing to say) where the OS has none ([])."""
-    return "" if load == [] else "?" if load is None else " ".join(load)
-
-
-def up_load_note(up, load):
-    """'up 5d 0h · load 0.82 0.64 0.51': ? for what could not be read (None), no load at all where the OS has none ([])."""
-    return f"up {fmt_up(up)}" + (f" · load {fmt_load(load)}" if load != [] else "")
-
-
-def ram_figures(m):
-    """(used, total) bytes of the RAM from a Sampler's "mem": None when it does not say (an old kernel without MemAvailable, no data)."""
-    try:
-        total, avail = m["MemTotal"], m["MemAvailable"]
-        return (total - avail, total) if total else None
-    except (KeyError, TypeError):
-        return None
+ram_figures, disk_figures = cards.ram_figures, cards.disk_figures  # (cards.py)
 
 
 def swap_figures(m):
@@ -407,15 +389,6 @@ def swap_figures(m):
         total, free = m["SwapTotal"], m["SwapFree"]
         return (total - free, total) if total else None
     except (KeyError, TypeError):
-        return None
-
-
-def disk_figures(d):
-    """(used, total, label) of a Sampler's "disk_root": None when it is missing or empty."""
-    try:
-        used, total, label = d
-        return (used, total, label) if total else None
-    except (TypeError, ValueError):
         return None
 
 
@@ -428,24 +401,19 @@ def unavail_msg(d, key, prefix="unavailable"):
     return msg(m.level, m.text)
 
 
+def _lines_of(parts, w):
+    """The console's lines of a list of components (ansi.render), and whether the drawing cut something."""
+    lines, hid = [], False
+    for part in parts:
+        got, h = ansi.render(part, w)
+        lines += got
+        hid = hid or h
+    return lines, hid
+
+
 def thermal_lines(th, bw, maxw=None):
-    """Temperatures with bar and thresholds (RAM style) + throttling time. Scale and thresholds come from the sensor."""
-    lines = []
-    for label, key in (("TEMP", "cpu"), ("NVMe", "nvme")):
-        if key in th:
-            t, mx = th[key]
-            clk = f"   clock {th['clk'][0]:.1f}/{th['clk'][1]:.1f} GHz" if key == "cpu" and th.get("clk") else ""
-            limits = f"   limits {THERMAL_WARN * mx:.0f}/{THERMAL_ERR * mx:.0f}°C"
-            head = f" {label:<5} {bar(t / mx, bw, THERMAL_WARN, THERMAL_ERR)} {t:.0f}°C/{mx:.0f}°C"
-            # when narrow, drop the clock first, then the limits (the line must not exceed the width)
-            line = next((x for x in (head + limits + clk, head + limits, head) if maxw is None or vlen(x) <= maxw), head)
-            lines.append(line)
-    if th.get("throttle_s") is not None:
-        rec = th.get("recent")
-        state = (c(31, f"✖ THROTTLING now (+{rec} events/min)") if rec else
-                 c(32, "✔ none in the last minute") if rec == 0 else c(90, "measuring"))
-        lines.append(f" {c(90, 'throt')} {fmt_min(th['throttle_s'])} total since boot   {state}")
-    return lines
+    """Temperatures with bar and thresholds (RAM style) + throttling time. Scale and thresholds come from the sensor (cards.thermal_parts)."""
+    return _lines_of(cards.thermal_parts(th, bw, maxw), 0)[0]
 
 
 def page_sistema(s, w, cont=None):
@@ -549,61 +517,21 @@ REAL_FS = ("ext4", "ext3", "xfs", "btrfs", "vfat", "f2fs", "zfs", "ntfs3", "exfa
 BOOT_WINDOW_S = 900  # a container started within 15 min of boot "started with the boot"
 
 
-def fs(x):
-    return f"{x:.1f}s"
+fs = ui.fmt_s
 
 
-BOOT_COLORS = {"firmware": 35, "loader": 34, "kernel": 36, "initrd": 33, "userspace": 32, "main path": 36, "post boot": 32}
-# the same BOOT blocks speak of systemd units, Windows services or launchd daemons depending on who wrote boot.json
-BOOT_LABELS = {
-    "linux": {"failed_one": "failed systemd unit", "failed_short": "failed unit", "journal_in": " in this boot's journal",
-              "failed_title": "FAILED UNITS", "enabled_title": "SERVICES ENABLED AT BOOT", "journal_title": "BOOT JOURNAL",
-              "journal_short": "journal", "kernel": "kernel "},
-    "windows": {"failed_one": "failed service", "failed_short": "failed service", "journal_in": " in the System event log since boot",
-                "failed_title": "FAILED SERVICES", "enabled_title": "AUTOMATIC SERVICES", "journal_title": "SYSTEM EVENT LOG",
-                "journal_short": "events", "kernel": ""},
-    "darwin": {"failed_one": "failed launch daemon", "failed_short": "failed daemon", "journal_in": " in the system log",
-               "failed_title": "FAILED LAUNCH DAEMONS", "enabled_title": "LAUNCH DAEMONS (third-party)", "journal_title": "SYSTEM LOG",
-               "journal_short": "log", "kernel": ""},
-}
+BOOT_COLORS = ansi.STAGE_COLORS  # the boot stages' colours (ansi.py draws the Timeline)
 
 
-def boot_labels(b):
-    return BOOT_LABELS.get(os_of(b), BOOT_LABELS["linux"])
-
-
-def unsupported(d, key):
-    """The collector of this OS has no such section (e.g. systemd-analyze blame on Windows): leave the block out."""
-    return isinstance(d, dict) and key in (d.get("unsupported") or [])
+boot_labels, unsupported, BOOT_LABELS = cards.boot_labels, cards.unsupported, cards.BOOT_LABELS  # (cards.py)
 
 
 def boot_block_avvio(b, up, w):
-    an, lbl = b.get("analyze"), boot_labels(b)
-    lines = [section("BOOT", w), ""]
-    if an is None:
-        head = [f"   {safe(b.get('kernel', '?'))}   up {fmt_dur(up)}"] if os_of(b) != "linux" else []
-        return lines + head + [unavail_msg(b, "analyze", "boot times unavailable")]
-    parts, total = an["parts"], max(an["total"], 0.001)
-    bw = max(20, min(w - 8, 80))
-    widths = {k: max(1, round(bw * v / total)) for k, v in parts.items()}
-    lines.append(f"   boot finished in {c(1, fs(total))}   {lbl['kernel']}{safe(b.get('kernel', '?'))}   up {fmt_dur(up)}")
-    lines.append("   " + "".join(c(BOOT_COLORS.get(k, 37), "█" * n) for k, n in widths.items()))
-    lines += wrap_items([c(BOOT_COLORS.get(k, 37), "■") + f" {k} {fs(v)}" for k, v in parts.items()], w, indent=3, sep="  ")
-    return lines
+    return [section("BOOT", w)] + _lines_of(cards.boot_start_parts(b, up, w), w)[0]
 
 
 def boot_block_lente(b, w, k):
-    lines = [section("SLOWEST UNITS", w, "activation time: not all of them block boot"), ""]
-    bl = b.get("blame")
-    if bl is None:
-        return lines + [unavail_msg(b, "blame")]
-    top = lim(bl, k, "boot")
-    mx = max((x["s"] for x in top), default=1) or 1
-    for x in top:
-        n = max(1, round(20 * x["s"] / mx))
-        t = c(33, fs(x["s"])) if x["s"] >= 5 else fs(x["s"])
-        lines.append(f"   {pad(safe(x['unit'])[:38], 39)}{c(36, '█' * n)}{c(90, '░' * (20 - n))}  {t}")
-    return lines
+    return _lines_of(cards.boot_slowest_parts(b, cards.Caps(w, FULL, EXPAND, TRUNC), k), w)[0]
 
 
 def boot_block_fallite(b, w):
@@ -645,17 +573,7 @@ def boot_block_container(b, w, k, now):
 
 
 def boot_block_journal(b, w, k):
-    j = b.get("journal")
-    lines = [section(boot_labels(b)["journal_title"], w, "warning and worse"), ""]
-    if j is None:
-        return lines + [unavail_msg(b, "journal")]
-    cap = " (last 500)" if j.get("capped") else ""
-    lines.append(f"   {c(31, str(j['err'])) if j['err'] else 0} errors   {c(33, str(j['warn'])) if j['warn'] else 0} warning{cap}")
-    room = max(20, w - 45)
-    for e in lim(j["top"], k, "boot"):
-        col = 31 if e["pr"] <= 3 else 33
-        lines.append(f"   {c(col, '●')} {pad(safe(e['id'])[:26], 27)}{e['n']:>4}×  {c(90, safe(e['last'])[:room])}")
-    return lines
+    return _lines_of(cards.boot_journal_parts(b, cards.Caps(w, FULL, EXPAND, TRUNC), k, w), w)[0]
 
 
 def tight(lines):
@@ -1373,144 +1291,27 @@ def page_rete(net, cont, w, now=None, baseline=False):
     return head + exposure_block(net, cont, w, new) + ["", ""] + firewall_block(net, w)
 
 
-def short_name(name, project=""):
-    """'ethibid-api-1' -> 'api' (without the stack prefix and the replica index)."""
-    n = safe(name)
-    if project and n.startswith(project + "-"):
-        n = n[len(project) + 1:]
-    return re.sub(r"-\d+$", "", n)
-
-
-def ct_ok(ct):
-    return ct["state"] == "running" and "unhealthy" not in ct["status"] and "Restarting" not in ct["status"]
+short_name, ct_ok, fmt_db_port = cards.short_name, cards.ct_ok, cards.fmt_db_port  # (cards.py)
 
 
 def stack_lines(cont, w, cap):
     """For each stack: a header with counts and RAM, then its services with a status dot."""
-    groups = {}
-    for ct in cont["containers"]:
-        groups.setdefault(safe(ct["project"]), []).append(ct)
-    lines = []
-    for proj in sorted(groups, key=lambda x: (x == "", x)):
-        cts = sorted(groups[proj], key=lambda x: x["name"])
-        bad = sum(not ct_ok(ct) for ct in cts)
-        head = (f" {c('1;36', '▸')} {c(1, pad((proj or '(no stack)')[:26], 27))}{len(cts) - bad}/{len(cts)} running   "
-                f"RAM {human(sum(ct['mem'] or 0 for ct in cts))}" + (c(31, f"   ✖ {bad}") if bad else ""))
-        items = [(c(32, "●") if ct_ok(ct) else c(31, "✖")) + " " + short_name(ct["name"], proj) for ct in cts]
-        lines += [head] + wrap_items(items, w, indent=5, sep="   ", max_lines=cap, section="containers")
+    lines, hid = _lines_of(cards.stack_parts(cont, cap, cards.Caps(w, FULL, EXPAND, TRUNC)), w)
+    if hid:
+        TRUNC.add("containers")
     return lines
 
 
 def ov_sistema(s, w, k, cont=None):
-    m, disk = s.get("mem"), disk_figures(s.get("disk_root"))  # the Sampler's figures: this block reads nothing from the host
-    bw = max(8, min(40, w - 52))
-    ram = ram_figures(m)
-    lines = [section("SYSTEM", w, up_load_note(s.get("uptime"), s.get("load"))),
-             f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}   cache {human(m.get('Cached'))}" if ram else f" RAM   {c(33, '?')}",
-             f" DISK  {bar(disk[0] / disk[1], bw)} {human(disk[0])}/{human(disk[1])}" if disk else f" DISK  {c(33, '?')}"]
-    if on("thermal"):  # (the sampler leaves it empty when the feature is off; the demo's is not, so the switch is honoured here too)
-        lines += thermal_lines(s.get("thermal") or {}, bw, w)
-    cores = [v for _, v in sorted(s["cpu"].items(), key=lambda kv: int(kv[0][3:]))]
-    if cores:
-        mean = sum(cores) / len(cores)
-        if k <= 2:  # one bar per core, in columns: the normal look; only the tiny-console levels (k>=3) compress to one character per core
-            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   {len(cores)} threads")
-            cells = [f" {i:>2} {bar(v, 9)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
-            per = max(1, min(6, (w - 1) // 20))
-            lines += ["".join(pad(x, 20) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
-        else:
-            spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
-            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
-    if k <= -2 and cont:
-        top = lim(sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"]), 5, "system")
-        if top:
-            lines += ["", c(1, " HEAVIEST CONTAINERS (RAM)")]
-            mx = top[0]["mem"]
-            lines += [f" {pad(safe(ct['name'])[:34], 35)}{pad(human(ct['mem']), 7)}{bar(ct['mem'] / mx, 20, 2, 2)}" for ct in top]
-    return lines
+    return _native_lines(cards.system_card, cards.Ctx(s=s, cont=cont, cfg=CFG), w, k)
 
 
 def ov_container(cont, w, k):
-    lines = [section("CONTAINER", w)]
-    if cont is None:
-        return lines + [msg("err", "container collector not running")]
-    if cont.get("absent"):
-        return lines + [msg("info", "docker not installed on this machine")]
-    cs = cont["containers"]
-    down = [x for x in cs if x["state"] != "running"]
-    sick = [x for x in cs if x["state"] == "running" and not ct_ok(x)]
-    ok = len(cs) - len(down) - len(sick)
-    lines.append(f" {plural(len(cs), 'container')}   RAM {human(sum(x['mem'] or 0 for x in cs))}   {c(32, '●')} {ok} ok"
-                 + (f"   {c(31, f'✖ {len(down)} stopped')}" if down else "")
-                 + (f"   {c(31, f'✖ {len(sick)} unhealthy')}" if sick else ""))
-    if k <= 2:  # detail: which stacks and which services are running
-        return lines + stack_lines(cont, w, {-2: 4, -1: 3, 0: 3, 1: 2, 2: 1}[k])
-    groups = {}
-    for x in cs:
-        groups[safe(x["project"]) or "(standalone)"] = groups.get(safe(x["project"]) or "(standalone)", 0) + 1
-    if k < 4:
-        lines += wrap_items([f"{g} {n}" for g, n in sorted(groups.items())], w, indent=1, max_lines=1, section="containers")
-    for x in (sick + down)[:max(0, 4 - k)]:
-        lines.append(f" {c(31, '✖')} {pad(safe(x['name'])[:36], 37)}{c(90, safe(x['status'])[:30])}")
-    return lines
-
-
-def fmt_db_port(p):
-    if p["c"] == "host":
-        return "host network"
-    pre = "lo:" if p["s"] == "lo" else "*" if p["s"] == "*" else p["s"] + ":"
-    return f"{pre}{p['p'] or '?'}" + ("/u" if p["c"].endswith("/udp") else "")
+    return _native_lines(cards.containers_card, cards.Ctx(cont=cont, cfg=CFG), w, k)
 
 
 def ov_database(net, cont, w, k):
-    lines = [section("DATABASE", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    dbs = net.get("dbs")
-    if dbs is None:
-        return lines + [unavail_msg(net, "dbs")]
-    items = dbs["items"]
-    if not items:
-        return lines + [msg("info", "no databases running")]
-    exposed = lambda it: it["host_net"] or any(p["s"] != "lo" for p in it["ports"])
-    open_n = sum(exposed(it) for it in items)
-    lines[0] = section("DATABASE", w, f"{len(items)} running" + (f" · {open_n} exposed" if open_n else ""))
-    now = time.time()
-    kw = min(14, max(len(safe(it["kind"])) for it in items) + 1)
-    txt = {it["name"]: " ".join(fmt_db_port(p) for p in it["ports"]) or "docker net only" for it in items}
-    pw = min(28, max(len(t) for t in txt.values()) + 2)
-    for it in items:
-        lines.append(f" {c(31 if exposed(it) else 32, '●')} {c(1, pad(safe(it['kind']), kw))}{pad(safe(it['name'])[:30], 31)}"
-                     f"{pad(txt[it['name']], pw)}" + (c(31, "exposed") if exposed(it) else c(90, "local only")))
-        if k > 1:
-            continue
-        proj = safe(it["project"])
-        names = lambda lst: ", ".join(short_name(n, proj) for n in lst)
-        who = []
-        if it["active"]:
-            who.append(c(32, "in use now: ") + names(it["active"]))
-        declared = [n for n in it["usano"] if n not in it["active"]]
-        if declared:
-            who.append("declared by " + names(declared))
-        if it["stessa_rete"]:
-            who.append(c(90, "same network: " + names(it["stessa_rete"])))
-        if it["host_clients"]:
-            who.append("host processes: " + ", ".join(safe(x) for x in it["host_clients"]))
-        if not who:
-            who.append(c(33, "no known service") + c(90, " (bridge: cannot tell)"))
-        ext = it["external"]
-        if ext and now - ext[0]["last"] < 900:
-            who.append(c(31, "external clients now: " + ", ".join(safe(e["ip"]) for e in ext if now - e["last"] < 900)))
-        elif ext:
-            who.append(c(33, f"last external client {safe(ext[0]['ip'])} {fmt_ago(now - ext[0]['last'])} ago"))
-        elif it["ext_source"] == "netns":
-            who.append(c(90, f"no external client seen in {fmt_ago(now - dbs['since'])}"))
-        else:
-            who.append(c(33, "external clients: not detectable"))
-        wrapped = wrap_items([clip(x, w - 14) for x in who], w, indent=8, sep="   ")  # wrapped, never silently cut
-        lines.append("      " + c(90, "→") + wrapped[0][7:])
-        lines += wrapped[1:]
-    return lines
+    return _native_lines(cards.databases_card, cards.Ctx(net=net, cont=cont, cfg=CFG), w, k)
 
 
 def ov_esposizione(net, cont, w, k, new=None):
@@ -1572,29 +1373,7 @@ def ov_firewall(net, w, k):
 
 
 def ov_boot(b, w, k, now=None):
-    if k <= -2 and b is not None:  # the full boot detail only if there really is room to spare
-        up = (now or time.time()) - b.get("btime", time.time())
-        lines = boot_block_avvio(b, up, w)
-        for key, blk in (("blame", lambda: boot_block_lente(b, w, 5)), ("journal", lambda: boot_block_journal(b, w, 4))):
-            if not unsupported(b, key):  # macOS/Windows: no empty "not available" blocks
-                lines += [""] + blk()
-        return lines
-    lines = [section("BOOT", w)]
-    if b is None:
-        return lines + [msg("warn", "boot collector not running")]
-    an, j, failed, lbl = b.get("analyze"), b.get("journal"), b.get("failed"), boot_labels(b)
-    bits = []
-    if an:
-        bits.append(f"finished in {c(1, fs(an['total']))}")
-    if failed is not None:
-        bits.append(c(31, f"✖ {plural(len(failed), lbl['failed_short'])}") if failed else c(32, f"✔ 0 {lbl['failed_short']}s"))
-    if j:
-        bits.append(f"{lbl['journal_short']} {c(31, str(j['err'])) if j['err'] else 0} err · {c(33, str(j['warn'])) if j['warn'] else 0} warn")
-    lines.append(fit_join(bits, "   ", w, " "))
-    if b.get("blame") and k < 3:
-        top = [f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
-        lines.append(fit_join(top, "  ·  ", w, " slowest: ", c90=True))
-    return lines
+    return _native_lines(cards.boot_card, cards.Ctx(boot=b, now=now, cfg=CFG), w, k)
 
 
 def _native_lines(builder, ctx, w, k):
@@ -1687,11 +1466,11 @@ OV_CARDS = (
     ("exposure", "EXPOSURE", "exposure", lambda x, k, cp: safe_block(ov_esposizione, "EXPOSURE", cp.width, x.net, x.cont, cp.width, k, x.new)),
     ("webapps", "WEB APPS", "webapps", lambda x, k, cp: safe_block(ov_webapp, "WEB APPS", cp.width, x.net, x.cont, cp.width, k)),
     ("firewall", "FIREWALL", "firewall", lambda x, k, cp: safe_block(ov_firewall, "FIREWALL", cp.width, x.net, cp.width, k)),
-    ("system", "SYSTEM", True, lambda x, k, cp: safe_block(ov_sistema, "SYSTEM", cp.width, x.s, cp.width, k, x.cont)),
-    ("containers", "CONTAINER", "containers", lambda x, k, cp: safe_block(ov_container, "CONTAINER", cp.width, x.cont, cp.width, k)),
-    ("databases", "DATABASE", "databases", lambda x, k, cp: safe_block(ov_database, "DATABASE", cp.width, x.net, x.cont, cp.width, k)),
-    ("boot", "BOOT", "boot", lambda x, k, cp: safe_block(ov_boot, "BOOT", cp.width, x.boot, cp.width, k)),
-    ("network_traffic", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
+    ("system", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
+    ("containers", None, None, None),
+    ("databases", None, None, None),
+    ("boot", None, None, None),
+    ("network_traffic", None, None, None),
     ("sessions", None, None, None),
     ("tailscale", None, None, None),
     ("docker_disk", None, None, None),

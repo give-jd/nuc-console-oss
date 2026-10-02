@@ -31,13 +31,14 @@ card whose source is missing is 'unknown' whatever the problems say (the problem
 nothing to show on purpose (docker not installed, no filesystems) is 'info'; else 'ok'. A problem list that does not say which problem is
 which (a plain list of (severity, text)) leaves every card but attention 'unknown' as soon as it is not empty: nothing is invented.
 """
+import re
 import time
 
 import nuc_config
 import prefs
 import ui
 from exposure import expose_apply, expose_over_items, exposure_rows, group_of, is_private_addr, os_of
-from ui import Bar, Card, Col, Kpi, Line, More, Msg, Raw, Row, Span, Spark, Table, Wrap
+from ui import Bar, Card, Col, Flow, Grid, Group, Head, Indent, Kpi, Line, More, Msg, NoteTable, Raw, Row, Span, Spark, Table, Timeline, Wrap
 
 
 # ---- Caps: what a card may show -----------------------------------------------------------------------------------------------
@@ -423,6 +424,334 @@ def network_traffic_card(ctx, k, caps):
             Col("tx", "Sent", num=True, w=12, gap=0), Col("tx_hist", "", gap=0), Col("total", "Total", prio=0)]
     more = More(len(nets) - len(shown), "more") if len(nets) > len(shown) else None
     return _native_card("network_traffic", ctx, note, [Table(cols, rows)] + ([more] if more else []), more)
+
+
+# ---- system, containers, databases and boot ------------------------------------------------------------------------------------
+# (PR 14.) The same lines the console has always drawn for these sections, as components: the Bars carry their values, the cores are a
+# Grid of Bars, a container stack is a Group of a header and a Wrap of chips (a Span with the state's tone and symbol), the databases a
+# NoteTable (a row each, the 'in use now' and 'external clients' facts under it as a Flow), the boot a Timeline and Tables. The figures
+# that more than one of them read (up/load, RAM, the container's name) are here, and render.py keeps its old names for them.
+
+BOOT_LABELS = {  # the same BOOT blocks speak of systemd units, Windows services or launchd daemons depending on who wrote boot.json
+    "linux": {"failed_one": "failed systemd unit", "failed_short": "failed unit", "journal_in": " in this boot's journal",
+              "failed_title": "FAILED UNITS", "enabled_title": "SERVICES ENABLED AT BOOT", "journal_title": "BOOT JOURNAL",
+              "journal_short": "journal", "kernel": "kernel "},
+    "windows": {"failed_one": "failed service", "failed_short": "failed service", "journal_in": " in the System event log since boot",
+                "failed_title": "FAILED SERVICES", "enabled_title": "AUTOMATIC SERVICES", "journal_title": "SYSTEM EVENT LOG",
+                "journal_short": "events", "kernel": ""},
+    "darwin": {"failed_one": "failed launch daemon", "failed_short": "failed daemon", "journal_in": " in the system log",
+               "failed_title": "FAILED LAUNCH DAEMONS", "enabled_title": "LAUNCH DAEMONS (third-party)", "journal_title": "SYSTEM LOG",
+               "journal_short": "log", "kernel": ""},
+}
+
+
+_BLOCKS = "▁▂▃▄▅▆▇█"  # one character per core, by load (the console's sparkline glyphs)
+
+
+def boot_labels(b):
+    return BOOT_LABELS.get(os_of(b), BOOT_LABELS["linux"])
+
+
+def unsupported(d, key):
+    """The collector of this OS has no such section (e.g. systemd-analyze blame on Windows): leave the block out."""
+    return isinstance(d, dict) and key in (d.get("unsupported") or [])
+
+
+def fmt_up(sec):
+    """'5d 0h', or '?' when the uptime is not known."""
+    return "?" if sec is None else ui.fmt_dur(sec)
+
+
+def fmt_load(load):
+    """The three load averages, '?' when they could not be read; '' (nothing to say) where the OS has none ([])."""
+    return "" if load == [] else "?" if load is None else " ".join(load)
+
+
+def up_load_note(up, load):
+    """'up 5d 0h · load 0.82 0.64 0.51': ? for what could not be read (None), no load at all where the OS has none ([])."""
+    return f"up {fmt_up(up)}" + (f" · load {fmt_load(load)}" if load != [] else "")
+
+
+def ram_figures(m):
+    """(used, total) bytes of the RAM from a Sampler's "mem": None when it does not say (an old kernel without MemAvailable, no data)."""
+    try:
+        total, avail = m["MemTotal"], m["MemAvailable"]
+        return (total - avail, total) if total else None
+    except (KeyError, TypeError):
+        return None
+
+
+def disk_figures(d):
+    """(used, total, label) of a Sampler's "disk_root": None when it is missing or empty."""
+    try:
+        used, total, label = d
+        return (used, total, label) if total else None
+    except (TypeError, ValueError):
+        return None
+
+
+def short_name(name, project=""):
+    """'ethibid-api-1' -> 'api' (without the stack prefix and the replica index)."""
+    n = ui.safe(name)
+    if project and n.startswith(project + "-"):
+        n = n[len(project) + 1:]
+    return re.sub(r"-\d+$", "", n)
+
+
+def ct_ok(ct):
+    return ct["state"] == "running" and "unhealthy" not in ct["status"] and "Restarting" not in ct["status"]
+
+
+def fmt_db_port(p):
+    if p["c"] == "host":
+        return "host network"
+    pre = "lo:" if p["s"] == "lo" else "*" if p["s"] == "*" else p["s"] + ":"
+    return f"{pre}{p['p'] or '?'}" + ("/u" if p["c"].endswith("/udp") else "")
+
+
+def _fits(lead, items, sep, w):
+    """The items (Spans / Lines) that fit in w columns after lead, joined by sep: trailing ones are dropped, one is always kept."""
+    items = list(items)
+    while len(items) > 1 and len(lead + sep.join(x.text for x in items)) > w:
+        items.pop()
+    return items
+
+
+def _joined(lead, items, sep):
+    spans = [lead] if lead else []
+    for n, x in enumerate(items):
+        spans += ([sep] if n else []) + (x.spans if isinstance(x, Line) else [x])
+    return Line(spans)
+
+
+def thermal_parts(th, bw, maxw=None):
+    """Temperatures with a Bar and its limits (RAM style) + the throttling time, as Lines. Scale and thresholds come from the sensor. When
+    the line is wider than maxw the clock goes first, then the limits. A temperature that is not a number is '?'."""
+    out = []
+    for label, key in (("TEMP", "cpu"), ("NVMe", "nvme")):
+        if key not in th:
+            continue
+        try:
+            t, mx = (ui.num(x) for x in th[key])
+        except (TypeError, ValueError):
+            t = mx = None
+        if t is None or not mx:  # not a reading: '?', never fine (and no limits to work out)
+            out.append(Line([f" {label:<5} ", Span("?", "unknown")]))
+            continue
+        val = f"{t:.0f}°C/{mx:.0f}°C"
+        clk = f"   clock {th['clk'][0]:.1f}/{th['clk'][1]:.1f} GHz" if key == "cpu" and th.get("clk") else ""
+        limits = f"   limits {ui.THERMAL_WARN * mx:.0f}/{ui.THERMAL_ERR * mx:.0f}°C"
+        head = 1 + 5 + 1 + bw + 1 + len(val)
+        extra = next((x for x in (limits + clk, limits) if maxw is None or head + len(x) <= maxw), "")
+        out.append(Line([f" {label:<5} ", Bar(_frac(t, mx), val, ui.THERMAL_WARN, ui.THERMAL_ERR, bw)] + ([extra] if extra else [])))
+    if th.get("throttle_s") is not None:
+        rec = th.get("recent")
+        state = (Span(f"✖ THROTTLING now (+{rec} events/min)", "err") if rec else
+                 Span("✔ none in the last minute", "ok") if rec == 0 else Span("measuring", "muted"))
+        out.append(Line([" ", Span("throt", "muted"), f" {ui.fmt_min(th['throttle_s'])} total since boot   ", state]))
+    return out
+
+
+@native("system", "SYSTEM", True)
+def system_card(ctx, k, caps):
+    s = ctx.s if isinstance(ctx.s, dict) else {}
+    m, disk, w = s.get("mem"), disk_figures(s.get("disk_root")), caps.width
+    bw = max(8, min(40, w - 52))
+    ram = ram_figures(m)
+    body = [Line([" RAM   ", Bar(_frac(ram[0], ram[1]), f"{ui.human(ram[0])}/{ui.human(ram[1])}   cache {ui.human(m.get('Cached'))}", w=bw)])
+            if ram else Line([" RAM   ", Span("?", "unknown")]),
+            Line([" DISK  ", Bar(_frac(disk[0], disk[1]), f"{ui.human(disk[0])}/{ui.human(disk[1])}", w=bw)])
+            if disk else Line([" DISK  ", Span("?", "unknown")])]
+    if ctx.cfg["features"].get("thermal", True):  # (the sampler leaves it empty when the feature is off; the demo's is not, so the switch is honoured here too)
+        body += thermal_parts(s.get("thermal") or {}, bw, w)
+    cores = [v for _, v in sorted(s["cpu"].items(), key=lambda kv: int(kv[0][3:]))]
+    if cores:
+        mean = sum(cores) / len(cores)
+        if k <= 2:  # one bar per core, in columns: the normal look; only the tiny-console levels (k>=3) compress to one character per core
+            body.append(Line([" CPU   ", Bar(mean, f"{mean * 100:.0f}%   {len(cores)} threads", w=bw)]))
+            body.append(Grid([Line([f" {i:>2} ", Bar(v, f"{v * 100:3.0f}%", w=9)]) for i, v in enumerate(cores)], 20, max(1, min(6, (w - 1) // 20))))
+        else:
+            spark = [Span(_BLOCKS[min(7, int(v * 8))], "ok" if v < 0.7 else "warn" if v < 0.9 else "err") for v in cores]
+            body.append(Line([" CPU   ", Bar(mean, f"{mean * 100:.0f}%", w=bw), "   core "] + spark))
+    cont = ctx.cont
+    if k <= -2 and cont:
+        top = caps.lim(sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"]), 5, "system")
+        if top:
+            mx = top[0]["mem"]
+            body += [Line([]), Line([Span(" HEAVIEST CONTAINERS (RAM)", "strong")]),
+                     Table([Col("name", "Container", w=35, gap=0), Col("mem", "RAM", w=7, gap=0), Col("share", "")],
+                           [Row([ui.safe(ct["name"])[:34], ui.human(ct["mem"]), Bar(ct["mem"] / mx, "", 2, 2, 20)]) for ct in top])]
+    return _native_card("system", ctx, up_load_note(s.get("uptime"), s.get("load")), body)
+
+
+def stack_parts(cont, cap, caps):
+    """For each stack: a Group of a header with counts and RAM, then its services as chips (a Wrap) with a status mark."""
+    groups = {}
+    for ct in cont["containers"]:
+        groups.setdefault(ui.safe(ct["project"]), []).append(ct)
+    out = []
+    for proj in sorted(groups, key=lambda x: (x == "", x)):
+        cts = sorted(groups[proj], key=lambda x: x["name"])
+        bad = sum(not ct_ok(ct) for ct in cts)
+        head = Line([" ", Span("▸", "accent_strong"), " ", Span(f"{(proj or '(no stack)')[:26]:<27}", "strong"),
+                     f"{len(cts) - bad}/{len(cts)} running   RAM {ui.human(sum(ct['mem'] or 0 for ct in cts))}"]
+                    + ([Span(f"   ✖ {bad}", "err")] if bad else []))
+        chips = [Line([Span("●", "ok") if ct_ok(ct) else Span("✖", "err"), " " + short_name(ct["name"], proj)]) for ct in cts]
+        out.append(Group([head, Wrap(chips, sep="   ", max_lines=None if caps.opened("containers") else cap, indent=5)]))
+    return out
+
+
+@native("containers", "CONTAINER", "containers")
+def containers_card(ctx, k, caps):
+    cont = ctx.cont
+    if cont is None:
+        return _native_card("containers", ctx, "", [Msg("err", "container collector not running")])
+    if cont.get("absent"):
+        return _native_card("containers", ctx, "", [Msg("info", "docker not installed on this machine")])
+    cs = cont.get("containers")
+    if not isinstance(cs, list):
+        return _native_card("containers", ctx, "", [Msg("warn", "unavailable")])
+    down = [x for x in cs if x["state"] != "running"]
+    sick = [x for x in cs if x["state"] == "running" and not ct_ok(x)]
+    ok = len(cs) - len(down) - len(sick)
+    body = [Line([f" {ui.plural(len(cs), 'container')}   RAM {ui.human(sum(x['mem'] or 0 for x in cs))}   ", Span("●", "ok"), f" {ok} ok"]
+                 + (["   ", Span(f"✖ {len(down)} stopped", "err")] if down else []) + (["   ", Span(f"✖ {len(sick)} unhealthy", "err")] if sick else []))]
+    if k <= 2:  # detail: which stacks and which services are running
+        return _native_card("containers", ctx, "", body + stack_parts(cont, {-2: 4, -1: 3, 0: 3, 1: 2, 2: 1}[k], caps))
+    groups = {}
+    for x in cs:
+        name = ui.safe(x["project"]) or "(standalone)"
+        groups[name] = groups.get(name, 0) + 1
+    if k < 4:
+        body.append(Wrap([f"{g} {n}" for g, n in sorted(groups.items())], max_lines=None if caps.opened("containers") else 1, indent=1))
+    for x in (sick + down)[:max(0, 4 - k)]:
+        body.append(Line([" ", Span("✖", "err"), f" {ui.safe(x['name'])[:36]:<37}", Span(ui.safe(x["status"])[:30], "muted")]))
+    return _native_card("containers", ctx, "", body)
+
+
+@native("databases", "DATABASE", "databases")
+def databases_card(ctx, k, caps):
+    net, w = ctx.net, caps.width
+    if net is None:
+        return _native_card("databases", ctx, "", [Msg("err", "network collector not running")])
+    dbs = net.get("dbs")
+    if dbs is None:
+        return _native_card("databases", ctx, "", [unavail(net, "dbs")])
+    items = dbs["items"]
+    if not items:
+        return _native_card("databases", ctx, "", [Msg("info", "no databases running")])
+    exposed = lambda it: it["host_net"] or any(p["s"] != "lo" for p in it["ports"])  # noqa: E731
+    open_n = sum(bool(exposed(it)) for it in items)
+    note = f"{len(items)} running" + (f" · {open_n} exposed" if open_n else "")
+    now = _now(ctx)
+    kw = min(14, max(len(ui.safe(it["kind"])) for it in items) + 1)
+    txt = [" ".join(fmt_db_port(p) for p in it["ports"]) or "docker net only" for it in items]
+    pw = min(28, max(len(t) for t in txt) + 2)
+    rows, notes = [], []
+    for it, ports in zip(items, txt):
+        ex = bool(exposed(it))
+        rows.append(Row([Span("●", "err" if ex else "ok"), Span(f"{ui.safe(it['kind']):<{kw}}", "strong"), ui.safe(it["name"])[:30], ports,
+                         Span("exposed", "err") if ex else Span("local only", "muted")]))
+        if k > 1:
+            notes.append([])
+            continue
+        proj = ui.safe(it["project"])
+        names = lambda lst: ", ".join(short_name(n, proj) for n in lst)  # noqa: E731
+        who = []
+        if it["active"]:
+            who.append(Line([Span("in use now: ", "ok"), names(it["active"])]))
+        declared = [n for n in it["usano"] if n not in it["active"]]
+        if declared:
+            who.append(Span("declared by " + names(declared)))
+        if it["stessa_rete"]:
+            who.append(Span("same network: " + names(it["stessa_rete"]), "muted"))
+        if it["host_clients"]:
+            who.append(Span("host processes: " + ", ".join(ui.safe(x) for x in it["host_clients"])))
+        if not who:
+            who.append(Line([Span("no known service", "warn"), Span(" (bridge: cannot tell)", "muted")]))
+        ext = it["external"]
+        if ext and now - ext[0]["last"] < 900:
+            who.append(Span("external clients now: " + ", ".join(ui.safe(e["ip"]) for e in ext if now - e["last"] < 900), "err"))
+        elif ext:
+            who.append(Span(f"last external client {ui.safe(ext[0]['ip'])} {ui.fmt_ago(now - ext[0]['last'])} ago", "warn"))
+        elif it["ext_source"] == "netns":
+            who.append(Span(f"no external client seen in {ui.fmt_ago(now - dbs['since'])}", "muted"))
+        else:
+            who.append(Span("external clients: not detectable", "warn"))
+        notes.append([Flow(who, Span("→", "muted"), 8, "   ", w - 14)])  # wrapped, never silently cut
+    cols = [Col("dot", "", w=1), Col("kind", "Kind", gap=0), Col("name", "Name", w=31, gap=0), Col("ports", "Ports", w=pw, gap=0),
+            Col("reach", "Reach")]
+    return _native_card("databases", ctx, note, [NoteTable(cols, rows, notes)])
+
+
+def boot_start_parts(b, up, w):
+    """The start of a boot: what it took (the Timeline of its stages and its legend), without the title line (the card has it)."""
+    an, lbl = b.get("analyze"), boot_labels(b)
+    out = [Line([])]
+    if an is None:
+        head = [Line([f"   {ui.safe(b.get('kernel', '?'))}   up {ui.fmt_dur(up)}"])] if os_of(b) != "linux" else []
+        return out + head + [unavail(b, "analyze", "boot times unavailable")]
+    total = max(an["total"], 0.001)
+    out.append(Line(["   boot finished in ", Span(ui.fmt_s(total), "strong"), f"   {lbl['kernel']}{ui.safe(b.get('kernel', '?'))}   up {ui.fmt_dur(up)}"]))
+    return out + [Timeline(list(an["parts"].items()), total, max(20, min(w - 8, 80)))]
+
+
+def boot_slowest_parts(b, caps, k):
+    """The slowest units: a Head, then a Table of unit, a Bar of its share of the slowest and its time."""
+    out = [Head("SLOWEST UNITS", "activation time: not all of them block boot"), Line([])]
+    bl = b.get("blame")
+    if bl is None:
+        return out + [unavail(b, "blame")]
+    top = caps.lim(bl, k, "boot")
+    mx = max((x["s"] for x in top), default=1) or 1
+    rows = [Row([ui.safe(x["unit"])[:38], Bar(max(1, round(20 * x["s"] / mx)) / 20, "", tone="accent", w=20),
+                 Span(ui.fmt_s(x["s"]), "warn" if x["s"] >= 5 else None)]) for x in top]
+    return out + [Indent([Table([Col("unit", "Unit", w=39, gap=0), Col("share", "", gap=2), Col("time", "Time", "r", num=True)], rows)], 2)]
+
+
+def boot_journal_parts(b, caps, k, w):
+    """The boot journal: errors and warnings counted, then its most frequent entries."""
+    j = b.get("journal")
+    out = [Head(boot_labels(b)["journal_title"], "warning and worse"), Line([])]
+    if j is None:
+        return out + [unavail(b, "journal")]
+    cap = " (last 500)" if j.get("capped") else ""
+    out.append(Line(["   ", Span(str(j["err"]), "err") if j["err"] else "0", " errors   ", Span(str(j["warn"]), "warn") if j["warn"] else "0",
+                     f" warning{cap}"]))
+    room = max(20, w - 45)
+    rows = [Row([Span("●", "err" if e["pr"] <= 3 else "warn"), ui.safe(e["id"])[:26], f"{e['n']}×", Span(ui.safe(e["last"])[:room], "muted")])
+            for e in caps.lim(j["top"], k, "boot")]
+    return out + [Indent([Table([Col("dot", "", w=1), Col("id", "Entry", w=27, gap=0), Col("n", "Count", "r", num=True, w=5, gap=2),
+                                 Col("last", "Last")], rows)], 2)]
+
+
+@native("boot", "BOOT", "boot")
+def boot_card(ctx, k, caps):
+    b, w = ctx.boot, caps.width
+    if k <= -2 and b is not None:  # the full boot detail only if there really is room to spare
+        up = _now(ctx) - b.get("btime", time.time())
+        body = boot_start_parts(b, up, w)
+        for key, blk in (("blame", lambda: boot_slowest_parts(b, caps, 5)), ("journal", lambda: boot_journal_parts(b, caps, 4, w))):
+            if not unsupported(b, key):  # macOS/Windows: no empty "not available" blocks
+                body += [Line([])] + blk()
+        return _native_card("boot", ctx, "", body)
+    if b is None:
+        return _native_card("boot", ctx, "", [Msg("warn", "boot collector not running")])
+    an, j, failed, lbl = b.get("analyze"), b.get("journal"), b.get("failed"), boot_labels(b)
+    bits = []
+    if an:
+        bits.append(Line(["finished in ", Span(ui.fmt_s(an["total"]), "strong")]))
+    if failed is not None:
+        bits.append(Span(f"✖ {ui.plural(len(failed), lbl['failed_short'])}", "err") if failed else Span(f"✔ 0 {lbl['failed_short']}s", "ok"))
+    if j:
+        bits.append(Line([f"{lbl['journal_short']} ", Span(str(j["err"]), "err") if j["err"] else "0", " err · ",
+                          Span(str(j["warn"]), "warn") if j["warn"] else "0", " warn"]))
+    body = [_joined(" ", _fits(" ", bits, "   ", w), "   ")]
+    if b.get("blame") and k < 3:
+        top = [f"{x['unit'].replace('.service', '')} {ui.fmt_s(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
+        top = _fits(" slowest: ", [Span(x) for x in top], "  ·  ", w)
+        body.append(Line([" slowest: ", Span("  ·  ".join(x.text for x in top), "muted")]))
+    return _native_card("boot", ctx, "", body)
 
 
 # ---- the KPIs -----------------------------------------------------------------------------------------------------------------
