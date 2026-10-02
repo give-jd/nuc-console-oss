@@ -113,6 +113,7 @@ CONTROLS = """
 .btn.pri{background:var(--accent-bg);border-color:var(--accent);color:var(--accent);font-weight:600}
 .lnk{color:var(--accent);text-decoration:underline;text-underline-offset:.15em;border-radius:3px;padding:.05em .15em}
 .lnk:hover{text-decoration-thickness:2px}
+button.lnk{background:none;border:0;cursor:pointer;margin-top:.4em}
 .lnk[aria-pressed="true"]{color:var(--fg-strong);font-weight:600}
 .lnk[aria-current="true"],span.lnk{color:var(--fg-strong);text-decoration:none;font-weight:600}
 span.lnk[aria-disabled="true"]{color:var(--muted);font-weight:400;opacity:.7}
@@ -209,6 +210,7 @@ GRID = """
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0}
 .view{padding:0 var(--pad) var(--pad);min-width:0}
 .view>*+*{margin-top:var(--gap)}
+.vb{display:contents}.vb>*+*{margin-top:var(--gap)}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1em;padding:var(--pad) 0 0;color:var(--muted);font-size:.92em}
 .toolbar .tl{display:inline-flex;align-items:center;gap:.4em}
 .toolbar b{color:var(--fg-strong);font-weight:600}

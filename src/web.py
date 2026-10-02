@@ -44,16 +44,13 @@ import prefs
 import render
 import ui
 import webcss
+import webjs
 from htmlview import AI_CSS, CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
-CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-AI_CSP = CSP.replace("form-action 'none'", "form-action 'self'")  # the AI page only: its forms post to this server and nowhere else; still no script
-SHELL_CSP = CSP.replace("style-src 'unsafe-inline'", "style-src 'self' 'unsafe-inline'")  # the shell loads /s/app.<sha8>.css; still no script-src
-SHELL_AI_CSP = SHELL_CSP.replace("form-action 'none'", "form-action 'self'")  # the AI page in the shell: the same forms, the same rule
 ASSET_FILES = {"%s.%s.css" % (name, sha[:8]): (body, ctype) for name, (body, ctype, sha) in webcss.ASSETS.items()}  # /s/<name>.<sha8>.<ext>
 ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the hash: a changed sheet is another URL
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
@@ -94,13 +91,25 @@ LABEL_MAX = 24       # characters of a label under its circle (the full name is 
 GRAPH_SCRIPT = graphjs.SCRIPT  # sent as is, never built from request data
 
 
-def script_csp(script, base=CSP):
-    """CSP that lets exactly this inline script run (by its SHA-256), and nothing else."""
-    digest = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii")
-    return f"{base}; script-src 'sha256-{digest}'"
+def page_csp(scripts=(), shell=False, forms=False):
+    """The Content-Security-Policy of one page, composed from what the page carries: the one place a policy is written.
+    scripts: the texts of the inline scripts the page has; script-src lists exactly their SHA-256 and nothing else, and a page without
+    one has no script-src (default-src 'none' then forbids every script). connect-src 'self' only where a script talks to this server
+    (refresh, preferences, layout editor); where the refresh script is, Trusted Types: its one policy, nuc-frag, is the only way to hand
+    markup to the parser. shell: the page loads /s/app.<sha8>.css. forms: the page's forms post to this server (the AI page) and nowhere else."""
+    scripts = [s for s in scripts if s]
+    parts = ["default-src 'none'", "style-src " + ("'self' " if shell else "") + "'unsafe-inline'", "base-uri 'none'",
+             "form-action " + ("'self'" if forms else "'none'"), "frame-ancestors 'none'"]
+    if scripts:
+        parts.append("script-src " + " ".join(dict.fromkeys(webjs.csp_source(s) for s in scripts)))
+    if any(s in (webjs.REFRESH_JS, webjs.PREFS_JS, webjs.BUILDER_JS) for s in scripts):
+        parts.append("connect-src 'self'")
+    if webjs.REFRESH_JS in scripts:
+        parts += ["require-trusted-types-for 'script'", "trusted-types nuc-frag"]
+    return "; ".join(parts)
 
 
-GRAPH_CSP = script_csp(GRAPH_SCRIPT) if GRAPH_SCRIPT else CSP  # computed once: the script is a constant
+CSP = page_csp()  # the classic pages: no script, no connection, no form
 
 
 class Page(str):
@@ -108,6 +117,7 @@ class Page(str):
     form) and the Referrer-Policy (the AI page sends its own address to itself, so that the browser's Origin on a post is the real one)."""
     csp = CSP
     referrer = "no-referrer"
+    blocks = None  # a shell page: its blocks (top bar, key figures, cards, the view), what ?frag=1 serves; a classic page has none
 
 
 class View(object):
@@ -229,7 +239,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP, referrer="no-referrer", cache="no-store"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
+        if code not in (204, 304):  # these have no body, and no length either
+            self.send_header("Content-Length", str(len(body)))
         for k, v in (("Cache-Control", cache), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", referrer),
                      ("Content-Security-Policy", csp), ("X-Frame-Options", "DENY")) + tuple(extra):
             self.send_header(k, v)
@@ -263,15 +274,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site not in ("same-origin", "none"):  # a link on another site does not change this one's look
             return self._send(403, b"a link of another site cannot change the preferences\n")
-        if field != "reset" and ("." in field or not prefs.parse_cookie("1." + field)):
+        whole = field.startswith(prefs.COOKIE_VERSION + ".") or field == prefs.COOKIE_VERSION  # PREFS_JS sends back the string it was given: all of it
+        if whole and (not prefs.parse_cookie(field) and field != prefs.COOKIE_VERSION):
             return self._send(400, b"not a preference\n")
-        value = prefs.apply_set(self._cookie(prefs.COOKIE_NAME), field)
+        if not whole and field != "reset" and ("." in field or not prefs.parse_cookie("1." + field)):
+            return self._send(400, b"not a preference\n")
+        value = prefs.dump_cookie(prefs.parse_cookie(field)) if whole else prefs.apply_set(self._cookie(prefs.COOKIE_NAME), field)
         try:
             back = parse_qs((q.get("back") or [""])[0][:400], max_num_fields=40)
         except ValueError:
             back = {}
         keep = (f"{prefs.COOKIE_NAME}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={UI_COOKIE_AGE}" if value != prefs.COOKIE_VERSION
                 else f"{prefs.COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")  # nothing left to remember: the cookie goes
+        if (q.get("frag") or [""])[0] == "1":  # a script's request: no redirect, the page changes itself; X-Nuc-Prefs is what it keeps in the browser
+            return self._send(204, extra=(("Set-Cookie", keep), ("X-Nuc-Prefs", value)))
         self._send(302, extra=(("Location", view_url(view_params(back))), ("Set-Cookie", keep)))
 
     def _asset(self, path):
@@ -305,8 +321,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if "set" in q:
             return self._set(q)
         page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
+        if (q.get("frag") or [""])[0] == "1" and getattr(page, "blocks", None) is not None:  # a classic page has no blocks: it is served whole, as always
+            return self._fragment(page.blocks)
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
                    extra=(("Vary", "Cookie"),))
+
+    def _fragment(self, blocks):
+        """?frag=1 on a shell page: only its blocks (what the refresh script swaps in), with an ETag of them: the same tag in If-None-Match is a 304."""
+        tag = '"%s"' % hashlib.sha256(blocks.encode("utf-8")).hexdigest()[:20]
+        extra = (("ETag", tag), ("X-Nuc-Fragment", "1"), ("Vary", "Cookie"))
+        sent = [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]
+        if tag in sent or "*" in sent or "W/" + tag in sent:
+            return self._send(304, extra=extra)
+        self._send(200, blocks.encode(), "text/html; charset=utf-8", extra=extra)
 
     def do_POST(self):  # noqa: N802 - the forms of the AI page, and nothing else
         u = urlsplit(self.path)
@@ -612,18 +639,25 @@ class Server(http.server.ThreadingHTTPServer):
                               page_url(dict(here, view="settings")), view == "settings")
         kpis = "" if view == "settings" else htmlview.kpis_block(tiles, note)
         # the page
-        r_live = int(v.wait or r) if v.live and not pause else 0
+        r_live = int(v.wait or r) if v.live and not pause else 0  # the meta refresh (inside <noscript>: with the scripts, they poll)
         tools = "".join(f'<span class="tl">{t}</span>' for t in v.tools)
         attrs = ""
-        if r_live and not v.script:  # a graph reloads itself with its own script
-            attrs = f' data-refresh="{r_live}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
+        if (v.live or pause) and view != "settings" and not v.script:  # a graph reloads itself with its own script; a paused page can be resumed by it
+            attrs = f' data-refresh="{int(v.wait or r)}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
         if pause:
             attrs += ' data-paused="1"'
         if v.grid:
             main = f'<main class="grid"{attrs}>{v.body}</main>'
+            blocks = v.body
         else:
             inner = v.body.replace("<main ", "<div ").replace("</main>", "</div>") if v.legacy else v.body  # one <main> a page: the old bodies' became <div>
-            main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>' + (f'<div class="toolbar">{tools}</div>' if tools else "") + inner + "</main>"
+            inner = (f'<div class="toolbar">{tools}</div>' if tools else "") + inner
+            if view != "settings" and not v.script:  # the view is one block of the page, so that the poll can replace it
+                inner = htmlview.block("div", "__view", "vb", inner)
+                blocks = inner
+            else:
+                blocks = ""
+            main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>{inner}</main>'
         groups = ["refresh every " + self.every(link, r) if view != "settings" else "",
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
                   + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" else "",
@@ -637,12 +671,13 @@ class Server(http.server.ThreadingHTTPServer):
         helps = htmlview.help_dialog(ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause))
         body = top + kpis + '<div id="stale" class="stale-banner" role="status" hidden></div>' + main + htmlview.foot([g for g in groups if g], clock) + helps
         name = {"": "overview", "settings": "settings"}.get(view, view)
+        scripts = [webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS] + ([v.script] if v.script else [])
         page = Page(htmlview.shell_doc(f"{host} · {name} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], zoom,
                                        int(time.time() // 600) % 3, here["kiosk"], "url" if here["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
-                                       cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.style, v.script, pause))
-        base = SHELL_AI_CSP if v.forms else SHELL_CSP
-        page.csp = script_csp(v.script, base) if v.script else base
+                                       cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.style, scripts, pause))
+        page.csp = page_csp(scripts, shell=True, forms=v.forms)
         page.referrer = "same-origin" if v.forms else "no-referrer"
+        page.blocks = top + kpis + blocks
         return page
 
     @staticmethod
@@ -747,6 +782,7 @@ class Server(http.server.ThreadingHTTPServer):
         export = prefs.export_ini(dict(eff, web="app"))
         appearance = (f'<section class="sec" aria-labelledby="sec-app"><h3 class="sech" id="sec-app">Appearance</h3>{theme}{dens}{preset}{order}{start}{kpis}'
                       f'<div class="fs expo"><span class="lab" id="exp-lab">Export</span><pre id="export" tabindex="0" aria-labelledby="exp-lab">{esc(export)}</pre>'
+                      f'<button type="button" class="lnk" data-copy="#export" data-done="Copied" data-fail="Selected: press Ctrl+C">Copy</button>'
                       f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
@@ -958,7 +994,7 @@ class Server(http.server.ThreadingHTTPServer):
             return View(body, tools, gh, not pause, script=script, style="#gsvg{width:%s}" % (f"{z}%" if z else "100%;max-height:calc(100vh - 150px)"))
         page = Page(graph_doc(r, zoom, z, body, bar, not pause, script))
         if script:
-            page.csp = GRAPH_CSP
+            page.csp = page_csp([script])
         return page
 
     def layout(self, ids, pairs, w, h):
@@ -1022,7 +1058,7 @@ class Server(http.server.ThreadingHTTPServer):
             page = Page('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
                         + meta + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
                         + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
-            page.csp, page.referrer = (CSP, "no-referrer") if snap["locked"] else (AI_CSP, "same-origin")
+            page.csp, page.referrer = (CSP, "no-referrer") if snap["locked"] else (page_csp(forms=True), "same-origin")
             return page
         dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
         if not render.CFG["features"].get("ai", True):

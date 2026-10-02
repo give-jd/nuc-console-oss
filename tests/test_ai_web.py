@@ -163,7 +163,7 @@ class AiPage(unittest.TestCase):
         csp = h["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
         self.assertNotIn("script-src", csp)                                  # still no script on this page
-        self.assertEqual(csp, web.AI_CSP)                                    # the one difference: its forms may post to this server (and nowhere else)
+        self.assertEqual(csp, web.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
         self.assertEqual(csp, web.CSP.replace("form-action 'none'", "form-action 'self'"))
         self.assertEqual(h["Referrer-Policy"], "same-origin")                # so that the browser's Origin on a post is the real one, not "null"
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
