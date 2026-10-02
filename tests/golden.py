@@ -443,6 +443,7 @@ def _cases():
                         ("cpu", "app=1&view=cpu"), ("cpu-details", f"app=1&view=cpu&sort=mem&sel={SELECTED['pid']}"),
                         ("health", "app=1&view=health"), ("health-details", f"app=1&view=health&period=30&sel={SELECTED['finding']}"),
                         ("overview-wall-light", "app=1&ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
+                        ("wall-kiosk", "app=1&ui=1.dw&kiosk=1"),  # the wall display: scrolls by itself (data-rotate), the footer says how to close it
                         ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
         add("web-shell-" + name, query=query)
     return out

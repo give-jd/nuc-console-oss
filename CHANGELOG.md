@@ -76,6 +76,9 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
   (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
   events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
+- The shell as a wall display: `/?app=1&ui=1.dw&kiosk=1` scrolls one screen every `[dashboard] rotate_seconds` seconds (`&rotate=N` for one URL), shifts the top bar
+  every ten minutes against burn-in and keeps a footer with only the way to close the window. With `[ui] web = app`, `render.py --kiosk` and `--open` open the shell
+  (the full-screen window its wall display); `web = classic`, the default, opens the classic page as before.
 
 **Windows and macOS**
 

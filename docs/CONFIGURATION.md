@@ -136,6 +136,8 @@ macOS and Windows have no text console to take over. The installers start the we
 | `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). In a browser window **nothing is left out**: every section and every item, the page scrolls; full screen shows what does not fit on the rotating Details pages. The **A− / A+** links at the bottom of the page change it while you look |
 | `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome, then Firefox (Windows: Firefox cannot start full screen, press F11; with none of them the default browser opens a normal window, F11 again); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
 
+With `[ui] web = app` the full-screen window opens the shell's wall display (`/?app=1&ui=1.dw&kiosk=1`: wall density, scrolling one screen every `[dashboard] rotate_seconds` seconds, [WEB.md](WEB.md#wall-and-kiosk)) and a normal window opens `/?app=1`; with `classic` (the default) nothing changes.
+
 The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
 **Alt+F4** (Cmd+Q) closes it until the next login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows.
 Its grid follows the monitor's shape (64 rows; 16:9 → the 3-column layout) or `[dashboard] columns` × `rows` when set.

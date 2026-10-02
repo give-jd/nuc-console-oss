@@ -3378,7 +3378,14 @@ def web_up(port, wait):
 
 
 def dashboard_url(fullscreen=False, cols=0, rows=0):
-    query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
+    """The page the display opens. [ui] web = classic: the classic page (fit to the window; full screen: sized to the grid, the pages taking
+    turns, the kiosk footer). [ui] web = app: the shell (app=1); full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by
+    itself, says how to close the window). Both take the token the caller appends."""
+    app = (CFG.get("ui") or {}).get("web") == "app"
+    if app:
+        query = {"app": 1, "ui": "1.dw", "kiosk": 1} if fullscreen else {"app": 1}
+    else:
+        query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
     from urllib.parse import urlencode
     return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
 
