@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ CPU │ 14:13:20                                                                                                                                                             ✖ 5 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                                                                                                      ✖ 5 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m5[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m5[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 18%   [32m✔[0m [90mRAM[0m 54%   [32m✔[0m [90mDisk[0m 38%   [33m?[0m [90mTemp[0m [33m?[0m[0m[K
 [36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
  [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mAMD64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M  ·  [90mgovernor [0m?  ·  [90mclock [0m?-3801 MHz (base 3801)[0m[0m[K
  [90mup [0m1d 2h  ·  [90mload [0m?  ·  [90mctxt [0m24.4k/s  ·  [90mintr [0m9.9k/s  ·  [90mrunning [0m?  ·  [90mblocked [0m?[0m[0m[K
@@ -46,5 +47,4 @@
   1560 SYSTEM     11   0.0   0.1    13M   0:08.8 spoolsv.exe[0m[0m[K
   2240 SYSTEM      3   0.0   0.0     8M   0:01.2 sshd.exe[0m[0m[K
   5100 alice      18   0.0   0.5    88M   0:12.0 pwsh.exe[0m[0m[K
-  7280 alice       8   0.0   0.1    24M   0:02.2 RuntimeBroker.exe[0m[0m[K
 [90m row 1/37   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   sort: [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user   1-5: screens   Esc: back   ?: help[0m[0m[0m

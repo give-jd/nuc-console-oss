@@ -1,4 +1,4 @@
-[1;41;37m  demo-host │ Overview 2/2 │ 14:13:20                           ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ [7m[1·Ov][27m 2·Map 3·CPU 4·Hlth 5·AI │ 14:13:20         ✖ 6 PROBLEMS  [0m[0m[K
  7 containers   RAM 1.6G   [32m●[0m 6 ok   [31m✖ 1 stopped[0m[0m[K
 [K
 [K

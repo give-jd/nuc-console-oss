@@ -1,5 +1,5 @@
-[1;41;37m  demo-host │ Details 1/2 │ 14:13:20                            ✖ 6 PROBLEMS  [0m[0m[K
-[36m──[0m[1;36m ATTENTION [0m[36m───────────────────────────────────────────────────────────────[0m[0m[K
+[1;41;37m  demo-host │ [7m[1·Ov][27m │ Details 1/2 │ 14:13:20                   ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m [0m[31m✖[0m[1;36m ATTENTION [0m[36m─────────────────────────────────────────────────────────────[0m[0m[K
    [31m✖[0m 1 DB/broker open on LAN[0m[K
    [31m✖[0m 2 services reach beyond config.ini: n8n :8444 Internet > tailnet,[0m[K
      shop-db :5432 LAN > local[0m[K

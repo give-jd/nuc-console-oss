@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Boot │ 14:13:20                                                                                                                                                                                      ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ [7m[1 Overview][27m  2 Map  3 CPU  4 Health  5 AI │ Boot │ 14:13:20                                                                                                                                         ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m BOOT [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m     [36m──[0m[1;36m SERVICES ENABLED AT BOOT [0m[36m────────────────────────────────────────────────────────────────────────────────[0m[0m  [0m[K
 [0m                                                                                                                   [0m                                                                                                              [0m[K
    boot finished in [1m58.4s[0m   kernel 6.8.0-demo   up 5d 0h[0m                                                              24 enabled   [32m24 active[0m   0 inactive (often one-shots already done)[0m                                         [0m[K
@@ -15,7 +16,6 @@
 [36m──[0m[1;36m FAILED UNITS [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────[0m[0m     [0m                                                                                                              [0m[K
 [0m                                                                                                                      [31m2[0m errors   [33m9[0m warning[0m                                                                                       [0m[K
    [32m✔[0m none[0m                                                                                                             [33m●[0m kernel                        4×  [90mexample warning[0m[0m                                                        [0m[K
-[K
 [K
 [K
 [K

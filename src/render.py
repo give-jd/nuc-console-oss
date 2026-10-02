@@ -25,6 +25,7 @@ import ansi  # same directory: the overlay of the help
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
+import prefs  # same directory: [ui], the console's theme, density, order and KPIs
 import procs
 import ui
 # the console primitives (ansi.py) and the text helpers (ui.py) moved out of this file; render.py draws with them, and tests,
@@ -1717,7 +1718,7 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     ci = 0
     for fn in blocks:
         lines = fn(cw)
-        if gap and CFG["spacing"] and len(lines) > 1 and lines[1] != "":  # a little air under each section title
+        if gap and spacing_on() and len(lines) > 1 and lines[1] != "":  # a little air under each section title
             lines = [lines[0], ""] + lines[1:]
         while ci < ncol:
             col = cols[ci]
@@ -1765,9 +1766,10 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             have |= {"databases", "boot", "webapps"}
         if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
             have |= {"network_traffic", "sessions", "tailscale", "docker_disk", "disks"}
-        # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
-        return [(n, lambda c_, n=n: card_block(n, k, c_)) for n in CFG["sections"]
-                if n in have and cards.enabled(n, CFG)]
+        # the order is fixed (config.ini [dashboard] sections, or [ui] layout / order: card_order), never decided by which block happens to fit where
+        def lines_of(n, c_):
+            return mark_title(card_block(n, k, c_), cards.build(n, ctx, k, caps_at(c_)).state)  # the card's state in front of its title, when it is not fine
+        return [(n, lambda c_, n=n: lines_of(n, c_)) for n in card_order(ctx, CFG["sections"]) if n in have and cards.enabled(n, CFG)]
 
     def detail_pages(trunc):
         """The sections that hid items ("… +N more"), built in full at the richest level and laid out page by page."""
@@ -1815,6 +1817,8 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
     levels = ((-2, True), (-1, True), (0, True), (1, True), (2, True), (3, True), (3, False), (4, False))
+    if ui_cfg().get("density") == "wall":  # a wall display is read from afar: it starts at level 0, without the two richest levels (-2, -1)
+        levels = levels[2:]
     for i, (k, spaced) in enumerate(levels):
         TRUNC.clear()  # only what the level that is finally shown hides counts
         blocks = [fn for _, fn in make_cand(k)]
@@ -1843,7 +1847,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
                         EXPAND.clear()
                         TRUNC.clear()
                 lines, left = expand(lines)
-                if left and CFG["spacing"]:
+                if left and spacing_on():
                     saved_spacing = CFG["spacing"]
                     CFG["spacing"] = 0
                     try:
@@ -1920,30 +1924,197 @@ def pick_slide(sl, t):
     return 0
 
 
+# ---- [ui] on the console: the theme, the density, the cards' order, the tab bar and the KPI line ---------------------------------
+# config.ini [ui] (prefs.parse_ui, in CFG["ui"]) is the only source here: a console has no cookie and no URL. Without it nothing below changes
+# what the console draws except the header's tab bar, the KPI line (on a tall screen) and the state symbol on a section's title.
+
+UI_THEMES = {"light": "light", "high-contrast": "hc"}  # [ui] theme -> ui.ANSI_THEMES (auto and dark: the default one)
+KPI_MIN_ROWS = 30  # the KPI line shows from this many rows up, or whenever [ui] kpis is set
+TAB_SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar when the line is narrow
+KPI_TOKEN = {"ok": "ok", "warn": "warn", "err": "err", "down": "err", "unknown": "unknown", "info": "info"}
+TITLE_STATES = ("warn", "err", "down", "unknown")  # the states a section's title says besides the colour (ok and info are quiet)
+LAYOUT_KEYS = ("layout", "hidden", "order", "preset")  # [ui] keys that take the order of the cards from prefs (else [dashboard] sections)
+
+
+def ui_cfg():
+    return CFG.get("ui") or {}
+
+
+def theme_name():
+    """The ANSI theme the frame is written in: NO_COLOR (set and not empty) is always mono, else [ui] theme."""
+    if os.environ.get("NO_COLOR"):
+        return "mono"
+    return UI_THEMES.get(ui_cfg().get("theme"), "default")
+
+
+def themed(screen):
+    """The frame in the console's theme (the screens are drawn in the default one)."""
+    return ansi.retheme(screen, theme_name())
+
+
+def spacing_on():
+    """Empty lines under the section titles: [dashboard] spacing, and never in the compact density."""
+    return bool(CFG["spacing"]) and ui_cfg().get("density") != "compact"
+
+
+def kpi_on(h, page=False):
+    """Is there a KPI line on a screen h rows tall? A browser page (page=True) has its own."""
+    return not page and (h >= KPI_MIN_ROWS or bool(ui_cfg().get("kpis")))
+
+
+def body_rows(h, page=False):
+    """The rows a screen's body has: the frame less the header, the footer and the KPI line."""
+    return h - 2 - (1 if kpi_on(h, page) else 0)
+
+
+def make_ctx(st, sm, pb, now=None):
+    """The cards.Ctx of the KPI line from what a screen has read (snapshot(), the sampler's reading, the header's problems)."""
+    ids = prefs.effective(ui_cfg())[0]["kpis"]
+    net, cont, base = st["net"], st["cont"], st["baseline"]
+    ctx = cards.Ctx(s=sm, cont=cont, net=net, boot=st["boot"], problems=pb, cfg=CFG, now=now, baseline=base, new=new_ports(net, cont, base))
+    for field, ask in (("health", lambda: health_data(7)), ("ai", ai_status)):  # only the KPIs that read them cost a read
+        if field in ids:
+            try:
+                setattr(ctx, field, ask())
+            except Exception:  # noqa: BLE001 - a source that fails is an unknown KPI, never a broken screen
+                pass
+    return ctx
+
+
+KEEP = {}  # what the screens last read (st, sm: map_graph, cpu_problems, health_state, ai_state) and the Ctx made of it (kept_ctx)
+
+
+def keep(st, sm):
+    """Remembers what a screen has read, for the KPI line of its frame."""
+    KEEP.update(st=st, sm=sm)
+
+
+def kept_ctx(pb):
+    """The cards.Ctx of the KPI line of a screen that has no Ctx of its own: made of what was last read (keep) and the header's problems
+    pb, once for each reading. Nothing read: only the problems are known, the other KPIs are '?'."""
+    st, sm = KEEP.get("st"), KEEP.get("sm")
+    if st is None:
+        return cards.Ctx(problems=pb or [], cfg=CFG)
+    hit = KEEP.get("ctx")
+    if hit is None or hit[0] is not st or hit[1] is not sm or hit[2] is not pb:
+        hit = KEEP["ctx"] = (st, sm, pb, make_ctx(st, sm, pb))
+    return hit[3]
+
+
+def kpi_line(ctx, w):
+    """The KPI line: symbol, label and value of each KPI of [ui] (kpis or the preset's), the last ones dropped until it fits w columns."""
+    items = []
+    for k in cards.kpis(ctx, prefs.effective(ui_cfg())[0]["kpis"]):
+        col, val = ui.sgr(KPI_TOKEN[k.state]), k.value + k.unit
+        items.append((len(f"{k.symbol} {k.label} {val}"),
+                      cc(col, k.symbol) + " " + c(ui.sgr("muted"), k.label) + " " + (val if k.state in ("ok", "info") else cc(col, val))))
+    while len(items) > 1 and 1 + sum(n for n, _ in items) + 3 * (len(items) - 1) > w:
+        items.pop()
+    return clip(" " + "   ".join(t for _, t in items), w)
+
+
+def card_order(ctx, base):
+    """The overview's cards in the order to draw them: [dashboard] sections (`base`) unless [ui] says layout, hidden, preset or order.
+    Then it is prefs' layout without the hidden cards, and with `order = severity` the cards with the worst state first: attention
+    stays where the layout puts it (first), the cards of one state keep their order. The order is a function of the states, so a card
+    moves only when its own state changes (or another one's does): the same states are the same order, frame after frame."""
+    ui_ = ui_cfg()
+    if not any(k in ui_ for k in LAYOUT_KEYS):
+        return list(base)
+    ids = [n for n, _w in prefs.visible_cards(prefs.effective(ui_)[0], base)]
+    if ui_.get("order") != "severity":
+        return ids
+    states = ctx.once("card_states", lambda: {n: cards.card_state(n, ctx) for n in ids})
+    rank = {n: -ui._SEVERITY[states[n]] for n in ids}
+    first = ids[:1] if ids[:1] == ["attention"] else []
+    return first + sorted(ids[len(first):], key=lambda n: rank[n])  # sorted() is stable
+
+
+def mark_title(lines, state):
+    """The card's lines with its state in front of the title ('── ✖ EXPOSURE ──'), the rule shortened by as much: width does not change.
+    Quiet states (ok, info) and a first line that is not a section title are left alone."""
+    if state not in TITLE_STATES or not lines:
+        return lines
+    strong, accent = ui.sgr("accent_strong"), ui.sgr("accent")
+    head, line = f"\x1b[{strong}m ", lines[0]
+    at = line.find(head)
+    if at < 0:
+        return lines
+    line = line[:at] + head + "\x1b[0m" + c(ui.sgr(KPI_TOKEN[state]), ui.SYMBOLS[state]) + head + line[at + len(head):]
+    fill = f"\x1b[{accent}m" + "─" * 4  # the rule after the title: 2 columns shorter, for the symbol and its blank
+    cut = line.find(fill)
+    if cut >= 0:
+        line = line[:cut + len(fill) - 4] + line[cut + len(fill) - 2:]
+    return [line] + lines[1:]
+
+
 PAUSED = False  # Z: the redraw is paused, the header says so
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None, healthkey=None, aikey=None):
+def tab_bar(cur, shown, short, rev_on, rev_off):
+    """The screens' tabs: '[1 Overview]  2 Map  3 CPU  4 Health  5 AI', or '[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI' when short. The current one has
+    brackets and is in reverse (rev_on / rev_off: the sequences, which depend on the bar being in reverse itself): never colour alone.
+    A screen whose feature is off is left out; the digits are the screens', they do not move."""
+    out = []
+    for i, (name, feat, title) in enumerate(ui.SCREENS):
+        if name != cur and (short is None or feat and not shown(feat)):  # short None: only the current tab, for a very narrow console
+            continue
+        label = f"{i + 1}·{TAB_SHORT[name]}" if short is not False else f"{i + 1} {title}"
+        out.append(f"{rev_on}[{label}]{rev_off}" if name == cur else label)
+    return (" " if short is not False else "  ").join(out)
+
+
+def console_head(name, part, parts, w, text, code, shift, shown):
+    """The header line of the console: ' host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ HH:MM:SS … ✖ N PROBLEMS' on the pill's colour.
+    The tabs have a short form when the long one leaves no room for the host name. A page of the overview that is not 'Overview'
+    (System, Boot, Details...) says which, after the tabs (the footer says which screen of how many)."""
+    cur, title = next(((n, t) for n, _f, t in ui.SCREENS if t == name), ("overview", "Overview"))
+    bar_rev = theme_name() == "mono" or "7" in code.split(";")  # the bar is in reverse already: the current tab is the one that is not
+    rev_on, rev_off = ("\x1b[27m", "\x1b[7m") if bar_rev else ("\x1b[7m", "\x1b[27m")
+    extra = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") if name != title else ""  # the footer counts the screens
+    tail = extra + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "") + " "
+    host = socket.gethostname()
+    for short in (False, True, None):
+        pre = shift + " "
+        mid = " │ " + tab_bar(cur, shown, short, rev_on, rev_off) + tail
+        room = w - len(text) - 2 - vlen(pre + mid)
+        if room >= min(len(host), 14) or short is None:  # a form is chosen when the host name keeps 14 columns (all of it, if it is shorter)
+            break
+    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+        host = host[:max(room - 1, 1)] + "…"
+    left = pre + host + mid
+    return clip(c(code, pad(left, max(vlen(left), w - len(text) - 2)) + text + "  "), w)
+
+
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None, healthkey=None, aikey=None,
+          ctx=None):
     """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1).
     mapkey / cpukey / healthkey / aikey: say that `2` opens the Map, `3` the CPU screen, `4` the Health screen, `5` the AI screen
-    (default: when keys are); foot: a footer of its own, else the overview's, made from ui.KEYMAP."""
+    (default: when keys are); foot: a footer of its own, else the overview's, made from ui.KEYMAP.
+    The console's frame has the tab bar on top and, from KPI_MIN_ROWS rows (or with [ui] kpis), the KPI line of ctx (a cards.Ctx; without
+    one, of what the screens last read: kept_ctx); its body is body_rows(h) tall. A browser page keeps the plain header and has no KPI line."""
     name, part, parts, body = slide
     text, code = status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
-    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "")
-    host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
-    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
-        host = host[:max(room - 1, 1)] + "…"
-    left = shift + f" {host}" + tail
-    head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
-    head = clip(head, w)
+    flags = {"map": mapkey, "cpu": cpukey, "health": healthkey, "ai": aikey}
+    shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
+    if page:
+        tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "")
+        host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
+        if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+            host = host[:max(room - 1, 1)] + "…"
+        left = shift + f" {host}" + tail
+        head = clip(c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  "), w)
+    else:
+        head = console_head(name, part, parts, w, text, code, shift, shown)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
     if foot is None:
-        flags = {"map": mapkey, "cpu": cpukey, "health": healthkey, "ai": aikey}
-        shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
         foot = c(90, overview_footer(name, idx, n, w, size, keys, hint, shown))
     foot = clip(foot, w)
-    rows = [head] + [clip(x, w) for x in body]
+    rows = [head]
+    if kpi_on(h, page):
+        rows.append(kpi_line(ctx if ctx is not None else kept_ctx(pb), w))
+    rows += [clip(x, w) for x in body[:max(0, h - 1 - len(rows))]]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
 
@@ -2004,6 +2175,7 @@ def map_graph(smp=None):
     """(MAP graph, header problems) of the current state: shared by the console's Map screen and the web view's map page."""
     st = snapshot(0)
     sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
@@ -2204,7 +2376,7 @@ def map_screen(G, pb, mv, w, h):
     """(the interactive Map as one frame: header, body, key help; the rows it shows): the live loop and --once."""
     rs = graph.rows(G, mv.st)
     map_sync(mv, rs)
-    body, mv.top = map_view(G, rs, w, h - 2, mv.cur, mv.details, mv.top, mv.st.only)
+    body, mv.top = map_view(G, rs, w, body_rows(h), mv.cur, mv.details, mv.top, mv.st.only)
     return frame(("Map", 1, 1, body), 0, 1, w, h, pb, foot=map_footer(mv, len(rs), w, getattr(rs, "truncated", False))), rs
 
 
@@ -2247,7 +2419,7 @@ def map_once(argv, w, h):
     if exp == "all":
         mv.st.expand_all()
     elif exp == "fit" or exp.isdigit():
-        mv.st.open = graph.fit_open(G, int(exp) if exp.isdigit() else map_layout(G, w, h - 2, mv.details)[1])
+        mv.st.open = graph.fit_open(G, int(exp) if exp.isdigit() else map_layout(G, w, body_rows(h), mv.details)[1])
     if opt("--select"):
         map_select(G, mv, opt("--select"))
     return map_screen(G, pb, mv, w, h)[0]
@@ -2910,7 +3082,7 @@ def cpu_screen(d, pb, cv, w, h):
     """(the interactive CPU screen as one frame: header, body, key help; the processes in order): the live loop and --once."""
     rows = cpu_rows(d["procs"]["procs"], cv.sort)
     cpu_sync(cv, rows)
-    body, cv.top, _, vis, _ = cpu_view(d, w, h - 2, cv.sort, cv.cur, cv.details, cv.top)
+    body, cv.top, _, vis, _ = cpu_view(d, w, body_rows(h), cv.sort, cv.cur, cv.details, cv.top)
     cv.page = max(1, vis - 1)
     return frame(("CPU", 1, 1, body), 0, 1, w, h, pb, foot=cpu_footer(cv, len(rows), w)), rows
 
@@ -2934,6 +3106,7 @@ def cpu_problems(smp=None):
     """The header's problems of the current state: the CPU screen has no graph of its own to take them from."""
     st = snapshot(0)
     sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -2968,13 +3141,14 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
     st, sm = snapshot(w), host_sample(smp)
     if DEMO:
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
+    pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None  # the KPI line (a console; a browser page has its own)
+    sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
         h = len(sl[0][3]) + 2
     n = pick_slide(sl, at) if at is not None else n
-    fill_cpu(sl, n % len(sl), w, h - 2, cpu_feed or CpuFeed(settle=0.5))  # only the slide shown reads the processes
-    return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)
+    fill_cpu(sl, n % len(sl), w, body_rows(h, page), cpu_feed or CpuFeed(settle=0.5))  # only the slide shown reads the processes
+    return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h, pb, keys=keys, page=page, ctx=ctx), len(sl)
 
 
 def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
@@ -2982,9 +3156,10 @@ def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     st, sm = snapshot(w), host_sample(smp)
     if DEMO:
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
+    sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
+    ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None
+    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page, ctx=ctx) for i, x in enumerate(sl)]
 
 
 def utf8_stdout():
@@ -3002,6 +3177,9 @@ def once(argv):
     arg = lambda k, d: int(argv[argv.index(k) + 1]) if k in argv else d
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
     view = argv[argv.index("--view") + 1] if "--view" in argv[:-1] else ""
+    if view == "start":  # the screen the console opens at: [ui] start_view (the overview when it is not set)
+        view = ui_cfg().get("start_view", "overview")
+        view = "" if view == "overview" else view
     if view == "map":  # the Map screen (see map_once for its options)
         if not on("map"):
             print("the map is off: [features] map = no in config.ini", file=sys.stderr)
@@ -3030,7 +3208,7 @@ def once(argv):
             smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
             time.sleep(0.5)
         out, _ = render_screen(smp, w, h, n=n)
-    print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
+    print(themed(out) if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 
 # ---- HEALTH screen: health.py's report (the history over days and weeks) on the console, moved through with the keyboard ------
@@ -3586,7 +3764,7 @@ def health_screen(data, pb, hv, w, h):
     """(the interactive Health screen as one frame: header, body, key help; its findings): the live loop and --once."""
     fl = health_findings(data["report"])
     health_sync(hv, fl)
-    body = health_body(data, hv, fl, w, h - 2)
+    body = health_body(data, hv, fl, w, body_rows(h))
     return frame(("Health", 1, 1, body), 0, 1, w, h, pb, foot=health_footer(hv, len(fl), w)), fl
 
 
@@ -3638,6 +3816,7 @@ def health_state(smp, days):
     """(the cached report data, the header's problems): shared by the console loop and --once."""
     st = snapshot(0)
     sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return health_data(days), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -3807,6 +3986,7 @@ def ai_state(smp):
     """(the catalog's data, the header's problems): shared by the console loop, --once and the web page."""
     st = snapshot(0)
     sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -4355,7 +4535,7 @@ def ai_screen(data, pb, av, w, h, wait=0.0):
     rows = ai_rows(data["cat"])
     ai_sync(av, rows)
     st = ai_status(wait)
-    body = ai_body(data, st, av, rows, w, h - 2)
+    body = ai_body(data, st, av, rows, w, body_rows(h))
     return frame(("AI", 1, 1, body), 0, 1, w, h, pb, foot=ai_footer(av, len(rows), w, st.get("snap"))), rows
 
 
@@ -4692,6 +4872,13 @@ def windows_key(timeout):
 HELP_W = 64  # the help box's widest size (columns), inside the frame
 
 
+def new_view(name, opened):
+    """(mv, cv, hv, av): the screen `name` (map, cpu, health, ai) open, the others None."""
+    v = {"map": MapView, "cpu": CpuView, "health": HealthView, "ai": AiView}[name]()
+    v.opened = v.touched = opened
+    return tuple(v if n == name else None for n in ("map", "cpu", "health", "ai"))
+
+
 def help_box(scope, w, h, enabled, portable=None, paused=False):
     """The `?` overlay's box: the screen's own keys and the global ones from ui.KEYMAP, as many as fit in a frame w x h (the header and the
     footer stay visible): the last ones of the table go first and the box says how many are left. Lines of equal width, ANSI allowed."""
@@ -4767,6 +4954,7 @@ def main(argv):
         cpu_ok = on("cpu") and bool(old or win_keys)  # so does the CPU screen (cpu_in_rotation is for a monitor without one)
         health_ok = on("health") and bool(old or win_keys)  # and the Health screen (health_in_rotation without one)
         ai_ok = on("ai") and bool(old or win_keys)  # and the AI screen (it is not part of the rotation: nobody chooses a model from a monitor)
+        kctx = None  # the overview's cards.Ctx (the KPI line); the other screens' is made of what they read (kept_ctx)
         mv, G, pb, fresh, rs = None, None, [], 0.0, []  # the Map while it is shown, its graph and problems, next data refresh
         err, last_pb = None, []  # why the Map or Health could not be drawn (until the next refresh); the rotation's last problems
         cv, cpu_d, cpu_fresh, cpu_rows_, rot_feed = None, None, 0.0, [], None  # the CPU screen, its data and rows; the rotation slide's feed
@@ -4777,6 +4965,10 @@ def main(argv):
         sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
         paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
         dirty, help_open = True, False  # a frame is due even when paused; the `?` overlay is shown
+        start = ui_cfg().get("start_view", "overview")  # [ui] start_view: the screen at the start, and where an idle one goes back to
+        start = start if start != "overview" and avail.get(start) else "overview"  # a screen needs its keyboard (and its feature on)
+        if start != "overview":
+            mv, cv, hv, av = new_view(start, time.time())
 
         def resume():
             """Z again (or another screen): the redraw goes on; a paused overview carries on with the slide it was at."""
@@ -4795,6 +4987,7 @@ def main(argv):
                 size, dirty = (w, h), True
             w -= 1  # the Linux VT keeps the cursor on the last column: \x1b[K there would erase the last character
             now = time.time()
+            was_open = any(x is not None for x in (mv, cv, hv, av))
             if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
                 t0, mv, paused, dirty = t0 + now - mv.opened, None, False, True
                 out.write("\x1b[2J")
@@ -4807,6 +5000,10 @@ def main(argv):
             if av is not None and now - av.touched > AI_IDLE_S:  # and the AI screen
                 t0, av, paused, dirty = t0 + now - av.opened, None, False, True
                 out.write("\x1b[2J")
+            if start != "overview" and was_open and mv is cv is hv is av is None:  # an idle screen: back to the start view, not the rotation
+                mv, cv, hv, av = new_view(start, now)
+                fresh = cpu_fresh = 0.0
+                err, cpu_d = None, None
             PAUSED = paused
             if mv is not None:  # the Map: new data every REFRESH_S, a new frame at every key
                 try:
@@ -4828,6 +5025,7 @@ def main(argv):
                         cpu_fresh = now + (min(1.0, REFRESH_S) if cpu_d is None else REFRESH_S)
                         st, sm = snapshot(w), smp.sample()  # the header's status pill stays true while the screen is open
                         last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                        keep(st, sm)
                         cpu_d = cv.feed.read()
                     screen, cpu_rows_ = cpu_screen(cpu_d, last_pb, cv, w, h)
                 except Exception as e:  # noqa: BLE001 - a broken screen must not take the console down; c/Esc still go back
@@ -4865,21 +5063,22 @@ def main(argv):
                 wait = fresh - time.time()
             else:
                 if paused and ov_cache is not None:  # the slide and the data it was paused on
-                    sl, last_pb = ov_cache
+                    sl, last_pb, kctx = ov_cache
                     idx = held % len(sl)
                 else:
                     st, sm = snapshot(w), smp.sample()
-                    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
+                    sl = slides(sm, st["cont"], st["net"], w, body_rows(h), st["boot"], st["baseline"], cpu_lazy=True)
                     idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
                     if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
                         rot_feed = rot_feed or CpuFeed()
-                        fill_cpu(sl, idx, w, h - 2, rot_feed)
+                        fill_cpu(sl, idx, w, body_rows(h), rot_feed)
                     else:
                         rot_feed = None
                     last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-                    ov_cache = (sl, last_pb)
+                    kctx = make_ctx(st, sm, last_pb) if kpi_on(h) else None
+                    ov_cache = (sl, last_pb, kctx)
                 screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,
-                               aikey=ai_ok)  # no keyboard (a monitor): no keys are offered
+                               aikey=ai_ok, ctx=kctx)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
             scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
             if help_open:
@@ -4887,7 +5086,7 @@ def main(argv):
             if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
                 wait = REFRESH_S
             if dirty or not paused:
-                out.write("\x1b[H" + screen)
+                out.write("\x1b[H" + themed(screen))
                 out.flush()
                 dirty = False
             keys = []
@@ -4961,7 +5160,7 @@ def main(argv):
                         ai_do(av, res, al)
                         fresh = 0.0
                 elif mv is not None:
-                    res = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
+                    res = map_key(mv, k, rs, max(1, map_layout(G, w, body_rows(h), mv.details)[1] - 1) if G else 10)
                     if res == "back":
                         tgt = "overview"
                     elif res == "rows" and G is not None:  # the next key of the same read moves on the new tree

@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Health │ 14:13:20                                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  [7m[4 Health][27m  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[90msince 2026-09-21 09:00 UTC · 5 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 1 warn[0m [36m──────────[0m [90m d:24h [0m [7m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
 [90m  · collecting: 5 hours so far; trends need 24 hours of data[0m[0m[0m[0m[K
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
@@ -19,7 +20,6 @@
 [0m                                                              /boot/efi [32m█[0m[90m░░░░░░░░░░░░░░░░░░░░░░[0m   6%  [90mno trend[0m[0m[0m         [0m[0m[K
 [36m──[0m[1;36m BOOTS [0m[36m────────────────────────────────────[0m[90m  boot time[0m[0m[0m                                                               [0m[0m[K
  [36m█[0m  [90mlast 58 s · median 58 s · 1 boot[0m[0m[0m                                                                                   [0m[0m[K
-[K
 [K
 [K
 [K

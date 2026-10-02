@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Map │ 14:13:20                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  [7m[2 Map][27m  3 CPU  4 Health  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m MAP [0m [90m27 nodes · 14 links · [0m[31m✖ 7 need attention[0m [36m────────[0m [1m━━►[0m [90mseen[0m  ╌╌► [90mdeclared[0m  [90m┄┄►[0m [90msame network[0m  [1m◄━━[0m [90mconnected to it[0m[0m[0m[0m[K
 [90m  · connections sampled every 30 s, remembered 24 h (watching since 1h)[0m[0m[0m[0m[K
 [7m▾ INTERNET  reachable from the Internet (Tailscale Funnel)                                                             [0m[0m[0m[K
@@ -22,7 +23,6 @@
 [36m▾[0m [1;36mOUTBOUND[0m  [90mconnections this machine opens to other hosts[0m[0m[0m[0m[K
 [90m├─ [0m[36m▸[0m [32mnode[0m  [90mn8n.service[0m[0m[0m[0m[K
 [90m└─ [0m[36m▸[0m [32mshop-api-1[0m  [90mcontainer · shop[0m[0m[0m[0m[K
-[K
 [K
 [K
 [K

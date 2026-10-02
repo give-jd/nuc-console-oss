@@ -31,6 +31,10 @@ Choices made here **without a source**: 2 s refresh (configurable 1–10 s: `[da
 
 The overview keeps a fixed order, top-left to bottom-right, following the "most important first" rule of dashboard design: ATTENTION (what needs action), then the security posture (EXPOSURE, FIREWALL), resources (SYSTEM), workloads (CONTAINER, DATABASE), history (BOOT) and finally the detail panels. Columns are filled in that order and never back-filled, so a line more or less in one block does not move sections around. Change it with `[dashboard] sections` in `config.ini`.
 
+Fixed or by severity. Without a `[ui]` section that sets the layout, the order above is the only one. With `[ui] layout`, `hidden` or `preset` the cards follow that list, still in a fixed order. `[ui] order = severity` puts the cards with the worst state first, and that is where the "sections do not jump" rule above could break, so the order is a pure function of the cards' states (✖ and down, then !, then ?, then fine; stable within a state; `attention` stays on top): a card changes place only when a state changes, never when a number does, and the same states are always the same order. The console does not turn it on by itself: `order = severity` has to be written, so a monitor that nobody watches never reshuffles. The state is also written on the section's title (`── ✖ EXPOSURE ──`): a symbol, never the colour alone.
+
+The header carries the same rule for the screens: `[1 Overview]  2 Map  3 CPU  4 Health  5 AI` with the current one in reverse video and in brackets; the KPI row under it is the figures that decide whether to look further (`[ui] kpis`), each with a symbol and a `?` when its source is missing.
+
 ## Exposure classification
 
 | Bind address | Exposure |

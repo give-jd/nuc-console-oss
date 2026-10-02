@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ CPU │ 14:13:20                                                                                                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                                                                                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
  [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mx86_64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M  ·  [90mgovernor [0mschedutil/acpi-cpufreq  ·  [90mclock [0m2200-4850 MHz (base 3800)[0m[0m[K
  [90mup [0m5d 0h  ·  [90mload [0m0.82 0.64 0.51  ·  [90mctxt [0m18.3k/s  ·  [90mintr [0m6.1k/s  ·  [90mrunning [0m2  ·  [90mblocked [0m0[0m[0m[K
@@ -45,6 +46,5 @@
    701 root      S   0   1   0.0   0.0     3M   0:06.1 cron[0m[0m[K
    745 root      S   0   1   0.0   0.0     9M   0:02.1 sshd[0m[0m[K
   1102 root      S   0   1   0.0   0.0     2M   0:00.0 agetty[0m[0m[K
-  1502 root      S   0  11   0.0   0.0    12M   1:10.3 containerd-shim[0m[0m[K
-[90m … +7 more processes[0m[0m[0m[K
+[90m … +8 more processes[0m[0m[0m[K
 [90m screen 3/4   ←→: slide   1-5: screens   ?: help   console 200x50[0m[0m

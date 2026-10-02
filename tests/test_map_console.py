@@ -33,7 +33,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
-                  "termios", "tty", "graph", "Sampler", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide")
+                  "termios", "tty", "graph", "Sampler", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -82,7 +82,7 @@ def pos(lines):
 
 def chosen(screen):
     """The highlighted (reverse video) lines of a frame, ANSI stripped: the cursor's row."""
-    return [render.ANSI.sub("", x) for x in screen.split(LINE) if ESC + "[7m" in x]
+    return [render.ANSI.sub("", x) for x in screen.split(LINE)[1:] if ESC + "[7m" in x]
 
 
 def worker_up(cont, net, boot):
@@ -111,6 +111,7 @@ class MapCase(unittest.TestCase):
         render.time = graph.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
         cfg["features"]["map"], cfg["map_in_rotation"] = True, False
 
@@ -411,7 +412,7 @@ class Once(MapCase):
                     with self.subTest(os=os_name, size=(cols, rows), opts=opts):
                         s, lines = self.screen(opts, cols, rows)
                         self.assertIn("── MAP ", lines[1])
-                        self.assertIn("demo-host │ Map │", lines[0])
+                        self.assertRegex(lines[0], r"^ *demo-host │ .*\[\d[ ·]Map\]")
                         self.assertTrue(pos(lines)[0] >= 1)
 
     def test_expand_none_all_fit_and_a_row_count(self):
@@ -681,7 +682,7 @@ class MainLoop(MapCase):
 
     @staticmethod
     def is_map(frame):
-        return " │ Map │ " in frame[0] and "── MAP " in frame[1]
+        return bool(re.search(r"\[\d[ ·]Map\]", frame[0]) and "── MAP " in frame[1])
 
     def test_m_opens_the_map_keys_move_it_tab_and_esc_go_back(self):
         G = render.map_graph()[0]
@@ -736,7 +737,7 @@ class MainLoop(MapCase):
 
     @staticmethod
     def error_frame(frame):
-        return " │ Map │ " in frame[0] and "error on the map" in frame[1]
+        return bool(re.search(r"\[\d[ ·]Map\]", frame[0]) and "error on the map" in frame[1])
 
     def test_a_broken_map_is_an_error_frame_esc_still_works_and_it_retries(self):
         calls = self.failing_once()

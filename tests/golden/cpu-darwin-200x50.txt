@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ CPU │ 14:13:20                                                                                                                                                             ✖ 4 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                                                                                                      ✖ 4 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m4[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m6[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 40%   [32m✔[0m [90mRAM[0m 40%   [32m✔[0m [90mDisk[0m 38%   [33m?[0m [90mTemp[0m [33m?[0m[0m[K
 [36m──[0m[1;36m CPU [0m[36m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  Apple M2[0m[0m[0m[K
  [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m8  ·  P 4 + E 4 cores  ·  [90march [0marm64  ·  [90mcache [0mL1d 128K  L1i 192K  L2 16M  ·  [90mgovernor [0m?  ·  [90mclock [0m?[0m[0m[K
  [90mup [0m2d 6h  ·  [90mload [0m3.12 2.87 2.40  ·  [90mctxt [0m?/s  ·  [90mintr [0m?/s  ·  [90mrunning [0m4  ·  [90mblocked [0m?[0m[0m[K
@@ -46,5 +47,4 @@
    514 alice     S   0   4   0.0   0.4    61M   0:31.0 Dock[0m[0m[K
    815 alice     S   0   2   0.0   0.0     4M   0:00.1 login[0m[0m[K
    816 alice     S   0   1   0.0   0.0     5M   0:00.4 zsh[0m[0m[K
-   902 alice     [31mZ[0m   0   1   0.0   0.0     0B   0:00.2 node[0m[0m[K
 [90m row 1/37   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   sort: [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user   1-5: screens   Esc: back   ?: help[0m[0m[0m

@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Health │ 14:13:20                                                                                                                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  [7m[4 Health][27m  5 AI │ 14:13:20                                                                                                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[90msince 2026-09-05 14:00 UTC · 168 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 6 warn[0m  [90m· 3 info[0m [36m─────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[0m[K
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
  [1;41;37m ✖ ERR  [0m [1mOut of memory: shop-worker-1[0m  [90mshop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (last 2026-09-21 11:43 UTC).[0m[0m[0m[0m[K
@@ -18,7 +19,6 @@
  postgres            [36m█[0m[90m░░░░░░░[0m   5%  avg 10%   [36m▆█▆▅██▇[0m  [90mpeak Fri 09:13[0m[0m                                 shop-worker-1       avg 717M   max 2.0G   [90mno trend[0m     [36m▇██████[0m[0m                                   [0m[0m[K
  python3             [36m█[0m[90m░░░░░░░[0m   4%  avg 7%    [36m█▆█▆█▆▇[0m  [90mpeak Sun 05:13[0m[0m                                 dockerd             avg 307M   max 410M   [90mno trend[0m     [36m▇▇████▇[0m[0m                                   [0m[0m[K
  shop-worker-1       [36m█[0m[90m░░░░░░░[0m   3%  avg 6%    [36m█▄▇▄▆▆▇[0m  [90mpeak Mon 12:13[0m[0m                                 python3             avg 205M   max 512M   [90mno trend[0m     [36m███████[0m[0m                                   [0m[0m[K
-[K
 [K
 [K
 [K

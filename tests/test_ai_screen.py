@@ -38,7 +38,7 @@ CJK = "\u30e1\u30e2\u5e33.exe"                             # wide characters wou
 FORMAT = "a\u202eb\u200bc\u2028d"                          # right-to-left override, zero width space, line separator
 PILLS = {"gpu": "✔ FITS GPU", "partial": "◐ GPU+CPU", "ram": "✔ FITS RAM", "slow": "! SLOW", "no": "✖ TOO BIG"}
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket", "termios", "tty",
-                  "Sampler", "read_keys", "snapshot", "page_overview", "ai_build", "ai_status", "ai_screen", "ai_probe_run", "health_extra_lines")
+                  "Sampler", "read_keys", "snapshot", "page_overview", "ai_build", "ai_status", "ai_screen", "ai_probe_run", "health_extra_lines", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -111,6 +111,7 @@ class AiCase(unittest.TestCase):
         render.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
         cfg["features"]["ai"] = True
         self.builds = []                                                        # the (demo, os) of every ai_build(): the catalog cache
@@ -366,7 +367,7 @@ class Navigation(AiCase):
                 with self.subTest(size=(cols, rows), step=step):
                     frame, _ = render.ai_screen(render.ai_data(), [], av, cols - 1, rows)
                     out = self.check_frame(frame, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE) if ESC + "[7m" in x and "─" not in x]
+                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x]
                     self.assertEqual(len(chosen), 1)                                                   # exactly one highlighted model ...
                     self.assertIn(rs[av.idx]["name"], chosen[0])                                       # ... the selected one
                     self.assertRegex(out[-1], r"model %d/%d" % (av.idx + 1, len(rs)))
@@ -384,7 +385,7 @@ class Once(AiCase):
                 for opts in ([], ["--details"], ["--select", "phi", "--details"], ["--select", "gpt-oss"]):
                     with self.subTest(os=os_name, size=(cols, rows), opts=opts):
                         s, lines = self.screen(opts, cols, rows)
-                        self.assertIn(" │ AI │ ", lines[0])
+                        self.assertRegex(lines[0], r"\[\d[ ·]AI\]")
                         self.assertNotIn("Traceback", s)
 
     def test_odd_sizes_never_break_the_frame(self):
@@ -558,7 +559,7 @@ class Once(AiCase):
         self.assertIn("── STATUS", txt)                                                                  # the sections stay
         s, lines = self.screen(["--select", "smollm"], 200, 50)                                          # a selection alone: no pane
         self.assertNotIn("DETAILS", "\n".join(lines))
-        self.assertTrue([x for x in s.split(LINE) if ESC + "[7m" in x and "─" not in x])               # the cursor is still on its row
+        self.assertTrue([x for x in s.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x])               # the cursor is still on its row
         s, lines = self.screen(["--select", "nothing like this", "--details"], 120, 33)                 # no match: the cursor stays on the recommended one
         self.assertIn("model 3/12", lines[-1].replace("  ", " "))
 
@@ -1030,7 +1031,7 @@ class MainLoop(AiCase):
 
     @staticmethod
     def is_ai(frame):
-        return " │ AI │ " in frame[0] and "── AI " in frame[1]
+        return bool(re.search(r"\[\d[ ·]AI\]", frame[0]) and "── AI " in frame[1])
 
     @staticmethod
     def at(frame):
@@ -1172,7 +1173,7 @@ class MainLoop(AiCase):
         render.DEMO_HEALTH = ""
         render._HEALTH.clear()
         frames, _ = self.run_main([b"h", b"a", b"\x1b", b"a", b"\x1b"])
-        is_health = lambda f: " │ Health │ " in f[0]  # noqa: E731
+        is_health = lambda f: bool(re.search(r"\[\d[ ·](?:Health|Hlth)\]", f[0]))  # noqa: E731
         self.assertEqual([is_health(f) for f in frames], [False, True, True, False, False, False])
         self.assertEqual([self.is_ai(f) for f in frames], [False, False, False, False, True, False])    # the second a, from the dashboard, does
         self.assertEqual(self.builds, [(True, None)])
@@ -1187,7 +1188,7 @@ class MainLoop(AiCase):
             return real(now)
         render.ai_build = flaky                                                          # ai_data() is not guarded: the loop is
         frames, _ = self.run_main([b"a", render.REFRESH_S, b"\x1b", b"a", b"\x1b"])      # check_frame: no raw escape on screen
-        error = lambda f: " │ AI │ " in f[0] and "error on the AI screen" in f[1]  # noqa: E731
+        error = lambda f: bool(re.search(r"\[\d[ ·]AI\]", f[0]) and "error on the AI screen" in f[1])  # noqa: E731
         self.assertEqual([error(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
         self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
@@ -1205,7 +1206,7 @@ class MainLoop(AiCase):
     def test_no_catalog_and_a_narrow_console(self):
         render.ai_build = lambda now: {"cat": None, "msg": "the model catalog could not be read: x", "err": True, "at": now}
         frames, _ = self.run_main([b"a", b"\x1b[B", b"\r", b"\x1b", b"\x1b"], cols=80, rows=24)  # Esc: the details, then back
-        ai = [f for f in frames if " │ AI │ " in f[0]]
+        ai = [f for f in frames if re.search(r"\[\d[ ·]AI\]", f[0])]
         self.assertEqual(len(ai), 4)
         for f in ai:
             self.assertIn("the model catalog could not be read: x", "\n".join(f))
