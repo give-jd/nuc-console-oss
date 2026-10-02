@@ -513,7 +513,7 @@ def split_blocks(text):
                 depth.append(tag)
 
         def handle_endtag(self, tag):
-            if start[0] is not None and depth:
+            if start[0] is not None and tag in depth:  # a void or self-closed element (<polyline/>) has no end of its own
                 while depth and depth.pop() != tag:
                     pass
                 if not depth:
@@ -658,7 +658,7 @@ class Scripts(unittest.TestCase):
                 self.seen += 1
                 unit.assertIn(tag, webjs.FRAG_TAGS)
                 for k, v in attrs:
-                    unit.assertIn(k, webjs.FRAG_ATTRS, (tag, k))
+                    unit.assertIn(k, {x.lower() for x in webjs.FRAG_ATTRS}, (tag, k))  # the parser reports attribute names in lower case
                     if k == "href":
                         unit.assertTrue(v.startswith(("/?", "#")), v)
                     if k == "action":
