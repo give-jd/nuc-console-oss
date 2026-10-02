@@ -35,6 +35,7 @@ import aiweb
 import aisetup
 import ansi  # same directory: the console's drawing of a card, kept in the shell's cards for now
 import cards
+import exposure
 import graph
 import graphjs
 import graphlayout
@@ -46,6 +47,7 @@ import screens
 import ui
 import webcss
 import webjs
+from ui import dd, hclean, hnum
 from htmlview import AI_CSS, CPU_CSS, CSS, GRAPH_CSS, HEALTH_CSS, MAP_CSS, fit_css, sgr_class, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MIN_TOKEN = 16
@@ -76,7 +78,7 @@ LEVEL_CLASS = {"err": "r", "warn": "y", "ok": "g"}
 HEALTH_SEL_MAX = 200  # characters of a finding id taken from a URL (an id is "<rule>:<subject>", the subject is capped at 64)
 HEALTH_COLS = 140     # the health page's default width in columns: wider than that scrolls sideways on a laptop (cols=200 asks for the 3-column layout)
 PILL_CLASS = {"err": "r", "warn": "y", "info": "d"}  # htmlview.HEALTH_CSS
-AI_SEL_MAX = render.AI_ID_MAX + 1  # characters of a model id taken from a URL: one more than an id has, so that a longer text never equals one
+AI_SEL_MAX = screens.AI_ID_MAX + 1  # characters of a model id taken from a URL: one more than an id has, so that a longer text never equals one
 # the MAP's graph view (?view=map&as=graph): the same graph as circles and lines
 GRAPH_NODES = 400    # nodes drawn on one graph page: beyond, the most relevant ones, and a note says how to see the others
 GZOOMS = (50, 67, 80, 100, 125, 150, 200, 250, 300)  # z=: the drawing's size in % of the window (no script needed)
@@ -467,7 +469,7 @@ def view_params(q):
             "ext": "0" if one("ext") == "0" else "",  # remote addresses are shown unless ext=0 (the only value written)
             "local": int(one("local")) if one("local") in ("1", "2") else 0,
             "z": gzoom(num("z")),
-            "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else "",
+            "sort": one("sort") if view == "cpu" and one("sort") in screens.CPU_SORTS[1:] else "",
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else ""} if view == "ai" else {})}
 
@@ -600,15 +602,15 @@ class Server(http.server.ThreadingHTTPServer):
             key = ("map", zoom, r) + tuple(here.items()) + tuple(sorted(state.items()))
             return serve(key, r / 2, lambda sh: self.map_page(here, state, zoom, r, sh))
         if view == "health":  # the period and the selected finding are checked here, so that the cache key holds only values that exist
-            days = state.get("period") if state.get("period") in render.HEALTH_DAYS else 7
+            days = state.get("period") if state.get("period") in screens.HEALTH_DAYS else 7
             on = render.CFG["features"].get("health", True)
-            ids = {f["id"] for f in render.health_findings(render.health_data(days)["report"])} if on else set()  # one report a minute per period
+            ids = {f["id"] for f in screens.health_findings(render.health_data(days)["report"])} if on else set()  # one report a minute per period
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             norm = {"days": days, "sel": sel, "pause": pause}
             key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
             return serve(key, r / 2, lambda sh: self.health_page(here, days, sel, pause, zoom, r, sh))
         if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
-            rows = render.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
+            rows = screens.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             confirm = state.get("confirm", "")
@@ -643,7 +645,7 @@ class Server(http.server.ThreadingHTTPServer):
         except Exception as e:  # noqa: BLE001 - a KPI whose source fails is '?', the page stays
             print("nuc-console web: shell data error:", repr(e)[:200], file=sys.stderr)
         return cards.Ctx(s=sm, cont=st["cont"], net=st["net"], boot=st["boot"], problems=pb, cfg=render.CFG, now=time.time(), baseline=st["baseline"],
-                         new=render.new_ports(st["net"], st["cont"], st["baseline"]), health=health, ai=ai)
+                         new=exposure.new_ports(st["net"], st["cont"], st["baseline"]), health=health, ai=ai)
 
     def shell_render(self, view, build, here, zoom, r, eff, cookie, pause, card, edit=False, custom=False):
         """One page of the shell: the top bar and the key figures (blocks the page is refreshed by), the view, the footer and the help. `build(True)`
@@ -824,14 +826,12 @@ class Server(http.server.ThreadingHTTPServer):
     def shell_card(self, ctx, cid, size, k, here, full, tools="", off=False):
         """(state, the article) of one card: the lines the console has always drawn for it (cards.build), colours as spans. A card that fails is
         shown unknown, with the reason in the log. tools: the editor's buttons of the card (the body is then not clickable); off: the editor lists it as hidden."""
-        saved = render.FULL
-        render.FULL = bool(full)  # the console's own switch: nothing is cut in the full card
         try:
             width = WEB_COLS
-            card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
+            card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full)))
             if card.body and all(isinstance(x, ui.Raw) for x in card.body):  # not built of components yet: the console's text, colours as spans
                 width = CARD_COLS.get(size, 104)
-                card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
+                card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full)))
                 lines, cut = ansi.card_lines(card, width)
                 note, inner = htmlview.ansi_card(lines)
             else:  # built of components: the web draws them itself, whatever the card is
@@ -843,8 +843,6 @@ class Server(http.server.ThreadingHTTPServer):
             print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
             entry = cards.CARDS.get(cid)
             return "unknown", htmlview.card_article(cid, entry.title if entry else cid, "", "unknown", size, '<p class="sm">this card could not be drawn (see the service log)</p>', "", tools, off)
-        finally:
-            render.FULL = saved
 
     def settings_view(self, here, eff, cookie, r):
         """The settings page: the appearance (every choice a link: /?set=), what to export, and what this machine is (read-only)."""
@@ -1202,7 +1200,7 @@ class Server(http.server.ThreadingHTTPServer):
         cols, rows = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), []
         try:
             data, pb = render.ai_state(self.smp)
-            rows = render.ai_rows(data["cat"])
+            rows = screens.ai_rows(data["cat"])
             ui = AiUi(snap, eng.choice() if not snap["locked"] else None, data["cat"], rows, sel, confirm, self.csrf, urlsplit(page_url(ahere)).query, ahere)
             body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname(), ui)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
@@ -1276,7 +1274,7 @@ class Server(http.server.ThreadingHTTPServer):
 
 
 def sel_index(data, sel):
-    return next((i for i, f in enumerate(render.health_findings(data["report"])) if f["id"] == sel), 0)
+    return next((i for i, f in enumerate(screens.health_findings(data["report"])) if f["id"] == sel), 0)
 
 
 def health_extra_html(report):
@@ -1313,7 +1311,7 @@ def health_native(smp, days, sel, here):
     details, the ADVICE block, the sections of tables. here: the page's parameters; the links of the periods change only the period."""
     try:
         data, _pb = render.health_state(smp, days)
-        fl = render.health_findings(data["report"])
+        fl = screens.health_findings(data["report"])
         hv = screens.HealthView(days)
         hv.cur = sel
         advice = health_advice_node(data["report"]) if data["report"] is not None else None
@@ -1342,7 +1340,7 @@ def ai_native(srv, ahere, sel, confirm, snap, eng):
     to /ai/* with the CSRF token and the page to come back to, as on the classic page; a locked page has none. ahere: the page's parameters."""
     try:
         data, _pb = render.ai_state(srv.smp)
-        rows = render.ai_rows(data["cat"])
+        rows = screens.ai_rows(data["cat"])
         locked = snap["locked"]
         acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(ahere)).query)
         links = screens.AiLinks(lambda mid: page_url(ahere, sel="" if mid == sel else mid), page_url(ahere, sel=""), page_url(ahere))
@@ -1396,14 +1394,14 @@ def ai_row_action(r, ui):
 def ai_row_html(r, i, sel, here, ui=None):
     """One model of the table: its marks, its name (a link: the details), the columns of the console, the pill with its symbol, and the button."""
     esc, cur = html.escape, r["id"] == sel
-    label, _, cls, _ = render.AI_VERDICT.get(r["verdict"], render.AI_UNKNOWN)
+    label, _, cls, _ = screens.AI_VERDICT.get(r["verdict"], screens.AI_UNKNOWN)
     marks = "".join(f'<span class="{col}" title="{what}">{sym}</span>' if on else " "
                     for sym, col, what, on in (("★", "y", "recommended", r["rec"]), ("✓", "g", "installed", r["installed"]), ("●", "c", "active", r["active"])))
     on, no = ' class="sel"' if cur else "", ' class="no"' if r["verdict"] == "no" else ""  # the selected row, a model that is too big (dim)
     return (f'<tr{on} id="m-{i}"><td class="mk">{marks}</td>'
             f'<td{no}><a class="lb" href="{esc(page_url(here, sel="" if cur else r["id"]) + f"#m-{i}")}">{esc(r["name"])}</a></td>'
-            f'<td class="pm">{esc(r["params"])}</td><td class="r sz">{esc(render.ai_mb(r["size_mb"]))}</td><td class="r">{esc(render.ai_mb(r["need_mb"]))}</td>'
-            f'<td><span class="pl {cls}">{esc(label)}</span></td><td>{esc(render.ai_tok(r["tok"]))}</td><td class="nn"><div>{esc(r["notes"])}</div></td>'
+            f'<td class="pm">{esc(r["params"])}</td><td class="r sz">{esc(screens.ai_mb(r["size_mb"]))}</td><td class="r">{esc(screens.ai_mb(r["need_mb"]))}</td>'
+            f'<td><span class="pl {cls}">{esc(label)}</span></td><td>{esc(screens.ai_tok(r["tok"]))}</td><td class="nn"><div>{esc(r["notes"])}</div></td>'
             + ai_row_action(r, ui) + "</tr>")
 
 
@@ -1411,10 +1409,10 @@ def ai_panel_html(r, here, i, windows, ui=None):
     """The details of a model: what the console's pane says, as a table (the commands selectable in one click), what can be done with it
     (use it; delete its files: asked about first), and a link that closes it."""
     esc = html.escape
-    title, items = render.ai_details(r, windows)
+    title, items = screens.ai_details(r, windows)
     trs = [f'<tr class="top"><th>model</th><td>{esc(title)}</td></tr>']
     for label, value, kind in items:
-        cell = (f'<span class="pl {render.AI_VERDICT[kind][2]}">{esc(value)}</span>' if kind in render.AI_VERDICT else f'<code class="cmd">{esc(value)}</code>' if kind == "cmd"
+        cell = (f'<span class="pl {screens.AI_VERDICT[kind][2]}">{esc(value)}</span>' if kind in screens.AI_VERDICT else f'<code class="cmd">{esc(value)}</code>' if kind == "cmd"
                 else f'<span class="{"y" if kind == "warn" else "d"}">{esc(value)}</span>' if kind in ("warn", "dim") else esc(value))
         trs.append(f"<tr><th>{esc(label)}</th><td>{cell}</td></tr>")
     if ui is not None and not ui.locked:
@@ -1452,7 +1450,7 @@ def ai_control_html(ui):
     if not ui.locked and state == "off" and ch:
         t = ui.row(ch["target"])
         name, size = esc(t["name"]) if t else "", ch["size"]
-        todo = "installed here" if ch["installed"] else ("%s to download" % esc(render.ai_mb((size or 0) / 2 ** 20)) if size else "not downloadable yet")
+        todo = "installed here" if ch["installed"] else ("%s to download" % esc(screens.ai_mb((size or 0) / 2 ** 20)) if size else "not downloadable yet")
         if ch["model"] and t:
             out.append(f'<div class="d">turning it on uses <strong>{name}</strong> ({"chosen on this page" if ch["by"] == "page" else "[ai] model in config.ini"}; {todo})</div>')
         elif t:
@@ -1462,7 +1460,7 @@ def ai_control_html(ui):
     cat = ui.cat
     if cat.get("dir"):
         out.append('<div class="row dir">models are downloaded to <code class="cmd">%s</code> · %s</div>'
-                   % (esc(render.hclean(cat["dir"], 200)), esc(aisetup.space_text(cat.get("space")))))
+                   % (esc(hclean(cat["dir"], 200)), esc(aisetup.space_text(cat.get("space")))))
     note = snap["notice"]
     if note:
         out.append('<div class="note %s">%s</div>' % ("ok" if note["ok"] else "bad", esc(note["text"])))
@@ -1471,10 +1469,10 @@ def ai_control_html(ui):
         if ui.confirm == "on" and t:
             what = "Turn AI on with <strong>%s</strong>? %s" % (esc(t["name"]), "It is installed here." if ch and ch["installed"] else
                    "It is not here yet: <strong>%s</strong> to download (the SHA-256 is checked), then the model server starts on this machine and the advisor is turned on."
-                   % esc(render.ai_mb(((ch or {}).get("size") or 0) / 2 ** 20)))
+                   % esc(screens.ai_mb(((ch or {}).get("size") or 0) / 2 ** 20)))
             yes = ui.form("on", "Yes, turn it on", (("model", ui.sel), ("confirm", "yes")), "on")
         elif ui.confirm == "delete" and t:
-            what = "Delete the files of <strong>%s</strong> (%s)? You can download it again later." % (esc(t["name"]), esc(render.ai_mb(t["size_mb"])))
+            what = "Delete the files of <strong>%s</strong> (%s)? You can download it again later." % (esc(t["name"]), esc(screens.ai_mb(t["size_mb"])))
             yes = ui.form("delete", "Yes, delete", (("model", ui.sel), ("confirm", "yes")), "off")
         elif ui.confirm == "delete-all":
             what = "Delete the runtime and every downloaded model (%s)? You can download them again later." % esc(aisetup.fmt_size((cat.get("space") or {}).get("used")) if (cat.get("space") or {}).get("used") else "nothing")
@@ -1522,20 +1520,30 @@ def ai_manage_html(ui):
             % (ui.form("delete-all", "delete everything", (), "del", "asks first", ui.working), html.escape(aisetup.fmt_size(used) if used else "nothing")))
 
 
+def console_lines(nodes, w):
+    """The console's lines of a list of components (the classic pages show them in a <pre>)."""
+    return ansi.render(ui.Group(nodes), w)[0]
+
+
+def console_line(node, w):
+    """The first console line of a component."""
+    return ansi.render(node, w)[0][0]
+
+
 def ai_body(data, st, pb, rows, sel, here, cols, host, ui=None):
     """Header, title, the AI switch and the chat, HARDWARE, the models (every one a link; the selected one's details beside or under the table), the
-    legend, STATUS and the manage area, as HTML. The lines are the console's (render.ai_*), cleaned by render.hclean() and escaped by to_html()/html.escape().
+    legend, STATUS and the manage area, as HTML. The lines are the console's (screens.ai_*, drawn by ansi), cleaned by hclean() and escaped by to_html()/html.escape().
     ui: the forms (AiUi); None draws the page without them."""
     esc, cat = html.escape, data["cat"]
     text, code = render.status_pill(pb)
     out = [f'<div class="hd {sgr_class(code)}"><span> {esc(host)} │ AI │ {time.strftime("%H:%M:%S")}</span><span>{esc(text)} </span></div>',
-           f'<pre class="ht">{to_html(render.ai_title(rows if cat is not None else None, cols))}</pre>']
+           f'<pre class="ht">{to_html(console_line(screens.ai_title(rows if cat is not None else None, cols), cols))}</pre>']
     if ui is not None:
         out += [ai_control_html(ui), ai_chat_html(ui)]
     if cat is None:  # the catalog could not be read
-        return "".join(out) + f'<p class="hn {"r" if data.get("err") else ""}">{esc(render.hclean(data["msg"]))}</p>'
-    ids, windows = {m["id"] for m in rows}, render.dd(cat.get("hw")).get("os") == "windows"
-    out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_hw_lines(cat.get("hw"), cols, 0)))}</pre>')
+        return "".join(out) + f'<p class="hn {"r" if data.get("err") else ""}">{esc(hclean(data["msg"]))}</p>'
+    ids, windows = {m["id"] for m in rows}, dd(cat.get("hw")).get("os") == "windows"
+    out.append(f'<pre class="ht">{to_html(chr(10).join(console_lines(screens.ai_hw_nodes(cat.get("hw"), cols, 0), cols)))}</pre>')
     i = next((j for j, m in enumerate(rows) if m["id"] == sel), None)
     panel = ai_panel_html(rows[i], here, i, windows, ui) if i is not None else ""
     act = ui is not None and not ui.locked
@@ -1544,8 +1552,8 @@ def ai_body(data, st, pb, rows, sel, here, cols, host, ui=None):
              + "".join(ai_row_html(m, j, sel, here, ui) for j, m in enumerate(rows)) + "</tbody></table></div>"
              if rows else '<div class="nt">the catalog lists no model</div>')
     out.append(f'<div class="hs">MODELS · best first</div><main class="mp{" two" if panel else ""}"><div class="tree">{table}'
-               f'<pre class="ht">{to_html(render.ai_legend(cols))}</pre></div>{panel}</main>')
-    out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_status_lines(st, cat, ids, cols, 0)))}</pre>')
+               f'<pre class="ht">{to_html(console_line(screens.ai_legend(cols), cols))}</pre></div>{panel}</main>')
+    out.append(f'<pre class="ht">{to_html(chr(10).join(console_lines(screens.ai_status_nodes(st, cat, ids, cols, 0), cols)))}</pre>')
     if ui is not None:
         out.append(ai_manage_html(ui))
     return "".join(out)
@@ -1553,34 +1561,34 @@ def ai_body(data, st, pb, rows, sel, here, cols, host, ui=None):
 
 def health_body(data, pb, days, sel, here, cols, host):
     """Header, title, notes, the findings (every one a link; the selected one's details beside or under them) and the sections, as HTML.
-    Everything from the report goes through render.hclean() (control, format and wide characters out) and html.escape()."""
+    Everything from the report goes through hclean() (control, format and wide characters out) and html.escape()."""
     esc, R = html.escape, data["report"]
     text, code = render.status_pill(pb)
     out = [f'<div class="hd {sgr_class(code)}"><span> {esc(host)} │ HEALTH │ {time.strftime("%H:%M:%S")}</span><span>{esc(text)} </span></div>']
-    fl = render.health_findings(R)
-    title = render.health_title(R, cols, days, fl, selector=False)
+    fl = screens.health_findings(R)
+    title = console_line(screens.health_title(R, days, fl, False), cols)
     if R is None:
-        return "".join(out) + f'<pre class="ht">{to_html(title)}</pre><p class="hn {"r" if data.get("err") else ""}">{esc(render.hclean(data["msg"]))}</p>'
-    notes = [render.hclean(x) for x in R.get("notes") or [] if isinstance(x, str)]
+        return "".join(out) + f'<pre class="ht">{to_html(title)}</pre><p class="hn {"r" if data.get("err") else ""}">{esc(hclean(data["msg"]))}</p>'
+    notes = [hclean(x) for x in R.get("notes") or [] if isinstance(x, str)]
     if not (R.get("coverage") or {}).get("since"):
         notes = [x for x in notes if x != "no history yet"]
     out.append(f'<pre class="ht">{to_html(title)}</pre>' + "".join(f'<div class="nt">· {esc(x)}</div>' for x in notes))
-    if not render.hnum((R.get("coverage") or {}).get("hours")):
-        return "".join(out) + f'<p class="hn">{esc("no data in this period" if (R.get("coverage") or {}).get("since") else render.HEALTH_NONE)}</p>'
+    if not hnum((R.get("coverage") or {}).get("hours")):
+        return "".join(out) + f'<p class="hn">{esc("no data in this period" if (R.get("coverage") or {}).get("since") else screens.HEALTH_NONE)}</p>'
     rows = []
     for i, f in enumerate(fl):
-        level, ttl, txt, _, _ = render.health_details(f)
-        label = render.LEVEL_PILL[level][0].strip()
+        level, ttl, txt, _, _ = screens.health_details(f)
+        label = screens.LEVEL_PILL[level][0].strip()
         cur = f["id"] == sel
         rows.append(f'<div class="ro{" sel" if cur else ""}" id="f-{i}"><span class="tr"><span class="pl {PILL_CLASS[level]}">{esc(label)}</span> </span>'
                     f'<span class="bd"><a class="lb {LEVEL_CLASS.get(level, "n")}" href="{esc(page_url(here, sel="" if cur else f["id"]) + f"#f-{i}")}">'
                     f'{esc(ttl)}</a>  <span class="d">{esc(txt)}</span>' + (' <a class="dl" href="#details">details ↓</a>' if cur else "") + '</span></div>')
     if not fl:
-        rows.append(f'<div class="nt">{esc(render.health_nothing(R))}</div>')
+        rows.append(f'<div class="nt">{esc(screens.health_nothing(R))}</div>')
     panel = ""
     cur = next((f for f in fl if f["id"] == sel), None)
     if cur:
-        level, ttl, txt, facts, fix = render.health_details(cur)
+        level, ttl, txt, facts, fix = screens.health_details(cur)
         trs = [f'<tr class="top"><th>finding</th><td class="{LEVEL_CLASS.get(level, "")}">{esc(ttl)}</td></tr>', f"<tr><th>what</th><td>{esc(txt)}</td></tr>"]
         trs += ([f'<tr><th>facts</th><td></td></tr>'] if facts else []) + [f'<tr><th class="in">{esc(k)}</th><td>{esc(v)}</td></tr>' for k, v in facts]
         trs.append(f"<tr><th>fix</th><td>{esc(fix)}</td></tr>")
@@ -1588,7 +1596,7 @@ def health_body(data, pb, days, sel, here, cols, host):
                  f'close ✕</a></div><table>{"".join(trs)}</table></aside>')
     out.append(f'<div class="hs">FINDINGS</div><main class="mp{" two" if panel else ""}"><div class="tree">{"".join(rows)}{health_extra_html(R)}</div>{panel}</main>')
     if R.get("coverage"):
-        out.append(f'<pre class="ht">{to_html(chr(10).join(render.health_tables(R, cols)))}</pre>')
+        out.append(f'<pre class="ht">{to_html(chr(10).join(screens.health_tables_lines(R, cols, None, time.time())))}</pre>')
     return "".join(out)
 
 

@@ -13,11 +13,13 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ansi  # noqa: E402
 import cards  # noqa: E402
 import demo  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
 import ui  # noqa: E402
 from ui import Bar, Col, Flow, Grid, Head, Indent, Line, Msg, NoteTable, Row, Span, Table, Timeline  # noqa: E402
 
@@ -471,11 +473,11 @@ class SharedPiecesTests(unittest.TestCase):
 
     def test_the_old_function_names_still_answer(self):
         ctx = ctx_of()
-        self.assertEqual(render.ov_boot(ctx.boot, 100, 0), ansi.card_lines(cards.build("boot", ctx, 0, cards.Caps(100)), 100)[0])
-        self.assertEqual(render.short_name("shop-api-1", "shop"), "api")
-        self.assertEqual(render.fs(1.25), "1.2s")
-        self.assertEqual(render.up_load_note(90000, ["0.1", "0.2", "0.3"]), "up 1d 1h · load 0.1 0.2 0.3")
-        self.assertEqual(render.stack_lines(ctx.cont, 100, 3)[1], "     " + ansi.c(32, "●") + " app   " + ansi.c(32, "●") + " db")
+        self.assertEqual(cardlines.ov_boot(ctx.boot, 100, 0), ansi.card_lines(cards.build("boot", ctx, 0, cards.Caps(100)), 100)[0])
+        self.assertEqual(cards.short_name("shop-api-1", "shop"), "api")
+        self.assertEqual(ui.fmt_s(1.25), "1.2s")
+        self.assertEqual(cards.up_load_note(90000, ["0.1", "0.2", "0.3"]), "up 1d 1h · load 0.1 0.2 0.3")
+        self.assertEqual(cardlines.stack_lines(ctx.cont, 100, 3)[1], "     " + ansi.c(32, "●") + " app   " + ansi.c(32, "●") + " db")
 
 
 if __name__ == "__main__":

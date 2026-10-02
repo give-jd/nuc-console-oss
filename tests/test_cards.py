@@ -13,12 +13,14 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ansi  # noqa: E402
 import cards  # noqa: E402
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
 import ui  # noqa: E402
 
 
@@ -189,15 +191,14 @@ class CapsTests(unittest.TestCase):
         self.assertTrue(caps.opened("disks") and not caps.opened("sessions"))
         self.assertEqual(caps.trunc, {"sessions"})
 
-    def test_it_shares_the_sets_it_is_given_and_agrees_with_the_globals(self):
-        seq = list(range(9))
-        with mock.patch.object(render, "FULL", False), mock.patch.object(render, "EXPAND", {"boot"}), \
-                mock.patch.object(render, "TRUNC", set()):
-            caps = cards.Caps(30, render.FULL, render.EXPAND, render.TRUNC)
-            for section in ("boot", "disks"):
-                self.assertEqual(caps.lim(seq, 3, section), render.lim(seq, 3, section))
-            self.assertIs(caps.trunc, render.TRUNC)
-            self.assertEqual(render.TRUNC, {"disks"})
+    def test_it_shares_the_sets_it_is_given(self):
+        seq, expand, trunc = list(range(9)), {"boot"}, set()
+        caps = cards.Caps(30, False, expand, trunc)
+        self.assertEqual(caps.lim(seq, 3, "boot"), seq)
+        self.assertEqual(caps.lim(seq, 3, "disks"), [0, 1, 2])
+        self.assertIs(caps.expand, expand)
+        self.assertIs(caps.trunc, trunc)
+        self.assertEqual(trunc, {"disks"})
 
     def test_key_tells_what_changes_the_lines(self):
         a = cards.Caps(40, expand={"disks"})
@@ -251,9 +252,9 @@ class RegistryTests(unittest.TestCase):
     def test_the_card_is_what_the_section_draws(self):
         ctx = demo_ctx()
         caps = cards.Caps(100)
-        self.assertEqual(ansi.card_lines(cards.build("firewall", ctx, 0, caps), 100)[0], render.ov_firewall(ctx.net, 100, 0))
-        self.assertEqual(ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0], render.ov_dischi(ctx.s, 100, 0))
-        self.assertEqual(ansi.card_lines(cards.build("attention", ctx, 0, caps), 100)[0], render.ov_attention(ctx.problems, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("firewall", ctx, 0, caps), 100)[0], cardlines.ov_firewall(ctx.net, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0], cardlines.ov_dischi(ctx.s, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("attention", ctx, 0, caps), 100)[0], cardlines.ov_attention(ctx.problems, 100, 0))
 
     def test_a_broken_section_becomes_a_message_not_an_exception(self):
         ctx = demo_ctx(s={"cpu": "nonsense"})

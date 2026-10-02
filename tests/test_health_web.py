@@ -20,6 +20,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
 import web  # noqa: E402
 
 ESC, BEL = chr(27), chr(7)
@@ -153,7 +154,7 @@ class HealthPage(unittest.TestCase):
         self.assertEqual(len({r[0] for r in rs}), len(rs))                   # one anchor per finding
         for i, sel, href, title, text in rs:                                 # the browser stays on the clicked row; the id is in the URL
             self.assertTrue(href.endswith("#f-%d" % i), href)
-            self.assertIn(params(href)["sel"], {f["id"] for f in render.health_findings(render.health_data(7)["report"])})
+            self.assertIn(params(href)["sel"], {f["id"] for f in screens.health_findings(render.health_data(7)["report"])})
             self.assertGreater(len(text), 20)
         for pill in ('<span class="pl r">✖ ERR</span>', '<span class="pl y">! WARN</span>', '<span class="pl d">· INFO</span>'):
             self.assertIn(pill, body)                                        # a symbol besides the colour
@@ -222,7 +223,7 @@ class HealthPage(unittest.TestCase):
             for days in (1, 7, 30):
                 render._HEALTH.clear()
                 self.srv.cache.clear()
-                ids = [f["id"] for f in render.health_findings(render.health_data(days)["report"])]
+                ids = [f["id"] for f in screens.health_findings(render.health_data(days)["report"])]
                 self.assertTrue(ids)
                 for fid in ids:
                     with self.subTest(os=os_name, days=days, finding=fid):
@@ -259,7 +260,7 @@ class HealthPage(unittest.TestCase):
         render._HEALTH.clear()
         self.srv.cache.clear()
         none = self.page("/?view=health")
-        self.assertIn(html.escape(render.HEALTH_NONE), none)
+        self.assertIn(html.escape(screens.HEALTH_NONE), none)
         self.assertEqual(rows_of(none), [])
         self.assertNotIn('class="dp"', none)
         self.assertNotIn("── TOP CPU", plain(none))
@@ -407,7 +408,7 @@ class HealthPage(unittest.TestCase):
 
     def test_html_and_control_characters_in_the_report_are_inert(self):
         self.seed(self.hostile())
-        fid = render.health_findings(render.health_data(7)["report"])[0]["id"]
+        fid = screens.health_findings(render.health_data(7)["report"])[0]["id"]
         for path in ("/?view=health", "/?view=health&cols=100", "/?view=health&cols=200", "/?view=health&sel=" + quote(fid, safe="")):
             body = self.page(path)
             self.assertEqual(re.findall(r"<script|<img|<iframe|<svg|<form|<object|<embed", body, re.I), [], path)

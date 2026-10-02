@@ -27,7 +27,7 @@ SGR = re.compile(r"\x1b\[([0-9;]*)m")
 
 
 def plain(s):
-    return render.ANSI.sub("", s)
+    return ansi.ANSI.sub("", s)
 
 
 def head(w, name="Overview", pb=PROBLEMS, **kw):

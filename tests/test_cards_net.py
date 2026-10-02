@@ -22,6 +22,8 @@ import cards  # noqa: E402
 import demo  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
+import exposure  # noqa: E402
 import ui  # noqa: E402
 
 HOSTILE = "<script>alert(1)</script>"
@@ -56,7 +58,7 @@ class Base(unittest.TestCase):
             tweak(cont, net, base)
         pb = render.safe_problems(net, cont, golden.NOW, boot=boot, baseline=base)
         args = dict(s=demo.sampler_data(os_name, golden.NOW), cont=cont, net=net, boot=boot, problems=pb, cfg=render.CFG, now=golden.NOW,
-                    baseline=base, new=render.new_ports(net, cont, base))
+                    baseline=base, new=exposure.new_ports(net, cont, base))
         args.update(kw)
         return cards.Ctx(**args)
 
@@ -292,9 +294,9 @@ class ConsoleTests(Base):
             self.assertEqual(len(rows(0)), 12)
             self.assertEqual(len(rows(2)), 6)
             self.assertEqual(len(rows(3)), 4)
-            self.assertEqual(self.lines("webapps", ctx, 3)[-1], " … +" + str(len(render.webapp_rows(ctx.net, ctx.cont)) - 4) + " more")
-            self.assertEqual(len(rows(3, expand=("webapps",))), len(render.webapp_rows(ctx.net, ctx.cont)))
-            self.assertEqual(len(rows(3, full=True)), len(render.webapp_rows(ctx.net, ctx.cont)))
+            self.assertEqual(self.lines("webapps", ctx, 3)[-1], " … +" + str(len(exposure.webapp_rows(ctx.net, ctx.cont)) - 4) + " more")
+            self.assertEqual(len(rows(3, expand=("webapps",))), len(exposure.webapp_rows(ctx.net, ctx.cont)))
+            self.assertEqual(len(rows(3, full=True)), len(exposure.webapp_rows(ctx.net, ctx.cont)))
             self.assertTrue(self.card("webapps", ctx, 3).truncated)
             note = self.card("webapps", ctx).note
             self.assertRegex(note, r"^\d+ active · 15 down \(expected\)$")
@@ -567,8 +569,8 @@ class WrapperTests(Base):
     def test_ov_functions_are_the_cards(self):
         ctx = self.frame()
         for k in (-2, -1, 0, 3):
-            for id, lines in (("attention", render.ov_attention(ctx.problems, 100, k)), ("exposure", render.ov_esposizione(ctx.net, ctx.cont, 100, k, ctx.new)),
-                              ("firewall", render.ov_firewall(ctx.net, 100, k)), ("webapps", render.ov_webapp(ctx.net, ctx.cont, 100, k))):
+            for id, lines in (("attention", cardlines.ov_attention(ctx.problems, 100, k)), ("exposure", cardlines.ov_esposizione(ctx.net, ctx.cont, 100, k, ctx.new)),
+                              ("firewall", cardlines.ov_firewall(ctx.net, 100, k)), ("webapps", cardlines.ov_webapp(ctx.net, ctx.cont, 100, k))):
                 self.assertEqual(plain(lines), self.lines(id, ctx, k), (id, k))
 
     def test_the_overview_is_made_of_these_cards(self):

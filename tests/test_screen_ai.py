@@ -73,11 +73,6 @@ class Model(unittest.TestCase):
     def tearDown(self):
         self.world.__exit__(None, None, None)
 
-    def test_the_rows_the_view_and_its_keys_moved_to_screens_and_render_keeps_them(self):
-        for name in ("AiView", "ai_rows", "ai_key", "ai_sync", "ai_select", "ai_details", "ai_mb", "ai_tok", "ai_params", "ai_id", "ai_where", "ai_cpu_name",
-                     "AI_VERDICT", "AI_UNKNOWN", "AI_BACKEND", "AI_ACTIONS", "AI_PANE_W", "AI_NAME_MIN", "AI_ID_MAX"):
-            self.assertIs(getattr(render, name), getattr(screens, name), name)
-
     def test_the_verdict_is_a_pill_with_a_symbol_and_a_tone_that_follows_it(self):
         want = {"gpu": ("✔ FITS GPU", "ok"), "partial": ("◐ GPU+CPU", "accent"), "ram": ("✔ FITS RAM", "ok"), "slow": ("! SLOW", "warn"),
                 "no": ("✖ TOO BIG", "err"), None: ("? UNKNOWN", "muted")}

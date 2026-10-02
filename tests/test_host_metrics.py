@@ -13,8 +13,12 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the host's config.ini
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpers (cardlines.py)
 import hostinfo  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
+import cards  # noqa: E402
+import ansi  # noqa: E402
 
 GIB = 2 ** 30
 STAT = "cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0 0 0\ncpu1 50 0 50 400 0 0 0 0 0 0\nintr 1 2 3\n"
@@ -34,7 +38,7 @@ class Statvfs(object):
 
 
 def text(lines):
-    return render.ANSI.sub("", "\n".join(lines))
+    return ansi.ANSI.sub("", "\n".join(lines))
 
 
 class FakeProc(unittest.TestCase):
@@ -90,14 +94,14 @@ class SamplerHostFigures(FakeProc):
             self.assertEqual(self.reads.count(path), 1, path)
         del self.reads[:]
         for k in (-2, 0, 3):
-            render.ov_sistema(sm, 119, k)
+            cardlines.ov_sistema(sm, 119, k)
         render.page_sistema(sm, 119, cont=None)
         self.assertEqual(self.reads, [], "a block read the host while it was drawing: the sample holds the figures")
 
         def boom(*a):
             raise AssertionError("a block called a reader of the host")
         with mock.patch.multiple(render, meminfo=boom, loadavg=boom, uptime_s=boom, root_disk=boom, read_thermal=boom):
-            self.assertIn("RAM", text(render.ov_sistema(sm, 119, 0)))
+            self.assertIn("RAM", text(cardlines.ov_sistema(sm, 119, 0)))
             self.assertIn("RAM", text(render.page_sistema(sm, 119, cont=None)))
 
     def test_an_unreadable_figure_is_none_and_the_others_are_kept(self):
@@ -126,7 +130,7 @@ class DrawnFromTheSample(FakeProc):
     """What the two blocks say for a sample: the figures, in the format they had when they read the host themselves."""
 
     def test_system_block(self):
-        lines = text(render.ov_sistema(self.sample(), 119, 0)).split("\n")
+        lines = text(cardlines.ov_sistema(self.sample(), 119, 0)).split("\n")
         self.assertTrue(lines[0].startswith("── SYSTEM "))
         self.assertTrue(lines[0].endswith("up 1d 2h · load 0.82 0.64 0.51"), lines[0])
         self.assertRegex(lines[1], r"^ RAM   █+░+ 9\.8G/15\.6G   cache 2\.0G$")
@@ -146,13 +150,13 @@ class DrawnFromTheSample(FakeProc):
         self.assertNotIn("SWAP", page)
         self.assertNotIn("load", page)
         self.assertIn("  C:", page)
-        block = text(render.ov_sistema(sm, 119, 0))
+        block = text(cardlines.ov_sistema(sm, 119, 0))
         self.assertNotIn("load", block)
         self.assertNotIn("?", block)
 
     def test_what_cannot_be_read_is_a_question_mark(self):
         sm = dict(self.sample(), mem=None, disk_root=None, uptime=None, load=None)
-        block = text(render.ov_sistema(sm, 119, 0)).split("\n")
+        block = text(cardlines.ov_sistema(sm, 119, 0)).split("\n")
         self.assertTrue(block[0].endswith("up ? · load ?"), block[0])
         self.assertEqual((block[1], block[2]), (" RAM   ?", " DISK  ?"))
         page = text(render.page_sistema(sm, 119, cont=None)).split("\n")
@@ -163,23 +167,23 @@ class DrawnFromTheSample(FakeProc):
                    dict(self.sample(), mem={"MemTotal": 0, "MemAvailable": 0}, disk_root=(1, 0, "/")),   # nothing to divide by
                    dict(self.sample(), mem={"MemTotal": GIB}, disk_root="garbage"),            # no MemAvailable (kernel < 3.14)
                    dict(self.sample(), mem={}, disk_root=())):
-            block = text(render.ov_sistema(sm, 119, 0)).split("\n")
+            block = text(cardlines.ov_sistema(sm, 119, 0)).split("\n")
             self.assertEqual((block[1], block[2]), (" RAM   ?", " DISK  ?"), sm)
             page = text(render.page_sistema(sm, 119, cont=None)).split("\n")
             self.assertEqual((page[2], page[3]), (" RAM   ?", " DISK  ?"), sm)
 
     def test_unreadable_figures_leave_the_rest_of_the_block(self):
         sm = dict(self.sample(), mem=None, cpu={"cpu0": 0.5, "cpu1": 0.25})
-        block = text(render.ov_sistema(sm, 119, 0))
+        block = text(cardlines.ov_sistema(sm, 119, 0))
         self.assertIn("CPU   ", block)
         self.assertIn("2 threads", block)
         self.assertNotIn("error", block.lower())
 
     def test_up_load_note(self):
-        self.assertEqual(render.up_load_note(5 * 86400, ["0.1", "0.2", "0.3"]), "up 5d 0h · load 0.1 0.2 0.3")
-        self.assertEqual(render.up_load_note(3600 + 120, []), "up 1h 2m")
-        self.assertEqual(render.up_load_note(None, None), "up ? · load ?")
-        self.assertEqual(render.up_load_note(None, []), "up ?")
+        self.assertEqual(cards.up_load_note(5 * 86400, ["0.1", "0.2", "0.3"]), "up 5d 0h · load 0.1 0.2 0.3")
+        self.assertEqual(cards.up_load_note(3600 + 120, []), "up 1h 2m")
+        self.assertEqual(cards.up_load_note(None, None), "up ? · load ?")
+        self.assertEqual(cards.up_load_note(None, []), "up ?")
 
 
 class OtherOperatingSystems(unittest.TestCase):
@@ -205,7 +209,7 @@ class OtherOperatingSystems(unittest.TestCase):
                                  root_disk=lambda: (100 * GIB, 500 * GIB, "C:")):
             sm = render.Sampler().sample()
         self.assertEqual((sm["mem"], sm["uptime"], sm["load"], sm["disk_root"]), (mem, 4000.0, [], (100 * GIB, 500 * GIB, "C:")))
-        block = text(render.ov_sistema(sm, 119, 0))
+        block = text(cardlines.ov_sistema(sm, 119, 0))
         self.assertIn("up 1h 6m", block.split("\n")[0])
         self.assertNotIn("load", block)
         with mock.patch.multiple(hostinfo, meminfo=lambda: mem, loadavg=lambda: ["1.50", "1.25", "1.00"],

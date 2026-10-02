@@ -20,6 +20,7 @@ import cards  # noqa: E402
 import demo  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
 import ui  # noqa: E402
 from ui import Bar, Card, Col, Group, KV, Line, More, Msg, Notice, Raw, Row, Span, Spark, Table, Wrap  # noqa: E402
 
@@ -382,9 +383,9 @@ class NativeCardTests(unittest.TestCase):
 
     def test_the_demo_cards_are_the_overview_blocks(self):
         ctx = ctx_of()
-        for id, fn, arg in (("disks", render.ov_dischi, ctx.s), ("sessions", render.ov_sessioni, ctx.s),
-                            ("tailscale", render.ov_tailscale, ctx.net), ("docker_disk", render.ov_docker, ctx.boot),
-                            ("network_traffic", render.ov_traffico, ctx.s)):
+        for id, fn, arg in (("disks", cardlines.ov_dischi, ctx.s), ("sessions", cardlines.ov_sessioni, ctx.s),
+                            ("tailscale", cardlines.ov_tailscale, ctx.net), ("docker_disk", cardlines.ov_docker, ctx.boot),
+                            ("network_traffic", cardlines.ov_traffico, ctx.s)):
             for k in (-2, 0, 3):
                 card = cards.build(id, ctx, k, cards.Caps(100))
                 self.assertEqual(ansi.card_lines(card, 100)[0], fn(arg, 100, k), (id, k))

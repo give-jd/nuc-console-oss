@@ -7,7 +7,7 @@ components with ansi.render, the web with htmlview.html: one model, two renderer
 
 Nothing here reads a file, the configuration, the host or the clock, and nothing draws: what a screen needs to know of the world comes in as
 an argument (a small context object such as CpuCtx, the time now, the advisor's answer) or inside the data. Producers, the live loop and the
-page handlers stay in render.py and web.py, which keeps shims for the names that moved (for the tests and the tools that still call them).
+page handlers stay in render.py and web.py.
 
 Layout that only the console has (how many lines the room is, which block is cut, where a table's rows end) is decided here from the size
 and written into the components' console fields (ui.Cap, ui.Split, ui.Cols, the widths of a ui.Col); the web ignores them and draws every
