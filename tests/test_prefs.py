@@ -992,5 +992,148 @@ class Docs(unittest.TestCase):
         self.assertEqual((cfg["ui"], err), ({"web": "classic", "sections": ALL}, ""))
 
 
+class LayoutEditor(unittest.TestCase):
+    """The pure steps of the layout editor (prefs.move, resize, hide, show, reset) and the `?set=e...` field that applies one to a cookie."""
+    LAY = {"layout": [("attention", 2), ("exposure", 2), ("webapps", 1), ("firewall", 1)], "hidden": ["boot", "disks"]}
+
+    def ids(self, lay):
+        return [c for c, _ in lay["layout"]]
+
+    def test_move_one_place_and_stay_at_the_ends(self):
+        self.assertEqual(self.ids(prefs.move(self.LAY, "webapps", -1)), ["attention", "webapps", "exposure", "firewall"])
+        self.assertEqual(self.ids(prefs.move(self.LAY, "webapps", 1)), ["attention", "exposure", "firewall", "webapps"])
+        self.assertEqual(self.ids(prefs.move(self.LAY, "attention", -1)), self.ids(self.LAY))
+        self.assertEqual(self.ids(prefs.move(self.LAY, "firewall", 1)), self.ids(self.LAY))
+        self.assertEqual(self.ids(prefs.move(self.LAY, "attention", 99)), ["exposure", "webapps", "firewall", "attention"])
+        self.assertEqual(prefs.move(self.LAY, "webapps", -1)["hidden"], ["boot", "disks"])
+        self.assertEqual(dict(prefs.move(self.LAY, "firewall", -2)["layout"])["firewall"], 1)  # the width goes with the card
+
+    def test_resize_is_held_to_one_to_four(self):
+        w = lambda lay, c: dict(lay["layout"])[c]  # noqa: E731
+        self.assertEqual(w(prefs.resize(self.LAY, "webapps", 1), "webapps"), 2)
+        self.assertEqual(w(prefs.resize(self.LAY, "webapps", -1), "webapps"), 1)
+        self.assertEqual(w(prefs.resize(self.LAY, "attention", 5), "attention"), 4)
+        self.assertEqual(w(prefs.resize(self.LAY, "attention", -5), "attention"), 1)
+        self.assertEqual(self.ids(prefs.resize(self.LAY, "webapps", 1)), self.ids(self.LAY))
+
+    def test_hide_and_show(self):
+        h = prefs.hide(self.LAY, "exposure")
+        self.assertEqual(self.ids(h), ["attention", "webapps", "firewall"])
+        self.assertEqual(h["hidden"], ["exposure", "boot", "disks"])  # the order of the sections: the hidden list is a set
+        s = prefs.show(h, "boot")
+        self.assertEqual(s["layout"][-1], ("boot", 1))  # last, 1 wide
+        self.assertEqual(s["hidden"], ["exposure", "disks"])
+        self.assertEqual(prefs.hide(self.LAY, "boot"), prefs._out(*prefs._lay(self.LAY)))  # already hidden: nothing
+        self.assertEqual(prefs.show(self.LAY, "webapps"), prefs._out(*prefs._lay(self.LAY)))  # not hidden: nothing
+
+    def test_unknown_ids_and_bad_numbers_change_nothing(self):
+        same = prefs._out(*prefs._lay(self.LAY))
+        for card in ("nope", "", None, 3, ("a", "b"), "__top"):
+            self.assertEqual(prefs.move(self.LAY, card, 1), same)
+            self.assertEqual(prefs.resize(self.LAY, card, 1), same)
+            self.assertEqual(prefs.hide(self.LAY, card), same)
+            self.assertEqual(prefs.show(self.LAY, card), same)
+        for delta in (None, "1", 1.5, True):
+            self.assertEqual(prefs.move(self.LAY, "webapps", delta), same)
+            self.assertEqual(prefs.resize(self.LAY, "webapps", delta), same)
+        self.assertEqual(prefs.move({}, "webapps", 1), {"layout": [], "hidden": []})
+        self.assertEqual(prefs.move("junk", "webapps", 1), {"layout": [], "hidden": []})
+
+    def test_the_steps_do_not_change_what_they_were_given(self):
+        before = repr(self.LAY)
+        for f in (lambda: prefs.move(self.LAY, "webapps", -1), lambda: prefs.resize(self.LAY, "webapps", 1), lambda: prefs.hide(self.LAY, "webapps"),
+                  lambda: prefs.show(self.LAY, "boot")):
+            f()
+        self.assertEqual(repr(self.LAY), before)
+
+    def test_reset_is_no_layout_at_all(self):
+        self.assertEqual(prefs.reset(self.LAY), {})
+        self.assertEqual(prefs.reset(), {})
+
+    def test_layout_of_is_what_the_overview_shows_and_what_is_hidden(self):
+        eff, _ = prefs.effective(None, "1.lat2_ex1_wax_dbx")
+        lay = prefs.layout_of(eff, ["attention", "exposure", "webapps", "databases", "boot"])
+        self.assertEqual(lay["layout"], [("attention", 2), ("exposure", 1), ("boot", 1)])  # databases is hidden, boot was left out: last
+        self.assertEqual(lay["hidden"], ["webapps", "databases"])
+        self.assertEqual(prefs.layout_of(eff, ["attention"])["hidden"], ["webapps", "databases"])  # a hidden card stays hidden
+
+    def test_the_field_of_a_step(self):
+        for op in prefs.EDIT_OPS:
+            for card in ALL:
+                f = prefs.edit_field(op, card)
+                self.assertRegex(f, r"^e[udsghw][a-z]{2}$")
+                self.assertEqual(prefs.edit_parts(f), (op, card))
+                self.assertRegex(f, prefs._FIELD_RE.pattern)  # it is a legal ?set= value
+        self.assertEqual(prefs.edit_parts("ereset"), ("r", None))
+        for bad in ("", "e", "euzz", "exat", "euat1", "Euat", "ereset1", "reset", "tl", "euat.euat", None, 5, ["euat"]):
+            self.assertIsNone(prefs.edit_parts(bad), bad)
+
+    def test_a_step_applied_to_a_cookie_keeps_everything_but_the_layout(self):
+        cur = "1.tl.dw.os.kpb_in_cp"
+        out = prefs.apply_edit(cur, "euwa")  # the first step fixes the whole layout of the preset
+        got = prefs.parse_cookie(out)
+        self.assertEqual({k: v for k, v in got.items() if k not in ("layout", "hidden")}, {k: v for k, v in prefs.parse_cookie(cur).items()})
+        self.assertEqual(len(got["layout"]), len(ALL))
+        self.assertEqual(got["layout"][1][0], "webapps")  # up from 3rd to 2nd
+        self.assertEqual(got["hidden"], [])
+        again = prefs.apply_edit(out, "ehwa")
+        self.assertEqual(prefs.parse_cookie(again)["hidden"], ["webapps"])
+        self.assertEqual(prefs.parse_cookie(prefs.apply_edit(again, "ewwa"))["hidden"], [])
+        self.assertEqual(prefs.apply_edit(prefs.apply_edit(out, "egat"), "esat"), out)  # wider, narrower: back
+        self.assertEqual(prefs.apply_edit("1.tl.lat2_ex2_wa1", "ereset"), "1.tl")
+        self.assertEqual(prefs.apply_edit("1.lat2", "ereset"), "1")
+
+    def test_a_step_that_changes_nothing_leaves_the_cookie_alone(self):
+        for field in ("euat", "esfw", "ehzz", "euzz", "junk", "", "ewat"):
+            self.assertEqual(prefs.apply_edit("1.tl", field), "1.tl", field)  # the first card up, the narrowest narrower, unknown, not hidden
+        self.assertEqual(prefs.apply_edit("junk", "ehwa"), prefs.apply_edit("1", "ehwa"))  # an invalid cookie is no cookie
+
+    def test_a_card_whose_feature_is_off_is_not_edited(self):
+        avail = [c for c in ALL if c != "webapps"]
+        self.assertEqual(prefs.apply_edit("1.tl", "ehwa", None, avail), "1.tl")
+        self.assertEqual(prefs.apply_edit("1.tl", "euwa", None, avail), "1.tl")
+        got = prefs.parse_cookie(prefs.apply_edit("1.tl", "ehfw", None, avail))
+        self.assertEqual(got["hidden"], ["firewall"])
+        self.assertNotIn("webapps", [c for c, _ in got["layout"]])  # it is in no list: the layout holds only the cards that exist
+
+    def test_the_presets_hidden_cards_become_the_cookies(self):
+        got = prefs.parse_cookie(prefs.apply_edit("1.pd", "ehat"))
+        self.assertEqual(set(got["hidden"]), {"attention", "containers", "databases", "docker_disk", "webapps", "tailscale"})
+        self.assertEqual(got["preset"], "desktop")  # the preset stays; its layout is now the reader's own
+
+    def test_the_cookie_stays_valid_and_short_after_any_run_of_steps(self):
+        rnd = random.Random(21)
+        cur = "1.tl.dw.vo.pv.os.kpb_in_la_be_dl_fw_cp_rm"  # all the other fields at their longest
+        for _ in range(400):
+            op = rnd.choice(list(prefs.EDIT_OPS))
+            cur = prefs.apply_edit(cur, prefs.edit_field(op, rnd.choice(ALL)))
+            self.assertLessEqual(len(cur), prefs.COOKIE_MAX)
+            self.assertEqual(prefs.dump_cookie(prefs.parse_cookie(cur)), cur)  # canonical
+            got = prefs.parse_cookie(cur)
+            seen = [c for c, _ in got.get("layout", ())] + got["hidden"]
+            self.assertEqual(len(seen), len(set(seen)))  # a card is in one list, once
+            self.assertEqual(sorted(seen), sorted(ALL))
+        worst = prefs.dump_cookie({"theme": "high-contrast", "density": "compact", "start_view": "overview", "preset": "security", "order": "fixed",
+                                   "kpis": list(prefs.KPI_IDS)[:8], "layout": [(c, 4) for c in ALL[:7]], "hidden": ALL[7:]})
+        self.assertLessEqual(len(worst), prefs.COOKIE_MAX)
+
+    def test_an_edited_layout_exports_as_layout_and_hidden(self):
+        cur = prefs.apply_edit(prefs.apply_edit("1", "euwa"), "ehdb")
+        eff, _ = prefs.effective(None, cur)
+        text = prefs.export_ini(eff)
+        self.assertIn("layout = attention:2, webapps, exposure:2", text)
+        self.assertIn("hidden = databases", text)
+        ui, warns = prefs.parse_ui(ini_section(text), ALL)
+        self.assertEqual(warns, [])
+        self.assertEqual((ui["layout"], ui["hidden"]), (eff["layout"], eff["hidden"]))
+
+    def test_a_layout_of_the_readers_own_fixes_the_order(self):
+        for cookie, ui, custom in (("", "", False), ("1.tl", "", False), ("1.lat2_ex2", "", True), ("1.dbx", "", False), ("", "1.lat2", True)):
+            _, src = prefs.effective(None, cookie, ui)
+            self.assertEqual(prefs.custom_layout(src), custom, (cookie, ui))
+        _, src = prefs.effective({"layout": [("attention", 1)], "sections": ALL}, "")
+        self.assertFalse(prefs.custom_layout(src))  # config.ini's layout is the admin's: the order preference stays what it says
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -477,11 +477,13 @@ def banner(sym, bold, small=""):
     return f'<div class="stale-banner" role="status"><span class="sym">{esc(sym)}</span> <b>{esc(bold)}</b>' + (f' <span class="sm">{small}</span>' if small else "") + "</div>"
 
 
-def card_article(card, title, note, state, size, inner, more=""):
-    """A card of the grid: width class sN, state class st-..., the header (title, note, state chip) and the body (inner is built by the caller)."""
-    body = f'<div class="ch"><h3>{esc(title)}</h3>' + (f'<span class="note">{esc(note)}</span>' if note else "") + f"{state_chip(state)}</div>"
-    body += f'<div class="cb">{inner}' + (f'<p class="more">{more}</p>' if more else "") + "</div>"
-    return block("article", card, f"card s{size} st-{state}", body, f' id="c-{esc(card)}" data-state="{esc(state)}"')
+def card_article(card, title, note, state, size, inner, more="", tools="", off=False):
+    """A card of the grid: width class sN, state class st-..., the header (title, note, state chip) and the body (inner is built by the caller).
+    tools: the layout editor's buttons (built by the page): they come between the header and the body, and the body is then inert (a
+    preview: nothing in it can be clicked or focused while the cards are being arranged). off: the card is hidden in the layout (the editor lists it dimmed)."""
+    body = f'<div class="ch"><h3>{esc(title)}</h3>' + (f'<span class="note">{esc(note)}</span>' if note else "") + f"{state_chip(state)}</div>" + tools
+    body += f'<div class="cb"{" inert" if tools else ""}>{inner}' + (f'<p class="more">{more}</p>' if more else "") + "</div>"
+    return block("article", card, f"card s{size} st-{state}" + (" off" if off else ""), body, f' id="c-{esc(card)}" data-state="{esc(state)}"' + (f' data-title="{esc(title)}"' if tools else ""))
 
 
 TITLE_LINE = re.compile(r"\s*\u2500{2} (.+?) \u2500{2,}(?:  (.*))?")  # ansi.section(): '\u2500\u2500 TITLE \u2500\u2500\u2500\u2500  note'

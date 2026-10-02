@@ -3,7 +3,7 @@
 The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only, no
 JavaScript** — with three exceptions, each boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
 switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the MAP's graph view carries one small script, pinned by its hash
-(see below), and the **new shell** carries three small first-party scripts, also pinned by their hashes ([below](#the-shells-scripts)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
+(see below), and the **new shell** carries three small first-party scripts per page (four in all, with the layout editor's), also pinned by their hashes ([below](#the-shells-scripts)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -94,8 +94,9 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
   A banner says so when a collector is not running.
 - **Overview**: a grid of cards (12 / 6 / 1 columns by the window's width), in the order of `[ui] order` (by severity, or fixed) and the layout. A
   card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
+  **Edit layout** (footer, and Appearance in the settings) opens the layout editor ([below](#edit-the-layout)).
 - **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The AI page keeps its forms and CSRF.
-- **Footer**: refresh − / +, pause, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
+- **Footer**: refresh − / +, pause, Edit layout, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
 - **Blocks**: the top bar (`__top`), the key figures (`__kpis`) and every card are elements with `data-card` and a `data-rev` that changes when,
   and only when, their HTML does. The Map, CPU, Health and AI pages are one block (`__view`, the bar above them and their body). The refresh
   script replaces the blocks whose `data-rev` changed, nothing else.
@@ -104,8 +105,9 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 |---|---|
 | `/?app=1` | the shell (every view above takes it: `/?view=cpu&app=1`) |
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
-| `/?view=settings` | **Appearance** (theme, density, preset, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
-| `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403` |
+| `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?app=1&edit=1` or, with `[ui] web = app`, `/?edit=1`. Only on the overview: with `app=0` or on another view it is ignored |
+| `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
+| `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403`. The layout editor's links are fields too (`euat`: move ATTENTION one place earlier; [below](#edit-the-layout)) |
 | `/?set=<field>&frag=1` | what the preferences script sends: the same cookie, but the answer is `204` (no redirect, no body) with `Set-Cookie` and `X-Nuc-Prefs: <the canonical cookie string>`, which the script keeps in `localStorage`. `<field>` may also be that whole string (`1.tl.dw`): the script sends it back, once in a while, when the browser sent no cookie. Same checks as above |
 | `<any shell page>&frag=1` | the **fragment** of that page ([below](#the-fragment-endpoint)) |
 | `/?ui=<string>` | the same grammar for this URL only (a bookmark, a kiosk link); an invalid string is ignored |
@@ -119,7 +121,7 @@ policy for their scripts, composed per page by `web.page_csp()` ([below](#the-sh
 
 ### The shell's scripts
 
-Three first-party scripts, each an inline `<script>` at the end of every shell page (`src/webjs.py`; ASCII, strict mode, no library, no global, ~18 KB together).
+Four first-party scripts, each an inline `<script>` at the end of the shell pages that use it (`src/webjs.py`; ASCII, strict mode, no library, no global, ~28 KB together; a page carries three of them).
 They only ever **GET**: nothing they do sends a form, and the AI page's POSTs stay native forms. Every control still works without them.
 
 | Script | What it does |
@@ -127,8 +129,43 @@ They only ever **GET**: nothing they do sends a form, and the AI page's POSTs st
 | `REFRESH_JS` | polls the page's fragment every `refresh` seconds and replaces the blocks whose `data-rev` changed, keeping the focus, the open `<details>` and the scroll. It waits while the tab is hidden, while the page is paused and while you type or select; a failed poll backs off (2 s to 60 s) and the banner under the top bar says **stale since HH:MM:SS** (the numbers are never shown as fresh); a lost session (`401`) says *session expired*. A fragment that is not on its allowlists makes it reload the page, at most once in 15 seconds. The pause link becomes a toggle that does not navigate |
 | `KEYS_JS` | a key press clicks the link or button the server marked with `data-key` (the keymap is the server's, the script has none: `1`–`5`, `Z`, `?`, `Escape`, ...); arrows, `j`/`k`, PageUp/PageDown, Home/End move over the rows of a list (`data-row`) |
 | `PREFS_JS` | a click on a theme or density link is sent to the server in the background (`/?set=…&frag=1`, `204`) and applied at once, without a reload; if that fails the link is followed as it is. It keeps the preferences string in `localStorage` and the **Copy** button of the settings page copies the `[ui]` block. It never touches `document.cookie` (the cookie is `HttpOnly`) |
+| `BUILDER_JS` | only on the layout editor page (`?edit=1`), in place of `REFRESH_JS`: drag a card to move it, drag its right edge to resize it, a keyboard path, and each change is saved at once ([below](#edit-the-layout)). It moves the cards the server drew and builds no markup; it keeps nothing in the browser |
 
-The layout editor (`BUILDER_JS`, `?edit=1`) is not part of the pages yet.
+### Edit the layout
+
+`Edit layout` (the overview's footer, or Appearance in the settings) opens `/?app=1&edit=1`: the overview as a grid of **previews** (the card
+bodies cannot be clicked here), in the order of the layout and never by severity, with a bar above it (**Done**, **Reset layout** and a short help)
+and these buttons in every card:
+
+| Button | What it does |
+|---|---|
+| ↑ / ↓ | the card one place earlier / later |
+| − / + | one column narrower / wider: `s1` to `s4`, a quarter to the whole width of the grid (shown as 1/4 … 4/4; on a narrow window the grid has fewer columns and the widths collapse, but the layout keeps them) |
+| ✕ | hide the card. A hidden card stays in the grid, dimmed and marked "hidden", with a **show** button; showing it puts it last, 1 column wide |
+
+**Without JavaScript** every button is a link. A click is one `GET /?set=e<step><card>&back=…` (for example `/?set=edat&…`: ATTENTION later): the
+server applies that step to the layout in force (the cookie's, else `config.ini`'s, else the preset's), stores the **whole** layout in the `nuc_ui`
+cookie (`l<card><1-4>[x]_…`, the other preferences untouched) and redirects back to the editor. The steps are `u` earlier, `d` later, `s` narrower,
+`g` wider, `h` hide, `w` show, and `ereset` drops the layout and the hidden list (the preset's cards show again). A step that changes nothing (the
+first card up, the narrowest card narrower) does not touch the cookie; an unknown card or a malformed step is `400`; the cookie stays a valid,
+canonical string of at most 256 bytes, always. The pure functions are `prefs.move`, `resize`, `hide`, `show` and `reset` over a layout, and
+`prefs.apply_edit` for a cookie.
+
+**With JavaScript** (`BUILDER_JS`) the same buttons change the page at once and the new layout is sent as `GET /?set=l…&frag=1` (`204`), one request after
+the other. If the server says anything but `204` the page goes back to the last layout it kept and says so. On top:
+
+- **Drag** a card by its ⠿ handle onto another card to move it; drag the ↔ handle on its right edge sideways to resize it (it snaps to 1–4 quarters of the
+  grid). `Esc` during a drag puts everything back. The handles appear only when the script runs.
+- **Keyboard**: Tab to a card, `Space` grabs it, arrows move it one place, `+` and `−` resize it, `x` hides or shows it, `Space` drops it, `Esc` puts it back
+  where it was. The `#live` region announces each step (`exposure: position 3 of 12, width 2`). The help (`?`) lists the keys of the editor.
+
+**The order.** While the cookie (or `?ui=`) holds a layout of your own the cards stay in it, as if `order = fixed`, whatever `order` says: the editor
+says so on its page, and so does the Order setting. A layout from `config.ini` is the administrator's and does not change that. **Reset layout** gives
+the preset's back, with its order. The layout is **per browser**: to make it everyone's default copy the **Export** block of the settings into
+`config.ini` (`layout =` and `hidden =` are in it).
+
+The editor page does not reload by itself and has no pause link: a page that moves under your hand is no editor. It carries `KEYS_JS`,
+`PREFS_JS` and `BUILDER_JS`; the policy is in the table below.
 
 **The CSP of each page** is built by one function, `web.page_csp(scripts, shell, forms)`, from what the page carries:
 
@@ -138,8 +175,9 @@ The layout editor (`BUILDER_JS`, `?edit=1`) is not part of the pages yet.
 | classic AI page | none | none | no | `'self'` (not when locked) |
 | classic map graph | the graph script's hash | none | no | `'none'` |
 | shell pages | the hashes of `REFRESH_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | yes | `'none'` |
-| shell AI page | the same three | `'self'` | yes | `'self'` (not when locked) |
-| shell map graph | the same three and the graph script's | `'self'` | yes | `'none'` |
+| shell edit page (`?edit=1`) | the hashes of `KEYS_JS`, `PREFS_JS`, `BUILDER_JS` | `'self'` | no (no script there parses markup) | `'none'` |
+| shell AI page | the same three as the shell pages | `'self'` | yes | `'self'` (not when locked) |
+| shell map graph | the same three as the shell pages and the graph script's | `'self'` | yes | `'none'` |
 
 Always `default-src 'none'; base-uri 'none'; frame-ancestors 'none'`. The scripts are inline and pinned (a hash source is honoured reliably by Safari
 and Firefox only for inline scripts). To verify a page: take each `<script>…</script>` body of the page, hash its UTF-8 bytes and compare:
@@ -216,6 +254,7 @@ library) for dragging, zooming and panning. It is the only exception, and it is 
 
 `config.ini` is owned by root; the web process is unprivileged. Writing it from the browser would require either a root process listening on the network
 or a privileged helper — a large jump in risk for a file you change a few times a year. Edit it over SSH, then `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web`.
+(The shell's [layout editor](#edit-the-layout) changes only the `nuc_ui` cookie of your browser, never `config.ini`; the settings page's Export block is what you paste there.)
 
 ## Threat model in one paragraph
 

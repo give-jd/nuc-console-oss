@@ -63,6 +63,13 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   server's own keymap) and **preferences** (theme and density apply without a reload; a **Copy** button on the settings page). Without scripts everything
   works as before and the page reloads by `<meta refresh>` inside `<noscript>`. The classic pages are unchanged and still have no script.
   See [docs/WEB.md](docs/WEB.md#the-shells-scripts) and [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
+- **Layout editor** (`/?app=1&edit=1`, from **Edit layout** in the overview's footer and in the settings): move cards earlier or later, make them
+  narrower or wider (1 to 4 columns), hide them and show them again, **Reset layout**, **Done**. Without JavaScript every button is a link that makes one
+  step on the server (`/?set=euat`, `/?set=ereset`, ...) and comes back to the editor; with JavaScript a fourth first-party script, pinned by its hash on
+  that page only, adds dragging to move and resize with snapping to quarters of the grid, and a keyboard path (Space grabs a card, arrows move it, `+`
+  and `-` resize, `x` hides, Esc puts it back, announced in a live region), and saves every change at once. Only the layout and the hidden cards of the
+  `nuc_ui` cookie change (still 256 bytes at most). While you have a layout of your own the cards keep its order instead of moving by severity. The
+  settings page's Export gives the `layout =` and `hidden =` lines for `config.ini`. See [docs/WEB.md](docs/WEB.md#edit-the-layout).
 
 **Windows and macOS**
 

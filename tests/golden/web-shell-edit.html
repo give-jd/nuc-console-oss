@@ -1,0 +1,1783 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg=' 'sha256-AHjgJpn69pqd6UU36KVBGoMFlzAVeqtUQKZgbuYNZvI='; connect-src 'self' -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>demo-host · layout · nuc-console</title>
+<link rel="stylesheet" href="/s/app.707e7582.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="c04f169b2e">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?app=1" data-key="1" aria-current="page">
+<kbd>1</kbd>Overview</a>
+<a href="/?app=1&amp;view=map" data-key="2">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?app=1&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?app=1&amp;view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?app=1&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="439277b829">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<section class="ebar" aria-label="Layout editor">
+<div class="eh">
+<h2>Edit layout</h2>
+<a class="lnk" href="/?app=1">Done</a>
+<a class="lnk" data-set href="/?set=ereset&amp;back=app%3D1%26edit%3D1">Reset layout</a>
+</div>
+<p class="hintl">Each card has its own buttons: ↑ ↓ move it, − + make it narrower or wider (1 to 4 columns), ✕ hides it, and a hidden card has a <b>show</b> button. With JavaScript you can also drag a card by its ⠿ handle, drag its right edge to resize it, or focus a card and press Space, then the arrow keys, + and −, x and Esc (<a href="#help">help</a>). Every change is saved at once.</p>
+<p class="hintl">While you have a layout of your own the cards stay in this order (the order is fixed), instead of moving by severity. <b>Reset layout</b> brings the preset's back.</p>
+<p id="live" class="sr-only" role="status" aria-live="polite">
+</p>
+</section>
+<main class="grid" data-edit>
+<article class="card s2 st-err" data-card="attention" data-rev="904cb972ad" id="c-attention" data-state="err" data-title="ATTENTION">
+<div class="ch">
+<h3>ATTENTION</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of ATTENTION">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euat&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: ATTENTION" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edat&amp;back=app%3D1%26edit%3D1" aria-label="Later: ATTENTION" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esat&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: ATTENTION" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egat&amp;back=app%3D1%26edit%3D1" aria-label="Wider: ATTENTION" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehat&amp;back=app%3D1%26edit%3D1" aria-label="ATTENTION: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<div class="msg prob lv-err" data-problem="db-open-lan">
+<span class="sym">✖</span>
+<span class="pr">1 DB/broker open on LAN <code class="pid" title="Database/broker open on the LAN">db-open-lan</code>
+</span>
+<span class="d why">data services should not be reachable from the network</span>
+<details class="fix" data-k="fix-db-open-lan">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-err" data-problem="over-exposed">
+<span class="sym">✖</span>
+<span class="pr">2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet, shop-db :5432 LAN &gt; local <code class="pid" title="Service reaches further than config.ini says">over-exposed</code>
+</span>
+<span class="d why">you declared under [expose] how far it should be reachable, and it is reachable from more places</span>
+<details class="fix" data-k="fix-over-exposed">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem over-exposed --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="container-exited">
+<span class="sym">!</span>
+<span class="pr">1 container exited with an error <code class="pid" title="Container exited with an error">container-exited</code>
+</span>
+<span class="d why">a service that should run is down</span>
+<details class="fix" data-k="fix-container-exited">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">docker ps -a; docker logs &lt;name&gt;; docker start &lt;name&gt; or remove it if obsolete</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem container-exited --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="journal-errors">
+<span class="sym">!</span>
+<span class="pr">2 errors in this boot&#x27;s journal <code class="pid" title="Errors in this boot&#x27;s journal">journal-errors</code>
+</span>
+<span class="d why">usually noise (docker veth races, firmware ACPI), sometimes a real fault</span>
+<details class="fix" data-k="fix-journal-errors">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem journal-errors --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="docker-bypass">
+<span class="sym">!</span>
+<span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
+</span>
+<span class="d why">a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
+<details class="fix" data-k="fix-docker-bypass">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="funnel-public">
+<span class="sym">!</span>
+<span class="pr">1 service public on the Internet (Funnel :8444) <code class="pid" title="Service public on the Internet (Tailscale Funnel)">funnel-public</code>
+</span>
+<span class="d why">anyone on the Internet can reach it</span>
+<details class="fix" data-k="fix-funnel-public">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem funnel-public --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
+</p>
+<p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
+</p>
+</div>
+</article>
+<article class="card s2 st-err" data-card="exposure" data-rev="9e8b6cc36b" id="c-exposure" data-state="err" data-title="EXPOSURE">
+<div class="ch">
+<h3>EXPOSURE</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of EXPOSURE">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euex&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: EXPOSURE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edex&amp;back=app%3D1%26edit%3D1" aria-label="Later: EXPOSURE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esex&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: EXPOSURE" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egex&amp;back=app%3D1%26edit%3D1" aria-label="Wider: EXPOSURE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehex&amp;back=app%3D1%26edit%3D1" aria-label="EXPOSURE: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="ln">   Internet <span class="t-err-strong">1</span>    LAN <span class="t-warn">3</span>    Tailscale 4    Local 4        <span class="t-err">⚠ 1 DB/broker open on LAN</span>
+</p>
+<p class="ln">
+<span class="t-muted">   ● open   ◐ filtered by source   ? unknown (treated as open)   · no</span>
+</p>
+<table class="tbl">
+<colgroup>
+<col class="c-port">
+<col class="c-service">
+<col class="c-loc">
+<col class="c-lan">
+<col class="c-ts">
+<col class="c-net">
+<col class="c-note">
+</colgroup>
+<thead>
+<tr>
+<th class="n" scope="col">Port</th>
+<th scope="col">Service</th>
+<th class="c p3" scope="col">Loc</th>
+<th class="c" scope="col">LAN</th>
+<th class="c" scope="col">TS</th>
+<th class="c" scope="col">Net</th>
+<th class="p2" scope="col">Note</th>
+</tr>
+</thead>
+<tbody>
+<tr class="grp">
+<th colspan="7" scope="rowgroup">Reachable from the Internet (Tailscale Funnel) <span class="n">(1)</span>
+</th>
+</tr>
+<tr data-key="8444/t:INTERNET">
+<td class="n">8444/tcp</td>
+<td> funnel /webhook → 127.0.0.1:5678/webhook</td>
+<td class="c p3">
+<span class="t-muted">·</span>
+</td>
+<td class="c">
+<span class="t-muted">·</span>
+</td>
+<td class="c">
+<span class="t-warn">●</span>
+</td>
+<td class="c">
+<span class="t-err-strong">●</span>
+</td>
+<td class="p2">
+<span class="t-err">beyond config.ini: tailnet</span>
+</td>
+</tr>
+<tr class="grp">
+<th colspan="7" scope="rowgroup">Open on the LAN (and on Tailscale) <span class="n">(3)</span>
+</th>
+</tr>
+<tr data-key="5432/t:LAN">
+<td class="n">5432/tcp</td>
+<td>
+<span class="t-err">⚠</span>shop-db-1</td>
+<td class="c p3">
+<span class="t-neutral">●</span>
+</td>
+<td class="c">
+<span class="t-err">●</span>
+</td>
+<td class="c">
+<span class="t-err">●</span>
+</td>
+<td class="c">
+<span class="t-muted">·</span>
+</td>
+<td class="p2">
+<span class="t-err">beyond config.ini: local</span>
+</td>
+</tr>
+<tr data-key="8080/t:LAN">
+<td class="n">8080/tcp</td>
+<td> shop-web-1</td>
+<td class="c p3">
+<span class="t-neutral">●</span>
+</td>
+<td class="c">
+<span class="t-warn">●</span>
+</td>
+<td class="c">
+<span class="t-warn">●</span>
+</td>
+<td class="c">
+<span class="t-muted">·</span>
+</td>
+<td class="p2">
+<span class="t-muted">expected: LAN · declared: docker</span>
+</td>
+</tr>
+<tr data-key="22/t:LAN">
+<td class="n">22/tcp</td>
+<td> sshd</td>
+<td class="c p3">
+<span class="t-neutral">●</span>
+</td>
+<td class="c">
+<span class="t-accent">◐</span>
+</td>
+<td class="c">
+<span class="t-warn">●</span>
+</td>
+<td class="c">
+<span class="t-muted">·</span>
+</td>
+<td class="p2">
+<span class="t-muted">LAN only 192.168.0.0/24</span>
+</td>
+</tr>
+</tbody>
+</table>
+<p class="ln">
+<span class="b">   This machine only</span>
+<span class="t-muted">  (4)</span>
+</p>
+<ul class="wrap">
+<li>5433 blog-db-1</li>
+<li>5678 node</li>
+<li>6379 cache-1</li>
+<li>8081 blog-app-1</li>
+</ul>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="webapps" data-rev="a163b3c5be" id="c-webapps" data-state="ok" data-title="WEB APPS">
+<div class="ch">
+<h3>WEB APPS</h3>
+<span class="note">4 active · 1 down (expected)</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of WEB APPS">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euwa&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: WEB APPS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edwa&amp;back=app%3D1%26edit%3D1" aria-label="Later: WEB APPS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=eswa&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: WEB APPS" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egwa&amp;back=app%3D1%26edit%3D1" aria-label="Wider: WEB APPS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehwa&amp;back=app%3D1%26edit%3D1" aria-label="WEB APPS: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-mark">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+<col class="c-flag">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Web app</th>
+<th class="n p2" scope="col">Ports</th>
+<th scope="col">Reach</th>
+<th class="p1" scope="col">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr data-key="shop-web">
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>shop-web</td>
+<td class="n p2">8080</td>
+<td>
+<span class="t-warn">LAN+tailnet</span>
+</td>
+<td class="p1">
+</td>
+</tr>
+<tr data-key="admin-console">
+<td>
+<span class="t-warn">○</span>
+</td>
+<td>admin-console</td>
+<td class="n p2">9443</td>
+<td>
+<span class="t-muted">not listening</span>
+</td>
+<td class="p1">
+<span class="t-warn">DOWN (expected)</span>
+</td>
+</tr>
+<tr data-key="funnel /webhook">
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>funnel /webhook</td>
+<td class="n p2">8444</td>
+<td>
+<span class="t-err">Internet</span>
+</td>
+<td class="p1">
+<span class="t-muted">not declared</span>
+</td>
+</tr>
+<tr data-key="blog-app-1">
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>blog-app-1</td>
+<td class="n p2">8081</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+<td class="p1">
+<span class="t-muted">not declared</span>
+</td>
+</tr>
+<tr data-key="node">
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>node</td>
+<td class="n p2">5678</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+<td class="p1">
+<span class="t-muted">not declared</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="firewall" data-rev="0fb206670e" id="c-firewall" data-state="warn" data-title="FIREWALL">
+<div class="ch">
+<h3>FIREWALL</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of FIREWALL">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eufw&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: FIREWALL" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edfw&amp;back=app%3D1%26edit%3D1" aria-label="Later: FIREWALL" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esfw&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: FIREWALL" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egfw&amp;back=app%3D1%26edit%3D1" aria-label="Wider: FIREWALL" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehfw&amp;back=app%3D1%26edit%3D1" aria-label="FIREWALL: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="msg lv-ok">
+<span class="sym">✔</span> ufw active</p>
+<p class="msg lv-warn">
+<span class="sym">!</span> DOCKER-USER empty: ports published by containers bypass ufw</p>
+<dl class="kv">
+<dt>ufw</dt>
+<dd>in deny  ·  out allow  ·  fwd deny   log: on (low)</dd>
+<dt>iptables</dt>
+<dd>INPUT DROP (5 rules)   FORWARD DROP (0 rules)</dd>
+<dt>tailscale</dt>
+<dd>
+<span class="t-ok">ts-input accepts tailscale0</span>
+</dd>
+<dt>fail2ban</dt>
+<dd>sshd: 2 ban  198.51.100.7 198.51.100.9</dd>
+<dt>drop 1h</dt>
+<dd>41</dd>
+<dt>  ports</dt>
+<dd>23×25  445×16</dd>
+<dt>  sources</dt>
+<dd>198.51.100.9×30  198.51.100.44×11</dd>
+</dl>
+<p class="ln">
+<span class="b">   UFW INBOUND RULES (3)</span>
+</p>
+<table class="tbl">
+<colgroup>
+<col class="c-to">
+<col class="c-action">
+<col class="c-from">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">To</th>
+<th class="n" scope="col">Action</th>
+<th class="p1" scope="col">From</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>22/tcp</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">192.168.0.0/24</td>
+</tr>
+<tr>
+<td>Anywhere on tailscale0</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
+</tr>
+<tr class="t-warn">
+<td>41641/udp</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="system" data-rev="3d67c885cd" id="c-system" data-state="ok" data-title="SYSTEM">
+<div class="ch">
+<h3>SYSTEM</h3>
+<span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of SYSTEM">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eusy&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: SYSTEM" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edsy&amp;back=app%3D1%26edit%3D1" aria-label="Later: SYSTEM" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=essy&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: SYSTEM" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egsy&amp;back=app%3D1%26edit%3D1" aria-label="Wider: SYSTEM" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehsy&amp;back=app%3D1%26edit%3D1" aria-label="SYSTEM: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="ln bl">
+<span class="lb">RAM</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>
+<span class="n">10.2G/31.2G</span>
+<span class="bx">cache 4.8G</span>
+</p>
+<p class="ln bl">
+<span class="lb">DISK</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</p>
+<p class="ln bl">
+<span class="lb">TEMP</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="72%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="72" height="8"/>
+</svg>
+<span class="n">72°C/100°C</span>
+<span class="bx">limits 80/90°C   clock 4.1/4.8 GHz</span>
+</p>
+<p class="ln bl">
+<span class="lb">NVMe</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="52%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="51.9" height="8"/>
+</svg>
+<span class="n">44°C/85°C</span>
+<span class="bx">limits 68/76°C</span>
+</p>
+<p class="ln bl">
+<span class="lb">CPU</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6.3" height="8"/>
+</svg>
+<span class="n">6%</span>
+<span class="bx">16 threads</span>
+</p>
+<ul class="grid">
+<li class="bl">
+<span class="lb">0</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">4%</span>
+</li>
+<li class="bl">
+<span class="lb">1</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">2</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">6%</span>
+</li>
+<li class="bl">
+<span class="lb">3</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">4</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="62%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="62" height="8"/>
+</svg>
+<span class="n">62%</span>
+</li>
+<li class="bl">
+<span class="lb">5</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">4%</span>
+</li>
+<li class="bl">
+<span class="lb">6</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">7</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">8</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="3" height="8"/>
+</svg>
+<span class="n">3%</span>
+</li>
+<li class="bl">
+<span class="lb">9</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">10</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">11</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">12</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">6%</span>
+</li>
+<li class="bl">
+<span class="lb">13</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">14</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">15</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+</ul>
+<p class="ln">
+<span class="t-strong"> HEAVIEST CONTAINERS (RAM)</span>
+</p>
+<table class="tbl">
+<colgroup>
+<col class="c-name">
+<col class="c-mem">
+<col class="c-share">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Container</th>
+<th class="n" scope="col">RAM</th>
+<th class="p2" scope="col">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>shop-api-1</td>
+<td class="n">520M</td>
+<td class="p2">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="100%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="100" height="8"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>shop-db-1</td>
+<td class="n">410M</td>
+<td class="p2">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="79%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="78.8" height="8"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>shop-web-1</td>
+<td class="n">310M</td>
+<td class="p2">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="60%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="59.6" height="8"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>blog-db-1</td>
+<td class="n">260M</td>
+<td class="p2">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="50%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="50" height="8"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>blog-app-1</td>
+<td class="n">150M</td>
+<td class="p2">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="29%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="28.8" height="8"/>
+</svg>
+</td>
+</tr>
+</tbody>
+</table>
+<p class="more">
+<a href="/?app=1&amp;card=system">… the whole card</a>
+</p>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="containers" data-rev="c9b2a74c3b" id="c-containers" data-state="warn" data-title="CONTAINER">
+<div class="ch">
+<h3>CONTAINER</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of CONTAINER">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euct&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: CONTAINER" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edct&amp;back=app%3D1%26edit%3D1" aria-label="Later: CONTAINER" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esct&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: CONTAINER" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egct&amp;back=app%3D1%26edit%3D1" aria-label="Wider: CONTAINER" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehct&amp;back=app%3D1%26edit%3D1" aria-label="CONTAINER: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="ln"> 7 containers   RAM 1.6G   <span class="t-ok">●</span> 6 ok   <span class="t-err">✖ 1 stopped</span>
+</p>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">blog                       </span>2/2 running   RAM 410M</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> app</li>
+<li>
+<span class="t-ok">●</span> db</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">shop                       </span>3/4 running   RAM 1.2G<span class="t-err">   ✖ 1</span>
+</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> api</li>
+<li>
+<span class="t-ok">●</span> db</li>
+<li>
+<span class="t-ok">●</span> web</li>
+<li>
+<span class="t-err">✖</span> worker</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">(no stack)                 </span>1/1 running   RAM 30M</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> cache</li>
+</ul>
+</section>
+</div>
+</article>
+<article class="card s1 st-err" data-card="databases" data-rev="9446e162ae" id="c-databases" data-state="err" data-title="DATABASE">
+<div class="ch">
+<h3>DATABASE</h3>
+<span class="note">3 running · 1 exposed</span>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of DATABASE">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eudb&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DATABASE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddb&amp;back=app%3D1%26edit%3D1" aria-label="Later: DATABASE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdb&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DATABASE" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egdb&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DATABASE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdb&amp;back=app%3D1%26edit%3D1" aria-label="DATABASE: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-kind">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Kind</th>
+<th scope="col">Name</th>
+<th class="n p2" scope="col">Ports</th>
+<th scope="col">Reach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-err">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>shop-db-1</td>
+<td class="n p2">*5432</td>
+<td>
+<span class="t-err">exposed</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>api</span>
+<span class="fi">
+<span class="t-err">external clients now: 192.168.0.50</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>blog-db-1</td>
+<td class="n p2">lo:5433</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>app</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">redis    </span>
+</td>
+<td>cache-1</td>
+<td class="n p2">lo:6379</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-warn">no known service</span>
+<span class="t-muted"> (bridge: cannot tell)</span>
+</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="boot" data-rev="dba7ef2664" id="c-boot" data-state="warn" data-title="BOOT">
+<div class="ch">
+<h3>BOOT</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of BOOT">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eubo&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: BOOT" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edbo&amp;back=app%3D1%26edit%3D1" aria-label="Later: BOOT" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esbo&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: BOOT" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egbo&amp;back=app%3D1%26edit%3D1" aria-label="Wider: BOOT" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehbo&amp;back=app%3D1%26edit%3D1" aria-label="BOOT: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="ln">   boot finished in <span class="t-strong">58.4s</span>   kernel 6.8.0-demo   up 5d 0h</p>
+<figure class="timeline">
+<svg class="tl" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="boot timeline" preserveAspectRatio="none">
+<rect class="tp tp-firmware" x="0.0" y="0" width="8.7" height="8"/>
+<rect class="tp tp-loader" x="8.7" y="0" width="3.4" height="8"/>
+<rect class="tp tp-kernel" x="12.2" y="0" width="2.1" height="8"/>
+<rect class="tp tp-initrd" x="14.2" y="0" width="1.9" height="8"/>
+<rect class="tp tp-userspace" x="16.1" y="0" width="83.9" height="8"/>
+</svg>
+<ul class="legend">
+<li class="tp-firmware">
+<span class="sw">
+</span> firmware <span class="n">5.1s</span>
+</li>
+<li class="tp-loader">
+<span class="sw">
+</span> loader <span class="n">2.0s</span>
+</li>
+<li class="tp-kernel">
+<span class="sw">
+</span> kernel <span class="n">1.2s</span>
+</li>
+<li class="tp-initrd">
+<span class="sw">
+</span> initrd <span class="n">1.1s</span>
+</li>
+<li class="tp-userspace">
+<span class="sw">
+</span> userspace <span class="n">49.0s</span>
+</li>
+</ul>
+</figure>
+<h3 class="sub">SLOWEST UNITS <span class="note">activation time: not all of them block boot</span>
+</h3>
+<div class="ind">
+<table class="tbl">
+<colgroup>
+<col class="c-unit">
+<col class="c-share">
+<col class="c-time">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Unit</th>
+<th class="p2" scope="col">
+</th>
+<th class="r n" scope="col">Time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>systemd-networkd-wait-online.service</td>
+<td class="p2">
+<svg class="bar st-err t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="100%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="100" height="8"/>
+</svg>
+</td>
+<td class="r n">
+<span class="t-warn">33.5s</span>
+</td>
+</tr>
+<tr>
+<td>docker.service</td>
+<td class="p2">
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="20%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="20" height="8"/>
+</svg>
+</td>
+<td class="r n">
+<span class="t-warn">6.2s</span>
+</td>
+</tr>
+<tr>
+<td>snapd.service</td>
+<td class="p2">
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="15%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="15" height="8"/>
+</svg>
+</td>
+<td class="r n">4.8s</td>
+</tr>
+<tr>
+<td>cloud-init.service</td>
+<td class="p2">
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="10%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="10" height="8"/>
+</svg>
+</td>
+<td class="r n">3.9s</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3 class="sub">BOOT JOURNAL <span class="note">warning and worse</span>
+</h3>
+<p class="ln">   <span class="t-err">2</span> errors   <span class="t-warn">9</span> warning</p>
+<div class="ind">
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-id">
+<col class="c-n">
+<col class="c-last">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Entry</th>
+<th class="r n" scope="col">Count</th>
+<th class="p1" scope="col">Last</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>kernel</td>
+<td class="r n">4×</td>
+<td class="p1">
+<span class="t-muted">example warning</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="network_traffic" data-rev="bb46c91805" id="c-network_traffic" data-state="ok" data-title="NETWORK TRAFFIC">
+<div class="ch">
+<h3>NETWORK TRAFFIC</h3>
+<span class="note">↓ received · ↑ sent</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of NETWORK TRAFFIC">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eunt&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: NETWORK TRAFFIC" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=ednt&amp;back=app%3D1%26edit%3D1" aria-label="Later: NETWORK TRAFFIC" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esnt&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: NETWORK TRAFFIC" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egnt&amp;back=app%3D1%26edit%3D1" aria-label="Wider: NETWORK TRAFFIC" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehnt&amp;back=app%3D1%26edit%3D1" aria-label="NETWORK TRAFFIC: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-iface">
+<col class="c-rx">
+<col class="c-rx-hist">
+<col class="c-tx">
+<col class="c-tx-hist">
+<col class="c-total">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Interface</th>
+<th class="n" scope="col">Received</th>
+<th class="p3" scope="col">
+</th>
+<th class="n p1" scope="col">Sent</th>
+<th class="p3" scope="col">
+</th>
+<th class="p2" scope="col">Total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>eth0</td>
+<td class="n">
+<span class="t-ok">↓</span> 1.8 MB/s</td>
+<td class="p3">
+<svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
+<polyline fill="none" points="0.0,7.6 2.8,8.2 5.5,6.0 8.3,6.5 11.0,4.3 13.8,2.2 16.6,3.0 19.3,1.2 22.1,2.4 24.8,1.0 27.6,2.6 30.3,1.6 33.1,3.6 35.9,3.1 38.6,2.6 41.4,5.1 44.1,4.8 46.9,7.3 49.7,7.0 52.4,9.4 55.2,8.9 57.9,11.0 60.7,10.1 63.4,11.8 66.2,10.5 69.0,9.0 71.7,10.0 74.5,8.1 77.2,8.8 80.0,6.7"/>
+</svg>
+</td>
+<td class="n p1">
+<span class="t-accent">↑</span> 372.4 kB/s</td>
+<td class="p3">
+<svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
+<polyline fill="none" points="0.0,5.3 2.8,3.3 5.5,1.4 8.3,2.5 11.0,1.0 13.8,2.5 16.6,1.4 19.3,3.3 22.1,2.6 24.8,4.9 27.6,4.5 30.3,4.2 33.1,6.7 35.9,6.4 38.6,8.8 41.4,8.4 44.1,10.5 46.9,9.7 49.7,11.5 52.4,10.3 55.2,11.7 57.9,10.1 60.7,8.3 63.4,9.1 66.2,7.0 69.0,7.6 71.7,5.4 74.5,5.9 77.2,3.8 80.0,4.5"/>
+</svg>
+</td>
+<td class="p2">
+<span class="t-muted"> ↓40.2G ↑6.3G</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="sessions" data-rev="8c35e9daa6" id="c-sessions" data-state="ok" data-title="SESSIONS">
+<div class="ch">
+<h3>SESSIONS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of SESSIONS">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euse&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: SESSIONS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edse&amp;back=app%3D1%26edit%3D1" aria-label="Later: SESSIONS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esse&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: SESSIONS" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egse&amp;back=app%3D1%26edit%3D1" aria-label="Wider: SESSIONS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehse&amp;back=app%3D1%26edit%3D1" aria-label="SESSIONS: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<p class="ln"> 1 user session   ssh: <span class="t-ok">1 connected</span>
+</p>
+<p class="ln"> <span class="t-ok">●</span> ssh from 192.168.0.20  <span class="t-muted">LAN or Tailscale</span>
+</p>
+<ul class="wrap" data-max-lines="1">
+<li>tty1</li>
+</ul>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="tailscale" data-rev="83e1e160e8" id="c-tailscale" data-state="warn" data-title="TAILSCALE">
+<div class="ch">
+<h3>TAILSCALE</h3>
+<span class="note">demo-host · 1/2 nodes online</span>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of TAILSCALE">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=euts&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: TAILSCALE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edts&amp;back=app%3D1%26edit%3D1" aria-label="Later: TAILSCALE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=ests&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: TAILSCALE" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egts&amp;back=app%3D1%26edit%3D1" aria-label="Wider: TAILSCALE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehts&amp;back=app%3D1%26edit%3D1" aria-label="TAILSCALE: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-name">
+<col class="c-os">
+<col class="c-state">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Node</th>
+<th class="p2" scope="col">OS</th>
+<th scope="col">State</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>laptop</td>
+<td class="p2">linux</td>
+<td>
+<span class="t-ok">online </span>
+<span class="t-muted">direct</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-muted">○</span>
+</td>
+<td>phone</td>
+<td class="p2">android</td>
+<td>
+<span class="t-muted">offline · seen 2 h ago</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="docker_disk" data-rev="40aec4dcbd" id="c-docker_disk" data-state="ok" data-title="DOCKER · DISK">
+<div class="ch">
+<h3>DOCKER · DISK</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of DOCKER · DISK">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eudd&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DOCKER · DISK" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddd&amp;back=app%3D1%26edit%3D1" aria-label="Later: DOCKER · DISK" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdd&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DOCKER · DISK" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egdd&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DOCKER · DISK" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdd&amp;back=app%3D1%26edit%3D1" aria-label="DOCKER · DISK: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-type">
+<col class="c-count">
+<col class="c-active">
+<col class="c-size">
+<col class="c-unused">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Type</th>
+<th class="r n p3" scope="col">Count</th>
+<th class="n p2" scope="col">In use</th>
+<th class="n" scope="col">Size</th>
+<th class="p1" scope="col">Unused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Images</td>
+<td class="r n p3">14</td>
+<td class="n p2">(6 in use)</td>
+<td class="n">5.2GB</td>
+<td class="p1">unused 2.1GB (40%)</td>
+</tr>
+<tr>
+<td>Containers</td>
+<td class="r n p3">7</td>
+<td class="n p2">(6 in use)</td>
+<td class="n">180MB</td>
+<td class="p1">unused 0B (0%)</td>
+</tr>
+<tr>
+<td>Local Volumes</td>
+<td class="r n p3">5</td>
+<td class="n p2">(5 in use)</td>
+<td class="n">1.4GB</td>
+<td class="p1">unused 0B (0%)</td>
+</tr>
+</tbody>
+</table>
+<p class="ln">
+<span class="t-muted"> dangling images: 0 (0B): safe to prune</span>
+</p>
+<p class="ln">
+<span class="t-warn"> 12 unused volumes (9 anonymous): may hold data, check before pruning</span>
+</p>
+<p class="ln">
+<span class="t-muted"> unused = no container uses it; tagged images can be re-pulled</span>
+</p>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="disks" data-rev="288b63f6bf" id="c-disks" data-state="ok" data-title="DISKS">
+<div class="ch">
+<h3>DISKS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="ectl" role="group" aria-label="Layout of DISKS">
+<span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
+<a class="eb" data-earlier href="/?set=eudi&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DISKS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddi&amp;back=app%3D1%26edit%3D1" aria-label="Later: DISKS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdi&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DISKS" title="Narrower">−</a>
+<span class="wv" aria-hidden="true">
+</span>
+<a class="eb" data-grow href="/?set=egdi&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DISKS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdi&amp;back=app%3D1%26edit%3D1" aria-label="DISKS: hide or show" title="Hide or show">
+<span class="t-hide">✕</span>
+<span class="t-show">show</span>
+</a>
+<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">↔</span>
+</div>
+<div class="cb" inert>
+<table class="tbl">
+<colgroup>
+<col class="c-mount">
+<col class="c-usage">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Mount</th>
+<th class="n" scope="col">Used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/</td>
+<td class="n">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</td>
+</tr>
+<tr>
+<td>/data</td>
+<td class="n">
+<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="83" height="8"/>
+</svg>
+<span class="n">249.0G/300.0G</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+</main>
+<footer class="foot">
+<a href="/?app=1">Done</a>
+<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1&amp;edit=1">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;edit=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26edit%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26edit%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26edit%3D1">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1%26edit%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26edit%3D1">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Editor</h3>
+<dl>
+<dt>
+<kbd>Space</kbd>
+</dt>
+<dd>grab or drop a card</dd>
+<dt>
+<kbd>←↑↓→</kbd>
+</dt>
+<dd>move it</dd>
+<dt>
+<kbd>+</kbd> <kbd>-</kbd>
+</dt>
+<dd>bigger/smaller</dd>
+<dt>
+<kbd>x</kbd>
+</dt>
+<dd>hide the card</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>let go</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
+// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+<script>// nuc-console web view: layout editor (src/webjs.py BUILDER_JS), only on the ?edit=1 page: main.grid[data-edit]. Cards are
+// reordered by moving the ones already there; no markup is made. Pointer: drag a card by its [data-drag] handle to move it, drag its
+// [data-size] handle sideways to resize it (it snaps to 1-4 columns). The links [data-earlier], [data-later], [data-shrink],
+// [data-grow] and [data-hide] do the same one step at a time. Keyboard: Space on a card grabs or drops it, arrows move it, + and -
+// resize, x hides or shows, Escape puts it back. #live announces each step ("exposure: position 3 of 12, width 2").
+// Every change is saved at once: the whole layout (cookie grammar l<card2>
+<1-4>[x]_...) goes to the server as
+// GET /?set=...&frag=1; when that fails, the page goes back to the last layout the server kept. Without this script the same
+// controls are links to the server's own steps.
+// Classes it sets, for the server's CSS:
+//   s1 s2 s3 s4   the card's width      off    the card is hidden in the layout (it stays in the grid, dimmed)
+//   drag          the card being dragged (data-grab marks a card grabbed with the keyboard)
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const grid = document.querySelector("main.grid[data-edit]");
+  if (!grid) return;
+  const CODES = new Map("attention:at exposure:ex webapps:wa firewall:fw system:sy containers:ct databases:db boot:bo network_traffic:nt sessions:se tailscale:ts docker_disk:dd disks:di".split(" ").map(p => p.split(":"))), live = document.getElementById("live");
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const cards = () => Array.from(grid.querySelectorAll("article.card[data-card]"));
+  const code = c => CODES.get(c.getAttribute("data-card"));
+  const width = c => c.classList.contains("s4") ? 4 : c.classList.contains("s3") ? 3 : c.classList.contains("s2") ? 2 : 1;
+  const setWidth = (c, n) => { c.classList.toggle("s1", n === 1); c.classList.toggle("s2", n === 2); c.classList.toggle("s3", n === 3); c.classList.toggle("s4", n === 4); };
+  const inside = (r, x, y) => x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+  let drag = null, grab = null;  // a pointer drag {id, c, h, s, over, x, y, size}; a keyboard grab {c, s}
+
+  function layout() { return "l" + cards().filter(code).map(c => code(c) + width(c) + (c.classList.contains("off") ? "x" : "")).join("_"); }
+  const snap = () => cards().map(c => ({c, w: width(c), off: c.classList.contains("off")}));
+  function sync(c) { const h = c.querySelector("[data-hide]"); if (h) h.setAttribute("aria-pressed", String(c.classList.contains("off"))); }
+  function restore(s) { for (const o of s) { grid.append(o.c); setWidth(o.c, o.w); o.c.classList.toggle("off", o.off); sync(o.c); } }
+  function arrange(str) {  // the layout string, on the page; false when it is not one
+    if (!/^l[a-z]{2}[1-4]x?(_[a-z]{2}[1-4]x?)*$/.test(str)) return false;
+    const by = new Map(cards().map(c => [code(c), c])), done = new Set();
+    for (const part of str.slice(1).split("_")) {
+      const c = by.get(part.slice(0, 2));
+      if (!c || done.has(c)) continue;
+      done.add(c); grid.append(c); setWidth(c, Number(part[2])); c.classList.toggle("off", part.length > 3); sync(c);
+    }
+    return true;
+  }
+  let sent = layout(), kept = sent, queue = Promise.resolve();  // the layout last sent, the one the server confirmed, the requests in turn
+  function say(c, extra) {  // "exposure: position 3 of 12, width 2"
+    const all = cards(), name = (c.getAttribute("data-title") || c.getAttribute("data-card")).replace(/_/g, " ");
+    if (live) live.textContent = name + ": position " + (all.indexOf(c) + 1) + " of " + all.length + ", width " + width(c) + (c.classList.contains("off") ? ", hidden" : "") + (extra ? ". " + extra : "");
+  }
+  function commit(c, extra) {  // tell the reader, and the server when the layout is not the one it has
+    say(c, extra);
+    if (layout() === sent) return;
+    sent = layout();
+    queue = queue.then(() => {
+      const str = sent;  // the latest: a request that failed before this one has put the page back
+      return load("/?set=" + str + "&frag=1").then(r => {
+        if (r.status !== 204) throw new Error("status " + r.status);
+        kept = str;
+      });
+    }).catch(() => {
+      arrange(kept); sent = kept;
+      if (live) live.textContent = "Saving failed; the layout is back as the server has it";
+    });
+  }
+  function resize(c, d) { setWidth(c, Math.max(1, Math.min(4, width(c) + d))); commit(c); }
+  function flip(c) { c.classList.toggle("off"); sync(c); commit(c); }
+  function nudge(c, d) {  // one place earlier or later
+    const all = cards(), o = all[all.indexOf(c) + d];
+    if (!o) { say(c); return; }
+    if (d < 0) o.before(c); else o.after(c);
+    c.focus({preventScroll: true});  // moving a node drops its focus
+    c.scrollIntoView({block: "nearest", behavior: calm.matches ? "auto" : "smooth"});
+    commit(c);
+  }
+  function release(extra) { const c = grab.c; grab = null; c.removeAttribute("data-grab"); say(c, extra); }
+
+  document.addEventListener("click", e => {
+    const t = e.target.closest("[data-earlier], [data-later], [data-grow], [data-shrink], [data-hide]"), c = t && t.closest("article.card[data-card]");
+    if (!t || !c || !plain(e)) return;
+    e.preventDefault();  // without the script these are links to the server's own step
+    if (t.hasAttribute("data-earlier")) nudge(c, -1);
+    else if (t.hasAttribute("data-later")) nudge(c, 1);
+    else if (t.hasAttribute("data-grow")) resize(c, 1);
+    else if (t.hasAttribute("data-shrink")) resize(c, -1);
+    else flip(c);
+    t.focus({preventScroll: true});
+  });
+  function hold() {  // the handle keeps the pointer even outside the window; moving a node in the page drops that, so ask again
+    try { drag.h.setPointerCapture(drag.id); } catch (err) { /* the pointer is gone */ }
+  }
+  document.addEventListener("pointerdown", e => {
+    const h = e.target.closest("[data-drag], [data-size]"), c = h && h.closest("article.card[data-card]");
+    if (!c || e.button > 0 || drag || grab) return;
+    drag = {id: e.pointerId, c, h, s: snap(), over: null, x: e.clientX, y: e.clientY, size: h.hasAttribute("data-size")};
+    hold();
+    c.classList.add("drag");
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const x = e.clientX, y = e.clientY;
+    if (drag.size) {  // the card ends where the pointer is, to the nearest quarter of the grid: 1 to 4 columns
+      const n = Math.max(1, Math.min(4, Math.round((x - drag.c.getBoundingClientRect().left) / (grid.getBoundingClientRect().width / 4))));
+      if (n !== width(drag.c)) setWidth(drag.c, n);
+      return;
+    }
+    if (y < 48 || y > window.innerHeight - 48) window.scrollBy(0, y < 48 ? -24 : 24);
+    const hit = cards().find(c => c !== drag.c && c.getClientRects().length && inside(c.getBoundingClientRect(), x, y));
+    if (!hit) { drag.over = null; return; }
+    if (hit === drag.over || Math.hypot(x - drag.x, y - drag.y) < 8) return;  // once per card entered, and not for a tremor
+    drag.over = hit; drag.x = x; drag.y = y;
+    if (hit.compareDocumentPosition(drag.c) & Node.DOCUMENT_POSITION_FOLLOWING) hit.before(drag.c); else hit.after(drag.c);
+    hold();
+  });
+  function end(e, ok) {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    d.c.classList.remove("drag");
+    if (ok) commit(d.c); else { restore(d.s); say(d.c); }
+  }
+  document.addEventListener("pointerup", e => end(e, true));
+  document.addEventListener("pointercancel", e => end(e, false));
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
+    const k = e.key;
+    if (drag) {  // a pointer drag in progress: Escape puts everything back, other keys wait
+      if (k === "Escape") { restore(drag.s); drag.c.classList.remove("drag"); say(drag.c, "Cancelled"); drag = null; e.preventDefault(); }
+      return;
+    }
+    if (!grab) {
+      if (k === " " && e.target.matches("article.card[data-card]")) {
+        grab = {c: e.target, s: snap()};
+        grab.c.setAttribute("data-grab", "1");
+        say(grab.c, "Grabbed. Arrows move, plus and minus resize, x hides or shows, space drops, escape cancels");
+        e.preventDefault();
+      }
+      return;
+    }
+    const c = grab.c;
+    if (k === "Escape") { restore(grab.s); grab = null; c.removeAttribute("data-grab"); c.focus({preventScroll: true}); commit(c, "Cancelled"); }
+    else if (k === " " || k === "Enter") release("Dropped");
+    else if (k === "ArrowLeft" || k === "ArrowUp") nudge(c, -1);
+    else if (k === "ArrowRight" || k === "ArrowDown") nudge(c, 1);
+    else if (k === "+" || k === "=") resize(c, 1);
+    else if (k === "-" || k === "_") resize(c, -1);
+    else if (k === "x") flip(c);
+    else return;
+    e.preventDefault();
+  });
+  document.addEventListener("focusout", e => {  // leaving a grabbed card drops it (a move gives the focus back at once)
+    if (grab && e.target === grab.c) setTimeout(() => { if (grab && document.activeElement !== grab.c) release("Dropped"); }, 0);
+  });
+
+  for (const c of cards()) { c.tabIndex = 0; sync(c); }
+})();
+</script>
+</body>
+</html>

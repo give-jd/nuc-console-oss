@@ -24,6 +24,9 @@ One string for the cookie, ?ui= and localStorage:  "1" *("." field)
   - dump_cookie() writes the canonical form (fields in the order t d v p o k l, visible cards first, hidden ones in the order of
     nuc_config.SECTIONS), so equal preferences give an equal string (a cache key).
 Example:  1.tl.dw.os.kpb_in_cp_rm.lat2_ex2_wa1_fw1_sy1_ct2_dbx
+
+The layout editor of the web shell (`?edit=1`) changes only l (layout and hidden): move, resize, hide, show and reset are pure functions here
+(`move`, `resize`, `hide`, `show`, `reset`; `apply_edit` applies one step, the field `e<op><card2>`, to a cookie).
 """
 import re
 
@@ -240,6 +243,125 @@ def apply_set(current, field):
             for k in ("kpis", "layout", "hidden"):
                 prefs.pop(k, None)
     return dump_cookie(prefs)
+
+
+# ---------------------------------------------------------------- the layout editor (pure: a layout in, a layout out)
+#
+# A layout here is {"layout": [(card, width)], "hidden": [card]}: the cards that show, in order, and the ones that are off. The editor's
+# links are `?set=e<op><card2>` (one step: the server applies it to the layout in force and stores the whole result) and `?set=ereset`
+# (drop the layout and the hidden list: the preset shows again); the editor's script sends the whole layout (`?set=l...`) instead.
+
+EDIT_OPS = {"u": "earlier", "d": "later", "s": "narrower", "g": "wider", "h": "hide", "w": "show"}
+_EDIT_RE = re.compile(r"e([udsghw])([a-z]{2})|(ereset)")
+
+
+def layout_of(prefs, available=None):
+    """The layout as the editor works on it, from preferences (usually effective()'s): the cards that show (visible_cards: the ones the
+    layout leaves out come last, 1 wide) and the hidden ones (all of them, even a card whose feature is off now: it stays hidden)."""
+    p = _clean(prefs)
+    return {"layout": visible_cards(p, available), "hidden": list(p.get("hidden", ()))}
+
+
+def _lay(layout):
+    c = _clean(layout)
+    return [list(i) for i in c.get("layout", ())], list(c.get("hidden", ()))
+
+
+def _out(items, hidden):
+    return {"layout": [tuple(i) for i in items], "hidden": hidden}
+
+
+def move(layout, card, delta):
+    """The card `delta` places earlier (< 0) or later (> 0) among the cards that show; at the end of the list it stays; a card that is not
+    shown or unknown changes nothing."""
+    items, hidden = _lay(layout)
+    ids = [c for c, _ in items]
+    if card in ids and isinstance(delta, int) and not isinstance(delta, bool):
+        i = ids.index(card)
+        items.insert(max(0, min(len(items) - 1, i + delta)), items.pop(i))
+    return _out(items, hidden)
+
+
+def resize(layout, card, delta):
+    """The card `delta` columns wider (or narrower), held to 1-4; a card that is not shown or unknown changes nothing."""
+    items, hidden = _lay(layout)
+    for it in items:
+        if it[0] == card and isinstance(delta, int) and not isinstance(delta, bool):
+            it[1] = max(1, min(MAX_WIDTH, it[1] + delta))
+    return _out(items, hidden)
+
+
+def hide(layout, card):
+    """The card out of the shown ones into the hidden ones (a card that is not shown, or unknown, changes nothing)."""
+    items, hidden = _lay(layout)
+    if any(c == card for c, _ in items):
+        items = [i for i in items if i[0] != card]
+        hidden = _hidden_order(hidden + [card])
+    return _out(items, hidden)
+
+
+def show(layout, card):
+    """A hidden card back, as the last one of the shown, 1 wide (a card that is not hidden, or unknown, changes nothing)."""
+    items, hidden = _lay(layout)
+    if card in hidden:
+        hidden = [c for c in hidden if c != card]
+        items.append([card, 1])
+    return _out(items, hidden)
+
+
+def reset(layout=None):
+    """No layout of one's own: nothing stored, the preset's cards show again."""
+    return {}
+
+
+def edit_parts(field):
+    """`?set=` field of the editor -> (op letter, card id), ("r", None) for `ereset`, None when it is not one (or names no card)."""
+    m = _EDIT_RE.fullmatch(field) if isinstance(field, str) else None
+    if not m:
+        return None
+    if m.group(3):
+        return ("r", None)
+    card = _CARD_BY_CODE.get(m.group(2))
+    return (m.group(1), card) if card else None
+
+
+def edit_field(op, card):
+    """The `?set=` field of one editor step: op is a key of EDIT_OPS, card a card id."""
+    return "e" + op + CARD_CODES[card]
+
+
+def apply_edit(current, field, cfg_ui=None, available=None):
+    """The cookie after an editor step: only the layout and the hidden list change, the rest is kept. The step is applied to the layout in
+    force (the cookie's, else config.ini's, else the preset's), so that the first step of a new editor fixes the whole layout as it was.
+    A field that is not a step, or names a card that does not show (unknown, hidden, its feature off), changes nothing: the canonical
+    `current` comes back. The result is never longer than COOKIE_MAX (else `current` is kept)."""
+    prefs = parse_cookie(current)
+    step = edit_parts(field)
+    if step is None:
+        return dump_cookie(prefs)
+    op, card = step
+    if op == "r":
+        prefs.pop("layout", None)
+        prefs.pop("hidden", None)
+        return dump_cookie(prefs)
+    eff, _src = effective(cfg_ui, current)
+    lay = layout_of(eff, available)
+    new = _clean({"u": lambda: move(lay, card, -1), "d": lambda: move(lay, card, 1), "s": lambda: resize(lay, card, -1),
+                  "g": lambda: resize(lay, card, 1), "h": lambda: hide(lay, card), "w": lambda: show(lay, card)}[op]())
+    if new.get("layout", []) == lay["layout"] and new.get("hidden", []) == lay["hidden"]:
+        return dump_cookie(prefs)  # nothing moved (the first card up, a card at its widest, an unknown card): do not fix the layout either
+    prefs.pop("layout", None)
+    if "layout" in new:
+        prefs["layout"] = new["layout"]
+    prefs["hidden"] = new.get("hidden", [])  # an empty list is stored too: it says 'nothing is hidden', whatever the preset hides
+    out = dump_cookie(prefs)
+    return out if len(out) <= COOKIE_MAX else dump_cookie(parse_cookie(current))
+
+
+def custom_layout(source):
+    """True when the layout in force is the reader's own (the cookie's or ?ui=): the cards then keep their order (order = fixed) instead of
+    moving by severity. `source` is effective()'s second value."""
+    return source.get("layout") in ("url", "browser")
 
 
 # ---------------------------------------------------------------- config.ini [ui]

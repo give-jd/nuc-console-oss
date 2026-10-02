@@ -440,7 +440,8 @@ def _cases():
     add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
     # the new shell (?app=1): the overview, the settings (appearance, export, about) and the AI page inside it (forms and CSRF as on the classic page)
     for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b"),
-                        ("overview-wall-light", "app=1&ui=1.tl.dw")):  # the wall density (short lists, no small print) in the light theme
+                        ("overview-wall-light", "app=1&ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
+                        ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
         add("web-shell-" + name, query=query)
     return out
 

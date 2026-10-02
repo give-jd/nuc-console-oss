@@ -109,7 +109,7 @@ CAPS = [
     ("before/after", r"\.(?:before|after)\(", 4, {"builder"}),
     ("append", r"\.append\(", 3, {"builder"}),
     ("textContent", r"\btextContent\b", 99, {"refresh", "prefs", "builder"}),
-    ("localStorage", r"\blocalStorage\b", 99, {"prefs", "builder"}),
+    ("localStorage", r"\blocalStorage\b", 99, {"prefs"}),
     ("sessionStorage", r"\bsessionStorage\b", 99, {"graph"}),
     ("navigator", r"\bnavigator\b", 2, {"prefs"}),
     ("clipboard.writeText", r"\bclipboard\.writeText\(", 1, {"prefs"}),
@@ -159,13 +159,13 @@ POLICIES = {
         location={"reload", "assign"}, assign_calls=1, storage={"localStorage": (2, {"getItem", "setItem"})}),
     "builder": Policy(
         "builder", 10752, 170, ids={"live"},
-        selectors={"main.grid[data-edit]", "article.card[data-card]", "[data-hide]", "[data-drag]",
-                   "[data-grow], [data-shrink], [data-hide], [data-save], [data-reset]"},
-        attrs_read={"data-card", "data-title", "data-done", "data-save", "data-reset", "data-grow", "data-shrink"},
+        selectors={"main.grid[data-edit]", "article.card[data-card]", "[data-hide]", "[data-drag], [data-size]",
+                   "[data-earlier], [data-later], [data-grow], [data-shrink], [data-hide]"},
+        attrs_read={"data-card", "data-title", "data-earlier", "data-later", "data-grow", "data-shrink", "data-size"},
         attrs_write={"data-grab", "aria-pressed"}, classes_set={"s1", "s2", "s3", "s4", "off", "drag"},
         classes_read={"s2", "s3", "s4", "off"},
         events={"DOMContentLoaded", "click", "pointerdown", "pointermove", "pointerup", "pointercancel", "keydown", "focusout"},
-        location={"assign"}, assign_calls=1, storage={"localStorage": (3, {"getItem", "setItem", "removeItem"})}),
+        location=()),
 }
 
 
