@@ -122,17 +122,17 @@ PROBLEM_CARDS = {
     "config-unreadable": ("exposure", "webapps"),
     "telegram-unpaired": (), "telegram-failing": (),
 }
-_SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)
+SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)
 
 
 def problem_state(id, ctx):
     """The state the problems of this frame give card `id` ('ok' when none belongs to it)."""
     items = ctx.problem_ids()
     if id == "attention":
-        return ui.worst(_SEV_STATE.get(sev, "warn") for sev, _ in items)
+        return ui.worst(SEV_STATE.get(sev, "warn") for sev, _ in items)
     if any(pid is None for _, pid in items):
         return "unknown"  # the list does not say which problem is which
-    return ui.worst(_SEV_STATE.get(sev, "warn") for sev, pid in items if id in PROBLEM_CARDS.get(pid, ()))
+    return ui.worst(SEV_STATE.get(sev, "warn") for sev, pid in items if id in PROBLEM_CARDS.get(pid, ()))
 
 
 def _has(d, key):

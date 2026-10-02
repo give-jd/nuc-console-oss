@@ -42,6 +42,11 @@ python3 tools/browser_check.py --out shots      # the web shell in a real headle
   (`tests/test_ai_web_actions.py`: a fake download server, fake runtimes that are shell scripts, a fake OpenAI server; no sleeps, no network, nothing real is downloaded),
   never in `web.py` or `render.py`, which only turn a request or a key into a call and the snapshot into markup or text. The POST rules (CSRF token,
   Origin/Referer, 4 KB, ids from the catalog, no JavaScript, the CSP) are in `docs/WEB.md`; a new button follows them and gets a test in `WebSecurity`. `--demo` simulates every action.
+- The data API (`/api/v1`, `docs/WEB.md`) serves the very components the pages draw: a view's model is one function (`cpu_nodes`, `health_nodes`,
+  `map_nodes`, `ai_nodes` in `web.py`, the cards and KPIs of `cards.py`) that the page turns into HTML and `src/webapi.py` into JSON (`data()`: every
+  field of the class and its bases, less `CONSOLE_ONLY`). A new component or field shows up in the API by itself; one that only the console draws
+  (a width, an indent) goes in `CONSOLE_ONLY`, and a field that changes meaning, or goes, is a new API version. `tests/test_webapi.py` tests the
+  documents, the access rules and the stream.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view's scripts are first-party, inline and pinned by hash: the shell's four in `src/webjs.py` (partial refresh, keys,
