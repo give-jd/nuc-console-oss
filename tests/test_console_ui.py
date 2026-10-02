@@ -42,7 +42,7 @@ class Base(unittest.TestCase):
                       os.environ.get("NO_COLOR"), render.PAUSED)
         os.environ.pop("NO_COLOR", None)
         cfg["ui"].clear()
-        cfg["ui"].update({"web": "classic", "sections": list(nuc_config.SECTIONS)})
+        cfg["ui"].update({"web": "app", "sections": list(nuc_config.SECTIONS)})
         for f in ("map", "cpu", "health", "ai"):
             cfg["features"][f] = True
         self.now = 1_790_000_000

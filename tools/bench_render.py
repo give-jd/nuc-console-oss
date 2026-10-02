@@ -50,12 +50,16 @@ VIEWS = tuple(
        ("cpu", ("console", ["--view", "cpu", "--select", "node", "--details"] + size(200, 50))),
        ("health", ("console", ["--view", "health", "--select", "mem-leak:node", "--details"] + size(200, 50))),
        ("ai", ("console", ["--view", "ai", "--select", "qwen3-8b", "--details"] + size(200, 50))),
-       ("web-dashboard", ("web", "")),
-       ("web-cpu", ("web", "view=cpu")),
-       ("web-map-tree", ("web", "view=map&all=1")),
-       ("web-map-graph", ("web", "view=map&as=graph")),
-       ("web-health", ("web", "view=health")),
-       ("web-ai", ("web", "view=ai"))])
+       # the classic pages (app=0: the shell is the default) and the shell
+       ("web-dashboard", ("web", "app=0")),
+       ("web-cpu", ("web", "view=cpu&app=0")),
+       ("web-map-tree", ("web", "view=map&all=1&app=0")),
+       ("web-map-graph", ("web", "view=map&as=graph&app=0")),
+       ("web-health", ("web", "view=health&app=0")),
+       ("web-ai", ("web", "view=ai&app=0")),
+       ("web-shell-dashboard", ("web", "")),
+       ("web-shell-cpu", ("web", "view=cpu")),
+       ("web-shell-health", ("web", "view=health"))])
 
 
 def frame_fn(world, kind, what):

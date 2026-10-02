@@ -14,7 +14,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import render  # noqa: E402
 import web  # noqa: E402
 import webjs  # noqa: E402
-from test_web import get, serve  # noqa: E402
+from test_web import get_any as get, serve  # noqa: E402
 
 WALL = "/?app=1&ui=1.dw&kiosk=1"
 

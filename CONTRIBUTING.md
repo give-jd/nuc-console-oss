@@ -44,8 +44,11 @@ python3 tools/browser_check.py --out shots      # the web shell in a real headle
   Origin/Referer, 4 KB, ids from the catalog, no JavaScript, the CSP) are in `docs/WEB.md`; a new button follows them and gets a test in `WebSecurity`. `--demo` simulates every action.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
-- JavaScript: the web view has none except `src/graphjs.py` (the MAP's graph view). Keep it that way; `tests/test_graphjs.py` lists
-  what that script may not do (build markup, eval, network, globals...). Its hash goes into the page's CSP automatically.
+- JavaScript: the web view's scripts are first-party, inline and pinned by hash: the shell's four in `src/webjs.py` (partial refresh, keys,
+  preferences, layout editor) and the MAP's graph view in `src/graphjs.py`; no library, no build, no external script. Every page works
+  without them. `tests/jsrules.py` lists what a script may not do (build markup with `innerHTML`, eval, string timers, network APIs other
+  than the one documented fetch, `document.cookie`, the `style` attribute...) and the DOM contract each one may touch;
+  `tests/test_graphjs.py` adds the graph's own rules. A page's CSP lists exactly the hashes of the scripts it carries, automatically.
 - The browser check (`tools/browser_check.py`, the `browser` job of `tests.yml`): it starts `src/web.py --demo` on a free port and loads every page of the shell in the Chrome or Chromium it finds (`--chrome PATH`, `$CHROME`, or the usual names and paths; as root it adds `--no-sandbox`): each view in each theme and density, with the scripts on (the DOM is the one after they ran) and with them removed by a small proxy, and the wall page. It fails on a CSP or Trusted Types violation, a script error or a page without its top bar, `main` or view block, and `--out DIR` keeps a screenshot per page (about 3 minutes for the whole matrix; `--quick` and `--only TEXT` for a part). A new view or block of the shell gets its landmark in `VIEW_LANDMARKS` and its entry in `VIEWS`; the pure parts are tested in `tests/test_browser_check.py`, and the script is stdlib only like the rest: no browser driver, no npm.
 - Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`. The MAP screen: `--view map` (with `--expand all|fit|N`, `--select TEXT`, `--details`, `--only`). The CPU screen: `--view cpu` (with `--sort cpu|mem|time|pid|user`, `--select NAME|PID`, `--details`). The HEALTH screen: `--view health` (with `--period 1|7|30`, `--select TEXT`, `--details`; `--demo-health little|none` for a machine with 5 hours of history or none). The AI screen: `--view ai` (with `--select TEXT`, `--details`; the demo has an NVIDIA box, a small Windows laptop and an Apple-silicon Mac). `--demo-os windows|darwin` for their data. `--view start`: the screen `[ui] start_view` opens at. `[ui]` on the console (theme, density, layout) is tried with a `[ui]` section in a `config.ini` (`NUC_CONSOLE_CONFIG=...`) and `NO_COLOR=1`; `tests/golden.py` has a case for each.
 
@@ -225,12 +228,14 @@ release must fill them, from the sources, never from memory or from a web page. 
 python3 src/render.py --once --demo --color --cols 226 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · overview, 3-column layout (demo data)" > docs/img/overview.svg
 python3 src/render.py --once --demo --color --cols 120 --rows 40 | python3 tools/ansi2svg.py --title "nuc-console · 120×40 console, single column (demo data)" > docs/img/compact.svg
 python3 src/render.py --once --demo --color --view map --expand fit --select shop-api --details --cols 200 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · MAP: who reaches what, and what is behind it (demo data)" > docs/img/map.svg
-# the CPU screen (docs/img/cpu.png) the same way: http://127.0.0.1:8799/?view=cpu&sel=<a pid>&pause=1, window 1760x940
-# the HEALTH page (docs/img/health.png): http://127.0.0.1:8799/?view=health&sel=mem-leak%3Anode&pause=1, window 1760x840
-# the AI page (docs/img/ai.png): the demo web view shows the invented machines and simulates the buttons:
-#   python3 src/web.py --demo --port 8796 & PID=$!   # then window 1760x900: http://127.0.0.1:8796/?view=ai&pause=1 ; kill $PID
-# the graph view is a browser page: run the demo web view and take a screenshot with any Chromium-based browser
-python3 src/web.py --demo --port 8799 &   # then:
-chromium --headless --hide-scrollbars --window-size=1600,1000 --screenshot=docs/img/graph.png "http://127.0.0.1:8799/?view=map&as=graph&sel=<key of shop-api-1>"
-kill %1
+# the web view's screenshots are the shell (the default web interface), dark theme (ui=1.td), paused (pause=1), demo data:
+python3 src/web.py --demo --port 8799 & PID=$!
+#   docs/img/web.png     window 1760x1100  http://127.0.0.1:8799/?ui=1.td&pause=1
+#   docs/img/cpu.png     window 1760x940   http://127.0.0.1:8799/?ui=1.td&view=cpu&sel=<a pid>&pause=1
+#   docs/img/health.png  window 1760x840   http://127.0.0.1:8799/?ui=1.td&view=health&sel=mem-leak%3Anode&pause=1
+#   docs/img/ai.png      window 1760x900   http://127.0.0.1:8799/?ui=1.td&view=ai&pause=1   (the demo simulates the buttons: nothing is downloaded or started)
+#   docs/img/graph.png   window 1600x1000  http://127.0.0.1:8799/?ui=1.td&view=map&as=graph&pause=1&sel=<key of shop-api-1>
+chromium --headless --hide-scrollbars --force-dark-mode --window-size=1760,1100 --screenshot=docs/img/web.png "http://127.0.0.1:8799/?ui=1.td&pause=1"
+# (any Chromium-based browser or a script driving one; the scripts of the page need about a second to run before the shot)
+kill $PID
 ```

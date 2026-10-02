@@ -43,21 +43,29 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
     nothing else of the data), a portable run `data/ai`. It holds `web.json` (the page's choices: on/off, model, endpoint; 0644) and
     `job.lock`. It stays when you uninstall.
   - A portable run writes only to the `data/` folder next to `run.sh` / `run.cmd`.
+- The web view is the new shell by default (`[ui] web = app`). To keep the classic pages for this release put `web = classic` under `[ui]` in `config.ini`;
+  they will be removed in the next one. The display opens the shell too.
 - `[web] refresh_seconds` is still read while `[dashboard] refresh_seconds` is absent; use the latter.
 - `install.sh` now clears `/opt/nuc-console/*.py` before it copies every module: do not keep files of your own there.
 
 ### Added
 
-**A new web interface (preview, opt-in)**
+**A new web interface (the default)**
 
-- `[ui] web = app` (or `?app=1` for one URL) serves a shell: a top bar (host, status pill, the five screens with badges, clock, help, settings),
+- **The web view is now the shell.** `[ui] web` defaults to `app`: `/` serves the shell described below (the Map, CPU, Health and AI screens drawn natively,
+  settings, a layout editor, partial refresh, a wall display), and the display (`render.py --kiosk`, `--open`) opens it (the full-screen window its wall
+  display). The classic pages (the console's text turned into HTML) are **kept for one release as a fallback and will be removed**: `[ui] web = classic` in
+  `config.ini` serves them for every page, `?app=0` for one URL (`?app=1` gives the shell back); their output is unchanged. Scripts on the default pages: see
+  Security below.
+
+- The shell (`[ui] web = app`, now the default; `?app=1` for one URL under `web = classic`) is: a top bar (host, status pill, the five screens with badges, clock, help, settings),
   a row of key figures, the overview as a grid of cards ordered by severity, and the Map, CPU, Health and AI pages in the same frame, in a dark, light,
-  high-contrast or automatic theme and three densities. It has no script yet. The classic pages stay the default and are unchanged.
+  high-contrast or automatic theme and three densities. The classic pages stay available and unchanged (see above).
 - The shell's pages have `style-src 'self'` and no `'unsafe-inline'`: no inline `<style>` or `style=` anywhere (the graph's size is a class); the classic pages are unchanged.
 - `/?view=settings`: appearance (theme, density, preset, order, start view, key figures, each a link), an Export of the `[ui]` block, and a read-only
   **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
 - The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.
-  The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-new-shell-preview-opt-in).
+  The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-shell-the-default-web-interface).
 - In the shell the CPU screen is real HTML, not a text screen: key figures, a meter per logical CPU, the temperatures and the process table, whose column
   heads are the sort links (the keys `p m t n u` work too) and whose rows select a process, with its details beside the table. The classic page and the
   console are unchanged.
@@ -78,8 +86,8 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
   events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
 - The shell as a wall display: `/?app=1&ui=1.dw&kiosk=1` scrolls one screen every `[dashboard] rotate_seconds` seconds (`&rotate=N` for one URL), shifts the top bar
-  every ten minutes against burn-in and keeps a footer with only the way to close the window. With `[ui] web = app`, `render.py --kiosk` and `--open` open the shell
-  (the full-screen window its wall display); `web = classic`, the default, opens the classic page as before.
+  every ten minutes against burn-in and keeps a footer with only the way to close the window. `render.py --kiosk` and `--open` open the shell
+  (the full-screen window its wall display); `web = classic` opens the classic page as before.
 - In the shell the **Map** (`?app=1&view=map`) is drawn natively too: the tree as a list whose rows are links (a symbol and a class for the state, an indent for
   the depth, a mark that opens or closes a branch), the details of the selected row beside it (below it in a narrow window), and expand all, collapse all and
   problems only as a segmented control of links with their keys (`e`, `c`, `p`), next to a link to the graph view. The console draws the same model and
@@ -253,6 +261,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Security
 
+- **The default web pages carry scripts.** Now that the shell is the default, `/` has three first-party inline scripts (partial refresh, keys,
+  preferences; a fourth on the layout editor), each pinned by its SHA-256 in that page's Content-Security-Policy (`script-src` lists exactly those
+  hashes, `connect-src 'self'`, Trusted Types for the fragment parser, `default-src 'none'`); the classic pages (`web = classic`, `app=0`) stay
+  script-free except their MAP graph. See [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
 - **The web view has one script now.** Every page is still GET only, with no JavaScript and `default-src 'none'`, except the MAP's graph
   view: one inline script whose SHA-256 is in that page's Content-Security-Policy. It builds no markup, opens no connection and loads
   nothing; `tests/test_graphjs.py` rejects changes that would let it. The MAP pages are bounded (unknown keys dropped, a capped page cache).

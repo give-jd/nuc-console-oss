@@ -13,6 +13,8 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import ansi  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 
 TOKEN = "t" * 24
 
@@ -41,13 +43,16 @@ def serve(token=""):
     return srv
 
 
-def get(srv, path="/", method="GET", headers=None):
+def get_any(srv, path="/", method="GET", headers=None):  # the interface the configuration says (the shell by default)
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request(method, path, headers=headers or {})
     r = c.getresponse()
     body = r.read().decode()
     c.close()
     return r.status, dict(r.getheaders()), body
+
+
+get = classic_default()(get_any)  # the classic pages: what most of this file looks at (the shell has its own files)
 
 
 class Web(unittest.TestCase):

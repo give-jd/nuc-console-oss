@@ -40,6 +40,8 @@ import render  # noqa: E402
 import screens  # noqa: E402
 import ansi  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
 
@@ -1208,6 +1210,7 @@ class WebBase(Base):
         render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
 
     # ---- http
+    @classic_default()
     def request(self, method, path, body=None, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
         c.request(method, path, body=body, headers=headers or {})

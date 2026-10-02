@@ -573,6 +573,11 @@ class NativeRenderer(unittest.TestCase):
 
 
 class Kiosk(unittest.TestCase):
+    def setUp(self):  # the classic page's addresses (the shell's are in tests/test_wall.py): [ui] web = classic
+        patcher = mock.patch.dict(render.CFG["ui"], {"web": "classic"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_html_colours_banner_and_escaping(self):
         out = htmlview.to_html("\x1b[1;41;37m ✖ 2 PROBLEMS \x1b[0m <b>\x1b[1;7m ok \x1b[0m")
         self.assertIn('class="w bR B"', out)

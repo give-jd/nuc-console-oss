@@ -1,6 +1,6 @@
 """Tests for the web shell (`?app=1`, `[ui] web = app`): its markup, /?set= and the nuc_ui cookie, /s/ assets, the settings page and the CSP.
 
-The classic pages stay the default and unchanged (tests/golden/ locks them byte for byte).
+The classic pages (`?app=0`, `[ui] web = classic`) are unchanged (tests/golden/ locks them byte for byte).
 """
 import base64
 import hashlib
@@ -21,7 +21,7 @@ import render  # noqa: E402
 import web  # noqa: E402
 import webcss  # noqa: E402
 import webjs  # noqa: E402
-from test_web import get, serve  # noqa: E402
+from test_web import get_any as get, serve  # noqa: E402
 
 
 class Tree(HTMLParser):
@@ -471,24 +471,27 @@ class Shell(unittest.TestCase):
         self.assertIn("not paired", body)
         self.assertIn("unreadable: bad line 3", body)
 
-    # ---- the classic pages stay the default
-    def test_the_classic_pages_are_unchanged_and_default(self):
-        _, h, body = get(self.srv, "/")
+    # ---- the shell is the default; the classic pages are the fallback (kept for one release)
+    def test_the_shell_is_the_default_and_the_classic_pages_are_the_way_back(self):
+        _, _, body = get(self.srv, "/")
+        self.assertIn("/s/app.", body)
+        self.assertNotIn("<pre>", body)
+        _, h, body = get(self.srv, "/?app=0")
         self.assertIn("<pre>", body)
         self.assertNotIn("/s/app.", body)
         self.assertEqual(h["Content-Security-Policy"], web.CSP)
         self.assertNotIn("script-src", web.CSP)
         self.assertNotIn("<script", body.lower())
-        _, _, body = get(self.srv, "/?app=0")
-        self.assertNotIn("/s/app.", body)
 
-    def test_ui_web_app_makes_the_shell_the_default_and_app_0_the_way_back(self):
-        with mock.patch.dict(render.CFG["ui"], {"web": "app"}):
+    def test_ui_web_classic_makes_the_classic_pages_the_default_and_app_1_the_way_forward(self):
+        with mock.patch.dict(render.CFG["ui"], {"web": "classic"}):
             self.srv.cache.clear()
             _, _, body = get(self.srv, "/?view=cpu")
-            self.assertIn("/s/app.", body)
-            _, _, classic = get(self.srv, "/?app=0")
-            self.assertNotIn("/s/app.", classic)
+            self.assertNotIn("/s/app.", body)
+            self.assertIn("<pre>", body)
+            _, _, shell = get(self.srv, "/?app=1&view=cpu")
+            self.assertIn("/s/app.", shell)
+        self.srv.cache.clear()
 
     def test_the_shell_cpu_page_has_no_stray_hint_and_the_footer_leaves_room(self):
         _, _, body = get(self.srv, "/?app=1&view=cpu")
@@ -614,14 +617,14 @@ class Scripts(unittest.TestCase):
         self.assertIn("style-src 'self'", web.page_csp(shell=True))
 
     def test_the_classic_pages_have_no_script_src_except_the_graph(self):
-        for path in ("/", "/?view=cpu", "/?view=map", "/?view=health", "/?view=ai", "/?app=0", "/?cols=100&full=1"):
+        for path in ("/?app=0", "/?view=cpu&app=0", "/?view=map&app=0", "/?view=health&app=0", "/?view=ai&app=0", "/?cols=100&full=1&app=0"):
             st, h, body = get(self.srv, path)
             csp = h["Content-Security-Policy"]
             self.assertTrue(csp.startswith("default-src 'none'"))
             for word in ("script-src", "connect-src", "trusted-types"):
                 self.assertNotIn(word, csp, path)
             self.assertNotIn("<script", body.lower(), path)
-        st, h, body = get(self.srv, "/?view=map&as=graph")
+        st, h, body = get(self.srv, "/?view=map&as=graph&app=0")
         self.assertEqual(script_src(h["Content-Security-Policy"]), hashes(inline_scripts(body)))
         self.assertEqual(len(inline_scripts(body)), 1)
         self.assertNotIn("connect-src", h["Content-Security-Policy"])
@@ -732,7 +735,7 @@ class Scripts(unittest.TestCase):
         self.assertGreater(int(h["Content-Length"]), 500)
 
     def test_only_shell_pages_have_fragments(self):
-        for path in ("/?frag=1", "/?view=cpu&frag=1", "/?app=0&frag=1"):
+        for path in ("/?app=0&frag=1", "/?view=cpu&app=0&frag=1"):
             st, h, body = get(self.srv, path)
             self.assertEqual(st, 200)
             self.assertNotIn("X-Nuc-Fragment", h, path)
@@ -1021,7 +1024,7 @@ class Builder(unittest.TestCase):
         for path in ("/?edit=1&app=0", "/?app=1&view=settings&edit=1", "/?app=1&view=cpu&edit=1", "/?view=map&edit=1"):
             self.assertFalse(self.page(path)[2].find("main", data_edit=True), path)
         self.assertTrue(self.page("/?app=1&edit=1&card=exposure")[2].find("main", data_edit=True))  # the editor wins over a single card
-        _, body, tree = self.page("/?edit=1")  # [ui] web = classic: the editor is a shell page all the same
+        _, body, tree = self.page("/?edit=1")  # the editor is a shell page
         self.assertTrue(tree.find("main", data_edit=True))
         self.assertIn('href="/s/app.', body)
         _, body, _ = self.page(self.EDIT + "&pause=1")

@@ -66,7 +66,7 @@ def load(path=None):
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True}  # notify.py; the bot token is never here
-    cfg["ui"] = {"web": "classic", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
+    cfg["ui"] = {"web": "app", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
             if os.path.exists(path):  # read() ignores a file it cannot open: that is not "no config.ini"
