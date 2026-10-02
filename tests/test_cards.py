@@ -412,7 +412,8 @@ class KpiTests(unittest.TestCase):
         self.assertEqual((got["internet"].value, got["internet"].state), ("1", "err"))
         self.assertEqual(got["db_lan"].state, "err")
         self.assertEqual((got["firewall"].value, got["firewall"].state), ("on", "ok"))
-        self.assertEqual((got["cpu"].value, got["cpu"].unit, got["cpu"].state), ("23", "%", "ok"))
+        busy = demo.machine("linux")["busy"]  # the one demo machine: its CPU figure, whatever the table says
+        self.assertEqual((got["cpu"].value, got["cpu"].unit, got["cpu"].state), (str(round(sum(busy) / len(busy))), "%", "ok"))
         self.assertEqual((got["ram"].unit, got["ram"].state), ("%", "ok"))
         self.assertEqual((got["temp"].unit, got["load"].value), ("°C", "0.82"))
         self.assertEqual((got["containers"].value, got["containers"].unit, got["containers"].state), ("6", "/7", "warn"))
