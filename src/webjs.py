@@ -6,10 +6,10 @@ either way no other script can run. The page works without any of them: every co
 fixed by tests/jsrules.py (no markup built from data, no eval, no cookie, no connection but this server's "/?..." pages, ...)
 and tests/test_webjs.py runs those rules on every script.
 
-    REFRESH_JS   partial refresh: polls the page's fragment and swaps in the cards whose revision changed (~10 KB)
+    REFRESH_JS   partial refresh: polls the page's fragment and swaps in the cards whose revision changed (~12 KB)
     KEYS_JS      keyboard: clicks the links the server marked with data-key, moves over the rows of a list (~3 KB)
     PREFS_JS     preferences: theme and density without a reload, the browser-side copy, the "Copy" button (~4 KB)
-    BUILDER_JS   layout editor, only on ?edit=1 pages: drag, resize, hide, with a keyboard alternative, saved at every change (~10 KB)
+    BUILDER_JS   layout editor, only on ?edit=1 pages: drag, resize, hide, with a keyboard alternative, saved at every change (~12 KB)
 
 The scripts only ever GET: they never send a form. A form POST (the AI screen's actions) stays a native form.
 
@@ -54,7 +54,9 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     data-kpi="<id>" data-depth="<n>" data-max-lines="<n>"   what the components (htmlview.html) say of a KPI, a tree row and a list; for the
                         server's CSS only (the scripts never read them, a fragment may carry them)
     data-problem="<id>" the stable id of a problem in ATTENTION (a problem, or one accepted as known); for the server's CSS only
-    class="card sN stateX rN"      (the overview's cards) rN: the grid rows the card spans (htmlview.est_rows); for the server's CSS only, the scripts never read it
+    class="card sN stateX rN"      (the overview's cards) rN: the grid rows the card spans (htmlview.est_rows, the server's estimate). REFRESH_JS
+                        replaces it with the measured span (article.card[data-card]: its height in rows of main.grid's grid-auto-rows, r2..r200) after
+                        load, each swap and a resize, only where the grid packs densely (not in one column, not on ?card=, not in the editor)
     data-state="ok|warn|err|unknown"   for the server's CSS only (the scripts never read it, a fragment may carry it)
     Ids in a fragment must not reuse the ids of this contract (stale, live, help, export). `name` is only allowed on form controls.
 
@@ -155,6 +157,9 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
 // Classes it sets on <html>, for the server's CSS:
 //   stale    the numbers on the page are old (the #stale banner says since when)
 //   paused   the refresh is paused with the [data-pause] toggle
+// It also trues up the grid's row spans: the server estimates each overview card's height (class rN), the script measures it and sets
+// the exact span, after load, after every swap and on resize (debounced); the classes r2..r200 are the server's CSS. The class
+// attribute is rewritten as a whole (the class names are computed, and classList is only used with literal names here).
 // In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
 // (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
 (function main() {
@@ -244,6 +249,19 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
     return true;
   }
 
+  function fit() {  // the grid's dense packing with the measured heights: each card spans the rows its own height needs (no hole, no overlap)
+    const g = getComputedStyle(page);
+    if (!/dense/.test(g.gridAutoFlow) || url.indexOf("card=") >= 0) return;  // one column (rows are auto), or one card in full
+    const hit = /([0-9.]+)px/.exec(g.gridAutoRows), unit = hit ? Number(hit[1]) : parseFloat(g.fontSize) * 0.5, todo = [];
+    if (!(unit > 1)) return;
+    for (const c of document.querySelectorAll("article.card[data-card]")) {  // measure all first, then write: one layout, not one per card
+      const names = (c.getAttribute("class") || "").split(/\s+/).filter(n => n), keep = names.filter(n => !/^r[0-9]+$/.test(n));
+      const h = c.getBoundingClientRect().height + (parseFloat(getComputedStyle(c).marginBottom) || 0);
+      const want = Math.min(200, Math.ceil(h / unit - 0.05)), next = want > 1 ? keep.concat("r" + want) : keep;
+      if (h > 0 && next.join(" ") !== names.join(" ")) todo.push([c, next]);
+    }
+    for (const [c, next] of todo) c.setAttribute("class", next.join(" "));
+  }
   async function poll() {
     const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
     busy = true;
@@ -255,6 +273,7 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
         const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
         if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
         if (!blocks || !swap(blocks)) { reload(); return; }
+        fit();
         etag = r.headers.get("ETag") || "";
       }
       fails = 0; lastOk = Date.now(); show("");
@@ -297,6 +316,10 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
   window.addEventListener("keydown", () => { touched = Date.now(); }, true);
   window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
   root.classList.toggle("paused", paused);
+  let shaken = 0;
+  window.addEventListener("resize", () => { clearTimeout(shaken); shaken = setTimeout(fit, 150); });
+  window.addEventListener("load", fit);
+  fit();
   if (!paused) plan(period);
   if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
     setTimeout(turn, spin);
