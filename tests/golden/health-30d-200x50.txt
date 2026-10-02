@@ -3,7 +3,7 @@
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
 [7m  ✖ ERR   Out of memory: shop-worker-1  shop-worker-1 was hit by an out-of-memory event 13 times in the last 30 days (last 2026-09-21 11:43 UTC).                                                      [0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (133 in total) and exited with an error 3 times in the last 30 days (last 2026-09-21 11:49 UTC).[0m[0m[0m[0m[K
- [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 27.4 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mMemory keeps growing: node[0m  [90mnode grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 133 hours in the last 30 days (peak 143%, busiest at 2026-09-20 11:13 UTC).[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m60 hours at or above the temperature limit (90 C) in the last 30 days (about 2.0 h/day, max 91 C); busiest then: chrome, node, shop-worker-1.[0m[0m[0m[0m[K
