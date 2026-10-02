@@ -245,14 +245,15 @@ class RegistryTests(unittest.TestCase):
             lines, _hid = ansi.card_lines(card, 80)
             self.assertTrue(lines and all(isinstance(x, str) for x in lines))
             # the cards built of components are not Raw; the others still draw the lines render.py has always drawn
-            self.assertEqual(isinstance(card.body[0], ui.Raw), id not in ("disks", "docker_disk", "sessions", "tailscale", "network_traffic"))
+            self.assertEqual(isinstance(card.body[0], ui.Raw), id not in ("disks", "docker_disk", "sessions", "tailscale", "network_traffic", "attention", "exposure", "firewall",
+                                                                         "webapps"))
 
     def test_the_card_is_what_the_section_draws(self):
         ctx = demo_ctx()
         caps = cards.Caps(100)
-        self.assertEqual(cards.build("firewall", ctx, 0, caps).lines, render.ov_firewall(ctx.net, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("firewall", ctx, 0, caps), 100)[0], render.ov_firewall(ctx.net, 100, 0))
         self.assertEqual(ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0], render.ov_dischi(ctx.s, 100, 0))
-        self.assertEqual(cards.build("attention", ctx, 0, caps).lines, render.ov_attention(ctx.problems, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("attention", ctx, 0, caps), 100)[0], render.ov_attention(ctx.problems, 100, 0))
 
     def test_a_broken_section_becomes_a_message_not_an_exception(self):
         ctx = demo_ctx(s={"cpu": "nonsense"})
@@ -382,14 +383,14 @@ class MemoTests(unittest.TestCase):
     def test_the_overview_builds_each_section_once_per_level_and_caps(self):
         """page_overview asks for every card again at each level and while it lifts the caps: the registry answers from the frame."""
         seen = []
-        real = render.ov_firewall
+        real = cards.CARDS["firewall"].builder
 
-        def spy(net, w, k):
-            seen.append((k, w, render.FULL, "firewall" in render.EXPAND))
-            return real(net, w, k)
+        def spy(ctx, k, caps):
+            seen.append((k, caps.width, caps.full, "firewall" in caps.expand))
+            return real(ctx, k, caps)
         cont, net, boot, base = demo.snapshot(time.time())
         s = demo.sampler_data(None)
-        with mock.patch.object(render, "ov_firewall", spy), mock.patch.object(render, "DEMO", True):
+        with mock.patch.object(cards.CARDS["firewall"], "builder", spy), mock.patch.object(render, "DEMO", True):
             for w, h in ((79, 24), (120, 33), (200, 50)):
                 del seen[:]
                 render.page_overview(s, cont, net, boot, w, h - 2, baseline=base)
