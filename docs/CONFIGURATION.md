@@ -62,7 +62,7 @@ Sections fill the columns in the given order and never back-fill, so a line more
 ## `[ui]` — look and layout of the screens
 
 > **The console uses this section.** Its theme, density, card order and visibility, KPI row and first screen follow these keys (what each one does there is in
-> the table and under "On the console" below). **The new web interface** (a shell of cards, [WEB.md](WEB.md#the-new-shell-preview-opt-in)) is a preview: it reads this
+> the table and under "On the console" below). **The new web interface** (a shell of cards, [WEB.md](WEB.md#the-new-shell-preview-opt-in)) is still being built, a preview: it reads this
 > section when you switch it on with `web = app` (or `?app=1` in one URL); `web = classic`, the default, keeps today's pages and ignores every other key here.
 > A wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
 
