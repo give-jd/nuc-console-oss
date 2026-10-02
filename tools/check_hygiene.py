@@ -15,9 +15,12 @@ import re
 import subprocess
 import sys
 
-# The repository's two authors; a committer may also be GitHub itself (a merge or an edit made on the website).
+# The repository's two accounts, by handle and GitHub noreply address; a committer may also be GitHub itself (an edit made on the
+# website). Nothing else leads to a person: no other name (GitHub puts the profile's name on what is done on the website), no other address.
 AUTHORS = {"57390069+dipada@users.noreply.github.com", "4461018+give-jd@users.noreply.github.com"}
 COMMITTERS = AUTHORS | {"noreply@github.com"}
+AUTHOR_NAMES = {"dipada", "JD"}
+COMMITTER_NAMES = AUTHOR_NAMES | {"GitHub"}
 
 # Nothing names the tools a change was made with, where it was made, or who else "wrote" it. CLAUDE.md, the file's name, is allowed.
 FORBIDDEN = [(re.compile(p, re.I | re.M), why) for p, why in (
@@ -32,29 +35,41 @@ FORBIDDEN = [(re.compile(p, re.I | re.M), why) for p, why in (
     (r"\bsub-?agents?\b", "how the work was split between agents"),
 )]
 
+# An e-mail address leads to a person, except the GitHub noreply ones, the documentation domains and what only looks like one (systemd units).
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})\b")  # a name ending in letters: user@127.0.0.1 in a URL is not one
+NOT_A_PERSON = re.compile(r"(?:^|\.)(?:example\.(?:com|org|net)|example|invalid|test|localhost|users\.noreply\.github\.com)$"
+                          r"|\.(?:service|socket|target|timer|mount|slice|scope|path|device)$", re.I)
+
 # The lines a change adds are checked too, except in the two files that must spell the patterns out.
 OWN_FILES = {"tools/check_hygiene.py", "tests/test_hygiene.py"}
 
 
 def text_findings(text, where):
     """One finding per forbidden thing in `text`, with the line it is on."""
-    out = []
+    text, out = text or "", []
     for rx, why in FORBIDDEN:
-        for m in rx.finditer(text or ""):
-            line = text[:m.start()].count("\n") + 1
-            out.append("%s, line %d: %s" % (where, line, why))
+        for m in rx.finditer(text):
+            out.append("%s, line %d: %s" % (where, text[:m.start()].count("\n") + 1, why))
+    for m in EMAIL.finditer(text):
+        if m.group(0).lower() != "noreply@github.com" and not NOT_A_PERSON.search(m.group(1)):
+            out.append("%s, line %d: an e-mail address (only the GitHub noreply ones may appear)" % (where, text[:m.start()].count("\n") + 1))
     return out
 
 
 def commit_findings(commits):
-    """commits: [{"sha", "author", "committer", "message"}] -> findings (unknown author or committer, forbidden text)."""
+    """commits: [{"sha", "author", "committer", "author_name", "committer_name", "message"}] -> findings (an author or a committer
+    that is not one of the repository's accounts, forbidden text). The finding never repeats the name or the address: the log is public."""
     out = []
     for c in commits:
         short = c["sha"][:7]
         if c["author"].lower() not in AUTHORS:
-            out.append("commit %s: author %s is not one of the repository's authors" % (short, c["author"]))
+            out.append("commit %s: the author's address is not a noreply address of the repository's accounts" % short)
         if c["committer"].lower() not in COMMITTERS:
-            out.append("commit %s: committer %s is not one of the repository's authors" % (short, c["committer"]))
+            out.append("commit %s: the committer's address is not a noreply address of the repository's accounts" % short)
+        if c.get("author_name", "dipada") not in AUTHOR_NAMES:
+            out.append("commit %s: the author's name is not one of the repository's handles (dipada, JD)" % short)
+        if c.get("committer_name", "dipada") not in COMMITTER_NAMES:
+            out.append("commit %s: the committer's name is not one of the repository's handles (dipada, JD)" % short)
         out += text_findings(c["message"], "commit %s message" % short)
     return out
 
@@ -84,13 +99,14 @@ def git(*args):
 
 def branch_commits(base, head):
     sep, end = "\x1f", "\x1e"
-    log = git("log", "--format=%H" + sep + "%ae" + sep + "%ce" + sep + "%B" + end, "%s..%s" % (base, head))
+    log = git("log", "--format=" + sep.join(("%H", "%ae", "%ce", "%an", "%cn", "%B")) + end, "%s..%s" % (base, head))
     commits = []
     for rec in log.split(end):
         rec = rec.strip("\n")
         if rec:
-            sha, author, committer, message = rec.split(sep, 3)
-            commits.append({"sha": sha, "author": author, "committer": committer, "message": message})
+            sha, author, committer, author_name, committer_name, message = rec.split(sep, 5)
+            commits.append({"sha": sha, "author": author, "committer": committer, "author_name": author_name,
+                            "committer_name": committer_name, "message": message})
     return commits
 
 

@@ -70,6 +70,10 @@ The repository is public: everything pushed to it, every pull request, comment a
 - Never, in a commit or anywhere else (pull requests, comments, reviews, code, docs, release notes, branch names): co-author trailers, "generated
   with" footers or signatures, links to the session or tool a change was made with, the names of tools or models used to write it, or paths of
   the machine it was written on. `tools/check_hygiene.py` lists exactly what is refused.
+- Nothing that leads to a person either: no e-mail address but the GitHub `noreply` ones and the documentation domains (`example.com`), no real
+  names (author and committer names are the handles), no links to personal accounts. A merge made on GitHub is authored with the name on
+  the merger's GitHub profile, so keep that name set to the handle (*Settings › Public profile › Name*), and keep *Keep my email addresses
+  private* and *Block command line pushes that expose my email* on (*Settings › Emails*).
 
 **Before pushing**
 - `python3 -m unittest discover -s tests` on Python 3.8 and on the newest Python, and `shellcheck` if you touched shell (see *Development*).
