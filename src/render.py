@@ -1731,179 +1731,25 @@ def map_graph(smp=None):
 
 
 # ---- MAP screen: graph.py's tree drawn on the console, moved through with the keyboard ------------------------------------
-
-MAP_PANE_W = 140  # from this width up the details pane sits beside the tree, below it otherwise
-MAP_IDLE_S = 600  # the Map left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
-ST_COL = {"err": "31", "down": "31", "warn": "33", "unknown": "33", "ok": "32", "info": ""}
-LV_COL = {"err": "31", "warn": "33", "ok": "32", "info": "90"}
-EV_COL = {"seen": "1", "declared": "", "possible": "90", "bind": "90"}  # how sure the link is: bright, normal, dim
-
-
-class MapView(object):
-    """The interactive Map: open branches (graph.State), the selected row (its key survives refreshes; its index is where
-    the cursor stays when that row vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, now=None):
-        self.st, self.cur, self.idx, self.top, self.details = graph.State(), None, 0, 0, False
-        self.opened = self.touched = now or time.time()
-
-
-def map_sync(mv, rs):
-    """The cursor back on its row after the rows changed: by key, else the same index (clamped). Returns the index."""
-    i = graph.find(rs, mv.cur) if mv.cur else None
-    mv.idx = i if i is not None else max(0, min(mv.idx, len(rs) - 1))
-    mv.cur = rs[mv.idx]["key"] if rs else None
-    return mv.idx
-
-
-def map_parent(rs, i):
-    d = rs[i]["depth"]
-    return next((j for j in range(i - 1, -1, -1) if rs[j]["depth"] < d), i)
-
-
-def map_key(mv, key, rs, page=10):
-    """One key in the Map, on the rows rs drawn from mv.st (what each key does: ui.KEYMAP, scope map). Returns 'back' (leave the Map: Esc or q
-    when no details pane is open), 'rows' (branches opened or closed: rebuild the rows, then map_sync) or '' (only the cursor or the
-    details pane changed). The keys of every screen (digits, Tab, ?) are the dispatcher's."""
-    act = ui.action("map", key)
-    if act == "back":
-        if mv.details:  # Esc closes the details pane first
-            mv.details = False
-            return ""
-        return "back"
-    if act == "details":
-        mv.details = not mv.details
-        return ""
-    if act in ("expand", "problems"):
-        if act == "expand":
-            mv.st.expand_all()
-        else:
-            mv.st.only = not mv.st.only
-        return "rows"
-    if not rs or act not in ("move", "page", "open", "close", "collapse"):
-        return ""
-    i = map_sync(mv, rs)
-    row = rs[i]
-    if act == "collapse":  # every branch closes: the cursor goes up to its root, which stays
-        i = next((j for j in range(i, -1, -1) if rs[j]["depth"] == 0), i)
-        mv.idx, mv.cur = i, rs[i]["key"]
-        mv.st.collapse_all()
-        return "rows"
-    if act in ("open", "close") and (row["open"] if act == "close" else row["kids"] and not row["open"]):
-        mv.st.toggle(row)
-        return "rows"
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rs) - 1,
-         "right": i + 1 if row["open"] else i, "l": i + 1 if row["open"] else i,  # already open: down to its first child
-         "left": map_parent(rs, i), "h": map_parent(rs, i)}.get(key, i)  # closed or a leaf: up to its parent
-    mv.idx = max(0, min(i, len(rs) - 1))
-    mv.cur = rs[mv.idx]["key"]
-    return ""
-
-
-def map_layout(G, w, h, details=False):
-    """(notes shown, tree rows, details rows, details beside the tree?) of a Map body h lines tall."""
-    notes = min(len(G["notes"]), max(0, (h - 4) // 4))
-    avail = max(1, h - 1 - notes)
-    if not details or avail < 6:
-        return notes, avail, 0, False
-    if w >= MAP_PANE_W:
-        return notes, avail, avail, True
-    return notes, avail - avail // 2, avail // 2, False
-
-
-def map_scroll(top, i, n, rows, margin=2):
-    """First tree row shown, so that row i stays in sight, a few rows from the edges when there is room."""
-    m = min(margin, max(0, (rows - 1) // 2))
-    top = max(min(top, i - m), i + m + 1 - rows)
-    return max(0, min(top, n - rows))
+# The screen's model (MapView, its keys, the tree, the details, the layout) moved to screens.py as components that ansi.render draws; what stays here is
+# what needs this process (the footer's enabled keys, the frame, the producers). Moved; kept for tests and tools until the cleanup PR.
+from screens import (MAP_IDLE_S, MAP_PANE_W, MapView, map_key, map_layout, map_parent, map_select, map_sync, map_view)  # noqa: E402,F401
 
 
 def map_title(G, w, only=False):
-    """'── MAP  27 nodes · 14 links · ✖ 7 problems ───── ━━► seen  ╌╌► declared …': the legend goes first when narrow."""
-    k = graph.counts(G)
-    probs = (c(31, f"✖ {k['problems']} need" + ("s" if k["problems"] == 1 else "") + " attention") if k["problems"]
-             else c(90, "none needs attention"))  # not a green: missing data also draws nothing
-    left = (c(36, "──") + c("1;36", " MAP ") + " " + c(90, f"{plural(k['nodes'], 'node')} · {plural(k['edges'], 'link')} · ") + probs
-            + (c("1;33", "  problems only") if only else "") + " ")
-    legend = []
-    for item in graph.LEGEND.split("  "):
-        glyph, _, word = item.partition(" ")
-        ev = "seen" if "━" in glyph else "declared" if "╌" in glyph else "possible" if "┄" in glyph else "bind"
-        legend.append(cc(EV_COL[ev], glyph) + " " + c(90, word))
-    while legend and vlen(left) + 4 + vlen("  ".join(legend)) > w:
-        legend.pop()
-    right = "  ".join(legend)
-    return clip(left + c(36, "─" * max(0, w - vlen(left) - vlen(right) - (1 if right else 0))) + (" " + right if right else ""), w)
+    """The Map's heading line (title, figures, legend), w columns wide. Moved (screens.map_title); kept for tests and tools."""
+    return ansi.render(screens.map_title(G, only), w)[0][0]
 
 
 def map_row(G, row):
-    """One tree row: tree (dim), toggle, arrow (by evidence), label (by state), owner of a port, port used, sub, note."""
-    p, n = graph.parts(G, row), G["nodes"].get(row["node"]) or {}
-    st, label = p["state"], safe(p["label"])
-    s = (c(90, safe(p["tree"])) if p["tree"] else "") + c("36" if p["toggle"] in ("▸", "▾") else "90", safe(p["toggle"])) + " "
-    if p["arrow"]:
-        s += cc(EV_COL.get(p["ev"], ""), safe(p["arrow"])) + " "
-    if not row["depth"]:
-        s += c("1;" + {"err": "31", "down": "31", "warn": "33"}.get(st, "36"), label)
-    else:  # a symbol too: colour alone is not enough
-        s += cc(ST_COL.get(st, ""), {"down": "✖ ", "unknown": "? "}.get(st, "") + label)
-    if p["kind"] == "port":
-        s += "  " + (c(33, "?") if p["owner"] in ("", "?") else c(1, safe(p["owner"])))
-    if p["port"]:
-        s += " " + safe(p["port"])
-    if p["sub"]:
-        s += "  " + c(90, safe(p["sub"]))
-    if p["note"]:
-        lv = next((lv for lv, t in n.get("findings") or [] if t == p["note"]), "")
-        s += "  " + c({"err": "31", "warn": "33"}.get(lv, "90"), safe(p["note"]))
-    return s
+    """One tree row as an ANSI string, not cut. Moved (screens.map_branch); kept for tests and tools."""
+    b = screens.map_branch(G, row)
+    return (ansi.style(b.prefix, "muted") if b.prefix else "") + ansi.inline(b.mark) + " " + ansi.inline(b.body)
 
 
 def map_pane(G, nid, w, h):
-    """Everything known about a node, w columns, h lines at most: long values wrap, what does not fit is counted."""
-    items = graph.details(G, nid)
-    lw = min(max([len(safe(x[0])) for x in items] + [4]) + 2, 18, max(6, w // 3))
-    out = [section("DETAILS", w)]
-    for i, (label, value, level) in enumerate(items):
-        label, col = safe(label), LV_COL.get(level, "")
-        if i == 0:
-            col = "1;" + col if col else "1"
-        head = cc(col if label.strip() in ("!", "·") else "90", pad(label[:lw - 1], lw))
-        chunks = textwrap.wrap(safe(value), max(8, w - lw), break_on_hyphens=False) or [""]
-        out += [(head if j == 0 else " " * lw) + cc(col, x) for j, x in enumerate(chunks)]
-    if len(out) > h:
-        out = out[:max(0, h - 1)] + [c(90, f" … +{len(out) - h + 1} more lines")]
-    return out[:h]
-
-
-def map_view(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
-    """(the Map body: at most h lines, none wider than w; the first tree row shown). details: True = the selected row's
-    node, or a node id. Without a cursor (the rotation slide) what does not fit is counted on the last line."""
-    notes, tree_h, pane_h, side = map_layout(G, w, h, bool(details))
-    out = [map_title(G, w, only)]
-    nl = [safe(x) for x in G["notes"]]
-    if len(nl) > notes:
-        nl = nl[:max(0, notes - 1)] + ([f"… +{len(nl) - notes + 1} more notes"] if notes else [])
-    out += [clip(c(90, "  · " + x), w) for x in nl]
-    i = graph.find(rs, cursor_key) if cursor_key else None
-    tw = w - (int(w * 0.42) + 3 if side else 0)
-    if not rs:
-        tree, top = [msg("info", "no problem on any path: p shows every path" if only else "nothing to draw: see the notes above")], 0
-    elif cursor_key is None and len(rs) > tree_h:
-        tree, top = [clip(map_row(G, r), tw) for r in rs[:tree_h - 1]] + [c(90, f"   … +{len(rs) - tree_h + 1} more rows")], 0
-    else:
-        top = map_scroll(top or 0, i or 0, len(rs), tree_h)
-        tree = [c(7, pad(ANSI.sub("", clip(map_row(G, rs[j]), tw)), tw)) if j == i else clip(map_row(G, rs[j]), tw)
-                for j in range(top, min(len(rs), top + tree_h))]
-    nid = details if isinstance(details, str) else rs[i if i is not None else 0]["node"] if rs else None
-    if pane_h and nid:
-        tree += [""] * (tree_h - len(tree))
-        if side:
-            pane = map_pane(G, nid, w - tw - 3, pane_h)
-            tree = [pad(t, tw) + c(90, " │ ") + (pane[k] if k < len(pane) else "") for k, t in enumerate(tree)]
-        else:
-            tree += map_pane(G, nid, w, pane_h)
-    return [clip(x, w) for x in (out + tree)[:h]], top
+    """Everything known about a node, w columns, h lines at most. Moved (screens.map_props); kept for tests and tools."""
+    return ansi.render(screens.map_props(G, nid, h), w)[0]
 
 
 def map_lines(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
@@ -1932,25 +1778,6 @@ def map_slide(cont, net, boot, baseline, w, body_h):
     """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
     G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline, expose=CFG["expose"])
     return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
-
-
-def map_select(G, mv, text):
-    """The cursor on the first row whose name (or port owner) contains text, the branches above it opened. False: none."""
-    t = text.lower()
-    for rs in (graph.rows(G, mv.st), graph.rows(G, graph.State(all=True, only=mv.st.only))):
-        i = next((j for j, r in enumerate(rs) if t in (G["nodes"][r["node"]]["label"] + " " + graph.parts(G, r)["owner"]).lower()), None)
-        if i is None:
-            continue
-        d = rs[i]["depth"]
-        for r in reversed(rs[:i]):  # its ancestors: the nearest row above it at each smaller depth
-            if r["depth"] < d:
-                d = r["depth"]
-                mv.st.shut.discard(r["key"])
-                if d:
-                    mv.st.open.add(r["key"])
-        mv.cur = rs[i]["key"]
-        return True
-    return False
 
 
 def map_once(argv, w, h):

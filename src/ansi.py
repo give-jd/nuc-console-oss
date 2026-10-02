@@ -557,6 +557,14 @@ def _only_lines(node, w):
 _PILL = {"err": ("\u2716 ERR ", "banner_err"), "warn": ("! WARN", "banner_warn"), "info": ("\u00b7 INFO", "muted")}  # a symbol besides the colour
 
 
+def _legend(items, w, used):
+    """The legend's items as one text, the last ones dropped while it does not fit after `used` columns (with the rule's 4 columns)."""
+    cells = [style(glyph, tone) + " " + style(word, "muted") for glyph, word, tone in items]
+    while cells and used + 4 + vlen("  ".join(cells)) > w:
+        cells.pop()
+    return "  ".join(cells)
+
+
 def _title_line(t, w):
     left = style("\u2500\u2500", "accent") + style(f" {t.label} ", "accent_strong") + " "
     right = inline(t.seg) if t.seg is not None else ""
@@ -564,6 +572,8 @@ def _title_line(t, w):
     while len(bits) > 1 and vlen(left + sep.join(bits)) + vlen(right) + 3 > w:
         bits.pop(1)
     text = left + sep.join(bits) + " "
+    if t.legend is not None and t.seg is None:
+        right = _legend(t.legend.items, w, vlen(text))
     return clip(text + style("\u2500" * max(0, w - vlen(text) - vlen(right) - (1 if right else 0)), "accent") + (" " + right if right else ""), w)
 
 
@@ -623,7 +633,36 @@ def _finding_row(f, w):
     return style(pad(ANSI.sub("", row), w), "sel") if f.cursor else row
 
 
+# ---- the Map's components, drawn (ui.py: Branch, Outline, Props) ----------------------------------------------------------------------
+
+def _branch_line(b, w):
+    """'tree mark body' cut to w; the cursor's row in reverse video, without its colours, padded to w."""
+    line = (style(b.prefix, "muted") if b.prefix else "") + inline(b.mark) + " " + inline(b.body)
+    row = clip(line, w)
+    return style(pad(ANSI.sub("", row), w), "sel") if b.cursor else row
+
+
+_LEVEL_TONE = {"err": "err", "warn": "warn", "ok": "ok", "info": "muted"}
+
+
+def _props_lines(p, w):
+    """'-- TITLE ---' and one line per item: the label (padded, muted; coloured when it marks a finding), the value wrapped under itself."""
+    lw = min(max([len(k) for k, _v, _l in p.items] + [4]) + 2, 18, max(6, w // 3))
+    out = [section(p.title, w)]
+    for i, (label, value, level) in enumerate(p.items):
+        tone, bold = _LEVEL_TONE.get(level), i == 0
+        text = pad(label[:lw - 1], lw)
+        head = style(text, tone, bold) if label.strip() in ("!", "·") else style(text, "muted")
+        chunks = textwrap.wrap(value, max(8, w - lw), break_on_hyphens=False) or [""]
+        out += [(head if j == 0 else " " * lw) + style(x, tone, bold) for j, x in enumerate(chunks)]
+    if p.h is not None and len(out) > p.h:
+        out = out[:max(0, p.h - 1)] + [style(f" … +{len(out) - p.h + 1} more lines", "muted")]
+    return (out if p.h is None else out[:p.h]), False
+
+
 _DRAW = {
+    ui.Outline: lambda n, w: ([_branch_line(b, w) for b in n.rows], False),
+    ui.Props: _props_lines,
     ui.Title: lambda n, w: ([_title_line(n, w)], False),
     ui.Seg: lambda n, w: ([inline(n)], False),
     ui.Series: lambda n, w: ([inline(n)], False),
