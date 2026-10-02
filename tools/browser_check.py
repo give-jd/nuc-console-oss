@@ -33,7 +33,9 @@ ROOT = os.path.dirname(HERE)
 VIEWS = ("overview", "map", "map-graph", "cpu", "health", "ai", "settings", "layout")
 THEMES = (("auto", "a"), ("dark", "d"), ("light", "l"), ("high-contrast", "h"))
 DENSITIES = (("wall", "w"), ("desk", "k"), ("compact", "c"))
-VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph", "cpu": "&view=cpu", "health": "&view=health",
+# the graph is paused: its script reloads the page when the refresh is due, and a reload inside --virtual-time-budget keeps some Chrome
+# builds (154 on the CI runner) from ever finishing the dump; paused, the same script runs (drawing, physics) and only the reload is off
+VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph&pause=1", "cpu": "&view=cpu", "health": "&view=health",
               "ai": "&view=ai", "settings": "&view=settings", "layout": "&edit=1"}
 WINDOW = "1440,900"
 VIRTUAL_TIME_MS = 4000  # the scripts fetch, poll and replace blocks: let the page run this long (virtual time, so it does not wait)
