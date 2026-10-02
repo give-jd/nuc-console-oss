@@ -260,10 +260,13 @@ def _http(info, method, path, body=None, timeout=120.0):
 
 def list_models(info, timeout=10.0):
     _, obj = _http(info, "GET", "/models", None, timeout)
-    data = obj.get("data")
+    data = obj.get("data", False)
+    if data is None:  # Ollama with no model yet
+        data = []
     if not isinstance(data, list):
         raise AdvisorError("the model server did not list its models: is [ai] endpoint an OpenAI-compatible /v1 URL?")
-    return [clean_line(m.get("id"), 80) for m in data[:50] if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    ids = [clean_line(m.get("id"), 80) for m in data[:50] if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    return [x[:-7] if x.endswith(":latest") else x for x in ids]  # Ollama names a model with its default tag; [ai] model does not
 
 
 def _model(cfg, info, timeout):

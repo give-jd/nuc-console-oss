@@ -1,10 +1,11 @@
 name: ai-pins
 
-# The AI manifest (src/aisetup.py: RUNTIME, MODELS) pins a commit, a SHA-256 and a size for every download. This workflow, on a
-# machine with network access: reads them from the Hugging Face and GitHub APIs (`aisetup.py pins`) for a maintainer to compare
-# and paste; shows the runtime's assets, hash and options; and, once everything is pinned, tries it for real: installs the smallest
-# model with `nuc-console-ai setup`, starts `serve`, asks it a question and checks `status`. It never changes the repository and
-# never fails a pull request (the unit tests do that).
+# The AI manifest (src/aisetup.py: RUNTIME, MODELS) pins the model server (Ollama: each build's file, SHA-256 and size) and names the models
+# to pull. This workflow, on machines with network access: reads the values from the GitHub API, the release's sha256sum.txt and the Ollama
+# registry (`aisetup.py pins`: each model's manifest, its size and the first words of its licence) for a maintainer to compare and paste;
+# and tries it for real on Linux, Windows and macOS runners: installs the smallest model with `nuc-console-ai setup`, starts `serve`, asks it
+# a question and checks `status`, then does what the AI page's button does (aiweb.Engine.use_model: download, unpack, start, pull, load) in a
+# folder of its own and asks again. It never changes the repository and never fails a pull request (the unit tests do that).
 #
 # The job `python-pins` does the same for the Python that the Linux and macOS release archives carry (python-build-standalone,
 # the install_only_stripped tarballs of the four targets): it reads the latest release of astral-sh/python-build-standalone, lists
@@ -18,6 +19,7 @@ on:
   pull_request:
     paths:
       - src/aisetup.py
+      - src/aiollama.py
       - src/advisor.py
       - tools/python_pins.py
       - tools/python-pins.json
@@ -29,24 +31,16 @@ permissions:
 jobs:
   pins:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # only for the API rate limit; aisetup sends it to api.github.com and nowhere else
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: read the values to pin
+      - name: read the values to pin (the server's builds, the models' manifests)
         continue-on-error: true
         run: python3 src/aisetup.py pins | tee pins.txt
-      - name: the runtime release (assets, SHA-256, size, options)
-        continue-on-error: true
-        run: |
-          v=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['version'])")
-          url=$(python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; print(aisetup.RUNTIME['url'])")
-          curl -fsSL "https://api.github.com/repos/mozilla-ai/llamafile/releases/tags/$v" \
-            | python3 -c "import json, sys; [print('asset', a['name'], a['size'], a.get('digest')) for a in json.load(sys.stdin)['assets']]" | tee -a pins.txt
-          curl -fsSL -o "$RUNNER_TEMP/llamafile" "$url"
-          echo "runtime $url sha256 $(sha256sum "$RUNNER_TEMP/llamafile" | cut -d' ' -f1) size $(stat -c %s "$RUNNER_TEMP/llamafile")" | tee -a pins.txt
-          sh "$RUNNER_TEMP/llamafile" --help 2>&1 | head -150
       - name: summary
         if: always()
         run: |
@@ -77,31 +71,71 @@ jobs:
           { echo; echo '```'; "$RUNNER_TEMP/unpacked/python/bin/python3" -V; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   for-real:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: install the smallest model, serve it, ask it
+      - name: setup, serve, status and a question, as the commands do them
         continue-on-error: true
+        shell: bash
         run: |
-          if python3 -c "import sys; sys.path.insert(0, 'src'); import aisetup; sys.exit(1 if aisetup.missing_pins(aisetup.RUNTIME, False) else 0)"; then
-            d="$RUNNER_TEMP/ai"
-            printf '[ai]\nenabled = yes\nendpoint = http://127.0.0.1:8091/v1\nmodel = qwen3-0.6b\n' > "$RUNNER_TEMP/config.ini"
-            export NUC_CONSOLE_CONFIG="$RUNNER_TEMP/config.ini"
-            python3 src/aisetup.py models --dir "$d"
-            python3 src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d"
-            python3 src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d" | grep -q "not downloaded again"   # never twice
-            python3 src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" --dry-run
-            python3 src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" > "$RUNNER_TEMP/serve.log" 2>&1 &
-            for i in $(seq 1 90); do curl -fs http://127.0.0.1:8091/v1/models > /dev/null && break; sleep 2; done
-            tail -20 "$RUNNER_TEMP/serve.log"
-            curl -fsS http://127.0.0.1:8091/v1/chat/completions -H 'Content-Type: application/json' \
-              -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "/no_think Say hello in five words."}], "max_tokens": 40}'
-            echo
-            python3 src/aisetup.py status --dir "$d" --endpoint http://127.0.0.1:8091/v1
-            python3 src/advisor.py status
-          else
-            echo "the runtime is not pinned yet: nothing to try"
-          fi
+          set -x
+          d="$RUNNER_TEMP/ai"
+          printf '[ai]\nenabled = yes\nendpoint = http://127.0.0.1:8091/v1\nmodel = qwen3-0.6b\n' > "$RUNNER_TEMP/config.ini"
+          export NUC_CONSOLE_CONFIG="$RUNNER_TEMP/config.ini"
+          python src/aisetup.py models --dir "$d"
+          python src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d"
+          python src/aisetup.py setup qwen3-0.6b --yes --no-config --dir "$d" | grep -q "not downloaded again"   # never twice
+          python src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" --dry-run
+          python src/aisetup.py serve --model qwen3-0.6b --port 8091 --dir "$d" > "$RUNNER_TEMP/serve.log" 2>&1 &
+          for i in $(seq 1 90); do curl -fs http://127.0.0.1:8091/v1/models > /dev/null && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8091/v1/models
+          curl -fsS --max-time 300 http://127.0.0.1:8091/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"model": "qwen3-0.6b", "messages": [{"role": "user", "content": "/no_think Say hello in five words."}], "max_tokens": 40}'
+          echo
+          python src/aisetup.py status --dir "$d" --endpoint http://127.0.0.1:8091/v1
+          python src/advisor.py status
+          tail -40 "$RUNNER_TEMP/serve.log"
+          python src/aisetup.py remove qwen3-0.6b --yes --dir "$d"
+      - name: the AI page's one button (download, unpack, start, pull, load), then a question through the advisor
+        continue-on-error: true
+        shell: bash
+        run: |
+          printf '[ai]\nenabled = no\n' > "$RUNNER_TEMP/config2.ini"
+          export NUC_CONSOLE_CONFIG="$RUNNER_TEMP/config2.ini"
+          python - "$RUNNER_TEMP/ai2" <<'PY'
+          import sys, time
+          sys.path.insert(0, "src")
+          import advisor, aiweb
+          eng = aiweb.Engine(directory=sys.argv[1])
+          last = [None]
+          def hook(job):
+              line = aiweb.job_text(job)
+              if line.split(",")[0] != last[0]:
+                  last[0] = line.split(",")[0]
+                  print(time.strftime("%H:%M:%S"), line, flush=True)
+          eng.progress_hook = hook
+          print(eng.use_model("qwen3-0.6b"), flush=True)
+          eng.wait(1800)
+          snap = eng.snapshot()
+          print("job:", snap["job"]["state"], snap["job"]["error"] or snap["job"]["note"])
+          print("state:", snap["state"])
+          print("server's last lines:", " | ".join(snap["server"]["tail"]))
+          if snap["job"]["state"] == "done":
+              cfg = eng.ecfg()
+              t0 = time.time()
+              msg = advisor.chat(advisor.endpoint_info(cfg["ai"]["endpoint"]), cfg["ai"]["model"],
+                                 [{"role": "user", "content": "/no_think Say hello in five words."}], max_tokens=40, timeout=300)
+              print("answer (%.1f s): %r" % (time.time() - t0, advisor._content(msg)))
+          eng.delete_all()
+          eng.wait(300)
+          print("delete:", eng.snapshot()["job"]["state"], eng.snapshot()["job"]["note"] or eng.snapshot()["job"]["error"])
+          eng.shutdown()
+          sys.exit(0 if snap["job"]["state"] == "done" else 1)
+          PY

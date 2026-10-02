@@ -1,19 +1,21 @@
 """What the AI page of the web view and the AI screen of the console do besides showing: one engine per process, shared by both.
 
-  use a model  the one action the user needs: download the runtime and the model if they are missing (with progress; aisetup.download():
-              HTTPS only, the pinned size and SHA-256, resume, a verified file is never fetched again), start the model server, wait until it
-              answers, make it the advisor's model and turn the advisor on. "Turn AI on" is the same with the model chosen before (or the
-              recommended one, which the page and the screen ask about first); "turn AI off" stops the server and turns the advisor off
-  delete      one model, or everything (runtime and models); cancel stops a download or a start (what was fetched is kept)
-  server      the model server is a CHILD of this process (aisetup.serve_argv and gpu_plan: 127.0.0.1 only, low priority, the GPU when the
-              model fits there); it ends with the process, and there is only ever one
+  use a model  the one action the user needs: download the model server if it is missing (Ollama, the build of this system: aisetup.download():
+              HTTPS only, the pinned size and SHA-256, resume, never fetched twice; then unpacked), start it, pull the model through it if it is
+              missing (with progress; Ollama checks every layer), load it, make it the advisor's model and turn the advisor on. "Turn AI on" is the
+              same with the model chosen before (or the recommended one, which the page and the screen ask about first); "turn AI off" stops the
+              server and turns the advisor off
+  delete      one model, or everything (the server and every model); cancel stops a download, a pull or a start (what was fetched is kept)
+  server      the model server is a CHILD of this process (aisetup.serve_argv and serve_env: 127.0.0.1 only, low priority, the models in the AI
+              folder, the GPU unless [ai] gpu = no); it serves every installed model, keeps the one in use loaded, ends with the process, and there
+              is only ever one
   chat        a question (advisor.ask) or "advice now" (advisor.advise), answered in the background; the last few are kept in memory
   switch      on/off, the model and the endpoint of the server started here: web.json in the AI folder (advisor.effective_cfg lays it
               over config.ini, which these programs never write)
 
 One job at a time (use, download, delete, start), plus one answer being written; both run in threads of their own, so a request or a key never
 waits for them. The state is in memory (snapshot() is what the pages read) and the AI folder is the one the commands use
-(aisetup.work_dir()): a lock file there keeps the web view and the console from fetching the same file at once. `[ai] web_actions = no`
+(aisetup.work_dir()): a lock file there keeps the web view and the console from fetching or deleting at once. `[ai] web_actions = no`
 refuses everything. --demo: the same flow, simulated, no file is written and nothing is downloaded or started.
 Standard library only, Python 3.8+.
 """
@@ -23,13 +25,13 @@ import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
 import time
 
 import advisor
+import aiollama
 import aisetup
 import nuc_config
 
@@ -39,15 +41,16 @@ LOCK_FILE = "job.lock"    # in the AI folder: a download or a delete is running,
 LOCK_STALE_S = 90         # a lock nobody has touched this long is a dead process's; a live job touches it every HEARTBEAT_S
 HEARTBEAT_S = 10
 START_WAIT_S = 2.0        # a server that is still there this long after it was started has not failed at once
-LOAD_WAIT_S = 900.0       # then it loads the model: the job waits this long for the first answer (a 19 GB model on a slow disk takes minutes)
+ANSWER_WAIT_S = 60.0      # ... and answers within this long (Windows may scan a new executable first)
+LOAD_WAIT_S = 900.0       # then it loads the model: the job waits this long (a 19 GB model on a slow disk takes minutes)
 POLL_S = 1.0              # ... looking every second
 STOP_GRACE_S = 10         # asked to end (SIGTERM), then killed
 TAIL_LINES = 12           # the last lines the server wrote, kept to say why it stopped
-PORT_TRIES = 20           # from DEFAULT_PORT up
 DEMO_STEPS, DEMO_STEP_S = 16, 0.15   # a simulated download: this many steps of this many seconds, per file
 DEMO_FREE = 412 * 10 ** 9
 
 VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server"}
+DEMO_RUNTIME = {"linux": "linux-amd64", "windows": "windows-amd64", "darwin": "darwin"}  # the build each demo machine would download
 LOCKED = "locked by config.ini ([ai] web_actions = no): the page and the screen only show"
 ASKING = "asking the model: the answer appears below (a small model on a slow CPU may need a minute)"
 
@@ -64,7 +67,7 @@ class Engine(object):
         self.cfg_fn, self.hw_fn, self.report_fn, self.history_fn = cfg_fn or default_cfg, hw_fn or aisetup._hardware, report_fn or default_report, \
             history_fn or advisor._open_history
         self.start_wait, self.stop_grace, self.demo_step = START_WAIT_S, STOP_GRACE_S, DEMO_STEP_S  # tests shorten them
-        self.load_wait, self.poll_s = LOAD_WAIT_S, POLL_S
+        self.load_wait, self.answer_wait, self.poll_s = LOAD_WAIT_S, ANSWER_WAIT_S, POLL_S
         self.lock = threading.RLock()
         self.version = 0                       # +1 at every change a page may show: the catalog is read again
         self.job = self.notice = self.pending = None
@@ -186,7 +189,7 @@ class Engine(object):
             if self.demo:
                 st = self._dstate()
                 installed = target["id"] in st["installed"] and st["runtime"]
-                size = 0 if installed else int(target.get("approx_mb", 0) * 10 ** 6) + (0 if st["runtime"] else 368 * 10 ** 6)
+                size = 0 if installed else int(target.get("approx_mb", 0) * 10 ** 6) + (0 if st["runtime"] else self._demo_runtime_size())
             else:
                 installed = target in aisetup.installed_models(d, self.models, self.runtime)
                 size = 0 if installed else self._missing_bytes(d, target)
@@ -194,13 +197,17 @@ class Engine(object):
                 "recommended": rec, "target": target["id"] if target else None, "size": size, "installed": installed}
 
     def _missing_bytes(self, d, m):
-        """Bytes still to fetch for the runtime and the model (what is partly there counts for what it has); None when something is not pinned."""
+        """Bytes still to download for the server and the model (what is partly there counts for what it has); None when something is not pinned."""
+        rt = self.runtime
+        if aisetup.missing_pins(rt, False) or aisetup.missing_pins(m, True):
+            return None
         total = 0
-        for entry, path, is_model in ((self.runtime, aisetup.runtime_path(d, self.runtime), False), (m, aisetup.model_path(d, m), True)):
-            if aisetup.missing_pins(entry, is_model):
-                return None
-            if not aisetup.is_verified(d, path, entry):
-                total += max(0, entry["size"] - (os.path.getsize(path + ".part") if os.path.exists(path + ".part") else 0))
+        if not aisetup.runtime_ready(d, rt):
+            a, p = aiollama.runtime_asset(rt), aisetup.archive_path(d, rt)
+            if not aisetup.is_verified(d, p, a["sha256"], a["size"]):
+                total += max(0, a["size"] - (os.path.getsize(p + ".part") if os.path.exists(p + ".part") else 0))
+        if not aisetup.model_ready(d, m):
+            total += aisetup.model_bytes(m)
         return total
 
     def _recommended(self):
@@ -351,19 +358,22 @@ class Engine(object):
     def _progress(self, job, base, total):
         """The callback of aisetup.download(): bytes of this file `done` out of `size`; base: bytes of the files before it; total: of the job."""
         def cb(done, size):
-            now = time.time()
-            with self.lock:
-                job["done"], job["total"] = base + done, total
-                t0, d0 = job["mark"]
-                if now - t0 >= 1.0:  # the speed over the last second or more
-                    job["rate"], job["mark"] = (job["done"] - d0) / (now - t0), (now, job["done"])
-                job["phase"] = "verifying" if done >= size else "downloading"
-            if self._lock_path:
-                self._touch_lock()
-            hook = self.progress_hook
-            if hook:
-                hook(job)
+            self._tick(job, base + done, total, "verifying" if done >= size else "downloading")
         return cb
+
+    def _tick(self, job, done, total, phase):
+        """Progress: the job's bytes done out of total, its phase, the speed over the last second or more; the lock is touched, the hook called."""
+        now = time.time()
+        with self.lock:
+            job["done"], job["total"], job["phase"] = done, total, phase
+            t0, d0 = job["mark"]
+            if now - t0 >= 1.0:
+                job["rate"], job["mark"] = (job["done"] - d0) / (now - t0), (now, job["done"])
+        if self._lock_path:
+            self._touch_lock()
+        hook = self.progress_hook
+        if hook:
+            hook(job)
 
     def _touch_lock(self):
         try:
@@ -373,10 +383,21 @@ class Engine(object):
 
     def _work_download(self, job, m):
         self._check_fit(job, m)
-        if self._fetch(job, m):
-            self._note(job, "%s is installed: %s, SHA-256 verified" % (m["id"], aisetup.fmt_size(job["total"])))
-        else:
+        if aisetup.runtime_ready(self.directory, self.runtime) and aisetup.model_ready(self.directory, m):
             self._note(job, "%s is already installed: nothing to download" % m["id"])
+            return
+        self._claim("downloading " + m["id"])
+        try:
+            self._fetch_runtime(job, m)
+            api, mine, started = self._server_for_files(job)
+            try:
+                self._pull(job, m, api)
+            finally:
+                if started:
+                    self._stop_child()  # it was started for the download only
+        finally:
+            self._unclaim()
+        self._note(job, "%s is installed: %s" % (m["id"], aisetup.fmt_size(aiollama.model_bytes(aiollama.models_dir(self.directory), m["id"]))))
 
     @staticmethod
     def _note(job, text):
@@ -385,7 +406,7 @@ class Engine(object):
 
     def _check_fit(self, job, m):
         """Refuse what cannot be downloaded (not pinned) or will not work on this machine; warn about what will slow it down."""
-        for name, entry, is_m in (("runtime", self.runtime, False), (m["id"], m, True)):
+        for name, entry, is_m in (("the server", self.runtime, False), (m["id"], m, True)):
             if aisetup.missing_pins(entry, is_m):
                 raise aisetup.SetupError("%s is not pinned in this build (%s): it cannot be downloaded" % (name, ", ".join(aisetup.missing_pins(entry, is_m))))
         a = aisetup.assess_model(m, self.hw_fn())
@@ -395,33 +416,48 @@ class Engine(object):
         if a and a["verdict"] == "slow":
             job["warn"] = "warning: the PC will slow down while %s runs" % m["id"]
 
-    def _fetch(self, job, m):
-        """The runtime and the model, whatever is missing: pinned, verified, never twice. -> False when both were there already."""
-        d, runtime = self.directory, self.runtime
-        plan = [("runtime", runtime, aisetup.runtime_path(d, runtime), 0o755, False), (m["id"], m, aisetup.model_path(d, m), 0o644, True)]
-        todo = [p for p in plan if not aisetup.is_verified(d, p[2], p[1])]  # by the stamp: a verified file is never fetched again
-        if not todo:
-            return False
-        need = sum(max(0, e["size"] - (os.path.getsize(p + ".part") if os.path.exists(p + ".part") else 0)) for _n, e, p, _mode, _m in todo)
+    def _fetch_runtime(self, job, m):
+        """The server's build, if it is not unpacked yet: its archive (pinned, verified, never fetched twice), then unpacked. The disk check
+        counts the model too. -> False when it was there already."""
+        d, rt = self.directory, self.runtime
+        need = (aisetup.runtime_bytes(d, rt) or 0) + (0 if aisetup.model_ready(d, m) else aisetup.model_bytes(m))
         free = aisetup.free_bytes(d)
         if need and free < need + aisetup.DISK_MARGIN:
             raise aisetup.SetupError("not enough free disk space in %s: %s needed, %s free" % (d, aisetup.fmt_size(need + aisetup.DISK_MARGIN), aisetup.fmt_size(free)))
-        self._claim("downloading " + m["id"])
-        try:
-            total, base = sum(e["size"] for _n, e, _p, _mode, _m in todo), 0
+        if aisetup.runtime_ready(d, rt):
+            return False
+        a, arch = aiollama.runtime_asset(rt), aisetup.archive_path(d, rt)
+        if not aisetup.is_verified(d, arch, a["sha256"], a["size"]):  # by the stamp: a verified archive is never fetched again
+            later = 0 if aisetup.model_ready(d, m) else aisetup.model_bytes(m)
             with self.lock:
-                job["total"], job["phase"] = total, "downloading"
-            for name, entry, path, mode, is_model in todo:
-                with self.lock:
-                    job["step"], job["phase"] = name, "downloading"  # (the next file is not being checked just because the last one was)
-                aisetup.download(aisetup.model_url(entry) if is_model else entry["url"], path, entry["sha256"], entry["size"], mode=mode,
-                                 allow_loopback_http=self.allow_loopback_http, progress=self._progress(job, base, total), cancel=self._cancel.is_set)
-                aisetup.record(d, path, entry["sha256"])
-                base += entry["size"]
-                with self.lock:
-                    job["done"] = base
-        finally:
-            self._unclaim()
+                job["total"], job["step"], job["phase"] = a["size"] + later, "runtime", "downloading"
+            aisetup.download(a["url"], arch, a["sha256"], a["size"], allow_loopback_http=self.allow_loopback_http,
+                             progress=self._progress(job, 0, a["size"] + later), cancel=self._cancel.is_set)
+            aisetup.record(d, arch, a["sha256"])
+            with self.lock:
+                job["done"] = a["size"]
+        with self.lock:
+            job["step"], job["phase"] = "runtime", "unpacking"
+        aisetup.unpack_runtime(d, rt, cancel=self._cancel.is_set)
+        return True
+
+    def _pull(self, job, m, api):
+        """Pull the model through the server if it is not installed (progress: the layers Ollama reports, after what the job fetched before)."""
+        d = self.directory
+        if aisetup.model_ready(d, m):
+            return False
+        with self.lock:
+            base = job["done"] if job.get("step") == "runtime" else 0
+            job["step"], job["phase"] = m["id"], "downloading"
+            if not job["total"] or job["total"] < base:
+                job["total"] = base + aisetup.model_bytes(m)
+        est = aisetup.model_bytes(m)
+
+        def cb(done, total, status):  # Ollama's words: "pulling <digest>", then "verifying sha256 digest", "writing manifest", "success"
+            self._tick(job, base + done, base + max(total, est), "verifying" if status.startswith(("verifying", "writing", "success")) else "downloading")
+        aisetup.install_model(api, d, m, cb, self._cancel.is_set, insecure=self.allow_loopback_http)
+        with self.lock:
+            job["done"] = job["total"]
         return True
 
     # ---------------------------------------------------------------------------------------------------------------------------- delete
@@ -434,7 +470,7 @@ class Engine(object):
         return self._start_job("delete", m["id"], lambda job: self._work_delete(job, m))
 
     def delete_all(self):
-        """Delete the runtime and every model."""
+        """Delete the server and every model."""
         return self._start_job("delete-all", "", lambda job: self._work_delete(job, None))
 
     def _work_delete(self, job, m):
@@ -442,40 +478,39 @@ class Engine(object):
         if self.demo:
             return self._demo_delete(job, m)
         mine = self._server_model()
-        stopped = bool(mine and (m is None or mine == m["id"]))
-        if stopped:
-            self._stop_child()  # a file the server uses is not deleted under it
-        targets = [aisetup.model_path(d, m)] if m else [aisetup.model_path(d, x) for x in self.models] + [aisetup.runtime_path(d, runtime)]
-        files = [p for t in targets for p in (t, t + ".part") if os.path.isfile(p)]
-        if not files:
+        served = bool(mine and (m is None or mine == m["id"]))
+        plan = aisetup.removal_plan(d, m, self.models)
+        if not plan:
             job["note"] = "nothing to delete in %s" % d
             return
-        size = sum(os.path.getsize(p) for p in files)
-        self._claim("deleting")
-        stuck = []
-        for p in files:
-            try:
-                os.unlink(p)
-                aisetup.forget(d, p)
-            except OSError as e:
-                stuck.append((os.path.basename(p), e.strerror or str(e)))
         if m is None:
-            shutil.rmtree(os.path.join(d, "home"), ignore_errors=True)  # the loader the runtime unpacked for the server
+            self._stop_child()  # the server runs from these files
+        self._claim("deleting")
+        if m is not None and self._child_alive():  # the server knows the model: it forgets it and deletes what only it used
+            api = aiollama.Api(aiollama.base_of(self.child_info["endpoint"]))
+            api.unload(m["id"])  # a loaded model's files cannot be deleted on Windows
+            freed, stuck = (plan[0][2], []) if api.delete(m["id"]) else aisetup.remove_files(d, m, runtime)
+            if served:
+                self._stop_child()  # it answered with that model: with the advisor off nothing asks it any more
+        else:
+            freed, stuck = aisetup.remove_files(d, m, runtime)
+        if m is None:
+            shutil.rmtree(os.path.join(d, "home"), ignore_errors=True)  # the server's key and its log
         chosen = self._web_model()
-        if (chosen and (m is None or chosen == m["id"])) or stopped:  # the model the page chose is gone, and the server it asked with
+        if (chosen and (m is None or chosen == m["id"])) or served:  # the model the page chose is gone, or the one the server answered with
             def forget(st):
                 if chosen and (m is None or chosen == m["id"]):
                     st.pop("model", None)
-                if stopped:
-                    st.pop("enabled", None)  # nothing answers any more: the advisor is off (config.ini's yes, if any, stays)
+                if served:
+                    st.pop("enabled", None)  # nothing answers with it any more: the advisor is off (config.ini's yes, if any, stays)
             try:
                 self._web(forget)
             except aisetup.SetupError:
                 pass
         if stuck:
-            raise aisetup.SetupError("could not delete %s: %s%s. The files belong to another account (installed with sudo?)%s"
+            raise aisetup.SetupError("could not delete %s: %s%s. The files belong to another account (installed with sudo?), or a server uses them%s"
                                      % (", ".join(n for n, _w in stuck[:3]), stuck[0][1], " and more" if len(stuck) > 3 else "", self._elsewhere(job)))
-        job["note"] = "deleted %d file%s, %s freed" % (len(files), "" if len(files) == 1 else "s", aisetup.fmt_size(size))
+        job["note"] = "deleted %s, %s freed" % (m["id"] if m else "the server and every model", aisetup.fmt_size(freed))
 
     def _web_model(self):
         return advisor.read_web_state(self.web_path()).get("model")
@@ -485,8 +520,9 @@ class Engine(object):
         return self.child is not None and self.child.poll() is None
 
     def _server_model(self):
+        """The model the server started here answers with (loaded), or None (no server, or none loaded)."""
         with self.lock:
-            return self.child_info["model"] if self._child_alive() else None
+            return (self.child_info["model"] or None) if self._child_alive() else None
 
     def start_server(self, model_id=None):
         """Start the model server as a child of this process: 127.0.0.1 only, low priority. One at a time; it ends with this process."""
@@ -500,57 +536,108 @@ class Engine(object):
         d = self.directory
         have = aisetup.installed_models(d, self.models, self.runtime)
         if not have:
-            raise aisetup.SetupError("no verified runtime and model in %s: download a model first" % d)
+            raise aisetup.SetupError("no server and model installed in %s: download a model first" % d)
         if wanted is not None:
             if wanted not in have:
-                raise aisetup.SetupError("%s is not installed (or not verified) in %s: download it first" % (wanted["id"], d))
+                raise aisetup.SetupError("%s is not installed in %s: download it first" % (wanted["id"], d))
             m = wanted
         else:
             chosen = self.ecfg()["ai"].get("model")
             m = next((x for x in have if x["id"] == chosen), None) or next((x for x in have if x["id"] == aisetup.DEFAULT_MODEL), have[0])
-        self._serve(job, m)
+        if self._child_alive():
+            raise aisetup.SetupError("the model server started here is already running (%s, pid %d): stop it first"
+                                     % (self.child_info["model"] or "no model loaded", self.child.pid))
+        try:
+            self._serve(job, m)
+        except BaseException:
+            self._stop_child()
+            raise
+        self._web(lambda st: st.update(model=m["id"]))
 
     def _work_use(self, job, m):
         """What the user asked for when they chose a model: it is there, it runs, the advisor asks it."""
         self._check_fit(job, m)
-        self._fetch(job, m)
-        with self.lock:
-            same = self._child_alive() and self.child_info["model"] == m["id"]
-        if not same:
-            if self._server_model():  # another model's: one server at a time
-                with self.lock:
-                    job["phase"] = "starting"
-                self._stop_child()
-            self._serve(job, m)
+        had_server = self._child_alive()
+        try:
+            self._claim("setting up " + m["id"])
+            try:
+                self._fetch_runtime(job, m)
+                if not aisetup.model_ready(self.directory, m):
+                    api, _mine, _started = self._server_for_files(job, own=True)
+                    self._pull(job, m, api)
+            finally:
+                self._unclaim()
+            with self.lock:
+                same = self._child_alive() and self.child_info["model"] == m["id"]
+            if not same:
+                self._serve(job, m)
+        except BaseException:
+            if not had_server:
+                self._stop_child()  # a server started for this and left without a model would only hold memory
+            raise
         self._web(lambda st: st.update(enabled=True, model=m["id"]))
         self._note(job, "%s is in use: the advisor is on and asks it" % m["id"])
 
-    def _serve(self, job, m):
-        """Start the model server for `m` as a child, see that it does not die at once, wait until it answers."""
-        info = self._spawn_server(job, m)
-        self._await_answering(job, info)
-        job["note"] = "the model server runs: %s on %s, %s" % (m["id"], info["endpoint"], info["where"])
+    def _server_for_files(self, job, own=False):
+        """A server to pull or delete through -> (api, mine, started): the one started here; else, unless `own`, the one the other nuc-console
+        process started (web.json's endpoint, when an Ollama answers there: the same folder); else one started now (started=True)."""
+        if self._child_alive():
+            return aiollama.Api(aiollama.base_of(self.child_info["endpoint"])), True, False
+        old = advisor.read_web_state(self.web_path()).get("endpoint")
+        if old and aisetup.is_loopback_endpoint(old):
+            other = aiollama.Api(aiollama.base_of(old))
+            if other.version(1.0):
+                if own:
+                    raise aisetup.SetupError("a model server already answers at %s (started from the other nuc-console process): use it, or stop it there" % old)
+                return other, False, False
+        info = self._spawn_server(job)
+        return aiollama.Api(aiollama.base_of(info["endpoint"])), True, True
 
-    def _spawn_server(self, job, m):
-        d, runtime = self.directory, self.runtime
-        with self.lock:
-            if self._child_alive():
-                raise aisetup.SetupError("the model server started here is already running (%s, pid %d): stop it first" % (self.child_info["model"], self.child.pid))
-            job["phase"] = "starting"
+    def _serve(self, job, m):
+        """`m` loaded by the server started here (started now if there is none), so that the first answer is quick."""
         hw = self.hw_fn()
         a = aisetup.assess_model(m, hw)
         if a and a["verdict"] == "no":
             raise aisetup.SetupError("%s will not work on this machine: %s" % (m["id"], aisetup.safe(a["why"], 160)))
+        if not self._child_alive():
+            self._server_for_files(job, own=True)
+        with self.lock:
+            info = self.child_info
+            job["phase"] = "loading"
+        try:
+            aiollama.Api(aiollama.base_of(info["endpoint"])).load(m["id"], cancel=self._cancel.is_set, timeout=self.load_wait)
+        except aisetup.Cancelled:
+            self._stop_child()
+            raise
+        except aisetup.SetupError as e:
+            if info["gone"].wait(self.poll_s * 2):
+                raise aisetup.SetupError("the model server stopped while it loaded the model (exit status %s): %s"
+                                         % (info["code"], aisetup.safe(" / ".join(info["tail"]) or "it wrote nothing", 240)))
+            raise aisetup.SetupError("%s could not be loaded: %s" % (m["id"], aisetup.safe(e, 300)))
+        with self.lock:
+            info["model"] = m["id"]
+            self.version += 1
+        job["note"] = "the model server runs: %s on %s, %s" % (m["id"], info["endpoint"], info["where"])
+
+    def _spawn_server(self, job):
+        """Start the server as a child of this process, see that it does not die at once, wait until it answers. -> its info."""
+        d, runtime = self.directory, self.runtime
+        with self.lock:
+            if self._child_alive():
+                raise aisetup.SetupError("the model server started here is already running (pid %d): stop it first" % self.child.pid)
+            job["phase"] = "starting"
+        if not aisetup.runtime_ready(d, runtime):
+            raise aisetup.SetupError("the model server is not installed in %s: download a model first" % d)
         old = advisor.read_web_state(self.web_path()).get("endpoint")
         if old and aisetup.probe(old, 1)[0]:
             raise aisetup.SetupError("a model server already answers at %s (started from the other nuc-console process): use it, or stop it there" % old)
-        ctx = min(aisetup.DEFAULT_CTX, m.get("ctx_max") or aisetup.DEFAULT_CTX)
-        layers, why = aisetup.gpu_plan(m, hw, self.cfg()["ai"].get("gpu", "auto"), ctx)
-        port = self._pick_port(old)
-        argv = aisetup.serve_argv(d, m, port, aisetup.default_threads(), ctx, runtime, gpu_layers=layers)
-        proc = self._spawn(argv, d)
-        info = {"pid": proc.pid, "model": m["id"], "port": port, "endpoint": aisetup.endpoint_for(port), "since": time.time(), "tail": collections.deque(maxlen=TAIL_LINES),
-                "stopping": False, "gone": threading.Event(), "code": None, "where": aisetup.gpu_text(layers, m), "why": why}
+        gpu, why = aisetup.gpu_plan(self.cfg()["ai"].get("gpu", "auto"))
+        port = aisetup.pick_port(aisetup.port_of(old) if old else None)
+        home = os.path.join(d, "home")
+        os.makedirs(home, exist_ok=True)
+        proc = self._spawn(aisetup.serve_argv(d, runtime), aisetup.serve_env(d, port, aisetup.DEFAULT_CTX, gpu, home), home)
+        info = {"pid": proc.pid, "model": "", "port": port, "endpoint": aisetup.endpoint_for(port), "since": time.time(), "tail": collections.deque(maxlen=TAIL_LINES),
+                "stopping": False, "gone": threading.Event(), "code": None, "where": aisetup.gpu_text(gpu), "why": why}
         with self.lock:
             self.child, self.child_info, self.last_exit = proc, info, None
         threading.Thread(target=self._watch, args=(proc, info), daemon=True).start()
@@ -559,72 +646,34 @@ class Engine(object):
             atexit.register(self.shutdown)
         if info["gone"].wait(self.start_wait):  # it ended at once: say why
             raise aisetup.SetupError("the model server stopped at once (exit status %s): %s" % (info["code"], aisetup.safe(" / ".join(info["tail"]) or "it wrote nothing", 240)))
-        self._web(lambda st: st.update(model=m["id"], endpoint=info["endpoint"]))
-        return info
-
-    def _await_answering(self, job, info):
-        """The server is there but loads the model first (seconds to minutes): wait until /v1/models answers. A cancel stops it; a server
-        that ends meanwhile, or does not answer within load_wait, is said."""
-        with self.lock:
-            job["phase"] = "loading"
-        deadline = time.monotonic() + self.load_wait
-        while True:
+        api, deadline = aiollama.Api(aiollama.base_of(info["endpoint"])), time.monotonic() + self.answer_wait
+        while not api.version(1.0):
             if self._cancel.is_set():
                 self._stop_child()
                 raise aisetup.Cancelled()
             if info["gone"].wait(self.poll_s):
-                raise aisetup.SetupError("the model server stopped while it loaded the model (exit status %s): %s"
+                raise aisetup.SetupError("the model server stopped as it started (exit status %s): %s"
                                          % (info["code"], aisetup.safe(" / ".join(info["tail"]) or "it wrote nothing", 240)))
-            if aisetup.probe(info["endpoint"], 1)[0]:
-                return
             if time.monotonic() > deadline:
-                raise aisetup.SetupError("the model server has not answered in %d minutes: the model may be too big for this machine; stop it and try a smaller one"
-                                         % (self.load_wait // 60))
+                self._stop_child()
+                raise aisetup.SetupError("the model server did not answer within %d s: %s" % (self.answer_wait, aisetup.safe(" / ".join(info["tail"]) or "it wrote nothing", 240)))
+        self._web(lambda st: st.update(endpoint=info["endpoint"]))
+        return info
 
-    def _pick_port(self, preferred=None):
-        ports = []
-        try:  # the port of the server started before (web.json), then 8080 and up
-            if preferred:
-                ports.append(int(preferred.split("://", 1)[1].split("/", 1)[0].rsplit(":", 1)[1]))
-        except (ValueError, IndexError):
-            pass
-        for port in ports + list(range(aisetup.DEFAULT_PORT, aisetup.DEFAULT_PORT + PORT_TRIES)):
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                if not nuc_config.WINDOWS:  # like the server itself: a port in TIME_WAIT is free (on Windows this option would let two bind)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind((aisetup.LOOPBACK, port))
-                return port
-            except OSError:
-                continue
-            finally:
-                s.close()
-        raise aisetup.SetupError("no free port from %d to %d on 127.0.0.1" % (aisetup.DEFAULT_PORT, aisetup.DEFAULT_PORT + PORT_TRIES - 1))
-
-    def _child_env(self, d):
-        """The server gets a small environment of its own, never this process's: a fixed PATH and a home inside the AI folder (the runtime
-        unpacks a loader there; the web view's own account has no home to write to)."""
-        home = os.path.join(d, "home")
-        os.makedirs(home, exist_ok=True)
-        if nuc_config.WINDOWS:
-            keep = ("SystemRoot", "SystemDrive", "ProgramData", "ProgramFiles", "TEMP", "TMP", "COMSPEC", "PATHEXT")
-            return dict({k: os.environ[k] for k in keep if k in os.environ}, USERPROFILE=home, HOME=home)
-        return {"PATH": aisetup.UNIX_PATH, "HOME": home, "TMPDIR": home, "LANG": "C"}
-
-    def _spawn(self, argv, d):
-        kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self._child_env(d), cwd=os.path.join(d, "home"))
+    def _spawn(self, argv, env, home):
+        kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, cwd=home)
         if nuc_config.WINDOWS:
             kw["creationflags"] = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x4000) | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) \
                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
         else:
-            kw["start_new_session"] = True  # its own process group: stopping it ends the runtime's children too
+            kw["start_new_session"] = True  # its own process group: stopping it ends the server's runners too
             nice = shutil.which("nice", path=aisetup.UNIX_PATH)
             if nice:
                 argv = [nice, "-n", "10"] + list(argv)  # low priority, like `nuc-console-ai serve`
         try:
             proc = self.popen(argv, **kw)
         except OSError as e:
-            raise aisetup.SetupError("cannot start the runtime: %s" % aisetup.safe(e.strerror or e, 160))
+            raise aisetup.SetupError("cannot start the model server: %s" % aisetup.safe(e.strerror or e, 160))
         if nuc_config.WINDOWS:
             self._into_job(proc)
         return proc
@@ -709,7 +758,8 @@ class Engine(object):
         return True
 
     def _stop_child(self):
-        """End the child and its group: asked (SIGTERM), then killed after stop_grace seconds; Windows: terminated, and its tree."""
+        """End the child and its group: asked (SIGTERM), then killed after stop_grace seconds; Windows: its tree is ended (the server's runner
+        is a process of its own, which terminating the server alone would leave behind)."""
         with self.stop_lock:
             with self.lock:
                 proc, info = self.child, self.child_info
@@ -718,10 +768,13 @@ class Engine(object):
             info["stopping"] = True
             try:
                 if nuc_config.WINDOWS:
-                    proc.terminate()
+                    tree = subprocess.run([aisetup.tool("taskkill", "win32"), "/PID", str(proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL).returncode == 0
+                    if not tree:
+                        proc.terminate()
                 else:
                     os.killpg(proc.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
+            except (OSError, ProcessLookupError, aisetup.SetupError):
                 pass
             try:
                 proc.wait(self.stop_grace)
@@ -890,6 +943,11 @@ class Engine(object):
                 self.demo_state["server"] = {"pid": 4242, "model": st["active"], "endpoint": aisetup.endpoint_for(aisetup.DEFAULT_PORT), "since": time.time() - 3600}
                 self.demo_state["web"] = {"enabled": True, "model": st["active"]}
 
+    def _demo_runtime_size(self):
+        """What the demo machine's build of the server weighs (the pinned size of that file)."""
+        a = (aisetup.RUNTIME.get("assets") or {}).get(DEMO_RUNTIME.get(self._demo_os or "linux", "linux-amd64")) or {}
+        return a.get("size") or 0
+
     def _demo_has(self, model_id):
         return model_id in self._dstate()["installed"]
 
@@ -903,7 +961,7 @@ class Engine(object):
             m["installed"] = m["id"] in st["installed"]
         cat["runtime"]["installed"] = st["runtime"]
         cat["active"] = (st.get("web") or {}).get("model") or st["model"] or None
-        cat["space"] = {"used": sum(sizes[i] for i in st["installed"] if i in sizes) + (368 * 10 ** 6 if st["runtime"] else 0), "free": DEMO_FREE}
+        cat["space"] = {"used": sum(sizes[i] for i in st["installed"] if i in sizes) + (self._demo_runtime_size() if st["runtime"] else 0), "free": DEMO_FREE}
         return cat
 
     def demo_status(self, os_name):
@@ -925,7 +983,7 @@ class Engine(object):
     def _demo_fetch(self, job, m):
         """The simulated download of what is missing -> False when it was all there."""
         st = self._dstate()
-        todo = [("runtime", 368 * 10 ** 6)] * (not st["runtime"]) + [(m["id"], int(m["approx_mb"] * 10 ** 6))] * (m["id"] not in st["installed"])
+        todo = [("runtime", self._demo_runtime_size())] * (not st["runtime"]) + [(m["id"], int(m["approx_mb"] * 10 ** 6))] * (m["id"] not in st["installed"])
         if not todo:
             return False
         total, base = sum(s_ for _n, s_ in todo), 0
@@ -1094,6 +1152,8 @@ def job_text(job, progress=True):
     part = "runtime" if step == "runtime" else "model"
     if phase == "verifying":
         body = "checking the SHA-256 of the %s" % part
+    elif phase == "unpacking":
+        body = "unpacking the runtime"
     elif phase == "starting":
         body = "starting the model server"
     elif phase == "loading":
@@ -1118,7 +1178,7 @@ def state_of(snap):
     if job and job["state"] == "running" and job["kind"] in ("use", "download", "start"):
         return "working", job_text(job)
     if on and srv["running"]:
-        return "running", "on: %s runs here and answers at %s" % (srv["model"], srv["endpoint"])
+        return "running", "on: %s runs here and answers at %s" % (srv["model"] or "the model server", srv["endpoint"])
     if on and srv.get("exit"):
         e = srv["exit"]
         return "error", "the model server stopped (exit status %s): %s" % (e["code"], " / ".join(e["tail"]) or "it wrote nothing")

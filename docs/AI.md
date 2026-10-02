@@ -11,31 +11,35 @@ Everything here is optional and off by default. There are two parts:
   and answers questions about the machine's history (`nuc-console-ask`, or the chat).
 
 **What it is not.** It analyses and never acts on the machine: no command is run, no setting is changed, whatever the model says. The
-page and the screen act on one thing only, the model itself: they download its pinned files into the AI folder, start the model server on
-127.0.0.1 and stop it, and delete those files; they never write `config.ini` and never run what the model suggests. It does not send
-anything to a cloud service (the endpoint must be on this machine unless you say otherwise). It does not see raw logs. The model can be wrong:
+page and the screen act on one thing only, the model itself: they download the model server (Ollama, the pinned build of this system) and the model
+into the AI folder, start the server on 127.0.0.1 and stop it, and delete those files; they never write `config.ini` and never run what the model
+suggests. It does not send anything to a cloud service (the endpoint must be on this machine unless you say otherwise; the server is started with
+Ollama's cloud models switched off). It does not see raw logs. The model can be wrong:
 every answer is marked "AI, check before acting". `[ai] web_actions = no` is the lock for an admin who wants the page and the screen read-only
 (then they *show* the command to run, `sudo nuc-console-ai setup qwen3-8b`, and you run it).
 
-It works the same on Linux, macOS and Windows. On Windows, run the commands that install, switch or serve from an
-**administrator** prompt (no `sudo`).
+It works the same on Linux, macOS and Windows. The model server is [Ollama](https://github.com/ollama/ollama) (MIT): nuc-console downloads the
+build of this system and processor, checks it against the SHA-256 written in the code, unpacks it into the AI folder and runs it as its own
+child process: nothing is installed on the system, no administrator is needed for the buttons, and an Ollama you installed yourself is left alone.
+On Windows, run the commands that install, switch or serve from an **administrator** prompt (no `sudo`).
 
 ## In short
 
-In the browser or on the console: open the **AI** page (`/?view=ai`) or press `5`, choose a model (**use this model**, or `u`): it is downloaded
-(SHA-256 checked), started on 127.0.0.1, and the AI is on. **Turn AI off** (or `e`) stops it. The same, from a terminal:
+In the browser or on the console: open the **AI** page (`/?view=ai`) or press `5`, choose a model (**use this model**, or `u`): the model server is
+downloaded (SHA-256 checked) the first time, the model is pulled through it, it is loaded on 127.0.0.1, and the AI is on. **Turn AI off** (or `e`) stops
+it. The same, from a terminal:
 
 ```bash
 nuc-console-ai models                         # what this machine can run, model by model; no root (or: key 5 on the console)
-sudo nuc-console-ai setup                     # downloads the recommended runtime and model once, SHA-256 checked
+sudo nuc-console-ai setup                     # downloads the server (SHA-256 checked) and the recommended model, once
 sudo nuc-console-ai serve --install-service   # runs it as a service on 127.0.0.1 (or `nuc-console-ai serve`: foreground)
 # config.ini: [ai] enabled = yes              # (setup offers to write endpoint and model)
 nuc-console-ask status                        # does the server answer?
 nuc-console-ask advise                        # advice on the last 7 days of HEALTH findings
 ```
 
-`setup` (and the buttons) download only what the build you run pins (see [The pins](#the-pins)): the twelve models and the runtime are pinned; a value that
-is not stops the download before it starts and names it. `models` and the screen work meanwhile. Preview the screen without any of this:
+`setup` (and the buttons) download only what the build you run pins (see [The pins](#the-pins)): the server of each system and the twelve models are
+pinned; a value that is not stops the download before it starts and names it. `models` and the screen work meanwhile. Preview the screen without any of this:
 `python3 src/render.py --once --demo --view ai`, or the page with its buttons, simulated (nothing is downloaded or started):
 `python3 src/web.py --demo --port 8796`.
 
@@ -98,10 +102,11 @@ cannot be read at all, every row shows `?` for the verdict and the speed, and no
 Nothing here needs a terminal. The **AI page** of the web view and the **AI screen** of the console do all of it, the same way, and the commands
 (`nuc-console-ai`, `nuc-console-ask`) stay as they are, for scripts and for what the page cannot do (a service, `--force`).
 
-**One choice does everything.** Press **use this model** next to a model (console: move to it, `u`). If the runtime and the model are not here yet
-they are downloaded, with a progress bar (the pinned size and SHA-256, resumed if interrupted, never fetched twice: a file that is there and verified
-is left alone); then the model server is started on 127.0.0.1 and the page waits until it answers; then the advisor is turned on with that model. Choosing
-another model stops the first server and starts the second: there is only ever one. A model that will not work on this machine ("too big") has no button;
+**One choice does everything.** Press **use this model** next to a model (console: move to it, `u`). If the server is not here yet it is downloaded,
+with a progress bar (the pinned size and SHA-256, resumed if interrupted, never fetched twice), and unpacked; then it is started on 127.0.0.1, the model is
+pulled through it if it is not here yet (Ollama checks every layer against the registry's SHA-256; a pull that was cancelled resumes), and it is loaded,
+so that the first answer is quick; then the advisor is turned on with that model. Choosing another model loads it in the same server (which unloads the
+first: one model in memory at a time); there is only ever one server. A model that will not work on this machine ("too big") has no button;
 one that fits but slows the PC is set up with a warning.
 
 **AI on / off.** The switch at the top of the page, a key on the screen (`e`). *Turn AI on* uses the model chosen before (the page's, else `[ai] model`
@@ -112,7 +117,7 @@ the advisor off. What it is doing is always on the screen:
 | State | Means |
 |---|---|
 | `OFF` | the advisor is off |
-| `WORKING` | `downloading the runtime, 39%, 303 MB of 765 MB, 130.6 MB/s, about 3 s left`, `checking the SHA-256 of the model`, `starting the model server`, `loading the model: it answers in a minute or two` (the page reloads every 2 s; **Cancel** / `c` stops it and keeps what was fetched) |
+| `WORKING` | `downloading the runtime, 39%, 1.1 GB of 2.9 GB, 30.6 MB/s, about 1 min left`, `unpacking the runtime`, `downloading the model, ...`, `checking the SHA-256 of the model`, `starting the model server`, `loading the model: it answers in a minute or two` (the page reloads every 2 s; **Cancel** / `c` stops it and keeps what was fetched) |
 | `ON` | the advisor is on and the model answers (`tiny runs here and answers at http://127.0.0.1:8080/v1`), or it is on and asks a server that was not started here (`config.ini`'s, Ollama...) |
 | `ERROR` | the model server stopped by itself: the exit status and its last lines are shown |
 
@@ -123,18 +128,19 @@ that period (`nuc-console-ask advise` does the same); it is also kept in the sha
 portable run, never for the unprivileged web account of an installation: only root writes `advice.json`). Every answer is marked "AI, check before acting"
 and is cleaned (console) or escaped (web) before anyone sees it.
 
-**Delete.** In the details of a model (click its name): *delete its files*; at the bottom of the page: *delete everything* (the runtime and every model,
-and the loader the runtime unpacked). Both ask first (web: a question with *Yes* / *No*; console: `y` / `n`). A file this account cannot delete (installed
-with `sudo nuc-console-ai setup` into a folder that is root's) is named, with the command to run instead (`sudo nuc-console-ai remove tiny`). Deleting the
-model the server runs stops the server first and turns the advisor off.
+**Delete.** In the details of a model (click its name): *delete its files* (the model, and the layers no other model uses); at the bottom of the page:
+*delete everything* (the server, every model, and the server's key in `home/`). Both ask first (web: a question with *Yes* / *No*; console: `y` / `n`). A file
+this account cannot delete (installed with `sudo nuc-console-ai setup` into a folder that is root's) is named, with the command to run instead
+(`sudo nuc-console-ai remove tiny`). Deleting the model the server answers with unloads it, deletes it through the server, stops the server and turns the
+advisor off; *delete everything* stops the server first.
 
 | On the page | Console key | Does |
 |---|---|---|
 | **Turn AI on** / **Turn AI off** | `e` | the switch (above); while a job runs `e` cancels it |
 | **use this model** (each row, and in its details) | `u` | the one action (above) |
-| **Cancel** | `c` | stops the download or the start that runs |
+| **Cancel** | `c` | stops the download, the pull or the start that runs |
 | **delete its files** (details) | `x` | deletes one model's files, after the question |
-| **delete everything** (bottom) | `X` | deletes the runtime and every model, after the question |
+| **delete everything** (bottom) | `X` | deletes the server and every model, after the question |
 | the question box, **advice now** | | chat (web only) |
 | | `Enter`, `↑` `↓`... | details, moving |
 
@@ -153,7 +159,8 @@ console screen (`folder ...`), and in `nuc-console-ai models` and `status`. It i
 | Portable run | `data/ai` next to `run.sh` / `run.cmd` (`$NUC_CONSOLE_HOME/ai`) | you |
 | Run by hand as a user | `~/.local/share/nuc-console/ai` (`$XDG_DATA_HOME`), macOS `~/Library/Application Support/nuc-console/ai`, unless the system-wide folder exists, is writable by you and your own has nothing in it | you |
 
-Models are 0.4 to 19 GB: the page says what is free on that disk, a download that would not leave 300 MB free is refused before it starts, and the folder stays
+The server takes 0.5 to 4 GB (its archive is kept for `serve --install-service`; the Windows and Linux builds carry the CUDA libraries) and the models 0.4 to
+19 GB: the page says what is free on that disk, a download that would not leave 300 MB free is refused before it starts, and the folder stays
 when you uninstall (delete everything, or `sudo nuc-console-ai remove`, gives the disk back). An installation that already had files there from
 `sudo nuc-console-ai setup` keeps them (root's, readable, usable); to let the page delete them too, `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS:
 `_nuc-console`).
@@ -172,14 +179,16 @@ replace `config.ini`'s. The `endpoint` is only ever this machine (a number of th
 `web.json` is read only from a file that root or the reading account owns and nobody else may write, and **never by root**: the daily digest
 (`[ai] daily`) and `sudo nuc-console-ask` use `config.ini` alone, so the web account cannot choose where root sends the findings. `[ai] web_actions = no`: the
 file counts for nothing. The other files the page makes in the folder: `job.lock` (a download or a delete is running, in the web view or in the console: the other
-one waits; a lock nobody has touched for 90 s is a dead process's), `home/` (the loader the runtime unpacks at its first start).
+one waits; a lock nobody has touched for 90 s is a dead process's), `home/` (the server's home: the key Ollama makes at its first start, `~/.ollama`).
 
 ### The model server it starts
 
-It is a **child** of the web view (or of the console): the command line is `serve`'s (`aisetup.serve_argv`: `--host 127.0.0.1`, the port from 8080 up that is free,
-`-ngl` from the hardware advice and `[ai] gpu`), at low priority (`nice -n 10`; Windows: below normal), in its own process group (a job object on Windows), with a
-small environment of its own (a fixed `PATH`, a home inside the AI folder) and the output kept for its last lines. It ends when the web view or the console ends
-(a stop, Ctrl+C, a crash on Windows: the job object), and there is only one per process. Two limits to know: on Linux the web view's unit has no access to the GPU
+It is a **child** of the web view (or of the console): `ollama serve` with the environment of `serve` (`aisetup.serve_env`: `OLLAMA_HOST=127.0.0.1:` the port from
+8080 up that is free, `OLLAMA_MODELS=` the AI folder's `models/`, 4096 tokens of context, one model loaded and one request at a time, `OLLAMA_NO_CLOUD=1`, nothing
+pruned at start, the GPUs hidden when `[ai] gpu = no`), at low priority (`nice -n 10`; Windows: below normal), in its own process group (a job object on Windows), with
+a small environment of its own (a fixed `PATH`, a home inside the AI folder: an `OLLAMA_HOST` of yours never reaches it) and the output kept for its last lines. It ends
+when the web view or the console ends (a stop, Ctrl+C, a crash on Windows: the job object; on Windows the stop ends its whole tree, the runner included), and there is
+only one per process. It serves every installed model and keeps the one in use loaded for a few minutes after the last question (Ollama's default), then frees the memory. Two limits to know: on Linux the web view's unit has no access to the GPU
 devices (`PrivateDevices=yes`), so a server started from the page runs on the CPU, and its cgroup caps the memory at 85% of the RAM; for a GPU use the console's
 unit (the account needs the `render`/`video` groups) or `sudo nuc-console-ai serve --install-service`, which is made for it. A server you run yourself
 (Ollama...) is never started or stopped from here; with the AI on by `config.ini` the page just asks it.
@@ -188,9 +197,10 @@ unit (the account needs the `render`/`video` groups) or `sudo nuc-console-ai ser
 
 The rules are in [WEB.md](WEB.md#the-ai-pages-buttons) (the same access as viewing, a CSRF token, Origin/Referer/Fetch-Metadata checks, 4 KB, ids from the catalog, the CSP
 difference) and [SECURITY.md](../SECURITY.md). In short: nothing from a request reaches a path, a command line or a shell except a model id the catalog has; the only
-files downloaded are the pinned ones; the only program started is the pinned runtime, on 127.0.0.1; everyone who can open the page can use the buttons (that is "viewing"
-for a tailnet), so `web_actions = no` is the switch for a page that must only show. The web account that owns the AI folder can replace the files in it: the runtime of
-a service installed with `serve --install-service` is checked again (SHA-256) when that command runs, not when the service restarts.
+files downloaded are the server's pinned archive and the models of the catalog (by their Ollama names, written in the code); the only program started is the pinned
+server, on 127.0.0.1; everyone who can open the page can use the buttons (that is "viewing" for a tailnet), so `web_actions = no` is the switch for a page that must only
+show. The web account that owns the AI folder can replace the files in it: for a service installed with `serve --install-service` the server's archive is hashed again
+against its pin and unpacked again, and every layer of the model is hashed against its name, when that command runs (not when the service restarts).
 
 ## Choosing a model
 
@@ -228,9 +238,10 @@ or confused, take the next size up before changing anything else.
 
 ### The models
 
-Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation (Q4_K_M, GGUF). Ordered best first,
-as in `nuc-console-ai models`. **Sizes are approximate** (they feed the advice); the download is checked against the exact pinned
-size. *Needs* is for 4096 tokens of context, the default of `serve`.
+Permissive licences only (Apache-2.0 or MIT; the tests refuse anything else), 4-bit quantisation as the Ollama library ships them. Each one is
+pulled under its Ollama name (`qwen3:4b`; SmolLM3 from its GGUF repository, `hf.co/unsloth/SmolLM3-3B-GGUF:Q4_K_M`) and then known to the server by its
+id. Ordered best first, as in `nuc-console-ai models`. **Sizes are approximate** (they feed the advice). *Needs* is for 4096 tokens of context, the
+default of `serve`.
 
 | Id | Model | Parameters | File (approx.) | Needs | Context | Licence | Notes |
 |---|---|---|---|---|---|---|---|
@@ -253,53 +264,48 @@ is installed, else `qwen3-4b` if that is installed, else the first installed one
 Qwen3 and SmolLM3 start in a "thinking" mode that writes a long `<think>` block first; the advisor removes that block from what it
 shows, but the time it takes still counts against `[ai] timeout_s`. (The `/no_think` in some model notes is the models' own switch:
 the advisor does not send it.) Which models the list holds, and in which order, is part of each release (a new model is a new entry
-with new pins); there is no automatic update.
+in a new release); there is no automatic update.
 
 ## GPU support
 
-The runtime is [llamafile](https://github.com/mozilla-ai/llamafile) (Mozilla, Apache-2.0): one program for the three
-systems that serves a GGUF model on an OpenAI-compatible API. `serve` tells it how many layers to put on the GPU
-(`--gpu auto -ngl N`) when the verdict is FITS GPU or GPU+CPU, and `--gpu disable` otherwise (no GPU, a SLOW or TOO BIG model,
-`[ai] gpu = no`). `N` is 999, llamafile's own spelling of "every layer", when the model fits entirely, and the number of layers
-that fit for GPU+CPU. The start line says which: `all 36 layers on the GPU`, `20 of 36 layers on the GPU` or `CPU only`, followed
-by the reason (the sentence of the verdict). `serve --gpu-layers N` sets it by hand (`0` = CPU only, `999` = all) and wins over
-the advice and over `[ai] gpu`.
-
-If the GPU cannot be set up, llamafile falls back to the CPU without failing: the model then runs at CPU speed, whatever the
-verdict said. Run `nuc-console-ai serve` in the foreground once and read its start-up lines to see which backend was loaded.
-llamafile's own documentation lists what each GPU needs; its 0.10 series has not been tested on every GPU and platform yet, so
-the AMD and Windows paths in particular are best effort.
+The model server is [Ollama](https://github.com/ollama/ollama). It finds the GPU by itself every time it loads a model: it measures the free video
+memory and puts as many layers there as fit (all of them, or some with the rest on the CPU), and falls back to the CPU when there is no usable GPU.
+`serve` and the buttons therefore do not decide layers: they let Ollama use the GPU (`[ai] gpu = auto`, the default) or hide every GPU from it
+(`[ai] gpu = no`, or `serve --cpu`). The verdicts of the screen are the advice for choosing a model; where it really runs is Ollama's measure. Its
+start-up lines (`nuc-console-ai serve` in a terminal, or the last lines the page shows) say which GPU it found (`inference compute`).
 
 | GPU | Linux | Windows | macOS |
 |---|---|---|---|
-| **NVIDIA** (CUDA) | the NVIDIA driver (`nvidia-smi` must work: that is how memory is read; without it the card is listed from `/sys` with its memory unknown and is not counted); llamafile may need the CUDA SDK (`nvcc`) to build its CUDA module on first start | the driver (memory from `nvidia-smi`, also found under `%ProgramFiles%\NVIDIA Corporation\NVSMI`; without it the adapter's registry entry gives the total only); llamafile's release carries prebuilt CUDA support | not supported |
-| **AMD** (ROCm / Vulkan) | memory read from `/sys/class/drm` (amdgpu) and counted as ROCm; a card with less than 2 GB is an APU's carve-out of the RAM: shared, not counted. llamafile uses ROCm with the HIP SDK (`hipcc`), or Vulkan | memory read from the display adapter's registry entry (counted as Vulkan; same 2 GB rule); Vulkan through the Adrenalin driver, ROCm with the HIP SDK | not supported |
-| **Apple** (Metal) | n/a | n/a | Apple silicon: Metal, on by default. The first start compiles a small module and needs the **Xcode Command Line Tools** (`xcode-select --install`). The memory is unified: the GPU uses the RAM, up to about two thirds of it. Intel Macs: `system_profiler` gives a dedicated GPU's memory, but llamafile uses the GPU on Apple silicon only: expect the CPU |
+| **NVIDIA** (CUDA) | the NVIDIA driver (`nvidia-smi` must work: that is how memory is read; without it the card is listed from `/sys` with its memory unknown and is not counted); the build carries the CUDA libraries | the driver (memory from `nvidia-smi`, also found under `%ProgramFiles%\NVIDIA Corporation\NVSMI`; without it the adapter's registry entry gives the total only); the build carries the CUDA libraries | not supported |
+| **AMD** (ROCm / Vulkan) | memory read from `/sys/class/drm` (amdgpu) and counted as ROCm; a card with less than 2 GB is an APU's carve-out of the RAM: shared, not counted. Ollama uses the card through Vulkan with the build nuc-console downloads (the separate ROCm add-on is not fetched yet) | memory read from the display adapter's registry entry (counted as Vulkan; same 2 GB rule); Vulkan through the Adrenalin driver | not supported |
+| **Apple** (Metal) | n/a | n/a | Apple silicon: Metal, on by default, nothing to install. The memory is unified: the GPU uses the RAM, up to about two thirds of it. Intel Macs: `system_profiler` gives a dedicated GPU's memory, but expect the CPU |
 | **Intel** | Arc cards (own memory, `lmem_total_bytes` in `/sys`) are counted, as Vulkan. An integrated GPU shares the RAM: shown on the screen, never counted | Arc A/B cards are counted (Vulkan); an integrated GPU is shown, never counted | an Intel Mac: CPU |
 
 A GPU the program cannot read is listed in the notes ("nvidia-smi not found", ...), never guessed. Over RDP, in a VM
 or in a container the GPU is often not visible at all.
 
-`[ai] gpu = no` makes `serve` start the server CPU-only whatever the hardware says (a GPU you need for something
-else, a driver you do not trust, a monitoring box that must never start compiling GPU code); it then does not even read the
-hardware. The default is `auto`. It changes how `serve` starts the server, not what the AI screen says about the hardware.
+`[ai] gpu = no` makes `serve` and the buttons start the server CPU-only whatever the hardware says (a GPU you need for something
+else, a driver you do not trust): the CUDA, ROCm and Vulkan devices are hidden from it (`CUDA_VISIBLE_DEVICES=-1` and the others). On a Mac
+Metal cannot be hidden this way: there the setting has no effect. The default is `auto`. It changes how the server is started, not what
+the AI screen says about the hardware.
 
-**An installed service keeps what it was installed with.** The service account reads none of our configuration and does not look at
-the hardware: `serve --install-service` decides the model, the port, the threads, the context and the GPU layers once, and writes them into
-the service (`serve --dir ... --model ... --gpu-layers N`). A later `nuc-console-ai use MODEL`, a change of `[ai] model` or of
-`[ai] gpu`, a new GPU or a new driver reaches it **only** when you run `sudo nuc-console-ai serve --install-service` again, which writes
-the service again and restarts it (Windows: an administrator prompt, no `sudo`). `use` prints that command.
+**An installed service keeps what it was installed with.** The service account reads none of our configuration: `serve --install-service`
+decides the port, the context and whether the GPU may be used once, and writes them into the service (`serve --dir ... --model ... --port N --ctx N`,
+and `--cpu` for CPU only). The server serves every installed model, so `nuc-console-ai use MODEL` needs nothing more (the advisor asks the new one
+from its next question); a change of `[ai] gpu` reaches the service **only** when you run `sudo nuc-console-ai serve --install-service` again, which
+writes it again and restarts it (Windows: an administrator prompt, no `sudo`). A new GPU or driver is found by Ollama itself at its next start.
 
 On Linux the systemd unit of a server that uses the GPU differs from the CPU one in two lines, because its sandbox otherwise hides
 the GPU: `PrivateDevices=no` (the device nodes `/dev/nvidia*`, `/dev/dri`, `/dev/kfd` must exist for it) and `SupplementaryGroups=`
 the `render` and `video` groups that the machine has (they own those nodes). The rest of the sandbox stays. A CPU-only unit has
 `PrivateDevices=yes` and no extra groups. The launchd daemon and the scheduled task are the same with or without a GPU, apart from
-the `--gpu-layers` value in their command.
+the `--cpu` in their command.
 
 ## Using a server you already have
 
-`setup` and `serve` are for people with no server. If you run **Ollama**, **LM Studio**, the **llama.cpp** server or
-anything else that speaks the OpenAI API on this machine, point the advisor at it and skip both:
+`setup`, `serve` and the buttons run a server of nuc-console's own, beside any other. If you already run **Ollama** (its own install, on port
+11434), **LM Studio**, the **llama.cpp** server or anything else that speaks the OpenAI API on this machine, you can point the advisor at it and
+skip them:
 
 ```ini
 [ai]
@@ -326,12 +332,12 @@ variable cannot redirect a write done as root.
 | Command | Does |
 |---|---|
 | `nuc-console-ai models` | the hardware summary, the folder the files go to (what it holds, what is free on that disk) and the table of models with a verdict, the estimated speed, whether each is installed and which one is active. Only reads, no root |
-| `nuc-console-ai setup [MODEL ...]` | downloads the runtime and the models you name (none: the recommended one), once; a file that is already there with the right hash is not downloaded again, a partial one is resumed. Asks before downloading (`--yes` agrees); a SLOW model is installed with a warning, a TOO BIG one is refused unless `--force`. Then offers to write `[ai] endpoint = http://127.0.0.1:PORT/v1` and `model` (the first one named) in `config.ini`: `--yes` does that only for a first setup and never replaces an endpoint or model you set, and `[ai] enabled` is never switched on for you. Also `--no-config`, `--port N` (the port for that endpoint, default 8080) |
-| `nuc-console-ai use MODEL` | makes an installed, verified model the one the advisor asks (`[ai] model`, nothing else in `config.ini` changes); refuses a TOO BIG one unless `--force`, warns about SLOW; tells you how to restart the server so that it serves that one (`serve --install-service` again) |
-| `nuc-console-ai serve` | runs the server in the foreground on 127.0.0.1 at low priority; Ctrl+C stops it. `--model ID`, `--port N` (8080), `--threads N` (default: cores minus two, at least 1), `--ctx N` (default 4096, at most the model's context), `--gpu-layers N` (0 = CPU only, 999 = all; default: decided from the hardware and `[ai] gpu`), `--dry-run` (print the command), `--log FILE` (for the Windows task) |
-| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account, with the values of that moment written into it. It hashes the runtime and the model again first (the web account may write the folder), and refuses a file that is not the pinned one. Run it again after `use` or a change of `[ai] gpu`. `--remove-service` removes it |
-| `nuc-console-ai status` | the folder (what it holds, what is free), what is installed and verified, whether the endpoint answers. Exit status: 0 it answers and lists the configured model; 3 it answers without that model, or does not answer (or is not on this machine and `allow_remote = no`) while a model is installed: run `serve`; 1 it does not answer and nothing is installed: run `setup`. `--verify` hashes the files again, `--endpoint URL` probes another server. Only reads, no root |
-| `nuc-console-ai remove [MODEL]` | deletes the downloaded files of that model (none named: every model and the runtime), after asking (`--yes`). `config.ini` is not changed |
+| `nuc-console-ai setup [MODEL ...]` | downloads the server (the build of this system, SHA-256 checked, then unpacked) and pulls the models you name through it (none: the recommended one), once; what is already there is not downloaded again, a partial download is resumed. Asks before downloading (`--yes` agrees); a SLOW model is installed with a warning, a TOO BIG one is refused unless `--force`. Then offers to write `[ai] endpoint = http://127.0.0.1:PORT/v1` and `model` (the first one named) in `config.ini`: `--yes` does that only for a first setup and never replaces an endpoint or model you set, and `[ai] enabled` is never switched on for you. Also `--no-config`, `--port N` (the port for that endpoint, default 8080) |
+| `nuc-console-ai use MODEL` | makes an installed model the one the advisor asks (`[ai] model`, nothing else in `config.ini` changes); refuses a TOO BIG one unless `--force`, warns about SLOW. The server serves every installed model: nothing to restart |
+| `nuc-console-ai serve` | runs the server (`ollama serve`) in the foreground on 127.0.0.1 at low priority, with its models in the cache folder; Ctrl+C stops it. `--model ID` (the one the start line names; every installed model is served), `--port N` (8080), `--ctx N` (default 4096, at most the model's context), `--cpu` (hide the GPUs: CPU only; default: the GPU when one holds the model, unless `[ai] gpu = no`), `--dry-run` (print the settings and the command), `--log FILE` (for the Windows task). An older service's `--threads` and `--gpu-layers` are still accepted |
+| `nuc-console-ai serve --install-service` | the same as a system service: systemd unit (Linux), launchd daemon (macOS), scheduled task (Windows), each under an unprivileged account, with the values of that moment written into it. It first hashes the server's archive against its pin and unpacks it again, and hashes every layer of the model against its name (the web account may write the folder), and refuses what does not match. Run it again after a change of `[ai] gpu`. `--remove-service` removes it |
+| `nuc-console-ai status` | the folder (what it holds, what is free), what is installed, whether the endpoint answers. Exit status: 0 it answers and lists the configured model; 3 it answers without that model, or does not answer (or is not on this machine and `allow_remote = no`) while a model is installed: run `serve`; 1 it does not answer and nothing is installed: run `setup`. `--verify` hashes the server's archive against its pin and every layer of the models against its name, `--endpoint URL` probes another server. Only reads, no root |
+| `nuc-console-ai remove [MODEL]` | deletes that model (its manifest and the layers no other model uses; none named: the folders `runtime/` and `models/`, the server and every model), after asking (`--yes`). `config.ini` is not changed |
 | `nuc-console-ai pins` | for maintainers: prints the values to paste in `RUNTIME` and `MODELS` (needs the network) |
 | `nuc-console-ask QUESTION...` | an answer from the history, through read-only queries (also `ask QUESTION...`) |
 | `nuc-console-ask advise [--days N]` | advice on the HEALTH findings of the last N days (1-30, default 7) (also `--advise`) |
@@ -373,19 +379,21 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
   LOCAL SERVICE) at low priority; the systemd unit adds a sandbox (no new privileges, read-only system, no home, private
   `/tmp`, kernel and control groups protected, no capabilities, only IP and Unix sockets) and a memory cap of 1.5 times the model's
   expected memory. With a GPU the unit has to let the service see the device nodes (`PrivateDevices=no`, the `render` and `video`
-  groups: see [GPU support](#gpu-support)). Nothing of this runs in the root collector. llamafile also confines itself with a
-  system-call sandbox on CPU runs; with a GPU backend loaded that is not possible (the drivers need device access), so a GPU
-  server relies on the account and the unit alone: `[ai] gpu = no` keeps it on the CPU.
-- **Downloads are pinned.** HTTPS only (a redirect to `http://` is refused), size and SHA-256 written in the code, a model
-  from a Hugging Face *commit* and never from a branch, written to `<name>.part` and renamed only after the check; a mismatch
-  deletes the file. No automatic update: a new runtime or model is a new pin in a new release. `setup`, the buttons that do the same (and `pins`, for
-  maintainers) are the only code in the project that connects outward (huggingface.co and github.com), and only when you ask: a click, or the command.
+  groups: see [GPU support](#gpu-support)). Nothing of this runs in the root collector. Ollama listens on 127.0.0.1 only and,
+  like any Ollama, answers the programs of this machine; it is started with its cloud models switched off (`OLLAMA_NO_CLOUD=1`).
+- **Downloads are pinned.** The server: HTTPS only (a redirect to `http://` is refused), size and SHA-256 written in the code, written to
+  `<name>.part` and renamed only after the check (a mismatch deletes the file), then unpacked with every member checked (no absolute path, no
+  `..`, no link that leaves the folder). The models: pulled by Ollama under the names written in the code, from the Ollama library
+  (registry.ollama.ai; SmolLM3 from huggingface.co); Ollama checks each layer against the SHA-256 of the registry's manifest. The model's exact
+  version is the registry's (a name, not a commit, is what the code holds): the integrity is Ollama's check, not a pin of nuc-console's. No
+  automatic update: a new server or model is a new entry in a new release. `setup`, the buttons that do the same (and `pins`, for maintainers)
+  are the only code in the project that connects outward (github.com, the registry), and only when you ask: a click, or the command.
 
 ## Files and disk
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Runtime and models | `/var/lib/nuc-console/ai` (installed: owned by `nuc-console`, which the web view and the console run as; also what `sudo nuc-console-ai` uses); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (installed: owned by `_nuc-console`; root's too); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it) |
+| Server and models | `/var/lib/nuc-console/ai` (installed: owned by `nuc-console`, which the web view and the console run as; also what `sudo nuc-console-ai` uses); `~/.local/share/nuc-console/ai` otherwise (`$XDG_DATA_HOME`) | `/Library/Application Support/nuc-console/ai` (installed: owned by `_nuc-console`; root's too); `~/Library/Application Support/nuc-console/ai` otherwise | `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it) |
 | Service | unit `nuc-console-ai.service`, user `nuc-console-ai`, state `/var/lib/nuc-console-ai`; log: `journalctl -u nuc-console-ai` | `/Library/LaunchDaemons/com.nuc-console.ai.plist`, user `_nuc-console-ai`; log `/var/log/nuc-console/ai.log` | scheduled task `\nuc-console\ai` (LOCAL SERVICE); log `%ProgramData%\nuc-console\logs\ai.log` |
 | Shared advice (what the screens show) | `/var/lib/nuc-console/advice.json` | same | `%ProgramData%\nuc-console\lib\advice.json` |
 | Advice cache | `advisor-cache.json` in `~/.cache/nuc-console` (`$XDG_CACHE_HOME`) of whoever asked | `~/Library/Caches/nuc-console` | `%LOCALAPPDATA%\nuc-console` |
@@ -393,9 +401,10 @@ The threat model of the whole project is in [SECURITY.md](../SECURITY.md); for t
 The screens and `models` and `status` read the system-wide folder when it holds `verified.json` (what `sudo setup` leaves there),
 else your own. `NUC_CONSOLE_HOME=<dir>` moves the first row to `<dir>/ai` (and the advice cache to `<dir>`) for the screens and for
 `python3 aisetup.py`; the `nuc-console-ai` command ignores it, use `--dir DIR` there (the folder itself, not `DIR/ai`); a portable run sets it to `data`, so the
-folder is `data/ai`. Inside it: `runtime/` (llamafile, tens to a few hundred MB depending on the version), `models/` (the sizes of the table), `verified.json` (what
-was checked, so that `status` does not hash 2 GB each time), and what the page and the screen add: `web.json`, `job.lock`, `home/` ([above](#from-the-browser-and-the-console)). `setup` needs the missing files plus 300 MB free and stops, naming the
-folder, if there is not enough. At its first start llamafile unpacks a small loader into the service account's home.
+folder is `data/ai`. Inside it: `runtime/` (Ollama's archive for this system and the folder it was unpacked into: 160 MB on a Mac, about 1.5 GB of archive and 2 GB
+unpacked on Windows and Linux, which carry the CUDA libraries), `models/` (Ollama's folder of models: `manifests/` and `blobs/`, the sizes of the table), `verified.json`
+(what was checked and unpacked, so that `status` does not hash a gigabyte each time), and what the page and the screen add: `web.json`, `job.lock`, `home/`
+([above](#from-the-browser-and-the-console)). `setup` needs the missing files plus 300 MB free and stops, naming the folder, if there is not enough.
 
 The advice cache keeps up to 20 answers for 7 days and belongs to the account that asked. What the screens show is the shared
 `advice.json`: the latest answer for 1, 7 or 30 days, written only by root / Administrator (the collector's daily digest, or
@@ -408,22 +417,23 @@ The advice cache keeps up to 20 answers for 7 days and belongs to the account th
 `timeout_s` + 2 minutes) that never holds up the collector. A failure is logged once and tried again the next day; the last attempt
 is remembered in `advice.json`, so a restart does not ask again. The screens show an answer up to 36 hours old, with its age.
 
-The installers add the two commands and remove them on uninstall, together with the service. They **keep** the runtime and
+The installers add the two commands and remove them on uninstall, together with the service. They **keep** the server and
 the models (and the `nuc-console-ai` account and its state), because downloading them again is the expensive part: to give
 the disk back, run `sudo nuc-console-ai remove` before uninstalling, or delete the folder above afterwards.
 
 ## The pins
 
-`setup` downloads only what the code pins: for the runtime a SHA-256 and a size, for each model a Hugging Face commit
-(40 hex), a SHA-256 and a size. They are written in `src/aisetup.py` (`RUNTIME` and `MODELS`); they are never read from
-the network at run time and never filled in from memory. A value that is still empty means "not pinned": `setup` says
-which and downloads nothing. In this release everything is pinned: llamafile 0.10.6 (from `github.com/mozilla-ai/llamafile`) and
-the twelve models (read with `pins` by the `ai-pins` workflow, which also installs the smallest model on a GitHub runner, serves it
-and asks it a question). The verdicts use the approximate sizes, not the pins; a model that is not pinned says "not pinned yet".
+`setup` downloads only what the code pins: for the server, the file, SHA-256 and size of the build of each system and processor
+(`linux-amd64`, `linux-arm64`, `darwin`, `windows-amd64`, `windows-arm64`); for each model, the name Ollama pulls it under. They are
+written in `src/aisetup.py` (`RUNTIME` and `MODELS`); they are never read from the network at run time and never filled in from memory.
+A value that is still empty means "not pinned": `setup` says which and downloads nothing. In this release everything is pinned: Ollama
+0.35.0 (from `github.com/ollama/ollama`, the release's own `sha256sum.txt`) and the twelve models (the `ai-pins` workflow checks that each
+name exists in the registry and prints its size and licence, and installs the smallest model with `setup` on a Linux, a Windows and a macOS
+runner, serves it and asks it a question). The verdicts use the approximate sizes; a model that is not pinned says "not pinned yet".
 
-A maintainer pins a release with `python3 src/aisetup.py pins` (it asks the Hugging Face and GitHub APIs, so it needs the
-network); the steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#pinning-the-ai-manifest). A model counts as installed
-when its file has the pinned size and hash.
+A maintainer pins a release with `python3 src/aisetup.py pins` (it asks the GitHub API and the Ollama registry, so it needs the
+network); the steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#pinning-the-ai-manifest). A model counts as installed when its
+manifest is in the folder of models and every layer it names is there with its size.
 
 ## When it does not work
 
@@ -435,13 +445,15 @@ when its file has the pinned size and hash.
 | `nuc-console-ask`: exit 3 | `[ai] enabled = yes`? the endpoint on this machine? `nuc-console-ask status` |
 | `nuc-console-ask`: exit 4 | no history yet: `[features] health = yes`, a few minutes of the collector |
 | The first answer takes a minute | the model is loaded into memory on its first request; later ones are faster |
-| Answers are slow, the GPU is idle | the GPU backend did not load and llamafile fell back to the CPU: run `nuc-console-ai serve` in the foreground, read the start-up lines; [GPU support](#gpu-support) |
+| Answers are slow, the GPU is idle | Ollama found no GPU it can use (a driver, `[ai] gpu = no`, the web view's sandbox on Linux) or the model does not fit it: run `nuc-console-ai serve` in the foreground and read the start-up lines (`inference compute`); [GPU support](#gpu-support) |
 | A new `[ai] model`, or `[ai] gpu`, changed nothing in the running server | an installed service keeps what it was installed with: `sudo nuc-console-ai serve --install-service` again |
 | HEALTH shows "no advice yet" | the screens show the shared answer of the last 36 hours: `sudo nuc-console-ask advise`, or `[ai] daily = yes`: [HEALTH.md](HEALTH.md#advice-optional) |
-| macOS: the server does not start the first time | `xcode-select --install` (Apple silicon needs the Command Line Tools once) |
+| Linux: `install zstd` | the Linux builds of Ollama are `.tar.zst`: Python 3.14 reads them, older ones need the `zstd` tool (`apt install zstd`, `dnf install zstd`) |
+| Windows: the server is blocked or removed | an antivirus may hold a new executable for a scan: allow `%ProgramData%\nuc-console\ai\runtime` (or the portable folder's `data\ai\runtime`), then *use this model* again |
 | The page or the screen says `locked by config.ini` | `[ai] web_actions = no`: set it to `yes` and restart the web view and the console (config is read when they start) |
 | A job says `another nuc-console process is downloading ...` | one job at a time, and the web view and the console share the folder: they wait for each other (`job.lock`, which clears itself 90 s after a process died) |
 | A job says `this account may not write to ...` | the folder is root's (made by an older `sudo nuc-console-ai setup`): `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS: `_nuc-console`), or run the command it names |
-| `ERROR`, or `the model server stopped at once` | the exit status and the server's last lines are shown: usually not enough memory, a port, or (macOS) the Command Line Tools; `nuc-console-ai serve` in a terminal shows more |
+| `ERROR`, or `the model server stopped at once` | the exit status and the server's last lines are shown: usually not enough memory or a port; `nuc-console-ai serve` in a terminal shows more |
+| `could not be loaded: the model server says: model requires more system memory ...` | the model does not fit what is free now: close something, or choose a smaller one |
 | `ON`, but it runs on the CPU although the machine has a GPU (Linux) | the web view's unit cannot open the GPU devices (`PrivateDevices=yes`); use `sudo nuc-console-ai serve --install-service` for a GPU ([GPU support](#gpu-support)) |
 | The download stops at `Tunnel connection failed` or HTTP 403 | this network blocks `huggingface.co` or `github.com` (a proxy, a firewall): the partial file is kept and resumed when the network lets it through |

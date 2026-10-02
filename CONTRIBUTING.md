@@ -205,22 +205,24 @@ A new Python is a new pin in a new release: nothing updates by itself, and nothi
 ## Pinning the AI manifest
 
 `nuc-console-ai setup` downloads only what `RUNTIME` and `MODELS` in `src/aisetup.py` pin, and refuses while a value is `None`. A
-release must fill them, from the sources, never from memory or from a web page. (A new model is an entry in `MODELS`, kept in rank order,
-`rank` 1..n with the best first: `params_b`, and `active_b` for a mixture of experts, `layers` (the blocks `--gpu-layers` counts), `ctx_max`,
-`approx_mb` (the file, in MB), `ram_mb`, a one-line ASCII `notes`, and the `repo` and `file` it comes from; `pins` then finds the rest.)
+release must fill them, from the sources, never from memory or from a web page. `RUNTIME` is the model server, Ollama: a `version`, the
+release's `base` URL and, per build (`linux-amd64`, `linux-arm64`, `darwin`, `windows-amd64`, `windows-arm64`: `aiollama.asset_key()`),
+the `file`, its `sha256` and its `size`. A model is an entry in `MODELS`, kept in rank order, `rank` 1..n with the best first: `params_b`, and
+`active_b` for a mixture of experts, `layers`, `ctx_max`, `approx_mb` (the weights, in MB), `ram_mb`, a one-line ASCII `notes`, `ollama` (the name
+it is pulled under: the Ollama library's, or `hf.co/<user>/<repo>:<quant>`) and `size` (what the registry says it weighs, for the disk check).
 
-1. On a machine with network access: `python3 src/aisetup.py pins`. It asks the GitHub API for the llamafile release (asset digest and size)
-   and the Hugging Face API for every model (the repository's current commit, and the file's LFS SHA-256 and size at that commit) and prints one
-   line per entry. An `ERROR` line means the repository or the file name in the code is wrong or moved: fix the entry, do not guess.
-2. Check the output: the licence it prints must be Apache-2.0 or MIT (`ALLOWED_LICENSES`; the tests refuse others); the file must be the
-   Q4_K_M GGUF you meant (or the model's own quantisation, noted in its entry); the size should be near its `approx_mb`, which only feeds the
-   advice before and after pinning. Change `approx_mb` if it is off by more than a few percent.
-3. Paste `revision`, `sha256` and `size` into the entries (for the runtime `sha256` and `size`, and its `version` and `url` when you move to a newer
-   llamafile). Then check the flags `serve_argv` passes (`--server --host --port -m -a -t -c`, `--gpu auto -ngl N` or
-   `--gpu disable`, and the runtime's `args`) against `llamafile --help` of that version, and that the models that need a recent llama.cpp
-   (SmolLM3, gpt-oss) load with it. A model's `revision` is a 40-hex commit, never `main`.
+1. On a machine with network access: `python3 src/aisetup.py pins` (the `ai-pins` workflow runs it on GitHub). It asks the GitHub API for the
+   Ollama release (each build's asset digest and size) and the registry for every model (its manifest: the size of every layer, and the first
+   words of its licence layer) and prints one line per entry. An `ERROR` line means the name in the code is wrong or moved: fix the entry, do not guess.
+2. Check the output: the licence it prints must be Apache-2.0 or MIT (`ALLOWED_LICENSES`; the tests refuse others); the weights should be near
+   the entry's `approx_mb`, which only feeds the advice: change `approx_mb` (and `ram_mb` with it) if it is off by more than a few percent.
+3. Paste the builds' `sha256` and `size` into `RUNTIME` (with its `version` and `base` when you move to a newer Ollama: check its `sha256sum.txt`
+   too) and each model's `size`. Check that the server still starts with the environment `aiollama.server_env()` gives it (its start-up line lists
+   the variables it read), that its folder of models still has the layout `aiollama` reads (`manifests/<host>/<namespace>/<model>/<tag>`,
+   `blobs/sha256-<hex>`), and that the newer models load with it.
 4. `python3 -m unittest discover -s tests`, then try it for real on each OS you can reach: `setup`, `serve`, `status`, a question with
-   `nuc-console-ask`, and `nuc-console-ai remove`. A new model or a new runtime is a new pin in a new release; nothing updates by itself.
+   `nuc-console-ask`, and `nuc-console-ai remove`; the `for-real` jobs of the `ai-pins` workflow do it on a Linux, a Windows and a macOS runner. A new
+   model or a new server is a new entry in a new release; nothing updates by itself.
 5. Keep `docs/AI.md` in step with the code: the table of models (ids, names, parameters, approximate sizes, needs, context, notes) with `MODELS`
    (`python3 src/aisetup.py models` prints the numbers), the verdicts and the speed table with the constants at the top of `src/aihw.py`.
 

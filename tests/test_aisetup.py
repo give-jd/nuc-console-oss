@@ -1,7 +1,8 @@
-"""nuc-console-ai (src/aisetup.py): the manifest, the downloader, the cache directories, the server command lines, the config
-helper, status, the service files, and the choice of models by what the machine can run (models, setup of several, use, the GPU
-decision, catalog). No network: downloads run against a local http.server serving fake files. The hardware advice (src/aihw.py)
-is replaced by FakeAihw, written from its contract, so these tests depend neither on that module nor on the machine they run on."""
+"""nuc-console-ai (src/aisetup.py, src/aiollama.py): the pins, the downloader, unpacking the server's build, the cache directories, the
+server's command and environment, the config helper, status, the service files, and the choice of models by what the machine can run
+(models, setup of several, use, the GPU decision, catalog). No network: downloads run against a local http.server serving fake files, and
+the model server is the fake Ollama of fakeollama.py (pulls from its fake registry, on loopback). The hardware advice (src/aihw.py) is
+replaced by FakeAihw, written from its contract, so these tests depend neither on that module nor on the machine they run on."""
 import argparse
 import contextlib
 import hashlib
@@ -26,8 +27,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
 sys.path.insert(0, os.path.join(ROOT, "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+import aiollama  # noqa: E402
 import aisetup  # noqa: E402
 import nuc_config  # noqa: E402
+sys.path.insert(0, HERE)
+import fakeollama as fo  # noqa: E402
 
 
 def blob(n, salt=b"x"):
@@ -135,12 +139,11 @@ def call(fn, *a, **kw):
     return r, out.getvalue(), err.getvalue()
 
 
-def fake_manifest(base, runtime_bytes, model_bytes, name="tiny"):
-    runtime = {"name": "llamafile", "version": "0.0", "license": "Apache-2.0", "url": base + "/llamafile-0.0",
-               "sha256": sha(runtime_bytes), "size": len(runtime_bytes), "args": []}
-    model = {"id": name, "name": "Tiny test model", "license": "MIT", "ram_mb": 100, "repo": "test/tiny-GGUF", "file": name + ".gguf",
-             "revision": "a" * 40, "sha256": sha(model_bytes), "size": len(model_bytes)}
-    return runtime, model
+def popen_any(argv, **kw):
+    """subprocess.Popen, except that on Windows the fake ollama.exe (Python source: fakeollama.py) is run by this interpreter."""
+    if os.name != "posix" and argv and argv[0].lower().endswith("ollama.exe"):
+        argv = [sys.executable] + list(argv)
+    return subprocess.Popen(argv, **kw)
 
 
 class FakeAihw:
@@ -216,26 +219,21 @@ def advice(testcase, hw):
 
 
 def fake_catalog(base="http://127.0.0.1:1"):
-    """-> (runtime, [huge, big, mid, small], {id: file bytes}): models of known sizes (the fake advice needs ~31, ~10, ~3.4 and ~1.3 GB)."""
-    runtime, _m = fake_manifest(base, b"r" * 100, b"x")
-    models, data = [], {}
+    """-> (runtime, [huge, big, mid, small]): models of known sizes (the fake advice needs ~31, ~10, ~3.4 and ~1.3 GB); each weighs a few KB in
+    the fake registry."""
+    runtime = fo.fake_runtime(base)[0]
+    models = []
     for rank, (name, approx) in enumerate((("huge", 30000), ("big", 9000), ("mid", 2500), ("small", 400)), 1):
-        data[name] = blob(5000 + rank, name.encode())
-        m = fake_manifest(base, b"r" * 100, data[name], name)[1]
-        models.append(dict(m, rank=rank, approx_mb=approx, ram_mb=approx + 800, layers=32, params_b=approx / 600.0, ctx_max=32768, notes="note " + name))
-    runtime["sha256"], runtime["size"] = sha(b"r" * 100), 100
-    return runtime, models, data
+        models.append(fo.fake_model(name, 5000 + rank, rank, approx_mb=approx, ram_mb=approx + 800, params_b=approx / 600.0))
+    return runtime, models
 
 
-def install_files(d, runtime, models, data, only=None):
-    """Put the runtime and the models of fake_catalog on disk, verified (stamp written), like a finished setup."""
-    aisetup.ensure_dirs(d)
-    put(aisetup.runtime_path(d, runtime), b"r" * 100)
-    aisetup.record(d, aisetup.runtime_path(d, runtime), runtime["sha256"])
+def install_files(d, runtime, models, only=None):
+    """The server's build and the models of fake_catalog on disk, like a finished setup."""
+    fo.install_runtime(d, runtime)
     for m in models:
         if only is None or m["id"] in only:
-            put(aisetup.model_path(d, m), data[m["id"]])
-            aisetup.record(d, aisetup.model_path(d, m), m["sha256"])
+            fo.install_model(d, m)
 
 
 Q4B = aisetup.find_model("qwen3-4b")
@@ -248,33 +246,33 @@ class ManifestTests(unittest.TestCase):
         self.assertIn(aisetup.DEFAULT_MODEL, ids)
         self.assertGreaterEqual(len(ids), 8, "a catalog to choose from: several sizes")
         self.assertEqual([m["rank"] for m in aisetup.MODELS], list(range(1, len(ids) + 1)), "ordered best first, ranks 1..n")
+        names = [m["ollama"] for m in aisetup.MODELS]
+        self.assertEqual(len(names), len(set(names)), "one model of the library per entry")
         for m in aisetup.MODELS:
             with self.subTest(m["id"]):
                 self.assertTrue(re.fullmatch(r"[a-z0-9][a-z0-9.-]*", m["id"]))
+                self.assertTrue(aiollama.NAME.fullmatch(m["id"]), "the id is what the server is asked for: a plain model name")
                 self.assertIn(m["license"], aisetup.ALLOWED_LICENSES)
                 self.assertIsInstance(m["ram_mb"], int)
-                self.assertEqual(m["quant"], "Q4_K_M")
+                self.assertIn(m["quant"], ("Q4_K_M", "MXFP4"))
                 self.assertGreater(m["params_b"], 0.1)
                 self.assertTrue(10 <= m["layers"] <= 100, m["layers"])
                 self.assertGreaterEqual(m["ctx_max"], aisetup.DEFAULT_CTX)
                 self.assertTrue(m["notes"] and "\n" not in m["notes"] and m["notes"].isascii(), "one line of ASCII")
                 # a typo in a size would silently turn a verdict around: Q4_K_M is about 0.5-0.8 GB per billion parameters
-                self.assertTrue(m["params_b"] * 500 <= m["approx_mb"] <= m["params_b"] * 800, (m["params_b"], m["approx_mb"]))
+                self.assertTrue(m["params_b"] * 500 <= m["approx_mb"] <= m["params_b"] * 900, (m["params_b"], m["approx_mb"]))
                 self.assertTrue(300 <= m["ram_mb"] - m["approx_mb"] <= 1200, "the server needs the file plus a KV cache and some overhead")
                 if "active_b" in m:  # a mixture of experts reads fewer parameters per token than it holds
                     self.assertLess(m["active_b"], m["params_b"])
-                self.assertTrue(re.fullmatch(r"[\w.-]+/[\w.-]+", m["repo"]))
-                self.assertTrue(m["file"].endswith(".gguf") and "Q4_K_M" in m["file"], "Q4_K_M GGUF files only")
-                self.assertNotIn("url", m, "the URL is built from repo, commit and file: nothing else can be fetched")
-                bad = aisetup.missing_pins(m, True)  # either pinned completely, or not at all: never half
-                self.assertTrue(bad == [] or set(bad) == {"revision", "sha256", "size"}, bad)
-                url = aisetup.model_url(m)
-                if bad:
-                    self.assertIsNone(url)
-                else:
-                    self.assertRegex(url, r"^https://huggingface\.co/[\w.-]+/[\w.-]+/resolve/[0-9a-f]{40}/[^/]+\.gguf$")
-                    self.assertRegex(m["sha256"], r"^[0-9a-f]{64}$")
-                    self.assertGreater(m["size"], 10 ** 8)
+                self.assertEqual(aisetup.missing_pins(m, True), [], "every model names what to pull")
+                host, ns, model, tag = aiollama.parse_name(m["ollama"])
+                self.assertIn(host, ("registry.ollama.ai", "hf.co"), "the Ollama library, or a GGUF repository it pulls from")
+                self.assertNotEqual(model, m["id"], "the library's name is dropped after the copy: it must not be the id itself")
+                for k in ("repo", "file", "revision", "sha256", "url"):
+                    self.assertNotIn(k, m, "nothing is fetched but through the server")
+                if m.get("size") is not None:
+                    self.assertTrue(isinstance(m["size"], int) and m["size"] > 10 ** 8, m["size"])
+                    self.assertTrue(0.7 <= m["size"] / (m["approx_mb"] * 1e6) <= 1.3, "approx_mb is near the registry's size")
 
     def test_a_model_that_cannot_work_is_refused_before_anything_else(self):
         advice(self, HW_CPU8)
@@ -287,16 +285,33 @@ class ManifestTests(unittest.TestCase):
 
     def test_runtime(self):
         r = aisetup.RUNTIME
+        self.assertEqual(r["name"], "ollama")
         self.assertIn(r["license"], aisetup.ALLOWED_LICENSES)
-        self.assertEqual(r["url"], "https://github.com/mozilla-ai/llamafile/releases/download/%s/llamafile-%s" % (r["version"], r["version"]))
-        bad = aisetup.missing_pins(r, False)
-        self.assertTrue(bad == [] or set(bad) == {"sha256", "size"}, bad)
-        self.assertTrue(all(isinstance(a, str) for a in r["args"]))
+        self.assertEqual(r["base"], "https://github.com/ollama/ollama/releases/download/v%s/" % r["version"])
+        self.assertEqual(set(r["assets"]), {"linux-amd64", "linux-arm64", "darwin", "windows-amd64", "windows-arm64"},
+                         "a build for every system and processor nuc-console's archives are made for")
+        for key, a in r["assets"].items():
+            with self.subTest(key):
+                self.assertRegex(a["sha256"], r"^[0-9a-f]{64}$")
+                self.assertTrue(isinstance(a["size"], int) and a["size"] > 10 ** 7)
+                self.assertEqual(a["file"], "ollama-%s%s" % (key, ".zip" if key.startswith("windows") else ".tgz" if key == "darwin" else ".tar.zst"))
+        for plat, machine in (("linux", "x86_64"), ("linux", "aarch64"), ("darwin", "arm64"), ("darwin", "x86_64"), ("win32", "AMD64"), ("win32", "ARM64")):
+            with self.subTest(plat=plat, machine=machine):
+                self.assertEqual(aisetup.missing_pins(r, False, plat, machine), [])
+                self.assertTrue(aiollama.runtime_asset(r, plat, machine)["url"].startswith(r["base"] + "ollama-"))
 
     def test_missing_pins_checks_formats(self):
-        m = dict(aisetup.MODELS[0], revision="main", sha256="abc", size=5)
-        self.assertEqual(len(aisetup.missing_pins(m, True)), 2)
-        self.assertEqual(aisetup.missing_pins(dict(m, revision="b" * 40, sha256="c" * 64), True), [])
+        rt = {"name": "ollama", "version": "1", "base": "https://example.invalid/", "assets": {"linux-amd64": {"file": "f.tgz", "sha256": "abc", "size": 5}}}
+        self.assertEqual(aisetup.missing_pins(rt, False, "linux", "x86_64"), ["sha256 (not 64 hex)"])
+        self.assertEqual(aisetup.missing_pins(dict(rt, assets={"linux-amd64": {"file": "f.tgz", "sha256": "c" * 64, "size": 5}}), False, "linux", "x86_64"), [])
+        self.assertEqual(aisetup.missing_pins(dict(rt, assets={"linux-amd64": {"file": "f.tgz", "sha256": None, "size": None}}), False, "linux", "x86_64"),
+                         ["sha256", "size"])
+        self.assertEqual(aisetup.missing_pins(rt, False, "linux", "riscv64"), ["a build for this system (linux riscv64)"])
+        self.assertEqual(aisetup.missing_pins(rt, False, "win32", "AMD64"), ["a build for this system (windows-amd64)"])
+        m = dict(aisetup.MODELS[0])
+        self.assertEqual(aisetup.missing_pins(dict(m, ollama=None), True), ["ollama (the name to pull)"])
+        self.assertEqual(aisetup.missing_pins(dict(m, ollama="a b:c"), True), ["ollama (not a model name)"])
+        self.assertEqual(aisetup.missing_pins(dict(m, ollama="../x:y"), True), ["ollama (not a model name)"])
 
     def test_moe_models_are_marked(self):
         moe = {m["id"] for m in aisetup.MODELS if "active_b" in m}
@@ -323,16 +338,15 @@ class ManifestTests(unittest.TestCase):
     def test_shipped_endpoint_is_the_config_default(self):
         self.assertEqual(aisetup.SHIPPED_ENDPOINT, nuc_config.load("/nonexistent")["ai"]["endpoint"])
 
-    def test_real_manifest_unpinned_refuses_to_download(self):
-        if not aisetup.missing_pins(aisetup.RUNTIME, False) and not any(aisetup.missing_pins(m, True) for m in aisetup.MODELS):
-            self.skipTest("everything is pinned")
+    def test_an_unpinned_entry_refuses_to_download(self):
         advice(self, hw_of(16384, 12000))
+        unpinned = dict(aisetup.RUNTIME, assets={})
         with tempfile.TemporaryDirectory() as d, mock.patch.object(urllib_request(), "urlopen", side_effect=AssertionError("network")):
-            args = aisetup.build_parser().parse_args(["setup", "--dir", d, "--yes", "--no-config"])
-            rc, out, err = call(aisetup.cmd_setup, args)
+            args = aisetup.build_parser().parse_args(["setup", "qwen3-4b", "--dir", d, "--yes", "--no-config"])
+            rc, out, err = call(aisetup.cmd_setup, args, runtime=unpinned)
             self.assertEqual(os.listdir(d), [])
         self.assertEqual(rc, 1)
-        self.assertIn("not pinned", err)
+        self.assertIn("the server: not pinned: a build for this system", err)
 
 
 def urllib_request():
@@ -345,18 +359,24 @@ class SourceRulesTests(unittest.TestCase):
         self.src = get(os.path.join(ROOT, "src", "aisetup.py"))
 
     def test_no_shell_no_wide_bind(self):
-        self.assertNotRegex(self.src, r"shell\s*=\s*True")
-        self.assertNotIn("os.system", self.src)
-        self.assertNotIn("0.0.0.0", self.src)
-        self.assertNotIn("http://", re.sub(r'"http://%s:%d/v1"|SHIPPED_ENDPOINT = "http://127.0.0.1:11434/v1"|#.*|""".*?"""', "", self.src, flags=re.S)
-                         .replace("http://127.0.0.1", "").replace("http://schemas.microsoft.com/windows/2004/02/mit/task", "")
-                         .replace("http://www.apple.com", ""), "downloads and APIs are https only")
+        for name in ("aisetup.py", "aiollama.py"):
+            with self.subTest(name):
+                src = get(os.path.join(ROOT, "src", name))
+                self.assertNotRegex(src, r"shell\s*=\s*True")
+                self.assertNotIn("os.system", src)
+                self.assertNotIn("0.0.0.0", src)
+                self.assertNotIn("http://", re.sub(r'"http://%s:%d"|"http://%s:%d/v1"|SHIPPED_ENDPOINT = "http://127.0.0.1:11434/v1"|#.*|""".*?"""', "", src, flags=re.S)
+                                 .replace("http://127.0.0.1", "").replace("http://schemas.microsoft.com/windows/2004/02/mit/task", "")
+                                 .replace("http://www.apple.com", "").replace('"not an http:// server', ""), "downloads and APIs are https only")
 
     def test_ascii_output(self):
         self.assertTrue(self.src.isascii(), "plain ASCII: Windows consoles")
+        self.assertTrue(get(os.path.join(ROOT, "src", "aiollama.py")).isascii())
 
     def test_host_is_not_a_parameter(self):
         self.assertNotIn("host", inspect.signature(aisetup.serve_argv).parameters)
+        self.assertNotIn("host", inspect.signature(aisetup.serve_env).parameters)
+        self.assertNotIn("host", inspect.signature(aiollama.server_env).parameters)
 
 
 class PlacesTests(unittest.TestCase):
@@ -374,11 +394,15 @@ class PlacesTests(unittest.TestCase):
         self.assertEqual(d("win32", {"NUC_CONSOLE_HOME": r"E:\h"}, None, None), r"E:\h\ai")
 
     def test_runtime_and_model_paths(self):
-        self.assertEqual(aisetup.runtime_path("/c", plat="linux"), "/c/runtime/llamafile-%s" % aisetup.RUNTIME["version"])
-        self.assertEqual(aisetup.runtime_path("/c", plat="darwin"), "/c/runtime/llamafile-%s" % aisetup.RUNTIME["version"])
-        self.assertEqual(aisetup.runtime_path(r"C:\c", plat="win32"), r"C:\c\runtime\llamafile-%s.exe" % aisetup.RUNTIME["version"])
-        m = aisetup.MODELS[0]
-        self.assertEqual(aisetup.model_path("/c", m, "linux"), "/c/models/" + m["file"])
+        v = aisetup.RUNTIME["version"]
+        self.assertEqual(aisetup.runtime_path("/c", plat="linux"), "/c/runtime/ollama-%s/bin/ollama" % v)
+        self.assertEqual(aisetup.runtime_path("/c", plat="darwin"), "/c/runtime/ollama-%s/ollama" % v)
+        self.assertEqual(aisetup.runtime_path(r"C:\c", plat="win32"), r"C:\c\runtime\ollama-%s\ollama.exe" % v)
+        self.assertEqual(aisetup.archive_path("/c", plat="linux", machine="aarch64"), "/c/runtime/ollama-linux-arm64.tar.zst")
+        self.assertEqual(aisetup.archive_path(r"C:\c", plat="win32", machine="ARM64"), r"C:\c\runtime\ollama-windows-arm64.zip")
+        self.assertIsNone(aisetup.archive_path("/c", plat="linux", machine="riscv64"))
+        self.assertEqual(aisetup.model_path("/c", Q4B, "linux"), "/c/models/manifests/registry.ollama.ai/library/qwen3-4b/latest")
+        self.assertEqual(aisetup.model_path(r"C:\c", Q4B, "win32"), r"C:\c\models\manifests\registry.ollama.ai\library\qwen3-4b\latest")
 
     @unittest.skipUnless(os.name == "posix", "Unix permissions")
     def test_ensure_dirs_modes(self):
@@ -393,12 +417,6 @@ class PlacesTests(unittest.TestCase):
             for sub in ("a", "a/b", "a/b/ai", "a/b/ai/runtime", "a/b/ai/models"):
                 self.assertEqual(os.stat(os.path.join(t, sub)).st_mode & 0o777, 0o755, sub)
             aisetup.ensure_dirs(os.path.join(t, "a", "b", "ai"))  # again: no error
-
-    def test_threads_leave_cores_free(self):
-        self.assertEqual(aisetup.default_threads(1), 1)
-        self.assertEqual(aisetup.default_threads(2), 1)
-        self.assertEqual(aisetup.default_threads(4), 2)
-        self.assertEqual(aisetup.default_threads(16), 14)
 
     def test_parse_meminfo(self):
         m = aisetup.parse_meminfo("MemTotal:       16487476 kB\nMemFree:  1 kB\nMemAvailable:   15000000 kB\nHugePages_Total:       0\n")
@@ -416,15 +434,18 @@ class FolderTests(unittest.TestCase):
         self.d = os.path.join(self.tmp.name, "ai")
 
     def test_dir_space_counts_the_runtime_and_the_models_partial_downloads_too(self):
-        os.makedirs(os.path.join(self.d, "runtime"))
-        os.makedirs(os.path.join(self.d, "models", "sub"))
-        put(os.path.join(self.d, "runtime", "llamafile-0.0"), b"r" * 1000)
-        put(os.path.join(self.d, "models", "a.gguf"), b"m" * 4000)
-        put(os.path.join(self.d, "models", "b.gguf.part"), b"p" * 500)
-        put(os.path.join(self.d, "models", "sub", "deep.bin"), b"d" * 9000)   # not a file of the folder: not counted
-        put(os.path.join(self.d, "verified.json"), "{}")                      # not a download either
+        os.makedirs(os.path.join(self.d, "runtime", "ollama-0.0", "bin"))
+        os.makedirs(os.path.join(self.d, "models", "blobs"))
+        put(os.path.join(self.d, "runtime", "ollama-0.0.tgz"), b"a" * 700)
+        put(os.path.join(self.d, "runtime", "ollama-0.0", "bin", "ollama"), b"r" * 1000)
+        put(os.path.join(self.d, "models", "blobs", "sha256-" + "a" * 64), b"m" * 4000)
+        put(os.path.join(self.d, "models", "blobs", "sha256-" + "b" * 64 + "-partial"), b"p" * 500)
+        put(os.path.join(self.d, "verified.json"), "{}")                      # not a download
+        put(os.path.join(self.d, "web.json"), "{}")
+        if os.name == "posix":
+            os.symlink("ollama", os.path.join(self.d, "runtime", "ollama-0.0", "bin", "link"))  # a link is not counted twice
         sp = aisetup.dir_space(self.d)
-        self.assertEqual(sp["used"], 5500)
+        self.assertEqual(sp["used"], 6200)
         self.assertIsInstance(sp["free"], int)
         self.assertGreater(sp["free"], 0)
 
@@ -445,10 +466,13 @@ class FolderTests(unittest.TestCase):
         self.assertEqual(aisetup.space_text(None), "nothing downloaded, free space unknown on that disk")
 
     def test_the_catalog_carries_the_folder_and_its_space(self):
-        install_files(self.d, *fake_catalog()[:1], fake_catalog()[1], fake_catalog()[2], only=("small",))
-        c = aisetup.catalog({}, self.d, cfg={"ai": {"model": ""}})
+        runtime, models = fake_catalog()
+        install_files(self.d, runtime, models, only=("small",))
+        c = aisetup.catalog({}, self.d, models=models, runtime=runtime, cfg={"ai": {"model": ""}})
         self.assertEqual(c["dir"], self.d)
-        self.assertEqual(c["space"]["used"], 100 + 5004)
+        self.assertEqual(c["space"]["used"], aisetup.du(os.path.join(self.d, "runtime")) + aisetup.du(os.path.join(self.d, "models")))
+        self.assertGreater(c["space"]["used"], 5004 + fo.runtime_archive()[1].__len__(), "the archive, the unpacked build and the model")
+        self.assertEqual(c["runtime"], {"installed": True, "name": "Ollama", "version": fo.VERSION})
 
     @unittest.skipUnless(hasattr(os, "geteuid"), "Unix ownership")
     def test_root_hands_a_new_folder_to_the_owner_of_the_folder_it_is_in(self):
@@ -513,50 +537,66 @@ class FolderTests(unittest.TestCase):
 
 
 class ServeCommandTests(unittest.TestCase):
-    def check_common(self, argv):
-        self.assertTrue(all(isinstance(a, str) for a in argv), "an argument list of strings: no shell involved")
-        i = argv.index("--host")
-        self.assertEqual(argv[i + 1], "127.0.0.1")
-        self.assertEqual(argv.count("--host"), 1)
-        self.assertEqual(argv[argv.index("--port") + 1], "8080")
-        self.assertIn("--server", argv)
-        self.assertNotIn("--nobrowser", argv)  # llamafile 0.10: "invalid argument"
-        self.assertEqual(argv[argv.index("-t") + 1], "2")
-        self.assertEqual(argv[argv.index("-c") + 1], str(aisetup.DEFAULT_CTX))
-        self.assertEqual(argv[argv.index("-a") + 1], "qwen3-4b")
-        self.assertTrue(argv[argv.index("-m") + 1].endswith(Q4B["file"]))
-        for a in aisetup.RUNTIME["args"]:
-            self.assertIn(a, argv)
+    def check_env(self, env, d, port="8080"):
+        self.assertTrue(all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()), "an environment of strings")
+        self.assertEqual(env["OLLAMA_HOST"], "127.0.0.1:" + port)
+        self.assertEqual(env["OLLAMA_MODELS"], os.path.join(d, "models") if os.path.sep in d or d.startswith("/") else env["OLLAMA_MODELS"])
+        self.assertEqual(env["OLLAMA_CONTEXT_LENGTH"], str(aisetup.DEFAULT_CTX))
+        self.assertEqual((env["OLLAMA_MAX_LOADED_MODELS"], env["OLLAMA_NUM_PARALLEL"]), ("1", "1"))
+        self.assertEqual(env["OLLAMA_NO_CLOUD"], "1", "no cloud model: nothing leaves the machine")
+        self.assertEqual(env["OLLAMA_NOPRUNE"], "1", "a cancelled pull resumes; the other process may be using the folder")
 
-    def test_linux_and_mac_go_through_sh(self):
+    def test_linux_and_mac_run_the_executable_with_its_environment(self):
         for plat, d in (("linux", "/var/lib/nuc-console/ai"), ("darwin", "/Library/Application Support/nuc-console/ai")):
             with self.subTest(plat):
-                argv = aisetup.serve_argv(d, Q4B, 8080, 2, plat=plat)
-                self.assertEqual(argv[0], "/bin/sh")
-                self.assertEqual(argv[1], d + "/runtime/llamafile-" + aisetup.RUNTIME["version"])
-                self.check_common(argv)
+                argv = aisetup.serve_argv(d, plat=plat)
+                self.assertEqual(argv, [aisetup.runtime_path(d, plat=plat), "serve"])
+                env = aisetup.serve_env(d, 8080, home="/h", plat=plat)
+                self.check_env(env, d)
+                self.assertEqual(env["OLLAMA_MODELS"], d + "/models")
+                self.assertEqual((env["PATH"], env["HOME"], env["TMPDIR"]), (aisetup.UNIX_PATH, "/h", "/h"))
 
-    def test_windows_runs_the_exe(self):
-        argv = aisetup.serve_argv(r"C:\ProgramData\nuc-console\ai", Q4B, 8080, 2, plat="win32")
-        self.assertTrue(argv[0].endswith(".exe"), argv[0])
-        self.assertNotIn("/bin/sh", argv)
-        self.assertEqual(argv[0], r"C:\ProgramData\nuc-console\ai\runtime\llamafile-%s.exe" % aisetup.RUNTIME["version"])
-        self.check_common(argv)
+    def test_windows_runs_the_exe_with_the_system_folders(self):
+        d = r"C:\ProgramData\nuc-console\ai"
+        argv = aisetup.serve_argv(d, plat="win32")
+        self.assertEqual(argv, [r"C:\ProgramData\nuc-console\ai\runtime\ollama-%s\ollama.exe" % aisetup.RUNTIME["version"], "serve"])
+        with mock.patch.dict(os.environ, {"SystemRoot": r"C:\Windows", "ProgramFiles": r"C:\Program Files", "OLLAMA_HOST": "0.0.0.0:1", "OLLAMA_ORIGINS": "*",
+                                          "SECRET": "x"}):
+            env = aisetup.serve_env(d, 8080, home=r"C:\h", plat="win32")
+        self.check_env(env, d)
+        self.assertEqual(env["OLLAMA_MODELS"], d + r"\models")
+        self.assertEqual(env["PATH"], r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem")
+        self.assertEqual((env["USERPROFILE"], env["ProgramFiles"]), (r"C:\h", r"C:\Program Files"))
+        self.assertNotIn("SECRET", env, "a small fixed environment, never the caller's")
+        self.assertNotIn("OLLAMA_ORIGINS", env)
 
-    def test_port_and_threads_are_numbers_in_the_command(self):
-        argv = aisetup.serve_argv("/c", aisetup.MODELS[0], "9090", "3", 8192, plat="linux")
-        self.assertEqual(argv[argv.index("--port") + 1], "9090")
-        self.assertEqual(argv[argv.index("-t") + 1], "3")
-        self.assertEqual(argv[argv.index("-c") + 1], "8192")
+    def test_the_callers_ollama_variables_never_reach_the_server(self):
+        with mock.patch.dict(os.environ, {"OLLAMA_HOST": "0.0.0.0:11434", "OLLAMA_MODELS": "/elsewhere", "OLLAMA_ORIGINS": "*", "HTTPS_PROXY": "http://p"}):
+            env = aisetup.serve_env("/c", 9090, home="/h", plat="linux")
+        self.assertEqual(env["OLLAMA_HOST"], "127.0.0.1:9090")
+        self.assertEqual(env["OLLAMA_MODELS"], "/c/models")
+        self.assertNotIn("OLLAMA_ORIGINS", env)
+        self.assertNotIn("HTTPS_PROXY", env)
+
+    def test_port_and_context_are_numbers_in_the_environment(self):
+        env = aisetup.serve_env("/c", "9090", 8192, home="/h", plat="linux")
+        self.assertEqual((env["OLLAMA_HOST"], env["OLLAMA_CONTEXT_LENGTH"]), ("127.0.0.1:9090", "8192"))
         with self.assertRaises(ValueError):
-            aisetup.serve_argv("/c", aisetup.MODELS[0], "8080; reboot", 2, plat="linux")
+            aisetup.serve_env("/c", "8080; reboot", home="/h", plat="linux")
 
-    def test_unix_exec_with_nice(self):
-        with mock.patch.object(aisetup, "lower_priority") as low, mock.patch.object(os, "execv") as ex, \
+    def test_cpu_only_hides_every_gpu(self):
+        env = aisetup.serve_env("/c", 8080, gpu=False, home="/h", plat="linux")
+        for k in ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "GGML_VK_VISIBLE_DEVICES"):
+            self.assertEqual(env[k], "-1", k)
+        env = aisetup.serve_env("/c", 8080, gpu=True, home="/h", plat="linux")
+        self.assertFalse(set(aiollama.GPU_HIDE) & set(env), "the GPU allowed: nothing hidden")
+
+    def test_unix_exec_with_nice_and_the_environment(self):
+        with mock.patch.object(aisetup, "lower_priority") as low, mock.patch.object(os, "execve", create=True) as ex, \
                 mock.patch.object(aisetup, "_is_win", return_value=False):
-            aisetup.run_server(["/bin/sh", "/x/llamafile", "--server"])
+            aisetup.run_server(["/x/ollama", "serve"], {"OLLAMA_HOST": "127.0.0.1:8080"})
         low.assert_called_once_with()
-        ex.assert_called_once_with("/bin/sh", ["/bin/sh", "/x/llamafile", "--server"])
+        ex.assert_called_once_with("/x/ollama", ["/x/ollama", "serve"], {"OLLAMA_HOST": "127.0.0.1:8080"})
 
     @unittest.skipIf(sys.platform == "win32", "Unix priorities")
     def test_lower_priority_sets_nice_10_not_more(self):
@@ -575,9 +615,10 @@ class ServeCommandTests(unittest.TestCase):
         with mock.patch.object(aisetup, "_is_win", return_value=True), mock.patch.object(subprocess, "Popen", return_value=proc) as popen, \
                 mock.patch.object(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x4000, create=True), \
                 mock.patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True):
-            self.assertEqual(aisetup.run_server([r"C:\x\llamafile.exe", "--server"]), 0)
+            self.assertEqual(aisetup.run_server([r"C:\x\ollama.exe", "serve"], {"OLLAMA_HOST": "127.0.0.1:8080"}), 0)
         self.assertTrue(popen.call_args[1]["creationflags"] & 0x4000)
-        self.assertEqual(popen.call_args[0][0], [r"C:\x\llamafile.exe", "--server"])
+        self.assertEqual(popen.call_args[0][0], [r"C:\x\ollama.exe", "serve"])
+        self.assertEqual(popen.call_args[1]["env"], {"OLLAMA_HOST": "127.0.0.1:8080"})
 
 
 class DownloadTests(unittest.TestCase):
@@ -765,33 +806,67 @@ class StampTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = self.tmp.name
         self.bytes = blob(5000)
-        self.runtime, self.model = fake_manifest("http://127.0.0.1:1", b"r", self.bytes)
-        self.path = aisetup.model_path(self.d, self.model)
+        self.path = os.path.join(self.d, "runtime", "ollama-fake.tgz")
         os.makedirs(os.path.dirname(self.path))
         put(self.path, self.bytes)
 
     def test_verified_by_stamp_and_by_hash(self):
-        self.assertFalse(aisetup.is_verified(self.d, self.path, self.model), "no stamp yet")
-        self.assertTrue(aisetup.is_verified(self.d, self.path, self.model, rehash=True))
-        aisetup.record(self.d, self.path, self.model["sha256"])
-        self.assertTrue(aisetup.is_verified(self.d, self.path, self.model))
+        self.assertFalse(aisetup.is_verified(self.d, self.path, sha(self.bytes), len(self.bytes)), "no stamp yet")
+        self.assertTrue(aisetup.is_verified(self.d, self.path, sha(self.bytes), len(self.bytes), rehash=True))
+        aisetup.record(self.d, self.path, sha(self.bytes))
+        self.assertTrue(aisetup.is_verified(self.d, self.path, sha(self.bytes), len(self.bytes)))
+        self.assertFalse(aisetup.is_verified(self.d, self.path, "0" * 64, len(self.bytes)), "another pin")
 
     def test_changed_file_loses_its_stamp(self):
-        aisetup.record(self.d, self.path, self.model["sha256"])
+        aisetup.record(self.d, self.path, sha(self.bytes))
         with open(self.path, "r+b") as f:
             f.write(b"X")
         os.utime(self.path, ns=(1, 1))
-        self.assertFalse(aisetup.is_verified(self.d, self.path, self.model))
-        self.assertFalse(aisetup.is_verified(self.d, self.path, self.model, rehash=True))
-
-    def test_unpinned_entry_is_never_verified(self):
-        unpinned = dict(self.model, sha256=None, revision=None, size=None)
-        aisetup.record(self.d, self.path, self.model["sha256"])
-        self.assertFalse(aisetup.is_verified(self.d, self.path, unpinned))
+        self.assertFalse(aisetup.is_verified(self.d, self.path, sha(self.bytes), len(self.bytes)))
+        self.assertFalse(aisetup.is_verified(self.d, self.path, sha(self.bytes), len(self.bytes), rehash=True))
 
     def test_broken_stamp_file_is_just_empty(self):
         put(aisetup.stamp_path(self.d), "{not json")
         self.assertEqual(aisetup.load_stamp(self.d), {})
+
+    def test_the_runtime_is_ready_when_it_was_unpacked_from_the_pinned_archive(self):
+        rt = fo.fake_runtime("http://127.0.0.1:1")[0]
+        self.assertFalse(aisetup.runtime_ready(self.d, rt))
+        fo.install_runtime(self.d, rt)
+        self.assertTrue(aisetup.runtime_ready(self.d, rt))
+        self.assertTrue(aisetup.runtime_ready(self.d, rt, rehash=True), "the archive is kept and hashes to its pin")
+        self.assertFalse(aisetup.runtime_ready(self.d, dict(rt, assets={fo.KEY: dict(rt["assets"][fo.KEY], sha256="0" * 64)})),
+                         "unpacked from another archive than the one pinned now")
+        self.assertFalse(aisetup.runtime_ready(self.d, dict(rt, assets={})), "no build for this system")
+        os.unlink(aisetup.runtime_path(self.d, rt))
+        self.assertFalse(aisetup.runtime_ready(self.d, rt), "the executable is gone")
+
+    def test_a_changed_archive_fails_the_rehash_only(self):
+        rt = fo.fake_runtime("http://127.0.0.1:1")[0]
+        fo.install_runtime(self.d, rt)
+        arch = aisetup.archive_path(self.d, rt)
+        with open(arch, "r+b") as f:
+            f.write(b"X")
+        self.assertTrue(aisetup.runtime_ready(self.d, rt), "the stamp says it was unpacked from the pinned archive")
+        self.assertFalse(aisetup.runtime_ready(self.d, rt, rehash=True))
+        os.unlink(arch)
+        self.assertFalse(aisetup.runtime_ready(self.d, rt, rehash=True), "no archive to check: `serve --install-service` refuses")
+
+    def test_a_model_is_ready_when_its_manifest_and_every_layer_are_there(self):
+        m = fo.fake_model("tiny", 5000)
+        self.assertFalse(aisetup.model_ready(self.d, m))
+        fo.install_model(self.d, m)
+        self.assertTrue(aisetup.model_ready(self.d, m))
+        self.assertTrue(aisetup.model_ready(self.d, m, rehash=True))
+        self.assertFalse(aisetup.model_ready(self.d, dict(m, ollama=None)), "an unpinned entry is never installed")
+        layers = aiollama.read_manifest(aisetup.model_path(self.d, m))
+        blob_file = aiollama.blob_path(aiollama.models_dir(self.d), layers[1][0])
+        with open(blob_file, "r+b") as f:
+            f.write(b"X")  # same size, another content
+        self.assertTrue(aisetup.model_ready(self.d, m), "without rehash only the sizes are looked at")
+        self.assertFalse(aisetup.model_ready(self.d, m, rehash=True), "a layer whose SHA-256 is not its name")
+        os.unlink(blob_file)
+        self.assertFalse(aisetup.model_ready(self.d, m), "a missing layer")
 
 
 class SetupTests(unittest.TestCase):
@@ -800,39 +875,51 @@ class SetupTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
         self.cfg = os.path.join(self.tmp.name, "config.ini")
-        self.rt_bytes, self.m_bytes = blob(20_000, b"rt"), blob(200_000, b"model")
+        self.archive = fo.runtime_archive()
+        self.model = fo.fake_model("tiny", 200_000)
         patcher = mock.patch.object(aisetup, "memory_mb", return_value=(16000, 12000))
         patcher.start()
         self.addCleanup(patcher.stop)
         advice(self, hw_of(16000, 12000))
 
-    def run_setup(self, srv, *extra, runtime=None, model=None, ask=None):
-        runtime, model = fake_manifest(srv_base(srv), self.rt_bytes, self.m_bytes) if runtime is None else (runtime, model)
-        args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--config", self.cfg, "--port", "18080", "--model", "tiny"] + list(extra))
-        with mock.patch.object(aisetup, "model_url", lambda m: srv_base(srv) + "/" + m["file"]):
-            kw = {"ask": ask} if ask else {}
-            return call(aisetup.cmd_setup, args, runtime=runtime, models=[model], allow_loopback_http=True, **kw)
+    def runtime(self, srv):
+        return fo.fake_runtime(srv_base(srv), self.archive)[0]
 
-    def files(self, srv):
-        return {"/llamafile-0.0": self.rt_bytes, "/tiny.gguf": self.m_bytes}
+    def files(self):
+        return {"/" + self.archive[0]: self.archive[1]}
+
+    def run_setup(self, srv, *extra, runtime=None, models=None, ask=None, registry=True):
+        models = models or [self.model]
+        if registry:
+            fo.write_control(self.d, registry=fo.registry_for(models))
+        args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--config", self.cfg, "--port", "18080"] + list(extra))
+        kw = {"ask": ask} if ask else {}
+        return call(aisetup.cmd_setup, args, runtime=runtime or self.runtime(srv), models=models, allow_loopback_http=True, popen=popen_any, **kw)
+
+    def pulls(self):
+        return [r["body"]["model"] for r in fo.requests_seen(self.d) if r["path"] == "/api/pull"]
 
     def test_setup_downloads_once_and_never_again(self):
         put(self.cfg, "# my settings\n[features]\nhealth = yes\n\n[ai]\n# local model\nenabled = no\nendpoint = http://127.0.0.1:11434/v1\nmodel =\n")
-        with Server(self.files(None)) as srv:
-            rc, out, err = self.run_setup(srv, "--yes")
+        with Server(self.files()) as srv:
+            rt = self.runtime(srv)
+            rc, out, err = self.run_setup(srv, "tiny", "--yes")
             self.assertEqual(rc, 0, out + err)
-            self.assertEqual(len(srv.requests), 2)
-            runtime_file = aisetup.runtime_path(self.d, {"url": srv_base(srv) + "/llamafile-0.0"})
-            self.assertEqual(get(runtime_file, "rb"), self.rt_bytes)
-            self.assertEqual(get(os.path.join(self.d, "models", "tiny.gguf"), "rb"), self.m_bytes)
+            self.assertEqual(len(srv.requests), 1, "the server's archive, once")
+            self.assertEqual(self.pulls(), ["tiny:test"], "the model, pulled once through the server")
+            self.assertTrue(aisetup.runtime_ready(self.d, rt, rehash=True))
+            self.assertTrue(aisetup.model_ready(self.d, self.model, rehash=True))
             if os.name == "posix":
-                self.assertEqual(os.stat(runtime_file).st_mode & 0o777, 0o755)
-                self.assertEqual(os.stat(os.path.join(self.d, "models", "tiny.gguf")).st_mode & 0o777, 0o644)
-            self.assertEqual(sorted(aisetup.load_stamp(self.d)), [os.path.basename(runtime_file), "tiny.gguf"])  # (.exe on Windows)
-            rc, out, err = self.run_setup(srv, "--yes")  # second run
+                self.assertEqual(os.stat(aisetup.runtime_path(self.d, rt)).st_mode & 0o777, 0o755)
+            self.assertEqual(sorted(aisetup.load_stamp(self.d)), sorted([self.archive[0], aisetup.runtime_key(rt)]))
+            ids = [r["body"] for r in fo.requests_seen(self.d) if r["path"] in ("/api/copy", "/api/delete")]
+            self.assertEqual(ids, [{"source": "tiny:test", "destination": "tiny"}, {"model": "tiny:test"}], "named by its id, the library's name dropped")
+            rc, out, err = self.run_setup(srv, "tiny", "--yes")  # second run
             self.assertEqual(rc, 0)
-            self.assertEqual(len(srv.requests), 2, "no request at all the second time")
+            self.assertEqual(len(srv.requests), 1, "no request at all the second time")
+            self.assertEqual(self.pulls(), ["tiny:test"], "and no server started to pull")
             self.assertIn("not downloaded again", out)
+            self.assertIn("server : Ollama %s (MIT), installed" % fo.VERSION, out)
         cfg = get(self.cfg)
         self.assertIn("# my settings", cfg)
         self.assertIn("# local model", cfg)
@@ -841,47 +928,79 @@ class SetupTests(unittest.TestCase):
         self.assertIn("enabled = no", cfg, "the advisor is not switched on behind the admin's back")
         self.assertEqual(nuc_config.load(self.cfg)["features"]["health"], True)
 
+    def test_the_server_started_to_pull_is_stopped(self):
+        started = []
+
+        def popen(argv, **kw):
+            p = popen_any(argv, **kw)
+            started.append(p)
+            return p
+        with Server(self.files()) as srv:
+            fo.write_control(self.d, registry=fo.registry_for([self.model]))
+            args = aisetup.build_parser().parse_args(["setup", "tiny", "--dir", self.d, "--yes", "--no-config"])
+            rc, out, err = call(aisetup.cmd_setup, args, runtime=self.runtime(srv), models=[self.model], allow_loopback_http=True, popen=popen)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(started), 1)
+        self.assertIsNotNone(started[0].poll(), "nothing keeps running after setup")
+        env = started[0].args if isinstance(started[0].args, list) else []
+        self.assertEqual(env[-1], "serve")
+
     def test_setup_shows_the_choice(self):
-        with Server(self.files(None)) as srv:
-            rc, out, err = self.run_setup(srv, "--yes", "--no-config")
+        with Server(self.files()) as srv:
+            rc, out, err = self.run_setup(srv, "tiny", "--yes", "--no-config")
         self.assertIn("tiny", out)
         self.assertIn("MIT", out)
-        self.assertIn("llamafile 0.0", out)
+        self.assertIn("Ollama %s" % fo.VERSION, out)
         self.assertFalse(os.path.exists(self.cfg), "--no-config")
 
     def test_without_consent_nothing_is_downloaded(self):
-        with Server(self.files(None)) as srv, mock.patch.object(sys, "stdin", io.StringIO("")):
-            rc, out, err = self.run_setup(srv)  # no --yes, stdin is not a terminal
+        with Server(self.files()) as srv, mock.patch.object(sys, "stdin", io.StringIO("")):
+            rc, out, err = self.run_setup(srv, "tiny", registry=False)  # no --yes, stdin is not a terminal
             self.assertEqual(rc, 1)
             self.assertEqual(srv.requests, [])
         self.assertIn("--yes", err)
-        self.assertFalse(os.path.exists(os.path.join(self.d, "models", "tiny.gguf")))
+        self.assertFalse(os.path.exists(self.d))
 
-    def test_unpinned_manifest_refuses_and_lists_what_is_missing(self):
-        with Server(self.files(None)) as srv:
-            runtime, model = fake_manifest(srv_base(srv), self.rt_bytes, self.m_bytes)
-            runtime["sha256"], model["revision"], model["sha256"] = None, None, None
-            rc, out, err = self.run_setup(srv, "--yes", runtime=runtime, model=model)
+    def test_unpinned_entries_refuse_and_list_what_is_missing(self):
+        with Server(self.files()) as srv:
+            rt = dict(self.runtime(srv), assets={})
+            rc, out, err = self.run_setup(srv, "tiny", "--yes", runtime=rt, models=[dict(self.model, ollama=None)], registry=False)
             self.assertEqual(rc, 1)
             self.assertEqual(srv.requests, [])
-        self.assertIn("runtime: not pinned: sha256", err)
-        self.assertIn("tiny: not pinned: revision, sha256", err)
+        self.assertIn("the server: not pinned: a build for this system", err)
+        self.assertIn("tiny: not pinned: ollama (the name to pull)", err)
         self.assertFalse(os.path.exists(self.d), "not even the directory")
 
     def test_corrupt_download_installs_nothing(self):
-        with Server({"/llamafile-0.0": self.rt_bytes, "/tiny.gguf": bytes(len(self.m_bytes))}) as srv:
+        with Server({"/" + self.archive[0]: bytes(len(self.archive[1]))}) as srv:
             with self.assertRaises(aisetup.SetupError) as cm:
-                self.run_setup(srv, "--yes")
+                self.run_setup(srv, "tiny", "--yes")
         self.assertIn("SHA-256", str(cm.exception))
-        self.assertFalse(os.path.exists(os.path.join(self.d, "models", "tiny.gguf")))
-        self.assertFalse(os.path.exists(os.path.join(self.d, "models", "tiny.gguf.part")))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "runtime", self.archive[0])))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "runtime", self.archive[0] + ".part")))
+        self.assertFalse(os.path.exists(aiollama.runtime_dir(self.d, fo.fake_runtime("http://x")[0])), "nothing unpacked")
+
+    def test_a_pull_the_server_refuses_is_said_and_nothing_is_left_running(self):
+        with Server(self.files()) as srv:
+            fo.write_control(self.d, pull_error="pull model manifest: file does not exist")
+            with self.assertRaises(aisetup.SetupError) as cm:
+                self.run_setup(srv, "tiny", "--yes", registry=False)
+        self.assertIn("the model server says: pull model manifest: file does not exist", str(cm.exception))
+        self.assertFalse(aisetup.model_ready(self.d, self.model))
+        self.assertTrue(aisetup.runtime_ready(self.d, self.runtime(srv)), "the server is installed: the next run only pulls")
+
+    def test_a_server_that_does_not_start_is_said(self):
+        with Server(self.files()) as srv:
+            fo.write_control(self.d, die="boom: cannot start")
+            with self.assertRaises(aisetup.SetupError) as cm:
+                self.run_setup(srv, "tiny", "--yes", registry=False)
+        self.assertIn("the model server stopped at once (exit status 3)", str(cm.exception))
+        self.assertIn("boom: cannot start", str(cm.exception))
 
     def test_not_enough_disk_space(self):
-        with Server(self.files(None)) as srv, mock.patch.object(aisetup, "free_bytes", return_value=1000):
-            runtime, model = fake_manifest(srv_base(srv), self.rt_bytes, self.m_bytes)
-            args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--model", "tiny", "--yes"])
+        with Server(self.files()) as srv, mock.patch.object(aisetup, "free_bytes", return_value=1000):
             with self.assertRaises(aisetup.SetupError) as cm:
-                call(aisetup.cmd_setup, args, runtime=runtime, models=[model], allow_loopback_http=True)
+                self.run_setup(srv, "tiny", "--yes", registry=False)
             self.assertEqual(srv.requests, [])
         self.assertIn("disk space", str(cm.exception))
 
@@ -892,140 +1011,122 @@ class SetupTests(unittest.TestCase):
         self.assertIn("qwen3-4b", str(cm.exception))
 
     def test_interrupted_download_resumes_in_the_next_run(self):
-        with Server(self.files(None)) as srv:
-            srv.cuts = [20_000] * 10  # the runtime fits in one cut; the connection then dies again and again on the model: this run gives up
-            runtime, model = fake_manifest(srv_base(srv), self.rt_bytes, self.m_bytes)
-            with mock.patch.object(aisetup, "model_url", lambda m: srv_base(srv) + "/" + m["file"]), \
-                    mock.patch.object(aisetup.time, "sleep"):
-                args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--model", "tiny", "--yes", "--no-config"])
+        big = fo.runtime_archive(fo.runtime_exe() + b"\n#" + blob(60_000, b"pad").hex().encode())  # an archive that takes more than one cut
+        with Server({"/" + big[0]: big[1]}) as srv:
+            srv.cuts = [5000] * 10  # the connection dies again and again: this run gives up
+            rt = fo.fake_runtime(srv_base(srv), big)[0]
+            with mock.patch.object(aisetup.time, "sleep"):
                 with self.assertRaises(aisetup.SetupError):
-                    call(aisetup.cmd_setup, args, runtime=runtime, models=[model], allow_loopback_http=True)
-            part = os.path.join(self.d, "models", "tiny.gguf.part")
+                    self.run_setup(srv, "tiny", "--yes", "--no-config", runtime=rt)
+            part = os.path.join(self.d, "runtime", big[0] + ".part")
             self.assertGreater(os.path.getsize(part), 0, "what arrived is kept")
             srv.cuts = []
-            rc, out, err = self.run_setup(srv, "--yes", "--no-config")
+            rc, out, err = self.run_setup(srv, "tiny", "--yes", "--no-config", runtime=rt)
             self.assertEqual(rc, 0, err)
             self.assertTrue(any(r and r.startswith("bytes=") for _p, r in srv.requests), "resumed with Range")
 
     # --- several models, the recommended one, what will not work or will be slow ---------------------------------------------------
-    def many(self, srv_files, approx=(("a", 400), ("b", 2500))):
-        """-> (runtime, [models]) of fake models (name, approx_mb) with their own bytes, all served by `srv_files`."""
-        models = []
-        for rank, (name, mb) in enumerate(approx, 1):
-            data = blob(30_000 + rank, name.encode())
-            srv_files["/%s.gguf" % name] = data
-            models.append(dict(fake_manifest("http://x", self.rt_bytes, data, name)[1], rank=rank, approx_mb=mb, ram_mb=mb + 800, layers=32))
-        srv_files["/llamafile-0.0"] = self.rt_bytes
-        return models
+    def many(self, approx=(("a", 400), ("b", 2500))):
+        """-> [models] of fake models (name, approx_mb), each a few KB in the fake registry."""
+        return [fo.fake_model(name, 30_000 + rank, rank, approx_mb=mb, ram_mb=mb + 800) for rank, (name, mb) in enumerate(approx, 1)]
 
     def setup_many(self, srv, models, *argv, ask=None):
-        runtime = fake_manifest(srv_base(srv), self.rt_bytes, b"x")[0]
-        args = aisetup.build_parser().parse_args(["setup", "--dir", self.d, "--config", self.cfg, "--port", "18080"] + list(argv))
-        with mock.patch.object(aisetup, "model_url", lambda m: srv_base(srv) + "/" + m["file"]):
-            return call(aisetup.cmd_setup, args, runtime=runtime, models=models, allow_loopback_http=True, **({"ask": ask} if ask else {}))
+        return self.run_setup(srv, *argv, models=models, ask=ask)
+
+    def installed(self, models):
+        return sorted(m["id"] for m in models if aisetup.model_ready(self.d, m))
 
     def test_several_models_in_one_run(self):
-        files = {}
-        models = self.many(files, (("a", 400), ("b", 2500), ("c", 1000)))
-        with Server(files) as srv:
+        models = self.many((("a", 400), ("b", 2500), ("c", 1000)))
+        with Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "b", "a", "--yes")
             self.assertEqual(rc, 0, out + err)
-            self.assertEqual(sorted(p for p, _r in srv.requests), ["/a.gguf", "/b.gguf", "/llamafile-0.0"], "the runtime once, each model once")
-            rt = os.path.basename(aisetup.runtime_path(self.d, {"url": srv_base(srv) + "/llamafile-0.0"}))  # (.exe on Windows)
-            self.assertEqual(sorted(aisetup.load_stamp(self.d)), ["a.gguf", "b.gguf", rt])
-            self.assertFalse(os.path.exists(os.path.join(self.d, "models", "c.gguf")), "only what was asked for")
+            self.assertEqual(len(srv.requests), 1, "the server once")
+            self.assertEqual(sorted(self.pulls()), ["a:test", "b:test"], "each model once")
+            self.assertEqual(self.installed(models), ["a", "b"], "only what was asked for")
             rc, out, err = self.setup_many(srv, models, "a", "b", "--yes")  # again, in another order
             self.assertEqual(rc, 0)
-            self.assertEqual(len(srv.requests), 3, "nothing is downloaded twice")
+            self.assertEqual((len(srv.requests), len(self.pulls())), (1, 2), "nothing is downloaded twice")
         self.assertEqual(out.count("not downloaded again"), 3)
         self.assertIn("model = b", get(self.cfg), "the first model named is the one [ai] points at")
-        self.assertIn("one model at a time", out)
+        self.assertIn("serves every installed model", out)
 
     def test_repeated_names_are_one_download(self):
-        files = {}
-        models = self.many(files)
-        with Server(files) as srv:
+        models = self.many()
+        with Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "a", "a", "--model", "a", "--yes", "--no-config")
             self.assertEqual(rc, 0, out + err)
-            self.assertEqual(len(srv.requests), 2)
+        self.assertEqual(self.pulls(), ["a:test"])
 
     def test_an_unknown_name_among_several_downloads_nothing(self):
-        files = {}
-        models = self.many(files)
-        with Server(files) as srv:
+        models = self.many()
+        with Server(self.files()) as srv:
             with self.assertRaises(aisetup.SetupError) as cm:
-                self.setup_many(srv, models, "a", "nope", "--yes")
+                self.run_setup(srv, "a", "nope", "--yes", models=models, registry=False)
             self.assertEqual(srv.requests, [])
         self.assertIn("nope", str(cm.exception))
         self.assertFalse(os.path.exists(self.d))
 
     def test_no_model_named_installs_the_recommended_one(self):
-        files = {}
-        models = self.many(files, (("huge", 30000), ("fits", 2500), ("small", 400)))  # on 16 GB: no, ram, ram
-        with Server(files) as srv:
+        models = self.many((("huge", 30000), ("fits", 2500), ("small", 400)))  # on 16 GB: no, ram, ram
+        with Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "--yes", "--no-config")
             self.assertEqual(rc, 0, out + err)
-        self.assertEqual(sorted(os.listdir(os.path.join(self.d, "models"))), ["fits.gguf"], "the best-ranked model that fits")
+        self.assertEqual(self.installed(models), ["fits"], "the best-ranked model that fits")
         self.assertIn("recommended for this machine", out)
 
     def test_no_model_named_and_nothing_fits_is_refused_with_the_reason(self):
-        files = {}
-        models = self.many(files, (("huge", 30000), ("big", 20000)))
-        with Server(files) as srv:
+        models = self.many((("huge", 30000), ("big", 20000)))
+        with Server(self.files()) as srv:
             with self.assertRaises(aisetup.SetupError) as cm:
-                self.setup_many(srv, models, "--yes")
+                self.run_setup(srv, "--yes", models=models, registry=False)
             self.assertEqual(srv.requests, [])
         self.assertIn("will not work on this machine", str(cm.exception))
         self.assertIn("--force", str(cm.exception))
 
     def test_a_model_that_will_not_work_is_refused_unless_forced(self):
-        files = {}
-        models = self.many(files, (("huge", 30000), ("small", 400)))
-        with Server(files) as srv:
+        models = self.many((("huge", 30000), ("small", 400)))
+        with Server(self.files()) as srv:
             with self.assertRaises(aisetup.SetupError) as cm:
-                self.setup_many(srv, models, "small", "huge", "--yes")
+                self.run_setup(srv, "small", "huge", "--yes", models=models, registry=False)
             self.assertEqual(srv.requests, [], "not even the model that would have been fine")
             self.assertIn("huge will not work on this machine", str(cm.exception))
             self.assertNotIn("small will not", str(cm.exception))
             rc, out, err = self.setup_many(srv, models, "huge", "--yes", "--force", "--no-config")
             self.assertEqual(rc, 0, out + err)
         self.assertIn("will not work on this machine, installing it anyway", out)
-        self.assertTrue(os.path.exists(os.path.join(self.d, "models", "huge.gguf")))
+        self.assertEqual(self.installed(models), ["huge"])
 
     def test_a_model_that_will_slow_the_pc_down_is_installed_with_a_warning(self):
-        files = {}
-        models = self.many(files, (("heavy", 9000),))  # needs ~9.9 GB of 16: more than half, less than 85 %
-        with Server(files) as srv:
+        models = self.many((("heavy", 9000),))  # needs ~9.9 GB of 16: more than half, less than 85 %
+        with Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "heavy", "--yes", "--no-config")
             self.assertEqual(rc, 0, out + err)
         self.assertIn("slow down a lot", out)
         self.assertIn("SLOW", out)
-        self.assertTrue(os.path.exists(os.path.join(self.d, "models", "heavy.gguf")))
+        self.assertEqual(self.installed(models), ["heavy"])
 
     def test_without_advice_the_plain_ram_rule_still_warns(self):
-        files = {}
-        models = self.many(files, (("a", 400),))
-        with mock.patch.dict(sys.modules, {"aihw": None}), mock.patch.object(aisetup, "memory_mb", return_value=(500, 400)), Server(files) as srv:
+        models = self.many((("a", 400),))
+        with mock.patch.dict(sys.modules, {"aihw": None}), mock.patch.object(aisetup, "memory_mb", return_value=(500, 400)), Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "a", "--yes", "--no-config")
         self.assertEqual(rc, 0, out + err)
         self.assertIn("swap or fail", out)
 
     def test_the_model_option_is_still_accepted(self):
-        files = {}
-        models = self.many(files)
-        with Server(files) as srv:
+        models = self.many()
+        with Server(self.files()) as srv:
             rc, out, err = self.setup_many(srv, models, "--model", "b", "--yes", "--no-config")
             self.assertEqual(rc, 0, out + err)
-        self.assertEqual(os.listdir(os.path.join(self.d, "models")), ["b.gguf"])
+        self.assertEqual(self.installed(models), ["b"])
 
     def test_one_unpinned_model_among_several_refuses_all(self):
-        files = {}
-        models = self.many(files)
-        models[1] = dict(models[1], revision=None, sha256=None, size=None)
-        with Server(files) as srv:
-            rc, out, err = self.setup_many(srv, models, "a", "b", "--yes")
+        models = self.many()
+        models[1] = dict(models[1], ollama=None)
+        with Server(self.files()) as srv:
+            rc, out, err = self.run_setup(srv, "a", "b", "--yes", models=models, registry=False)
             self.assertEqual((rc, srv.requests), (1, []))
-        self.assertIn("b: not pinned: revision, sha256, size", err)
+        self.assertIn("b: not pinned: ollama (the name to pull)", err)
         self.assertNotIn("a: not pinned", err)
 
 
@@ -1140,15 +1241,13 @@ class StatusTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
         self.cfg = os.path.join(self.tmp.name, "config.ini")
-        self.runtime, self.model = fake_manifest("http://127.0.0.1:1", blob(1000, b"r"), blob(5000, b"m"))
+        self.runtime, self.model = fo.fake_runtime("http://127.0.0.1:1")[0], fo.fake_model("tiny", 5000)
 
     def install(self, stamp=True):
-        aisetup.ensure_dirs(self.d)
-        for path, entry, content in ((aisetup.runtime_path(self.d, self.runtime), self.runtime, blob(1000, b"r")),
-                                     (aisetup.model_path(self.d, self.model), self.model, blob(5000, b"m"))):
-            put(path, content)
-            if stamp:
-                aisetup.record(self.d, path, entry["sha256"])
+        fo.install_runtime(self.d, self.runtime)
+        fo.install_model(self.d, self.model)
+        if not stamp:
+            aisetup.forget(self.d, aisetup.runtime_key(self.runtime))
 
     def status(self, endpoint, *extra, ini=None):
         put(self.cfg, ini if ini is not None else "[ai]\nenabled = yes\nendpoint = %s\nmodel = tiny\n" % endpoint)
@@ -1168,16 +1267,26 @@ class StatusTests(unittest.TestCase):
         rc, out, err = self.status(s.base + "/v1")
         self.assertEqual(rc, 0, out)
         self.assertEqual(httpd.requests, ["/v1/models"])
-        self.assertIn("installed, SHA-256 verified", out)
+        self.assertIn("server    : Ollama %s: installed" % fo.VERSION, out)
+        self.assertRegex(out, r"model     : tiny +Tiny test model +installed  \(active\)")
         self.assertIn("answering, /v1/models lists: tiny", out)
         self.assertIn("model = tiny", out)
+
+    def test_an_ollama_with_no_model_yet_and_tags_are_read(self):
+        s, _h = self.models_server((200, b'{"object": "list", "data": null}'))
+        self.assertEqual(aisetup.probe(s.base + "/v1"), (True, [], ""), "Ollama answers null when it has no model")
+        s, _h = self.models_server((200, b'{"data": [{"id": "tiny:latest"}, {"id": "qwen3:8b"}]}'))
+        self.assertEqual(aisetup.probe(s.base + "/v1")[1], ["tiny", "qwen3:8b"], "the default tag is not part of the name [ai] model uses")
+        rc, out, err = self.status(s.base + "/v1")
+        self.assertEqual(rc, 0, out)
 
     def test_the_directory_line_says_what_is_in_it_and_what_is_free(self):
         self.install()
         rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port())
         line = next(ln for ln in out.splitlines() if ln.startswith("  directory :"))
         self.assertIn(self.d, line)
-        self.assertRegex(line, r"\(6 KB downloaded, [\d.]+ (GB|MB) free on that disk\)$")
+        self.assertIn("(%s downloaded, " % aisetup.fmt_size(aisetup.dir_space(self.d)["used"]), line)
+        self.assertRegex(line, r"downloaded, [\d.]+ (GB|MB) free on that disk\)$")
         rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port(), "--dir", os.path.join(self.tmp.name, "empty"))
         self.assertRegex(next(ln for ln in out.splitlines() if ln.startswith("  directory :")), r"\(nothing downloaded, ")
 
@@ -1240,7 +1349,7 @@ class StatusTests(unittest.TestCase):
             rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model])
         fd.assert_called()
         self.assertIn("directory : %s" % self.d, out)
-        self.assertIn("installed, SHA-256 verified", out)
+        self.assertIn("server    : Ollama %s: installed" % fo.VERSION, out)
         self.assertEqual(rc, 3, "installed, the server is not running")
         args = aisetup.build_parser().parse_args(["status", "--config", self.cfg, "--dir", mine])
         with mock.patch.object(aisetup, "find_dir", return_value=self.d):
@@ -1254,30 +1363,39 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(httpd.requests, ["/v1/models"])
 
-    def test_file_without_stamp_or_changed_is_not_verified(self):
+    def test_a_build_not_unpacked_from_the_pinned_archive_does_not_count(self):
         self.install(stamp=False)
         rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port())
-        self.assertIn("NOT verified", out)
-        self.assertEqual(rc, 1, "files that were never verified do not count as installed")
+        self.assertIn("present but NOT verified", out)
+        self.assertEqual(rc, 1, "a server that was never unpacked from the pinned archive does not count as installed")
+
+    def test_verify_hashes_the_archive_and_every_layer(self):
+        self.install()
         rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port(), "--verify")
-        self.assertIn("installed, SHA-256 verified", out, "--verify hashes the files itself")
+        self.assertIn("installed, its archive SHA-256 verified", out)
+        self.assertIn("installed, every layer SHA-256 verified", out)
         self.assertEqual(rc, 3)
+        layers = aiollama.read_manifest(aisetup.model_path(self.d, self.model))
+        with open(aiollama.blob_path(aiollama.models_dir(self.d), layers[1][0]), "r+b") as f:
+            f.write(b"X")
+        rc, out, err = self.status("http://127.0.0.1:%d/v1" % free_port(), "--verify")
+        self.assertIn("present but INCOMPLETE (run nuc-console-ai setup tiny again)", out)
 
     def test_unpinned_entries_are_reported_as_such(self):
-        rt, md = dict(self.runtime, sha256=None, size=None), dict(self.model, revision=None, sha256=None, size=None)
+        rt = dict(self.runtime, assets={})
         put(self.cfg, "")
         args = aisetup.build_parser().parse_args(["status", "--dir", self.d, "--config", self.cfg, "--endpoint", "http://127.0.0.1:%d/v1" % free_port()])
-        rc, out, err = call(aisetup.cmd_status, args, runtime=rt, models=[md])
+        rc, out, err = call(aisetup.cmd_status, args, runtime=rt, models=[self.model])
         self.assertEqual(rc, 1)
-        self.assertIn("not pinned in this build", out)
+        self.assertIn("not pinned for this system in this build", out)
 
     def test_only_installed_models_are_listed_and_the_active_one_is_marked(self):
         self.install()
-        other = dict(self.model, id="other", file="other.gguf")
+        other = fo.fake_model("other")
         put(self.cfg, "[ai]\nenabled = yes\nendpoint = http://127.0.0.1:%d/v1\nmodel = tiny\n" % free_port())
         args = aisetup.build_parser().parse_args(["status", "--dir", self.d, "--config", self.cfg])
-        rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model, other, dict(other, id="o2", file="o2.gguf")])
-        self.assertRegex(out, r"model     : tiny .*installed, SHA-256 verified  \(active\)")
+        rc, out, err = call(aisetup.cmd_status, args, runtime=self.runtime, models=[self.model, other, fo.fake_model("o2")])
+        self.assertRegex(out, r"model     : tiny .*installed  \(active\)")
         self.assertNotIn("model     : other", out, "a catalog of a dozen models would bury the one that is there")
         self.assertIn("2 more in the catalog, not installed (nuc-console-ai models)", out)
 
@@ -1298,48 +1416,54 @@ class ServeCommandFlowTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
-        self.runtime, self.model = fake_manifest("http://127.0.0.1:1", blob(1000, b"r"), blob(5000, b"m"))
+        self.runtime, self.model = fo.fake_runtime("http://127.0.0.1:1")[0], fo.fake_model("tiny", 5000)
         self.cfg = os.path.join(self.tmp.name, "config.ini")
         advice(self, HW_CPU8)
 
     def install(self):
-        aisetup.ensure_dirs(self.d)
-        for path, entry, content in ((aisetup.runtime_path(self.d, self.runtime), self.runtime, blob(1000, b"r")),
-                                     (aisetup.model_path(self.d, self.model), self.model, blob(5000, b"m"))):
-            put(path, content)
-            aisetup.record(self.d, path, entry["sha256"])
+        fo.install_runtime(self.d, self.runtime)
+        fo.install_model(self.d, self.model)
 
     def parse(self, *extra):
         return aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg] + list(extra))
 
-    def test_install_service_hashes_the_files_again_the_stamp_is_not_enough(self):
-        """The web account may write the AI folder (the AI page downloads there): it can swap a file for another of the same size and put the date
-        back, and the stamp would still say 'verified'. The service runs those files as another account: they are hashed again first."""
+    def test_install_service_checks_the_files_again_the_stamp_is_not_enough(self):
+        """The web account may write the AI folder (the AI page downloads there): it can change the unpacked build or a layer, and the stamp
+        would still say 'installed'. The service runs those files as another account: the archive is hashed against its pin and unpacked again,
+        and every layer of the model is hashed against its name, first."""
         self.install()
         calls = []
-        with mock.patch.object(aisetup, "install_service", side_effect=lambda *a, **k: calls.append(a)):
+        with mock.patch.object(aisetup, "install_service", side_effect=lambda *a, **k: calls.append((a, k))):
             rc, out, _e = call(aisetup.cmd_serve, self.parse("--install-service"), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
         self.assertEqual((rc, len(calls)), (0, 1))
         self.assertIn("checking the SHA-256 of the files the service will run", out)
-        for which, path in (("the runtime", aisetup.runtime_path(self.d, self.runtime)), ("model tiny", aisetup.model_path(self.d, self.model))):
+        exe = aisetup.runtime_path(self.d, self.runtime)
+        put(exe, b"#!/bin/sh\necho changed\n")  # the unpacked build changed by the web account
+        with mock.patch.object(aisetup, "install_service"):
+            call(aisetup.cmd_serve, self.parse("--install-service"), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
+        self.assertEqual(get(exe, "rb"), fo.runtime_exe(), "unpacked again from the archive that hashes to its pin")
+        for which in ("the server's archive", "model tiny"):
             with self.subTest(which):
                 self.install()
+                if "archive" in which:
+                    path = aisetup.archive_path(self.d, self.runtime)
+                else:
+                    path = aiollama.blob_path(aiollama.models_dir(self.d), aiollama.read_manifest(aisetup.model_path(self.d, self.model))[1][0])
                 st = os.stat(path)
                 put(path, b"#" * st.st_size)                         # the same size,
                 os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))  # the same date: the stamp cannot tell
-                self.assertTrue(aisetup.is_verified(self.d, path, self.runtime if "runtime" in which else self.model), "by the stamp it is still 'verified'")
                 calls.clear()
                 with mock.patch.object(aisetup, "install_service", side_effect=lambda *a, **k: calls.append(a)):
                     with self.assertRaises(aisetup.SetupError) as cm:
                         call(aisetup.cmd_serve, self.parse("--install-service"), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
                 self.assertEqual(calls, [], "nothing was installed")
                 self.assertIn(which, str(cm.exception))
-                self.assertIn("is not the pinned file", str(cm.exception))
-                self.assertIn("nuc-console-ai setup", str(cm.exception))
+                self.assertIn("nothing was installed", str(cm.exception))
 
     def test_a_foreground_serve_does_not_hash_again(self):
         self.install()
         with mock.patch.object(aisetup, "sha256_file", side_effect=AssertionError("serve trusts the stamp")), \
+                mock.patch.object(aiollama.hashlib, "sha256", side_effect=AssertionError("serve trusts the sizes")), \
                 mock.patch.object(aisetup, "run_server", return_value=0):
             rc, out, _e = call(aisetup.cmd_serve, self.parse(), runtime=self.runtime, models=[self.model], hw=HW_CPU8)
         self.assertEqual(rc, 0)
@@ -1349,24 +1473,27 @@ class ServeCommandFlowTests(unittest.TestCase):
             call(aisetup.cmd_serve, self.parse(), runtime=self.runtime, models=[self.model])
         self.assertIn("setup", str(cm.exception))
 
-    def test_dry_run_prints_the_command(self):
+    def test_dry_run_prints_the_command_and_its_settings(self):
         self.install()
         rc, out, err = call(aisetup.cmd_serve, self.parse("--dry-run", "--port", "9191", "--threads", "3"), runtime=self.runtime, models=[self.model])
         self.assertEqual(rc, 0)
-        words = out.split() if os.name == "posix" else out.replace('"', "").split()
-        self.assertIn("127.0.0.1", words)
-        self.assertEqual(words[words.index("--port") + 1], "9191")
-        self.assertEqual(words[words.index("-t") + 1], "3")
+        self.assertIn("OLLAMA_HOST=127.0.0.1:9191", out)
+        self.assertIn("OLLAMA_NO_CLOUD=1", out)
+        self.assertIn("OLLAMA_MODELS=", out)
+        self.assertTrue(out.rstrip().endswith("serve"), out)
         self.assertNotIn("0.0.0.0", out)
 
-    def test_serve_starts_the_server_with_the_command(self):
+    def test_serve_starts_the_server_with_its_environment(self):
         self.install()
         with mock.patch.object(aisetup, "run_server", return_value=0) as rs:
             rc, out, err = call(aisetup.cmd_serve, self.parse("--port", "9191"), runtime=self.runtime, models=[self.model])
         self.assertEqual(rc, 0)
-        argv = rs.call_args[0][0]
-        self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1")
+        argv, env = rs.call_args[0]
+        self.assertEqual(argv, [aisetup.runtime_path(self.d, self.runtime), "serve"])
+        self.assertEqual(env["OLLAMA_HOST"], "127.0.0.1:9191")
+        self.assertEqual(env["OLLAMA_MODELS"], aiollama.models_dir(self.d))
         self.assertIn("http://127.0.0.1:9191/v1", out)
+        self.assertIn("the advisor asks tiny", out)
 
     def test_configured_model_is_preferred_among_installed(self):
         self.install()
@@ -1388,7 +1515,7 @@ class ModelsCommandTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
         self.cfg = os.path.join(self.tmp.name, "config.ini")
-        self.runtime, self.models, self.data = fake_catalog()
+        self.runtime, self.models = fake_catalog()
 
     def models_cmd(self, hw, models=None, ini=""):
         put(self.cfg, ini)
@@ -1499,8 +1626,8 @@ class ModelsCommandTests(unittest.TestCase):
         self.assertEqual(aisetup.fmt_mem(None), "?")
 
     def test_installed_active_and_unpinned(self):
-        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
-        models = [dict(m, revision=None, sha256=None, size=None) if m["id"] == "huge" else m for m in self.models]
+        install_files(self.d, self.runtime, self.models, only=("mid",))
+        models = [dict(m, ollama=None, size=None) if m["id"] == "huge" else m for m in self.models]
         rc, out, err = self.models_cmd(HW_CPU8, models=models, ini="[ai]\nmodel = mid\n")
         self.assertRegex(self.row(out, "mid"), r"installed, ACTIVE$")
         self.assertRegex(self.row(out, "small"), r"not installed$")
@@ -1512,7 +1639,7 @@ class ModelsCommandTests(unittest.TestCase):
         self.assertRegex(self.row(out, "small"), r"not installed$", "active but not installed: not shown as installed")
 
     def test_it_only_reads_so_an_unprivileged_user_can_run_it(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         stamp = get(aisetup.stamp_path(self.d))
         boom = lambda *a, **kw: (_ for _ in ()).throw(AssertionError("models must only read"))  # noqa: E731
         with mock.patch.object(aisetup, "is_root", side_effect=boom), mock.patch.object(aisetup, "ensure_dirs", side_effect=boom), \
@@ -1528,7 +1655,7 @@ class ModelsCommandTests(unittest.TestCase):
 
     def test_without_a_directory_argument_it_looks_where_the_administrator_installed(self):
         system = os.path.join(self.tmp.name, "system-ai")
-        install_files(system, self.runtime, self.models, self.data, only=("mid",))
+        install_files(system, self.runtime, self.models, only=("mid",))
         put(self.cfg, "")
         args = aisetup.build_parser().parse_args(["models", "--config", self.cfg])
         with mock.patch.object(aisetup, "find_dir", return_value=system), mock.patch.dict(sys.modules, {"aihw": FakeAihw(HW_CPU8)}):
@@ -1537,7 +1664,7 @@ class ModelsCommandTests(unittest.TestCase):
         self.assertRegex(self.row(out, "small"), "not installed")
 
     def test_the_folder_the_files_go_to_is_said_with_what_it_holds_and_what_is_free(self):
-        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
+        install_files(self.d, self.runtime, self.models, only=("mid",))
         rc, out, err = self.models_cmd(HW_CPU8)
         line = next(ln for ln in out.splitlines() if ln.startswith("  Models   :"))
         self.assertIn(self.d, line)
@@ -1582,21 +1709,13 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(aisetup.speed_text({}), "?")
 
     def test_gpu_text(self):
-        m = {"layers": 36}
-        self.assertEqual(aisetup.gpu_text(0, m), "CPU only")
-        self.assertEqual(aisetup.gpu_text(20, m), "20 of 36 layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(35, m), "35 of 36 layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(36, m), "all 36 layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(37, m), "all 36 layers on the GPU", "aihw counts the output layer: one more than the model's own")
-        self.assertEqual(aisetup.gpu_text(aisetup.ALL_LAYERS, m), "all 36 layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(12), "12 layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(aisetup.ALL_LAYERS), "all layers on the GPU")
-        self.assertEqual(aisetup.gpu_text(0), "CPU only")
+        self.assertEqual(aisetup.gpu_text(False), "CPU only")
+        self.assertEqual(aisetup.gpu_text(True), "on the GPU when one holds the model (Ollama decides), else the CPU")
 
 
 class RealAdviceTests(unittest.TestCase):
-    """aihw.assess() says gpu_layers = the model's layers + 1 for a full fit (the output layer is one more): what serve passes to the
-    runtime and prints, and what a service unit shows, must read as "all layers"."""
+    """With the real aihw: the advice still says where a model fits, but the server decides for itself how many layers go to the GPU (it
+    measures the free video memory every time it loads a model): serve and a service install only allow or hide the GPU."""
 
     def setUp(self):
         import aihw
@@ -1606,48 +1725,30 @@ class RealAdviceTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.m = aisetup.find_model("qwen3-8b")  # 36 layers
 
-    def test_a_full_fit(self):
-        a = self.aihw.assess(self.m, HW_BIG)
-        self.assertEqual((a["verdict"], a["gpu_layers"]), ("gpu", self.m["layers"] + 1))
-        layers, why = aisetup.gpu_plan(self.m, HW_BIG)
-        self.assertEqual(layers, aisetup.ALL_LAYERS)
-        self.assertIn("all on the GPU", why)
-        argv = aisetup.serve_argv("/c", self.m, 8080, 2, plat="linux", gpu_layers=layers)
-        self.assertEqual(argv[argv.index("-ngl") + 1], "999")
-        self.assertEqual(aisetup.gpu_text(layers, self.m), "all 36 layers on the GPU")
-        service = aisetup.service_argv("/c", self.m, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu_layers=layers)
-        self.assertEqual(service[-2:], ["--gpu-layers", "999"])
-        self.assertEqual(aisetup.build_parser().parse_args(service[3:]).gpu_layers, 999)
-        self.assertNotIn("37", service)
+    def test_the_advice_is_advice_and_the_gpu_is_allowed_whatever_it_says(self):
+        self.assertEqual(self.aihw.assess(self.m, HW_BIG)["verdict"], "gpu")
+        self.assertEqual(self.aihw.assess(self.m, HW_SMALL_GPU)["verdict"], "partial")
+        for cfg_gpu in ("auto", "yes", ""):
+            self.assertEqual(aisetup.gpu_plan(cfg_gpu), (True, ""))
+        self.assertEqual(aisetup.gpu_plan("no"), (False, "[ai] gpu = no: CPU only"))
 
-    def test_a_partial_fit_says_how_many_of_how_many(self):
-        a = self.aihw.assess(self.m, HW_SMALL_GPU)
-        self.assertEqual(a["verdict"], "partial")
-        layers, why = aisetup.gpu_plan(self.m, HW_SMALL_GPU)
-        self.assertEqual(layers, a["gpu_layers"])
-        self.assertTrue(0 < layers < 36)
-        self.assertEqual(aisetup.gpu_text(layers, self.m), "%d of 36 layers on the GPU" % layers)
-
-    def test_serve_says_all_layers_in_its_start_line_and_a_service_install_too(self):
+    def test_serve_and_a_service_install_say_where_it_runs(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         d, cfg = os.path.join(tmp.name, "ai"), os.path.join(tmp.name, "config.ini")
-        runtime, models, data = fake_catalog()
-        install_files(d, runtime, models, data)
+        runtime, models = fake_catalog()
+        install_files(d, runtime, models)
         put(cfg, "")
-        mid = models[2]
-        hw = hw_of(65536, 60000, [gpu_of("NVIDIA GeForce RTX 4090", 24576, 22000)])
         args = aisetup.build_parser().parse_args(["serve", "--dir", d, "--config", cfg, "--model", "mid"])
-        with mock.patch.object(aisetup, "run_server", return_value=0):
-            rc, out, err = call(aisetup.cmd_serve, args, runtime=runtime, models=models, hw=hw)
-        self.assertIn("all 32 layers on the GPU", out)
-        self.assertNotRegex(out, r"\b(33|999) layers")
-        args = aisetup.build_parser().parse_args(["serve", "--dir", d, "--config", cfg, "--model", "mid", "--gpu-layers", "999"])
-        with mock.patch.object(aisetup, "run_server", return_value=0):
-            rc, out, err = call(aisetup.cmd_serve, args, runtime=runtime, models=models, hw=hw)
-        self.assertIn("all 32 layers on the GPU", out)
-        self.assertIn("as given by --gpu-layers", out)
-        self.assertEqual(mid["layers"], 32)
+        with mock.patch.object(aisetup, "run_server", return_value=0) as rs:
+            rc, out, err = call(aisetup.cmd_serve, args, runtime=runtime, models=models, hw=HW_BIG)
+        self.assertIn("on the GPU when one holds the model (Ollama decides)", out)
+        self.assertFalse(set(aiollama.GPU_HIDE) & set(rs.call_args[0][1]))
+        service = aisetup.service_argv("/c", models[2], 8080, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py")
+        self.assertNotIn("--cpu", service)
+        service = aisetup.service_argv("/c", models[2], 8080, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu=False)
+        self.assertEqual(service[-1], "--cpu")
+        self.assertTrue(aisetup.build_parser().parse_args(service[3:]).cpu)
 
 
 class CatalogTests(unittest.TestCase):
@@ -1657,7 +1758,7 @@ class CatalogTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
-        self.runtime, self.models, self.data = fake_catalog()
+        self.runtime, self.models = fake_catalog()
         self.cfg = {"ai": {"model": "mid"}}
 
     def cat(self, hw, **kw):
@@ -1666,11 +1767,11 @@ class CatalogTests(unittest.TestCase):
             return aisetup.catalog(hw, self.d, models=self.models, runtime=self.runtime, **kw)
 
     def test_shape(self):
-        install_files(self.d, self.runtime, self.models, self.data, only=("mid", "small"))
+        install_files(self.d, self.runtime, self.models, only=("mid", "small"))
         c = self.cat(HW_CPU8)
         self.assertEqual(set(c), {"hw", "dir", "space", "runtime", "recommended", "active", "models"})
         self.assertEqual((c["hw"], c["dir"]), (HW_CPU8, self.d))
-        self.assertEqual(c["runtime"], {"installed": True, "version": "0.0"})
+        self.assertEqual(c["runtime"], {"installed": True, "name": "Ollama", "version": fo.VERSION})
         self.assertEqual((c["recommended"], c["active"]), ("mid", "mid"))
         self.assertEqual([m["id"] for m in c["models"]], ["huge", "big", "mid", "small"], "the catalog's order: best first")
         for m in c["models"]:
@@ -1684,7 +1785,7 @@ class CatalogTests(unittest.TestCase):
         json.dumps(c)  # plain data: the web view can serialise it
 
     def test_runtime_not_installed_and_unpinned_model(self):
-        self.models[0] = dict(self.models[0], revision=None, sha256=None, size=None)
+        self.models[0] = dict(self.models[0], ollama=None, size=None)
         c = self.cat(HW_CPU8)
         self.assertEqual(c["runtime"]["installed"], False)
         self.assertEqual([m["pinned"] for m in c["models"]], [False, True, True, True])
@@ -1714,19 +1815,20 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual({m["assess"]["verdict"] for m in c["models"]}, {"no"})
 
     def test_never_downloads_never_hashes(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         with mock.patch.object(urllib_request(), "urlopen", side_effect=AssertionError("network")), \
                 mock.patch.object(aisetup, "sha256_file", side_effect=AssertionError("hashing")), \
+                mock.patch.object(aiollama.hashlib, "sha256", side_effect=AssertionError("hashing")), \
                 mock.patch.object(aisetup, "download", side_effect=AssertionError("download")), \
-                mock.patch.object(subprocess, "run", side_effect=AssertionError("subprocess")):
+                mock.patch.object(subprocess, "run", side_effect=AssertionError("subprocess")), \
+                mock.patch.object(subprocess, "Popen", side_effect=AssertionError("no server is started")):
             c = self.cat(HW_BIG)
-        self.assertTrue(all(m["installed"] for m in c["models"]), "the stamp file is what counts")
+        self.assertTrue(all(m["installed"] for m in c["models"]), "the stamp and the manifests are what count")
 
-    def test_a_changed_file_is_not_installed(self):
-        install_files(self.d, self.runtime, self.models, self.data)
-        path = aisetup.model_path(self.d, self.models[2])
-        put(path, self.data["mid"][:-1] + b"!")  # same size, new mtime: the stamp no longer matches
-        os.utime(path, ns=(1, 1))
+    def test_a_model_with_a_missing_layer_is_not_installed(self):
+        install_files(self.d, self.runtime, self.models)
+        layers = aiollama.read_manifest(aisetup.model_path(self.d, self.models[2]))
+        os.unlink(aiollama.blob_path(aiollama.models_dir(self.d), layers[1][0]))
         self.assertEqual({m["id"]: m["installed"] for m in self.cat(HW_BIG)["models"]}["mid"], False)
 
     def test_the_hardware_argument_wins_over_the_detected_one(self):
@@ -1806,15 +1908,15 @@ class UseTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
         self.cfg = os.path.join(self.tmp.name, "config.ini")
-        self.runtime, self.models, self.data = fake_catalog()
+        self.runtime, self.models = fake_catalog()
         advice(self, HW_CPU8)
 
     def use(self, *argv):
         args = aisetup.build_parser().parse_args(["use", "--dir", self.d, "--config", self.cfg] + list(argv))
         return call(aisetup.cmd_use, args, runtime=self.runtime, models=self.models)
 
-    def test_writes_ai_model_and_says_how_to_restart(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+    def test_writes_ai_model_and_says_nothing_has_to_restart(self):
+        install_files(self.d, self.runtime, self.models)
         put(self.cfg, "# mine\n[web]\nenabled = no\n\n[ai]\n# the model\nenabled = yes\nendpoint = http://127.0.0.1:8080/v1\nmodel = small\n\n[features]\nhealth = yes\n")
         before = get(self.cfg)
         rc, out, err = self.use("mid")
@@ -1825,23 +1927,22 @@ class UseTests(unittest.TestCase):
         self.assertIn("# the model", text)
         self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "mid")
         self.assertEqual(nuc_config.load(self.cfg)["features"]["health"], True)
-        self.assertIn(("" if sys.platform == "win32" else "sudo ") + "nuc-console-ai serve --install-service", out)
-        self.assertIn("one model at a time", out)
-        self.assertNotIn("still the Ollama default", out)
+        self.assertIn("the advisor asks mid from its next question, nothing to restart", out)
+        self.assertNotIn("Ollama you run yourself", out)
         self.assertNotIn("enabled = no", out)
 
     def test_creates_the_section_and_notes_what_is_not_set_up(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         rc, out, err = self.use("small")
         self.assertEqual(rc, 0)
         ai = nuc_config.load(self.cfg)["ai"]
         self.assertEqual((ai["model"], ai["enabled"]), ("small", False), "the advisor is not switched on behind the admin's back")
-        self.assertIn("Ollama default", out)
+        self.assertIn("the default of an Ollama you run yourself (port 11434)", out)
         self.assertIn("http://127.0.0.1:8080/v1", out)
         self.assertIn("[ai] enabled = no", out)
 
-    def test_only_installed_and_verified_models(self):
-        install_files(self.d, self.runtime, self.models, self.data, only=("mid",))
+    def test_only_installed_models(self):
+        install_files(self.d, self.runtime, self.models, only=("mid",))
         rc, out, err = self.use("mid")
         self.assertEqual(rc, 0)
         before = get(self.cfg)
@@ -1852,20 +1953,21 @@ class UseTests(unittest.TestCase):
         with self.assertRaises(aisetup.SetupError) as cm:
             self.use("gpt-9")
         self.assertIn("unknown model", str(cm.exception))
-        put(aisetup.model_path(self.d, self.models[3]), self.data["small"])  # on disk, never verified: no stamp
-        with self.assertRaises(aisetup.SetupError):
+        os.makedirs(os.path.dirname(aisetup.model_path(self.d, self.models[3])))
+        put(aisetup.model_path(self.d, self.models[3]), '{"config": {}, "layers": [{"digest": "sha256:%s", "size": 9}]}' % ("0" * 64))
+        with self.assertRaises(aisetup.SetupError):  # a manifest whose layers are not there
             self.use("small")
         self.assertEqual(get(self.cfg), before, "a refusal changes nothing")
 
-    def test_runtime_must_be_verified_too(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+    def test_the_server_must_be_installed_too(self):
+        install_files(self.d, self.runtime, self.models)
         os.unlink(aisetup.runtime_path(self.d, self.runtime))
         with self.assertRaises(aisetup.SetupError):
             self.use("mid")
         self.assertFalse(os.path.exists(self.cfg))
 
     def test_a_model_that_will_not_work_needs_force(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         with self.assertRaises(aisetup.SetupError) as cm:
             self.use("huge")
         self.assertIn("will not work on this machine", str(cm.exception))
@@ -1878,38 +1980,31 @@ class UseTests(unittest.TestCase):
 
     def test_a_slow_model_is_used_with_a_warning(self):
         self.models[2] = dict(self.models[2], approx_mb=3500)  # ~4.4 GB of 8: more than half of the RAM, less than 85 %
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         rc, out, err = self.use("mid")
         self.assertEqual(rc, 0, err)
         self.assertIn("will slow the PC down a lot", out)
         self.assertEqual(nuc_config.load(self.cfg)["ai"]["model"], "mid")
 
     def test_unwritable_config_is_one_line(self):
-        install_files(self.d, self.runtime, self.models, self.data)
+        install_files(self.d, self.runtime, self.models)
         self.cfg = os.path.join(self.tmp.name, "no", "such", "dir", "config.ini")
         with self.assertRaises(aisetup.SetupError) as cm:
             self.use("mid")
         self.assertIn("model = mid", str(cm.exception))
         self.assertNotIn("\n", str(cm.exception))
 
-    def test_restart_hint_per_system(self):
-        self.assertTrue(aisetup.restart_hint("linux")[0].startswith("service   : sudo nuc-console-ai serve --install-service"))
-        win = "\n".join(aisetup.restart_hint("win32"))
-        self.assertIn("administrator prompt", win)
-        self.assertNotIn("sudo", win)
-        self.assertIn("nuc-console-ai serve", win)
-
-
 class ServeGpuTests(unittest.TestCase):
-    """serve: the GPU is used when the model fits there (all of it, or in part), the CPU otherwise or when [ai] gpu = no."""
+    """serve: Ollama uses the GPU when it finds one that holds the model (it decides how many layers fit); [ai] gpu = no or --cpu hide the
+    GPUs from it, and the service carries that decision in its command."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
         self.cfg = os.path.join(self.tmp.name, "config.ini")
-        self.runtime, self.models, self.data = fake_catalog()
-        install_files(self.d, self.runtime, self.models, self.data)
+        self.runtime, self.models = fake_catalog()
+        install_files(self.d, self.runtime, self.models)
         self.big = self.models[1]
 
     def dry_run(self, hw, *extra, ini="", model="big"):
@@ -1918,89 +2013,20 @@ class ServeGpuTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}):
             rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
         self.assertEqual(rc, 0, err)
-        return out.replace('"', "").split()
+        return out
 
-    def test_argv_cpu_or_gpu(self):
-        cpu = aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux")
-        self.assertEqual(cpu[cpu.index("--gpu") + 1], "disable")
-        self.assertNotIn("-ngl", cpu)
-        self.assertEqual(aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers=0), cpu)
-        for plat in ("linux", "darwin", "win32"):
-            with self.subTest(plat):
-                gpu = aisetup.serve_argv("/c", Q4B, 8080, 2, plat=plat, gpu_layers=24)
-                self.assertEqual(gpu[gpu.index("--gpu") + 1], "auto")
-                self.assertEqual(gpu[gpu.index("-ngl") + 1], "24")
-                self.assertEqual(gpu.count("--gpu"), 1)
-                self.assertEqual(gpu[gpu.index("--host") + 1], "127.0.0.1", "the GPU changes nothing about where it listens")
-        with self.assertRaises(ValueError):
-            aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers=-1)
-        with self.assertRaises(ValueError):
-            aisetup.serve_argv("/c", Q4B, 8080, 2, plat="linux", gpu_layers="12; reboot")
+    def hidden(self, out):
+        return all("%s=-1" % k in out for k in aiollama.GPU_HIDE)
 
-    def test_the_runtime_no_longer_forces_the_cpu(self):
-        self.assertNotIn("--gpu", aisetup.RUNTIME["args"])
-        self.assertNotIn("disable", aisetup.RUNTIME["args"])
-
-    def test_plan_per_machine(self):
-        advice(self, HW_BIG)
-        for name, hw, mid_all_on_gpu in (("big nvidia", HW_BIG, True), ("apple", HW_APPLE, True), ("small gpu", HW_SMALL_GPU, None),
-                                         ("8 GB cpu", HW_CPU8, False), ("unknown", HW_UNKNOWN, False)):
+    def test_the_gpu_is_allowed_on_every_machine_unless_told_otherwise(self):
+        for name, hw in ALL_HW.items():
             with self.subTest(name):
-                layers, why = aisetup.gpu_plan(self.models[2], hw)  # "mid": 32 layers
-                if mid_all_on_gpu:
-                    self.assertEqual(layers, aisetup.ALL_LAYERS, "all of it: -ngl says so (not a number one past the last layer)")
-                elif mid_all_on_gpu is None:
-                    self.assertTrue(0 < layers <= aisetup.ALL_LAYERS, layers)
-                else:
-                    self.assertEqual(layers, 0)
-                self.assertTrue(why)
-        layers, why = aisetup.gpu_plan(self.big, HW_SMALL_GPU)
-        self.assertTrue(0 < layers < 32, "part of the model on a GPU that is too small for all of it")
-        self.assertEqual(aisetup.gpu_plan(self.models[0], HW_SMALL_GPU)[0], 0, "a GPU that holds almost nothing of it is not worth it")
+                self.assertFalse(self.hidden(self.dry_run(hw)), "Ollama measures the GPU itself: nothing hidden")
+                self.assertFalse(any(k in self.dry_run(hw, model="huge") for k in aiollama.GPU_HIDE), "even for a model the advice says does not fit")
 
-    def test_config_gpu_no_forces_the_cpu(self):
-        advice(self, HW_BIG)
-        layers, why = aisetup.gpu_plan(self.big, HW_BIG, "no")
-        self.assertEqual(layers, 0)
-        self.assertIn("[ai] gpu = no", why)
-
-    def test_no_advice_means_cpu(self):
-        with mock.patch.dict(sys.modules, {"aihw": None}):
-            layers, why = aisetup.gpu_plan(self.big, HW_BIG)
-        self.assertEqual(layers, 0)
-        self.assertIn("could not be assessed", why)
-        self.assertEqual(aisetup.gpu_plan(self.big, {})[0], 0)
-
-    def test_dry_run_on_a_big_gpu(self):
-        words = self.dry_run(HW_BIG)
-        self.assertEqual(words[words.index("--gpu") + 1], "auto")
-        self.assertEqual(words[words.index("-ngl") + 1], str(aisetup.ALL_LAYERS))
-
-    def test_dry_run_on_apple_silicon(self):
-        words = self.dry_run(HW_APPLE)
-        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", str(aisetup.ALL_LAYERS)))
-
-    def test_dry_run_on_a_gpu_that_holds_part_of_it(self):
-        words = self.dry_run(HW_SMALL_GPU)
-        n = int(words[words.index("-ngl") + 1])
-        self.assertTrue(0 < n < 32, n)
-
-    def test_dry_run_without_gpu_is_cpu_only(self):
-        for hw in (HW_CPU8, HW_UNKNOWN):
-            words = self.dry_run(hw, model="mid")
-            self.assertEqual(words[words.index("--gpu") + 1], "disable")
-            self.assertNotIn("-ngl", words)
-
-    def test_a_model_the_gpu_cannot_help_with_runs_on_the_cpu(self):
-        words = self.dry_run(HW_SMALL_GPU, model="huge")
-        self.assertEqual(words[words.index("--gpu") + 1], "disable")
-
-    def test_config_gpu_no(self):
-        words = self.dry_run(HW_BIG, ini="[ai]\ngpu = no\n")
-        self.assertEqual(words[words.index("--gpu") + 1], "disable")
-        self.assertNotIn("-ngl", words)
-        words = self.dry_run(HW_BIG, ini="[ai]\ngpu = auto\n")
-        self.assertIn("-ngl", words)
+    def test_config_gpu_no_hides_the_gpus(self):
+        self.assertTrue(self.hidden(self.dry_run(HW_BIG, ini="[ai]\ngpu = no\n")))
+        self.assertFalse(self.hidden(self.dry_run(HW_BIG, ini="[ai]\ngpu = auto\n")))
 
     def test_config_gpu_no_does_not_even_detect_the_hardware(self):
         put(self.cfg, "[ai]\ngpu = no\n")
@@ -2009,23 +2035,23 @@ class ServeGpuTests(unittest.TestCase):
             rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
         self.assertEqual(rc, 0)
 
-    def test_explicit_gpu_layers_win(self):
-        words = self.dry_run(HW_CPU8, "--gpu-layers", "12")
-        self.assertEqual((words[words.index("--gpu") + 1], words[words.index("-ngl") + 1]), ("auto", "12"))
-        words = self.dry_run(HW_BIG, "--gpu-layers", "0")
-        self.assertEqual(words[words.index("--gpu") + 1], "disable")
+    def test_cpu_option_and_the_older_services_options(self):
+        self.assertTrue(self.hidden(self.dry_run(HW_BIG, "--cpu")))
+        self.assertTrue(self.hidden(self.dry_run(HW_BIG, "--gpu-layers", "0")), "an older service's CPU only")
+        self.assertFalse(self.hidden(self.dry_run(HW_CPU8, "--gpu-layers", "12", "--threads", "3")), "an older service's GPU: allowed")
         for bad in ("-1", "1000", "many"):
             with self.subTest(bad), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 aisetup.build_parser().parse_args(["serve", "--gpu-layers", bad])
 
     def test_start_message_says_where_it_runs(self):
         put(self.cfg, "")
-        for hw, want in ((HW_BIG, "all 32 layers on the GPU"), (HW_CPU8, "CPU only")):
+        for ini, want in (("", "on the GPU when one holds the model"), ("[ai]\ngpu = no\n", "CPU only")):
+            put(self.cfg, ini)
             args = aisetup.build_parser().parse_args(["serve", "--dir", self.d, "--config", self.cfg, "--model", "mid"])
-            with mock.patch.dict(sys.modules, {"aihw": FakeAihw(hw)}), mock.patch.object(aisetup, "run_server", return_value=0) as rs:
+            with mock.patch.dict(sys.modules, {"aihw": FakeAihw(HW_BIG)}), mock.patch.object(aisetup, "run_server", return_value=0):
                 rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
             self.assertIn(want, out)
-            self.assertIn("needs", out, "the reason (aihw's sentence) is printed")
+        self.assertIn("[ai] gpu = no: CPU only", out, "the reason is printed")
 
     def test_context_beyond_what_the_model_handles_is_refused(self):
         put(self.cfg, "")
@@ -2036,18 +2062,16 @@ class ServeGpuTests(unittest.TestCase):
 
     def test_the_service_has_the_decision_in_its_command(self):
         """The service reads no config of ours: the unit's command is what `serve` was told, and `serve` accepts it."""
-        for layers in (0, 24):
-            with self.subTest(layers):
-                argv = aisetup.service_argv(self.d, self.big, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu_layers=layers)
-                self.assertEqual(argv[-2:], ["--gpu-layers", str(layers)])
+        for gpu in (False, True):
+            with self.subTest(gpu):
+                argv = aisetup.service_argv(self.d, self.big, 8080, 4096, "linux", python="/usr/bin/python3", script="/opt/aisetup.py", gpu=gpu)
+                self.assertEqual(argv[-1] == "--cpu", not gpu)
                 args = aisetup.build_parser().parse_args(argv[3:] + ["--dry-run", "--config", os.path.join(self.tmp.name, "none.ini")])
-                self.assertEqual(args.gpu_layers, layers)
                 with mock.patch.object(aisetup, "_hardware", side_effect=AssertionError("the service does not detect: it was told")):
                     rc, out, err = call(aisetup.cmd_serve, args, runtime=self.runtime, models=self.models)
-                words = out.split()
-                self.assertEqual(words[words.index("--gpu") + 1], "auto" if layers else "disable")
-        w = aisetup.service_argv(r"C:\PD\nuc-console\ai", self.big, 8080, 2, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\a\aisetup.py", gpu_layers=8)
-        self.assertEqual(w[w.index("--gpu-layers") + 1], "8")
+                self.assertEqual(self.hidden(out), not gpu)
+        w = aisetup.service_argv(r"C:\PD\nuc-console\ai", self.big, 8080, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\a\aisetup.py", gpu=False)
+        self.assertIn("--cpu", w)
         self.assertEqual(w[-2], "--log")
 
     def test_install_linux_with_a_gpu(self):
@@ -2058,16 +2082,16 @@ class ServeGpuTests(unittest.TestCase):
                 mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: "/usr/bin/" + n), \
                 mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: ran.append(argv)), \
                 mock.patch.object(aisetup, "_is_win", return_value=False), mock.patch.object(aisetup, "_is_mac", return_value=False):
-            _r, out, _e = call(aisetup.install_service, self.d, m, 8080, 2, 4096, "linux", gpu_layers=24)
+            _r, out, _e = call(aisetup.install_service, self.d, m, 8080, 4096, "linux", gpu=True)
             unit = wrote["/etc/systemd/system/nuc-console-ai.service"]
-            self.assertIn("--gpu-layers 24\n", unit)
+            self.assertNotIn("--cpu", unit)
             self.assertIn("PrivateDevices=no\n", unit, "the sandbox must let the service see the GPU")
             self.assertIn("SupplementaryGroups=render video\n", unit)
-            self.assertIn("24 of 32 layers on the GPU", out)
+            self.assertIn("on the GPU when one holds the model", out)
             wrote.clear()
-            call(aisetup.install_service, self.d, m, 8080, 2, 4096, "linux", gpu_layers=0)
+            call(aisetup.install_service, self.d, m, 8080, 4096, "linux", gpu=False)
             unit = wrote["/etc/systemd/system/nuc-console-ai.service"]
-            self.assertIn("--gpu-layers 0\n", unit)
+            self.assertIn("--cpu\n", unit)
             self.assertIn("PrivateDevices=yes\n", unit, "CPU only: the sandbox keeps its private /dev")
             self.assertNotIn("SupplementaryGroups", unit)
 
@@ -2078,7 +2102,7 @@ class ServeGpuTests(unittest.TestCase):
         with mock.patch.object(aisetup, "is_root", return_value=True), mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: n), \
                 mock.patch.object(subprocess, "run", side_effect=record), mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: record(argv)), \
                 mock.patch.object(os, "makedirs"):
-            call(aisetup.install_service, r"C:\PD\nuc-console\ai", self.big, 8080, 2, 4096, "win32", gpu_layers=8)
+            call(aisetup.install_service, r"C:\PD\nuc-console\ai", self.big, 8080, 4096, "win32", gpu=True)
         verbs = [c[1] for c in calls if c[0] == "schtasks"]
         self.assertEqual(verbs, ["/End", "/Create", "/Run"])
 
@@ -2093,6 +2117,8 @@ class ServiceTemplateTests(unittest.TestCase):
                      "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX", "MemoryMax=5400M"):
             self.assertIn(line + "\n", unit)
         self.assertNotIn("User=root", unit)
+        self.assertIn("Description=nuc-console local AI model server (Ollama, 127.0.0.1 only)\n", unit)
+        self.assertIn("TasksMax=512\n", unit, "the server and its runner threads")
         import configparser
         cp = configparser.RawConfigParser(strict=False)
         cp.optionxform = str
@@ -2107,7 +2133,7 @@ class ServiceTemplateTests(unittest.TestCase):
         self.assertIn('ExecStart=/usr/bin/python3 "x y" --dir "/a b/c"\n', unit)
 
     def test_systemd_unit_for_a_gpu(self):
-        argv = ["/usr/bin/python3", "-B", "/opt/aisetup.py", "serve", "--gpu-layers", "24"]
+        argv = ["/usr/bin/python3", "-B", "/opt/aisetup.py", "serve"]
         cpu, gpu = aisetup.systemd_unit(argv, 3600), aisetup.systemd_unit(argv, 3600, gpu=True, groups=["render", "video"])
         self.assertIn("PrivateDevices=yes\n", cpu)
         self.assertNotIn("SupplementaryGroups", cpu)
@@ -2158,10 +2184,10 @@ class ServiceTemplateTests(unittest.TestCase):
 
     def test_service_argv_is_explicit(self):
         m = aisetup.MODELS[0]
-        argv = aisetup.service_argv("/var/lib/nuc-console/ai", m, 8080, 2, 4096, "linux", python="/usr/bin/python3", script="/opt/nuc-console/aisetup.py")
+        argv = aisetup.service_argv("/var/lib/nuc-console/ai", m, 8080, 4096, "linux", python="/usr/bin/python3", script="/opt/nuc-console/aisetup.py")
         self.assertEqual(argv, ["/usr/bin/python3", "-B", "/opt/nuc-console/aisetup.py", "serve", "--dir", "/var/lib/nuc-console/ai", "--model", m["id"],
-                                "--port", "8080", "--threads", "2", "--ctx", "4096", "--gpu-layers", "0"])
-        w = aisetup.service_argv(r"C:\PD\nuc-console\ai", m, 8080, 2, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\app\aisetup.py")
+                                "--port", "8080", "--ctx", "4096"])
+        w = aisetup.service_argv(r"C:\PD\nuc-console\ai", m, 8080, 4096, "win32", python=r"C:\py\python.exe", script=r"C:\app\aisetup.py")
         self.assertEqual(w[-2], "--log")
         self.assertTrue(w[-1].endswith("ai.log"))
 
@@ -2183,7 +2209,7 @@ class ServiceTemplateTests(unittest.TestCase):
     def test_install_needs_root(self):
         m = aisetup.MODELS[0]
         with mock.patch.object(aisetup, "is_root", return_value=False), self.assertRaises(aisetup.SetupError) as cm:
-            aisetup.install_service("/var/lib/nuc-console/ai", m, 8080, 2, 4096, "linux")
+            aisetup.install_service("/var/lib/nuc-console/ai", m, 8080, 4096, "linux")
         self.assertIn("root", str(cm.exception))
         with mock.patch.object(aisetup, "is_root", return_value=False), self.assertRaises(aisetup.SetupError):
             aisetup.remove_service("linux")
@@ -2193,10 +2219,9 @@ class ServiceTemplateTests(unittest.TestCase):
         """The Linux path end to end with every system call replaced: what would be written and run."""
         m, ran, wrote = aisetup.MODELS[0], [], {}
         with tempfile.TemporaryDirectory() as d:
-            for sub in ("runtime", "models"):
-                os.makedirs(os.path.join(d, sub), mode=0o755)
             os.chmod(d, 0o755)
             for p in (aisetup.runtime_path(d, plat="linux"), aisetup.model_path(d, m, "linux")):
+                os.makedirs(os.path.dirname(p), mode=0o755)
                 put(p, "x")
                 os.chmod(p, 0o644)
             with mock.patch.object(aisetup, "is_root", return_value=True), mock.patch.object(aisetup, "_linux_user") as user, \
@@ -2205,8 +2230,8 @@ class ServiceTemplateTests(unittest.TestCase):
                     mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: ran.append(argv)), \
                     mock.patch.object(aisetup, "_is_win", return_value=False), mock.patch.object(aisetup, "_is_mac", return_value=False), \
                     mock.patch.object(aisetup, "_readable_by_all", return_value=True):  # (the temp dir's parents: 0700 on macOS)
-                _r, out, _e = call(aisetup.install_service, d, m, 8080, 2, 4096, "linux")
-            argv = aisetup.service_argv(d, m, 8080, 2, 4096, "linux")
+                _r, out, _e = call(aisetup.install_service, d, m, 8080, 4096, "linux")
+            argv = aisetup.service_argv(d, m, 8080, 4096, "linux")
         user.assert_called_once_with()
         self.assertEqual(list(wrote), ["/etc/systemd/system/nuc-console-ai.service"])
         self.assertIn("ExecStart=%s -B %s serve --dir %s" % (argv[0], argv[2], d), wrote["/etc/systemd/system/nuc-console-ai.service"])
@@ -2220,26 +2245,30 @@ class RemoveTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
-        self.runtime, self.model = fake_manifest("http://127.0.0.1:1", b"r" * 100, b"m" * 500)
-        self.other = dict(self.model, id="other", file="other.gguf")
-        aisetup.ensure_dirs(self.d)
-        for p in (aisetup.runtime_path(self.d, self.runtime), aisetup.model_path(self.d, self.model), aisetup.model_path(self.d, self.other),
-                  aisetup.model_path(self.d, self.model) + ".part", os.path.join(self.d, "models", "mine.gguf")):
-            put(p, b"x" * 10)
-        aisetup.record(self.d, aisetup.model_path(self.d, self.model), "0" * 64)
+        self.runtime = fo.fake_runtime("http://127.0.0.1:1")[0]
+        self.model, self.other = fo.fake_model("tiny", 5000), fo.fake_model("other", 7000)
+        fo.install_runtime(self.d, self.runtime)
+        fo.install_model(self.d, self.model)
+        fo.install_model(self.d, self.other)
+        put(os.path.join(self.d, "web.json"), "{}")
 
     def remove(self, *extra, ask=None):
         args = aisetup.build_parser().parse_args(["remove", "--dir", self.d] + list(extra))
         return call(aisetup.cmd_remove, args, runtime=self.runtime, models=[self.model, self.other], **({"ask": ask} if ask else {}))
 
+    def blobs(self):
+        return sorted(os.listdir(os.path.join(self.d, "models", "blobs")))
+
     def test_one_model(self):
+        before = self.blobs()
         rc, out, err = self.remove("--model", "tiny", "--yes")
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 0, err)
         self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.model)))
-        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.model) + ".part"))
-        self.assertTrue(os.path.exists(aisetup.model_path(self.d, self.other)))
-        self.assertTrue(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
-        self.assertNotIn("tiny.gguf", aisetup.load_stamp(self.d))
+        self.assertFalse(aisetup.model_ready(self.d, self.model))
+        self.assertTrue(aisetup.model_ready(self.d, self.other), "the other model and the layers it uses are kept")
+        self.assertTrue(aisetup.runtime_ready(self.d, self.runtime))
+        self.assertEqual(len(self.blobs()), len(before) - 2, "tiny's two layers; the config layer both use stays")
+        self.assertIn("deleted, ", out)
 
     def test_the_model_as_a_plain_argument(self):
         rc, out, err = self.remove("tiny", "--yes")
@@ -2257,38 +2286,61 @@ class RemoveTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("active model", out)
         self.assertIn("nuc-console-ai use ID", out)
+        fo.install_model(self.d, self.model)
         put(cfg, "[ai]\nmodel = other\n")
         rc, out, err = self.remove("--model", "tiny", "--yes", "--config", cfg)
         self.assertNotIn("active model", out)
 
-    def test_everything_but_only_what_we_downloaded(self):
+    def test_everything_means_the_server_and_every_model_and_nothing_else(self):
+        os.makedirs(os.path.join(self.d, "home", ".ollama"))
+        put(os.path.join(self.d, "home", ".ollama", "id_ed25519"), "key")
         rc, out, err = self.remove("--yes")
-        self.assertEqual(rc, 0)
-        self.assertFalse(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
-        self.assertTrue(os.path.exists(os.path.join(self.d, "models", "mine.gguf")), "a file we do not know is never deleted")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(os.listdir(self.d)), ["verified.json", "web.json"], "the folders runtime/, models/ and home/ are gone, the rest stays")
+        self.assertFalse(aisetup.runtime_ready(self.d, self.runtime))
+        self.assertEqual(aisetup.load_stamp(self.d), {}, "the stamp forgets the archive and the unpacked build")
+        self.assertIn("runtime/ (everything in it)", out)
+        self.assertIn("models/ (everything in it)", out)
 
     def test_declined(self):
         with mock.patch.object(sys, "stdin", io.StringIO("")):
             rc, out, err = self.remove("--model", "tiny")
         self.assertEqual(rc, 1)
-        self.assertTrue(os.path.exists(aisetup.model_path(self.d, self.model)))
+        self.assertTrue(aisetup.model_ready(self.d, self.model))
 
     def test_nothing_to_remove(self):
         shutil.rmtree(self.d)
         rc, out, err = self.remove("--yes")
         self.assertEqual(rc, 0)
         self.assertIn("nothing to remove", out)
+        rc, out, err = self.remove("tiny", "--yes")
+        self.assertIn("nothing to remove", out)
 
 
 class PinsTests(unittest.TestCase):
-    def test_hub(self):
-        info = {"sha": "a" * 40, "cardData": {"license": "apache-2.0"}}
-        tree = [{"type": "file", "path": "README.md", "size": 5}, {"type": "file", "path": "m-Q4_K_M.gguf", "oid": "b" * 40, "size": 25,
-                                                               "lfs": {"oid": "c" * 64, "size": 2497280256, "pointerSize": 135}}]
-        self.assertEqual(aisetup.pin_from_hub(info, tree, "m-Q4_K_M.gguf"), {"revision": "a" * 40, "sha256": "c" * 64, "size": 2497280256, "license": "apache-2.0"})
-        for bad_info, bad_tree, path in (({}, tree, "m-Q4_K_M.gguf"), (info, tree, "missing.gguf"), (info, tree, "README.md"), (info, {}, "x")):
-            with self.subTest(path), self.assertRaises(aisetup.SetupError):
-                aisetup.pin_from_hub(bad_info, bad_tree, path)
+    def test_registry_manifest(self):
+        man = {"schemaVersion": 2, "config": {"digest": "sha256:" + "a" * 64, "size": 500},
+               "layers": [{"mediaType": "application/vnd.ollama.image.model", "digest": "sha256:" + "b" * 64, "size": 5_000_000_000},
+                          {"mediaType": "application/vnd.ollama.image.license", "digest": "sha256:" + "c" * 64, "size": 11_000},
+                          {"mediaType": "application/vnd.ollama.image.template", "digest": "sha256:" + "d" * 64, "size": 1_000}]}
+        self.assertEqual(aiollama.manifest_summary(man), {"size": 5_000_012_500, "model": 5_000_000_000, "license": "sha256:" + "c" * 64})
+        with self.assertRaises(aisetup.SetupError):
+            aiollama.manifest_summary({"layers": []})
+        self.assertEqual(aiollama.manifest_url("qwen3:8b"), "https://registry.ollama.ai/v2/library/qwen3/manifests/8b")
+        self.assertEqual(aiollama.manifest_url("hf.co/u/r:Q4_K_M"), "https://hf.co/v2/u/r/manifests/Q4_K_M")
+        self.assertEqual(aiollama.blob_url("qwen3:8b", "sha256:" + "c" * 64), "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:" + "c" * 64)
+        self.assertEqual(aisetup.licence_words("                                 Apache License\n                           Version 2.0, January 2004"),
+                         "Apache License Version 2.0, January 2004")
+
+    def test_the_release_sums_and_the_token_only_for_the_api(self):
+        text = "%s  ./ollama-darwin.tgz\n%s  ./ollama-windows-amd64.zip\nnot a line\n%s *install.sh\n" % ("a" * 64, "b" * 64, "c" * 64)
+        self.assertEqual(aisetup.sums_of(text), {"ollama-darwin.tgz": "a" * 64, "ollama-windows-amd64.zip": "b" * 64, "install.sh": "c" * 64})
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t0k"}):
+            self.assertEqual(aisetup._headers("https://api.github.com/repos/x", "a")["Authorization"], "Bearer t0k")
+            self.assertNotIn("Authorization", aisetup._headers("https://registry.ollama.ai/v2/library/qwen3/manifests/8b", "a"))
+            self.assertNotIn("Authorization", aisetup._headers("https://github.com/ollama/ollama/releases/download/v1/x", "a"))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertNotIn("Authorization", aisetup._headers("https://api.github.com/repos/x", "a"))
 
     def test_release(self):
         url = "https://github.com/o/r/releases/download/1.0/r-1.0"
@@ -2423,7 +2475,7 @@ class DocsTests(unittest.TestCase):
         self.assertEqual(aihw.PARTIAL_MIN_FRAC, 0.10, "the text says a tenth of the layers")
         self.assertEqual(aihw.APU_VRAM_MAX_MB, 2048, "the text says 2 GB")
         self.assertEqual(aihw.KV_BYTES_PER_LAYER_TOKEN * aihw.DEFAULT_CTX // 2 ** 20, 16, "the text says 16 MB per layer")
-        self.assertEqual((aisetup.DEFAULT_PORT, aisetup.DEFAULT_CTX, aisetup.ALL_LAYERS), (8080, 4096, 999))
+        self.assertEqual((aisetup.DEFAULT_PORT, aisetup.DEFAULT_CTX), (8080, 4096))
 
     def test_every_option_of_every_command_is_documented(self):
         subs = next(a for a in aisetup.build_parser()._actions if isinstance(a, argparse._SubParsersAction)).choices

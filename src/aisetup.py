@@ -2,23 +2,25 @@
 
   models  the hardware found (RAM, GPU and its memory) and every model of the catalog: does it fit (GPU / GPU+CPU / RAM / SLOW /
           TOO BIG), a rough speed, installed, active, the recommended one
-  setup   download the runtime (llamafile, one executable for Linux, macOS and Windows) and one or several models (GGUF) into a
-          cache directory, verify each against the SHA-256 pinned below, never download a file that is already there with the
-          right hash; with your consent write [ai] endpoint/model in config.ini. No model named = the recommended one; a model
-          that will not work here is refused unless --force
-  use     make an installed, verified model the one the advisor asks for ([ai] model in config.ini)
-  serve   run the server in the foreground, on 127.0.0.1 only, at low priority, on the GPU when the model fits there ([ai] gpu =
-          no: never) (--install-service / --remove-service: a system service: systemd unit, launchd daemon or Windows scheduled
-          task, each run by an unprivileged account)
-  status  what is installed and verified, whether the configured endpoint answers
+  setup   download the model server (Ollama: the build of this system and processor, pinned below, SHA-256 checked, unpacked in the
+          cache directory) and pull one or several models from the Ollama library through it (Ollama checks every layer against the
+          registry's SHA-256); never twice; with your consent write [ai] endpoint/model in config.ini. No model named = the recommended
+          one; a model that will not work here is refused unless --force
+  use     make an installed model the one the advisor asks for ([ai] model in config.ini)
+  serve   run the server in the foreground, on 127.0.0.1 only, at low priority, on the GPU when Ollama finds one ([ai] gpu = no: never)
+          (--install-service / --remove-service: a system service: systemd unit, launchd daemon or Windows scheduled task, each run by an
+          unprivileged account)
+  status  what is installed, whether the configured endpoint answers
   remove  delete the downloaded files (one model, or everything)
   pins    for maintainers: prints the values to paste in RUNTIME and MODELS (needs the network)
 
-Security: HTTPS only (a redirect to http:// is refused), every file is checked against a SHA-256 written in this file, downloads
-go to "<name>.part" and are renamed only after the check (a mismatch deletes them), commands are argument lists (no shell), the
-server binds to 127.0.0.1 and nothing here can change that, no auto-update: a new runtime or model means a new pin in a new release.
-The advice (aihw.py) only reads the machine and does arithmetic: it never downloads and never hashes. catalog() is what the screens
-call: it reads the stamp file only, so an unprivileged process can show it.
+Security: HTTPS only (a redirect to http:// is refused), the server's archive is checked against a SHA-256 written in this file before it is
+unpacked (downloads go to "<name>.part", renamed only after the check; every member of the archive is checked before it is written),
+commands are argument lists (no shell), the server binds to 127.0.0.1 and nothing here can change that, no auto-update: a new server
+means a new pin in a new release. The models come from the Ollama library (registry.ollama.ai), named in MODELS: Ollama verifies each file
+it downloads against the digest of the registry's manifest. The advice (aihw.py) only reads the machine and does arithmetic: it never
+downloads and never hashes. catalog() is what the screens call: it reads the stamp file and the manifests only, so an unprivileged process
+can show it. The Ollama specifics (the build, unpacking, the server's environment, its API, its folder of models) are in aiollama.py.
 Standard library only, Python 3.8+. Output is plain ASCII (Windows consoles).
 """
 import argparse
@@ -32,6 +34,7 @@ import posixpath
 import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -41,130 +44,120 @@ import urllib.parse
 import urllib.request
 from xml.sax.saxutils import escape as xml_escape
 
+import aiollama
 import nuc_config
 
-LOOPBACK = "127.0.0.1"  # the only address the server is ever started on (serve_argv has no parameter for it)
-DEFAULT_PORT = 8080
+LOOPBACK = "127.0.0.1"  # the only address the server is ever started on (serve_env has no parameter for it)
+DEFAULT_PORT = 8080     # not Ollama's own 11434: an Ollama you run yourself keeps its port, and the two are never mistaken for each other
 DEFAULT_CTX = 4096  # tokens of context: bounds the memory of the KV cache (a 32k default would need gigabytes)
-ALL_LAYERS = 999  # the -ngl that means "every layer" (aihw counts the output layer too, so its number is one more than the model's own)
 ALLOWED_LICENSES = ("Apache-2.0", "MIT")  # permissive only; tests refuse anything else in MODELS and RUNTIME
 SHIPPED_ENDPOINT = "http://127.0.0.1:11434/v1"  # nuc_config's default [ai] endpoint (Ollama): setup --yes never replaces another one
 UA = "nuc-console-ai/1"
-DISK_MARGIN = 300 * 10 ** 6  # free space kept besides the files (the runtime unpacks a loader and caches in the home directory)
+DISK_MARGIN = 300 * 10 ** 6  # free space kept besides the files
 SERVICE_NAME = "nuc-console-ai"  # systemd unit, system user, Windows task name
 MAC_LABEL, MAC_USER = "com.nuc-console.ai", "_nuc-console-ai"
 UNIX_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+PORT_TRIES = 20  # a server started here takes the first free port from DEFAULT_PORT up
+START_WAIT_S = 60.0  # a server started by setup must answer within this long
+
+SetupError, Cancelled = aiollama.SetupError, aiollama.Cancelled  # one class each for this file, aiollama and aiweb
 
 # ---------------------------------------------------------------------------------------------------------------------------
 # The pins. A value that is None means "not pinned yet": `setup` refuses to download it. Never fill one from memory or from a
-# web page: run `python3 aisetup.py pins` (it asks the Hugging Face and GitHub APIs) and check the output, then re-run the tests.
+# web page: run `python3 aisetup.py pins` (it asks the GitHub API and the Ollama registry) and check the output, then re-run the tests.
 # ---------------------------------------------------------------------------------------------------------------------------
-# llamafile (Mozilla, Apache-2.0): ONE executable for Linux, macOS, Windows, x86_64 and arm64; it runs a GGUF model given with -m
-# and serves an OpenAI-compatible API under /v1. The tag in the URL pins the release; the SHA-256 pins the bytes.
-# 0.10.x: the llama.cpp it is built on knows Qwen3, SmolLM3 and gpt-oss (0.9.x does not). The asset and its SHA-256 (the release's
-# own digest, and the hash of the downloaded file: the same) were read by the ai-pins workflow on 2026-10-01. The project moved
-# from Mozilla-Ocho to mozilla-ai: the URL is the new one (the old one redirects);
-# the GPU flags serve_argv adds (--gpu auto -ngl N, or --gpu disable) must be confirmed against `llamafile --help` of the pinned
-# version, and the newer models (SmolLM3, gpt-oss) against the llama.cpp that version is built on: an older runtime may not know them.
-# "args" are extra arguments for every start; the GPU ones are not here because they depend on the machine (gpu_plan).
+# Ollama (MIT): one archive per system and processor, with the server and the libraries of every GPU backend it supports (CUDA, ROCm on
+# Linux through an add-on this build does not fetch, Vulkan, Metal); it serves an OpenAI-compatible API under /v1 and its own under /api.
+# "base" + the file of this machine's key is the URL; "sha256" and "size" pin the bytes. The values are the release's own SHA256SUMS
+# (sha256sum.txt) and the sizes GitHub serves, read on 2026-10-02 from the v0.35.0 release (the ai-pins workflow reads them again from the
+# API's asset digests). Keys: aiollama.asset_key(); Linux builds are .tar.zst (Python 3.14 reads them, else the zstd tool).
 RUNTIME = {
-    "name": "llamafile", "version": "0.10.6", "license": "Apache-2.0",
-    "url": "https://github.com/mozilla-ai/llamafile/releases/download/0.10.6/llamafile-0.10.6",
-    "sha256": "d579f61dcd3a306f518e6d90e599d77793ed5f09543023d09c96ad35fcfa63f0", "size": 368094430,
-    "args": [],
+    "name": "ollama", "version": "0.35.0", "license": "MIT",
+    "base": "https://github.com/ollama/ollama/releases/download/v0.35.0/",
+    "assets": {
+        "linux-amd64": {"file": "ollama-linux-amd64.tar.zst", "sha256": "1c114a6b220c5efca2ef2b1e5f01d1e535e26f6cd6d1678c8489325d2835e525",
+                        "size": 1427765407},
+        "linux-arm64": {"file": "ollama-linux-arm64.tar.zst", "sha256": "cb627d332b1fe5055bd5485ca10d595da8429e447648209e375390ec3bd09374",
+                        "size": 1550231393},
+        "darwin": {"file": "ollama-darwin.tgz", "sha256": "2608dbb0a0f0136a198db9d48b4f74ece55f452314a39452fca35b7cf20c2589", "size": 160167937},
+        "windows-amd64": {"file": "ollama-windows-amd64.zip", "sha256": "d6f7d3dd4f5d013553a78c1e78b2521fcf41d43dd2863e4596cdc046fe6036db",
+                          "size": 1461196158},
+        "windows-arm64": {"file": "ollama-windows-arm64.zip", "sha256": "99d061915a68fb563da0fb9316fd112cfc6fce0c9478601b2765b1f973cb715e",
+                          "size": 208072407},
+    },
 }
 
-# Instruct models, GGUF Q4_K_M, permissive licences, ordered best first (rank 1 = best for the advisor's job: short, grounded advice).
-# "revision" is a Hugging Face COMMIT (never "main"), "sha256" and "size" are those of the file at that commit (the Hub's tree API:
-# lfs.oid, lfs.size), read by `aisetup.py pins` (the ai-pins workflow runs it on GitHub) on 2026-10-01; a commit never changes.
-# The rest is for ADVICE only (what fits, how fast), before and after pinning; a download never uses it: params_b (billions; MoE:
-# active_b = parameters read per token), layers (transformer blocks: how many fit on a GPU becomes -ngl), ctx_max (tokens the model
-# was trained for), approx_mb (approximate Q4_K_M file in MB of 10^6 bytes: the maintainer's estimate, not a measurement), ram_mb
-# (approximate memory of the server with DEFAULT_CTX tokens of context). Qwen3 and SmolLM3 start in "thinking" mode (long <think>
-# blocks): the advisor should ask for /no_think.
+# Instruct models, permissive licences, ordered best first (rank 1 = best for the advisor's job: short, grounded advice). "ollama" is the
+# name the model is pulled under (the Ollama library's, registry.ollama.ai); once pulled it is known to the server by its "id". "size" is
+# what the registry's manifest says the model weighs (every layer), read by `aisetup.py pins`; it feeds the disk check and the screens.
+# The rest is for ADVICE only (what fits, how fast): params_b (billions; MoE: active_b = parameters read per token), layers (transformer
+# blocks), ctx_max (tokens the model was trained for), approx_mb (approximate file in MB of 10^6 bytes: the maintainer's estimate, not a
+# measurement), ram_mb (approximate memory of the server with DEFAULT_CTX tokens of context). Qwen3 and SmolLM3 start in "thinking"
+# mode (long <think> blocks): the advisor should ask for /no_think.
 MODELS = [
     {"id": "qwen3-30b-a3b", "name": "Qwen3 30B-A3B (MoE)", "license": "Apache-2.0", "rank": 1, "params_b": 30.5, "active_b": 3.3,
      "quant": "Q4_K_M", "layers": 48, "ctx_max": 32768, "approx_mb": 18600, "ram_mb": 19300,
-     "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think",
-     "repo": "Qwen/Qwen3-30B-A3B-GGUF", "file": "Qwen3-30B-A3B-Q4_K_M.gguf", "revision": "e4d4bafdfb96a411a163846265362aceb0b9c63a",
-     "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5", "size": 18556685824},
+     "notes": "MoE: reads only 3.3B per token, fast on CPU if the RAM holds it; /no_think", "ollama": "qwen3:30b-a3b", "size": None},
     {"id": "gpt-oss-20b", "name": "OpenAI gpt-oss 20B (MoE)", "license": "Apache-2.0", "rank": 2, "params_b": 21.0, "active_b": 3.6,
      "quant": "Q4_K_M", "layers": 24, "ctx_max": 131072, "approx_mb": 11600, "ram_mb": 12100,
-     "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)",
-     "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "revision": "d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4",
-     "sha256": "c27536640e410032865dc68781d80a08b98f8db5e93575919af8ccc0568aeb4f", "size": 11624759488},
+     "notes": "MoE: reads only 3.6B per token; a reasoning model (long answers)", "ollama": "gpt-oss:20b", "size": None},
     {"id": "phi-4", "name": "Phi-4 14B", "license": "MIT", "rank": 3, "params_b": 14.7, "quant": "Q4_K_M", "layers": 40,
-     "ctx_max": 16384, "approx_mb": 9100, "ram_mb": 10300, "notes": "dense 14B: strong reasoning, slow without a GPU",
-     "repo": "bartowski/phi-4-GGUF", "file": "phi-4-Q4_K_M.gguf", "revision": "19cd65f97c2f1712a81c506611d3f9c94b16a1e1",
-     "sha256": "009aba717c09d4a35890c7d35eb59d54e1dba884c7c526e7197d9c13ab5911d9", "size": 9053114816},
+     "ctx_max": 16384, "approx_mb": 9100, "ram_mb": 10300, "notes": "dense 14B: strong reasoning, slow without a GPU", "ollama": "phi4:14b",
+     "size": None},
     {"id": "qwen3-14b", "name": "Qwen3 14B", "license": "Apache-2.0", "rank": 4, "params_b": 14.8, "quant": "Q4_K_M", "layers": 40,
-     "ctx_max": 32768, "approx_mb": 9000, "ram_mb": 10000, "notes": "dense 14B: slow without a GPU; /no_think",
-     "repo": "Qwen/Qwen3-14B-GGUF", "file": "Qwen3-14B-Q4_K_M.gguf", "revision": "530227a7d994db8eca5ab5ced2fb692b614357fd",
-     "sha256": "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0", "size": 9001752960},
+     "ctx_max": 32768, "approx_mb": 9000, "ram_mb": 10000, "notes": "dense 14B: slow without a GPU; /no_think", "ollama": "qwen3:14b", "size": None},
     {"id": "qwen3-8b", "name": "Qwen3 8B", "license": "Apache-2.0", "rank": 5, "params_b": 8.2, "quant": "Q4_K_M", "layers": 36,
-     "ctx_max": 32768, "approx_mb": 5000, "ram_mb": 6000, "notes": "a good balance on 16 GB; /no_think",
-     "repo": "Qwen/Qwen3-8B-GGUF", "file": "Qwen3-8B-Q4_K_M.gguf", "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
-     "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785", "size": 5027783488},
+     "ctx_max": 32768, "approx_mb": 5000, "ram_mb": 6000, "notes": "a good balance on 16 GB; /no_think", "ollama": "qwen3:8b", "size": None},
     {"id": "granite-3.3-8b", "name": "IBM Granite 3.3 8B instruct", "license": "Apache-2.0", "rank": 6, "params_b": 8.2,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 4900, "ram_mb": 5900, "notes": "enterprise-tuned, 128k context",
-     "repo": "ibm-granite/granite-3.3-8b-instruct-GGUF", "file": "granite-3.3-8b-instruct-Q4_K_M.gguf",
-     "revision": "e40e9dd739c7be00fa965c16ce167088190ce114",
-     "sha256": "77bcee066a76dcdd10d0d123c87e32c8ec2c74e31b6ffd87ebee49c9ac215dca", "size": 4942873344},
+     "ollama": "granite3.3:8b", "size": None},
     {"id": "qwen3-4b", "name": "Qwen3 4B", "license": "Apache-2.0", "rank": 7, "params_b": 4.0, "quant": "Q4_K_M", "layers": 36,
-     "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think",
-     "repo": "Qwen/Qwen3-4B-GGUF", "file": "Qwen3-4B-Q4_K_M.gguf", "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
-     "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5", "size": 2497280256},
+     "ctx_max": 32768, "approx_mb": 2500, "ram_mb": 3600, "notes": "the default: small and capable; /no_think", "ollama": "qwen3:4b", "size": None},
     {"id": "phi-4-mini", "name": "Phi-4-mini instruct 3.8B", "license": "MIT", "rank": 8, "params_b": 3.8, "quant": "Q4_K_M", "layers": 32,
-     "ctx_max": 131072, "approx_mb": 2500, "ram_mb": 3600, "notes": "good at reasoning for its size, 128k context",
-     "repo": "bartowski/microsoft_Phi-4-mini-instruct-GGUF", "file": "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf",
-     "revision": "7ff82c2aaa4dde30121698a973765f39be5288c0",
-     "sha256": "01999f17c39cc3074afae5e9c539bc82d45f2dd7faa3917c66cbef76fce8c0c2", "size": 2491874688},
+     "ctx_max": 131072, "approx_mb": 2500, "ram_mb": 3600, "notes": "good at reasoning for its size, 128k context", "ollama": "phi4-mini:3.8b",
+     "size": None},
     {"id": "smollm3-3b", "name": "SmolLM3 3B", "license": "Apache-2.0", "rank": 9, "params_b": 3.1, "quant": "Q4_K_M", "layers": 36,
-     "ctx_max": 65536, "approx_mb": 1900, "ram_mb": 2500, "notes": "3B with a thinking mode; /no_think",
-     "repo": "unsloth/SmolLM3-3B-GGUF", "file": "SmolLM3-3B-Q4_K_M.gguf", "revision": "a7bc17204c8a326d6bd6e466e076959eddae2025",
-     "sha256": "4de907d2d388a5508fb7cb443a06effe14cce3518b0a78d3bdd9e74d9edce989", "size": 1915306528},
+     "ctx_max": 65536, "approx_mb": 1900, "ram_mb": 2500, "notes": "3B with a thinking mode; /no_think", "ollama": "hf.co/unsloth/SmolLM3-3B-GGUF:Q4_K_M",
+     "size": None},
     {"id": "granite-3.3-2b", "name": "IBM Granite 3.3 2B instruct", "license": "Apache-2.0", "rank": 10, "params_b": 2.5,
      "quant": "Q4_K_M", "layers": 40, "ctx_max": 131072, "approx_mb": 1550, "ram_mb": 2400, "notes": "small and quick, 128k context",
-     "repo": "ibm-granite/granite-3.3-2b-instruct-GGUF", "file": "granite-3.3-2b-instruct-Q4_K_M.gguf",
-     "revision": "7cdf86ccd1f1bb3491c9b7017b033f2e51367397",
-     "sha256": "ac71e9e32c0bea919b409c5918f69ca74339854b0319c5065e4e9fb6d95c4852", "size": 1545303328},
+     "ollama": "granite3.3:2b", "size": None},
     {"id": "qwen3-1.7b", "name": "Qwen3 1.7B", "license": "Apache-2.0", "rank": 11, "params_b": 1.7, "quant": "Q4_K_M", "layers": 28,
-     "ctx_max": 32768, "approx_mb": 1100, "ram_mb": 2000, "notes": "for old or small machines; /no_think",
-     "repo": "unsloth/Qwen3-1.7B-GGUF", "file": "Qwen3-1.7B-Q4_K_M.gguf", "revision": "d7f544eead698dbd1f15126ef60b45a1e1933222",
-     "sha256": "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897", "size": 1107409472},
+     "ctx_max": 32768, "approx_mb": 1100, "ram_mb": 2000, "notes": "for old or small machines; /no_think", "ollama": "qwen3:1.7b", "size": None},
     {"id": "qwen3-0.6b", "name": "Qwen3 0.6B", "license": "Apache-2.0", "rank": 12, "params_b": 0.6, "quant": "Q4_K_M", "layers": 28,
-     "ctx_max": 32768, "approx_mb": 400, "ram_mb": 1200, "notes": "the smallest: simple summaries only; /no_think",
-     "repo": "unsloth/Qwen3-0.6B-GGUF", "file": "Qwen3-0.6B-Q4_K_M.gguf", "revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
-     "sha256": "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a", "size": 396705472},
+     "ctx_max": 32768, "approx_mb": 400, "ram_mb": 1200, "notes": "the smallest: simple summaries only; /no_think", "ollama": "qwen3:0.6b",
+     "size": None},
 ]
 DEFAULT_MODEL = "qwen3-4b"  # without a reading of the machine: the best that fits an 8 GB one; MODELS is ordered best first (pick_default)
 
-HEX40, HEX64 = re.compile(r"^[0-9a-f]{40}$"), re.compile(r"^[0-9a-f]{64}$")
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
-class SetupError(Exception):
-    """An expected failure: printed as one line, exit status 1."""
+def model_name(m):
+    """The name a model is pulled under (the Ollama library's), or None while it is not pinned."""
+    return m.get("ollama") or None
 
 
-class Cancelled(Exception):
-    """The caller asked download() to stop (the cancel of the web page and of the screen): the partial file stays, a later download resumes it."""
-
-
-def model_url(m):
-    """https://huggingface.co/<repo>/resolve/<commit>/<file>, or None while the model is not pinned."""
-    if not m.get("revision"):
-        return None
-    return "https://huggingface.co/%s/resolve/%s/%s" % (m["repo"], m["revision"], urllib.parse.quote(m["file"]))
-
-
-def missing_pins(entry, is_model):
-    """Names of the values that are still not pinned (empty = ready to download)."""
-    fields = ["revision", "sha256", "size"] if is_model else ["sha256", "size"]
-    bad = [f for f in fields if entry.get(f) in (None, "")]
-    if is_model and entry.get("revision") and not HEX40.match(entry["revision"]):
-        bad.append("revision (not a 40-hex commit)")
-    if entry.get("sha256") and not HEX64.match(entry["sha256"]):
+def missing_pins(entry, is_model, plat=None, machine=None):
+    """Names of the values that are still not pinned (empty = ready to download). A model needs its Ollama name; the runtime needs the
+    file, SHA-256 and size of the build of this system and processor."""
+    if is_model:
+        name = entry.get("ollama")
+        if not name:
+            return ["ollama (the name to pull)"]
+        try:
+            aiollama.parse_name(name)
+        except SetupError:
+            return ["ollama (not a model name)"]
+        return []
+    a = aiollama.runtime_asset(entry, plat, machine)
+    if a is None:
+        return ["a build for this system (%s)" % (aiollama.asset_key(plat, machine) or "%s %s" % (plat or sys.platform, machine or "?"))]
+    bad = [f for f in ("file", "sha256", "size") if a.get(f) in (None, "")]
+    if a.get("sha256") and not HEX64.match(a["sha256"]):
         bad.append("sha256 (not 64 hex)")
+    if a.get("size") is not None and not (isinstance(a["size"], int) and a["size"] > 0):
+        bad.append("size (not a number of bytes)")
     return bad
 
 
@@ -225,16 +218,19 @@ def default_dir(plat=None, env=None, euid=None, home=None):
 
 
 def runtime_path(d, runtime=None, plat=None):
-    """<dir>/runtime/llamafile-<version>; on Windows with .exe (the system only runs executables with that suffix)."""
-    runtime = runtime or RUNTIME
-    name = posixpath.basename(urllib.parse.urlsplit(runtime["url"]).path)
-    if _is_win(plat) and not name.lower().endswith(".exe"):
-        name += ".exe"
-    return _pm(plat).join(d, "runtime", name)
+    """The server's executable once its build is unpacked: <dir>/runtime/ollama-<version>/ollama.exe (Windows), .../ollama (macOS),
+    .../bin/ollama (Linux)."""
+    return aiollama.exe_path(d, runtime or RUNTIME, plat)
+
+
+def archive_path(d, runtime=None, plat=None, machine=None):
+    """<dir>/runtime/<the archive of this machine's build> (kept after unpacking: `serve --install-service` checks it again), or None."""
+    return aiollama.archive_path(d, runtime or RUNTIME, plat, machine)
 
 
 def model_path(d, model, plat=None):
-    return _pm(plat).join(d, "models", model["file"])
+    """The file that says a model is installed: its manifest under the catalog id, in the server's folder of models."""
+    return aiollama.manifest_path(aiollama.models_dir(d, plat), model["id"], plat)
 
 
 def stamp_path(d):
@@ -244,7 +240,7 @@ def stamp_path(d):
 def ensure_dirs(d):
     """<dir>, <dir>/runtime, <dir>/models; the directories created here (and only those) get 0755 whatever the umask, so that the
     service account can walk down to the files. An existing directory (a home, say) is never touched."""
-    for p in (d, os.path.join(d, "runtime"), os.path.join(d, "models")):
+    for p in (d, os.path.join(d, "runtime"), aiollama.models_dir(d)):
         missing, q = [], os.path.abspath(p)
         while not os.path.isdir(q) and os.path.dirname(q) != q:
             missing.append(q)
@@ -273,20 +269,18 @@ def adopt(path, like):
 
 
 def dir_space(d):
-    """{"used": bytes taken by the downloaded files (runtime/ and models/, partial downloads too), "free": bytes free on the disk the folder is
-    on (None when unknown)}: what the screens say about the folder. Never raises."""
+    """{"used": bytes taken by the downloaded files (runtime/ and models/, everything in them, partial downloads too), "free": bytes free on
+    the disk the folder is on (None when unknown)}: what the screens say about the folder. Never raises."""
     used = 0
     for sub in ("runtime", "models"):
-        try:
-            with os.scandir(os.path.join(d, sub)) as entries:
-                for e in entries:
-                    try:
-                        if e.is_file(follow_symlinks=False):
-                            used += e.stat(follow_symlinks=False).st_size
-                    except OSError:
-                        pass
-        except OSError:
-            pass
+        for root, _dirs, files in os.walk(os.path.join(d, sub)):
+            for f in files:
+                try:
+                    st = os.lstat(os.path.join(root, f))
+                except OSError:
+                    continue
+                if not os.path.islink(os.path.join(root, f)):
+                    used += st.st_size
     try:
         free = free_bytes(d)
     except OSError:
@@ -337,6 +331,17 @@ def record(d, path, sha256):
     st = os.stat(path)
     data = load_stamp(d)
     data[os.path.basename(path)] = {"sha256": sha256, "size": st.st_size, "mtime_ns": st.st_mtime_ns}
+    _write_stamp(d, data)
+
+
+def forget(d, name):
+    """Forget an entry of the stamp: a file's (its path) or the unpacked build's (runtime_key)."""
+    data = load_stamp(d)
+    if data.pop(os.path.basename(name), None) is not None:
+        _write_stamp(d, data)
+
+
+def _write_stamp(d, data):
     tmp = stamp_path(d) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, sort_keys=True)
@@ -344,30 +349,60 @@ def record(d, path, sha256):
     os.replace(tmp, stamp_path(d))
 
 
-def forget(d, path):
-    data = load_stamp(d)
-    if data.pop(os.path.basename(path), None) is not None:
-        tmp = stamp_path(d) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=1, sort_keys=True)
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, stamp_path(d))
-
-
-def is_verified(d, path, entry, rehash=False):
-    """True when `path` is the pinned file: by its stamp (size and mtime unchanged), or by hashing it again (rehash)."""
-    if missing_pins(entry, "revision" in entry):
-        return False
+def is_verified(d, path, sha256, size, rehash=False):
+    """True when `path` is the pinned file (the server's archive): by its stamp (size and mtime unchanged), or by hashing it again."""
     try:
         st = os.stat(path)
     except OSError:
         return False
-    if st.st_size != entry["size"]:
+    if st.st_size != size:
         return False
     if rehash:
-        return sha256_file(path) == entry["sha256"]
+        return sha256_file(path) == sha256
     s = load_stamp(d).get(os.path.basename(path))
-    return bool(s) and s.get("sha256") == entry["sha256"] and s.get("size") == st.st_size and s.get("mtime_ns") == st.st_mtime_ns
+    return bool(s) and s.get("sha256") == sha256 and s.get("size") == st.st_size and s.get("mtime_ns") == st.st_mtime_ns
+
+
+def runtime_key(runtime=None):
+    """The stamp's entry of the unpacked build: ollama-<version>."""
+    runtime = runtime or RUNTIME
+    return "%s-%s" % (runtime["name"], runtime["version"])
+
+
+def runtime_ready(d, runtime=None, plat=None, machine=None, rehash=False):
+    """True when the build of this machine is unpacked: the stamp says it was unpacked from the archive with the pinned SHA-256, and its
+    executable is there. rehash: the archive is also hashed again against the pin (`serve --install-service`, which then unpacks it again)."""
+    runtime = runtime or RUNTIME
+    if missing_pins(runtime, False, plat, machine):
+        return False
+    a = aiollama.runtime_asset(runtime, plat, machine)
+    s = load_stamp(d).get(runtime_key(runtime))
+    if not (isinstance(s, dict) and s.get("sha256") == a["sha256"] and os.path.isfile(runtime_path(d, runtime, plat))):
+        return False
+    if rehash:
+        p = archive_path(d, runtime, plat, machine)
+        try:
+            return os.path.getsize(p) == a["size"] and sha256_file(p) == a["sha256"]
+        except OSError:
+            return False
+    return True
+
+
+def model_ready(d, model, rehash=False):
+    """True when the model is installed: its manifest under the catalog id and every layer it names, with their sizes (rehash: and their
+    SHA-256, the digest each layer is named after)."""
+    if missing_pins(model, True):
+        return False
+    return aiollama.blobs_ok(aiollama.models_dir(d), model["id"], rehash)
+
+
+def mark_unpacked(d, runtime=None, plat=None, machine=None):
+    """Remember that the build was unpacked from the pinned archive (the stamp, atomic, 0644)."""
+    runtime = runtime or RUNTIME
+    a = aiollama.runtime_asset(runtime, plat, machine)
+    data = load_stamp(d)
+    data[runtime_key(runtime)] = {"sha256": a["sha256"], "file": a["file"]}
+    _write_stamp(d, data)
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -570,11 +605,6 @@ def free_bytes(path):
     return shutil.disk_usage(path or ".").free
 
 
-def default_threads(cores=None):
-    """Leave two cores free for the machine's own work."""
-    return max(1, (cores if cores is not None else (os.cpu_count() or 1)) - 2)
-
-
 def tool(name, plat=None):
     """Absolute path of a system tool from a fixed PATH (never the caller's)."""
     if _is_win(plat):
@@ -662,31 +692,18 @@ def recommend_id(models, hw):
         return None
 
 
-def gpu_plan(model, hw, cfg_gpu="auto", ctx=DEFAULT_CTX):
-    """-> (layers, why). layers > 0: that many layers on the GPU (serve passes --gpu auto -ngl N; a model that fits entirely gets
-    ALL_LAYERS); 0: the CPU only (--gpu disable). The GPU is used when aihw says the model fits there (all of it, or in part: verdict
-    gpu or partial) and [ai] gpu is not "no"."""
+def gpu_plan(cfg_gpu="auto"):
+    """-> (gpu, why). gpu True: Ollama uses the GPU when it finds one that holds the model, all of it or some of its layers (it measures
+    the free video memory itself, every time it loads a model); False: the GPUs are hidden from the server, which runs on the CPU only
+    ([ai] gpu = no: the GPU is needed for something else, or its driver is not trusted)."""
     if cfg_gpu == "no":
-        return 0, "[ai] gpu = no: CPU only"
-    a = assess_model(model, hw, ctx)
-    if a is None:
-        return 0, "%s: CPU only" % NO_ADVICE
-    layers = int(a.get("gpu_layers") or 0)
-    if a.get("verdict") in ("gpu", "partial") and layers > 0:
-        every = model.get("layers")
-        return (ALL_LAYERS if every and layers >= every else min(layers, ALL_LAYERS)), a.get("why") or ""
-    return 0, a.get("why") or "CPU only"
+        return False, "[ai] gpu = no: CPU only"
+    return True, ""
 
 
-def gpu_text(layers, model=None):
-    """Where the server runs, in words: 'CPU only', 'all 36 layers on the GPU', '20 of 36 layers on the GPU'. `layers` is what -ngl gets:
-    the model's own number or more (ALL_LAYERS, or aihw's one more for the output layer) means all of them."""
-    n = (model or {}).get("layers")
-    if not layers:
-        return "CPU only"
-    if n:
-        return "all %d layers on the GPU" % n if layers >= n else "%d of %d layers on the GPU" % (layers, n)
-    return "all layers on the GPU" if layers >= ALL_LAYERS else "%d layers on the GPU" % layers
+def gpu_text(gpu):
+    """Where the server runs, in words."""
+    return "on the GPU when one holds the model (Ollama decides), else the CPU" if gpu else "CPU only"
 
 
 def find_dir(plat=None):
@@ -718,10 +735,10 @@ def commands_for(model_id, plat=None):
 
 
 def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
-    """Everything a screen shows about the models: {"hw", "dir", "space": {"used", "free"}, "runtime": {"installed", "version"}, "recommended": id|None,
-    "active": [ai] model|None, "models": [model + assess, installed, pinned, commands]} in rank order, best first.
-    Never downloads, never hashes (the stamp file says what was verified), never raises: an unprivileged process can call it.
-    `hw` (default aihw.cached()) can be given: the demo screens pass invented machines. models/runtime/cfg/plat are for tests.
+    """Everything a screen shows about the models: {"hw", "dir", "space": {"used", "free"}, "runtime": {"installed", "name", "version"},
+    "recommended": id|None, "active": [ai] model|None, "models": [model + assess, installed, pinned, commands]} in rank order, best first.
+    Never downloads, never hashes (the stamp says what was unpacked, the manifests what was pulled), never raises: an unprivileged process
+    can call it. `hw` (default aihw.cached()) can be given: the demo screens pass invented machines. models/runtime/cfg/plat are for tests.
     "assess" is aihw's answer, or verdict "unknown" with a sentence when the machine cannot be assessed."""
     models = list(MODELS if models is None else models)
     runtime = RUNTIME if runtime is None else runtime
@@ -734,36 +751,50 @@ def catalog(hw=None, d=None, models=None, runtime=None, cfg=None, plat=None):
             cfg = advisor.effective_cfg(cfg)
         except Exception:  # noqa: BLE001 - config.ini's word then
             pass
-    rp = runtime_path(d, runtime, plat)
     out = []
     for m in models:
         a = assess_model(m, hw)
         if a is None:
             a = {"verdict": "unknown", "where": "", "need_mb": m.get("ram_mb") or 0, "gpu_layers": 0, "tok_s": None, "why": NO_ADVICE}
-        out.append(dict(m, assess=a, installed=is_verified(d, model_path(d, m, plat), m), pinned=not missing_pins(m, True),
-                        commands=commands_for(m["id"], plat)))
-    return {"hw": hw, "dir": d, "space": dir_space(d), "runtime": {"installed": is_verified(d, rp, runtime), "version": runtime["version"]},
+        try:
+            installed = model_ready(d, m)
+        except (OSError, ValueError):
+            installed = False
+        out.append(dict(m, assess=a, installed=installed, pinned=not missing_pins(m, True), commands=commands_for(m["id"], plat)))
+    try:
+        rt_ok = runtime_ready(d, runtime, plat)
+    except (OSError, ValueError, KeyError, TypeError):
+        rt_ok = False
+    return {"hw": hw, "dir": d, "space": dir_space(d), "runtime": {"installed": rt_ok, "name": "Ollama", "version": runtime["version"]},
             "recommended": recommend_id(models, hw), "active": (cfg.get("ai") or {}).get("model") or None, "models": out}
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
 # The server command line
 # ---------------------------------------------------------------------------------------------------------------------------
-def serve_argv(d, model, port=DEFAULT_PORT, threads=None, ctx=DEFAULT_CTX, runtime=None, plat=None, gpu_layers=0):
-    """argv list that starts the server. The host is fixed to 127.0.0.1. Unix: the runtime is an "actually portable executable"
-    that the kernel cannot start by itself without binfmt_misc; started through sh it works everywhere (and avoids binfmt/WINE
-    interference). Windows: the file is a real .exe. gpu_layers > 0: that many layers on the GPU (--gpu auto -ngl N; ALL_LAYERS = all
-    of them); 0: the CPU only (--gpu disable), so that the server never starts compiling GPU code on a machine whose GPU cannot hold the model."""
-    runtime = runtime or RUNTIME
-    exe = runtime_path(d, runtime, plat)
-    args = ["--server", "--host", LOOPBACK, "--port", str(int(port)), "-m", model_path(d, model, plat), "-a", model["id"],
-            "-t", str(int(threads if threads is not None else default_threads())), "-c", str(int(ctx))]  # (--server opens no browser; 0.10 refuses --nobrowser)
-    args += list(runtime.get("args", []))
-    gpu_layers = int(gpu_layers or 0)
-    if gpu_layers < 0:
-        raise ValueError("gpu_layers must not be negative")
-    args += ["--gpu", "auto", "-ngl", str(gpu_layers)] if gpu_layers else ["--gpu", "disable"]
-    return [exe] + args if _is_win(plat) else ["/bin/sh", exe] + args
+def serve_argv(d, runtime=None, plat=None):
+    """argv that starts the server: `<executable> serve`. Where it listens (127.0.0.1 only), its folder of models and the rest are in its
+    environment: serve_env()."""
+    return aiollama.server_argv(runtime_path(d, runtime, plat))
+
+
+def base_env(home, plat=None):
+    """The small fixed environment the server starts with, never the caller's (an OLLAMA_HOST there must not open it to the network): a
+    fixed PATH, a home for its key (~/.ollama), and on Windows the system's own folders (the GPU drivers are found through them)."""
+    if _is_win(plat):
+        root = os.environ.get("SystemRoot") or r"C:\Windows"
+        keep = ("SystemRoot", "SystemDrive", "windir", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "TEMP", "TMP",
+                "COMSPEC", "PATHEXT", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE")
+        env = {k: os.environ[k] for k in keep if k in os.environ}
+        env.update(PATH=";".join((ntpath.join(root, "System32"), root, ntpath.join(root, "System32", "Wbem"))), USERPROFILE=home, HOME=home)
+        return env
+    return {"PATH": UNIX_PATH, "HOME": home, "TMPDIR": home, "LANG": "C"}
+
+
+def serve_env(d, port, ctx=DEFAULT_CTX, gpu=True, home=None, plat=None):
+    """The server's whole environment: base_env() and aiollama.server_env() (127.0.0.1:<port>, the models in <dir>/models, the context,
+    one model at a time, no cloud, the GPUs hidden unless `gpu`)."""
+    return aiollama.server_env(d, port, ctx, gpu, base_env(home or os.path.expanduser("~"), plat), plat)
 
 
 def lower_priority():
@@ -775,7 +806,7 @@ def lower_priority():
         pass
 
 
-def run_server(argv):
+def run_server(argv, env):
     """Run in the foreground at low priority; returns the exit status (Unix: replaces this process and does not return)."""
     sys.stdout.flush()
     sys.stderr.flush()
@@ -788,7 +819,7 @@ def run_server(argv):
             out, err = sys.stdout, subprocess.STDOUT
         except (AttributeError, OSError, ValueError):
             out, err = subprocess.DEVNULL, subprocess.DEVNULL
-        proc = subprocess.Popen(argv, creationflags=flags, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+        proc = subprocess.Popen(argv, env=env, creationflags=flags, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
         try:
             return proc.wait()
         except KeyboardInterrupt:
@@ -799,7 +830,119 @@ def run_server(argv):
                 proc.kill()
                 return 1
     lower_priority()
-    os.execv(argv[0], argv)
+    os.execve(argv[0], argv, env)
+
+
+def pick_port(preferred=None):
+    """A free port on 127.0.0.1: `preferred` (the one used before), else the first from DEFAULT_PORT up."""
+    ports = [int(preferred)] if preferred else []
+    for port in ports + list(range(DEFAULT_PORT, DEFAULT_PORT + PORT_TRIES)):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if not _is_win():  # like the server itself: a port in TIME_WAIT is free (on Windows this option would let two bind)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((LOOPBACK, port))
+            return port
+        except OSError:
+            continue
+        finally:
+            s.close()
+    raise SetupError("no free port from %d to %d on 127.0.0.1" % (DEFAULT_PORT, DEFAULT_PORT + PORT_TRIES - 1))
+
+
+def port_of(endpoint):
+    """'http://127.0.0.1:8080/v1' -> 8080; None when it has no port."""
+    try:
+        return urllib.parse.urlsplit(endpoint).port
+    except (ValueError, AttributeError):
+        return None
+
+
+class TempServer(object):
+    """A server started for a moment (`setup` pulls its models through it): a child on a free port, its output in <dir>/home/server.log,
+    stopped when the `with` ends. The GPUs are hidden: nothing is loaded, only downloaded."""
+
+    def __init__(self, d, runtime=None, popen=subprocess.Popen, wait=START_WAIT_S):
+        self.d, self.runtime, self.popen, self.wait = d, runtime or RUNTIME, popen, wait
+        self.proc = self.api = None
+
+    def __enter__(self):
+        home = os.path.join(self.d, "home")
+        os.makedirs(home, exist_ok=True)
+        port = pick_port()
+        self.log = os.path.join(home, "server.log")
+        kw = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)} if _is_win() else {"start_new_session": True}
+        with open(self.log, "wb") as out:
+            self.proc = self.popen(serve_argv(self.d, self.runtime), env=serve_env(self.d, port, DEFAULT_CTX, False, home), cwd=home,
+                                   stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, **kw)
+        self.api = aiollama.Api("http://%s:%d" % (LOOPBACK, port))
+        deadline = time.monotonic() + self.wait
+        while self.api.version(1.0) is None:
+            if self.proc.poll() is not None:
+                raise SetupError("the model server stopped at once (exit status %s): %s" % (self.proc.returncode, self.tail()))
+            if time.monotonic() > deadline:
+                self.__exit__(None, None, None)
+                raise SetupError("the model server did not answer within %d s: %s" % (self.wait, self.tail()))
+            time.sleep(0.2)
+        return self.api
+
+    def tail(self):
+        try:
+            with open(self.log, "rb") as f:
+                lines = [safe(x.decode("utf-8", "replace").strip(), 200) for x in f.read()[-4000:].splitlines() if x.strip()]
+        except OSError:
+            lines = []
+        return " / ".join(lines[-3:]) or "it wrote nothing"
+
+    def __exit__(self, *exc):
+        p = self.proc
+        if p is not None and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(5)
+        return False
+
+
+def unpack_runtime(d, runtime=None, cancel=None, plat=None, machine=None):
+    """Unpack the verified archive of this machine's build into <dir>/runtime/ollama-<version> and say so in the stamp."""
+    runtime = runtime or RUNTIME
+    forget(d, runtime_key(runtime))
+    aiollama.unpack(archive_path(d, runtime, plat, machine), aiollama.runtime_dir(d, runtime, plat), cancel)
+    if not os.path.isfile(runtime_path(d, runtime, plat)):
+        raise SetupError("the archive has no %s: this is not the build this version expects" % aiollama.exe_rel(plat))
+    mark_unpacked(d, runtime, plat, machine)
+
+
+def install_model(api, d, m, progress=None, cancel=None, insecure=False):
+    """Pull the model through the server `api`, name it by its catalog id, drop the library's name (the layers stay: the id uses them)."""
+    name = model_name(m)
+    api.pull(name, progress, cancel, insecure)
+    if name != m["id"]:
+        api.copy(name, m["id"])
+        api.delete(name)
+    if not model_ready(d, m):
+        raise SetupError("the server pulled %s, but its files are not in %s: is another server using that folder?" % (name, safe(aiollama.models_dir(d), 160)))
+
+
+def runtime_bytes(d, runtime=None, plat=None, machine=None):
+    """Bytes the build still needs on disk: what is left of its archive to download, and its unpacked size (an estimate) when it is not
+    unpacked yet; None when this system has no pinned build."""
+    runtime = runtime or RUNTIME
+    if missing_pins(runtime, False, plat, machine):
+        return None
+    if runtime_ready(d, runtime, plat, machine):
+        return 0
+    a, p = aiollama.runtime_asset(runtime, plat, machine), archive_path(d, runtime, plat, machine)
+    left = 0 if is_verified(d, p, a["sha256"], a["size"]) else a["size"] - (os.path.getsize(p + ".part") if os.path.exists(p + ".part") else 0)
+    return max(0, left) + int(a["size"] * aiollama.UNPACK_FACTOR)
+
+
+def model_bytes(m):
+    """What a model weighs: the registry's size when it is pinned, else the estimate."""
+    return m.get("size") or int((m.get("approx_mb") or 0) * 10 ** 6)
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -950,15 +1093,17 @@ def cmd_models(args, runtime=None, models=None, hw=None):
 # ---------------------------------------------------------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------------------------------------------------------
-def show_choices(chosen, runtime, hw, recommended=False):
-    print("Local model%s for the HEALTH advisor (open model, Q4_K_M, served on %s only)%s:" % (
+def show_choices(chosen, runtime, hw, recommended=False, have_server=False):
+    print("Local model%s for the HEALTH advisor (open model from the Ollama library, served on %s only)%s:" % (
         "s" if len(chosen) > 1 else "", LOOPBACK, ", recommended for this machine" if recommended else ""))
     print("   %-15s %-27s %8s %8s  %-8s %s" % ("ID", "NAME", "SIZE", "NEEDS", "FITS", "LICENCE"))
     for m in chosen:
         a = assess_model(m, hw) or {}
         need = "~" + fmt_mem(a.get("need_mb") or m["ram_mb"])
         print("   %-15s %-27s %8s %8s  %-8s %s" % (m["id"], m["name"], size_text(m), need, VERDICT_LABEL.get(a.get("verdict"), "?"), m["license"]))
-    print("   runtime: %s %s (%s), %s" % (runtime["name"], runtime["version"], runtime["license"], fmt_size(runtime["size"])))
+    a = aiollama.runtime_asset(runtime)
+    print("   server : Ollama %s (%s)%s" % (runtime["version"], runtime["license"], ", installed" if have_server else
+                                            ", %s to download" % fmt_size(a["size"]) if a and a.get("size") else ""))
 
 
 def check_fit(chosen, hw, total, force):
@@ -981,7 +1126,7 @@ def check_fit(chosen, hw, total, force):
         raise SetupError("%s. Choose a smaller model (nuc-console-ai models), or add --force to install it anyway" % "; ".join(refused))
 
 
-def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=input, hw=None):
+def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=input, hw=None, popen=subprocess.Popen):
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     d = args.dir or default_dir()
@@ -989,67 +1134,69 @@ def cmd_setup(args, runtime=None, models=None, allow_loopback_http=False, ask=in
     total = ((hw or {}).get("ram") or {}).get("total_mb") or memory_mb()[0]
     asked = list(dict.fromkeys(list(args.models or []) + list(args.model_opt or [])))  # --model is the older spelling
     chosen = [find_model(i, models) for i in asked] or [pick_default(total, models, hw)]
-    show_choices(chosen, runtime, hw, not asked)
+    show_choices(chosen, runtime, hw, not asked, runtime_ready(d, runtime))
     check_fit(chosen, hw, total, args.force)  # first: a model that cannot work here is not worth a word about pins
-    todo = [("runtime", runtime, runtime_path(d, runtime), 0o755, False)] + [(m["id"], m, model_path(d, m), 0o644, True) for m in chosen]
-    unpinned = [(n, missing_pins(e, is_m)) for n, e, _p, _m, is_m in todo if missing_pins(e, is_m)]
+    unpinned = [(n, bad) for n, bad in [("the server", missing_pins(runtime, False))] + [(m["id"], missing_pins(m, True)) for m in chosen] if bad]
     if unpinned:
         print("\nnuc-console-ai: nothing downloaded: this build does not pin everything it needs.", file=sys.stderr)
         for n, bad in unpinned:
             print("  %s: not pinned: %s" % (n, ", ".join(bad)), file=sys.stderr)
-        print("A maintainer fills them in with `python3 aisetup.py pins` (values come from the Hugging Face and GitHub APIs, "
-              "never from memory). Downloads are only ever made from pinned, hash-checked values.", file=sys.stderr)
+        print("A maintainer fills them in with `python3 aisetup.py pins` (values come from the GitHub API and the Ollama registry, "
+              "never from memory). Downloads are only ever made from pinned values.", file=sys.stderr)
         return 1
-    ok = {n: is_verified(d, p, e, rehash=True) for n, e, p, _m, _is_m in todo}  # hashed once: it takes seconds for a 2 GB file
-    need = 0
-    for n, e, p, _m, _is_m in todo:
-        if not ok[n]:
-            have = os.path.getsize(p + ".part") if os.path.exists(p + ".part") else 0
-            need += max(0, e["size"] - have)
+    a, arch = aiollama.runtime_asset(runtime), archive_path(d, runtime)
+    have_rt = runtime_ready(d, runtime)
+    have_arch = have_rt or is_verified(d, arch, a["sha256"], a["size"], rehash=True)  # hashed once: it takes seconds for a 1 GB file
+    todo = [m for m in chosen if not model_ready(d, m)]
+    need = (runtime_bytes(d, runtime) or 0) + sum(model_bytes(m) for m in todo)
     if need and free_bytes(d) < need + DISK_MARGIN:
         raise SetupError("not enough free disk space in %s: %s needed, %s free (use --dir for another disk)"
                          % (d, fmt_size(need + DISK_MARGIN), fmt_size(free_bytes(d))))
-    if sys.platform == "darwin" and os.uname().machine == "arm64":
-        if subprocess.run(["/usr/bin/xcode-select", "-p"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-            print("note: on Apple silicon the runtime needs the Command Line Tools to start for the first time: xcode-select --install")
-    if need and not confirm("\nDownload %s into %s?" % (fmt_size(need), d), args.yes, ask):
+    fetch = (0 if have_arch else a["size"]) + sum(model_bytes(m) for m in todo)
+    if fetch and not confirm("\nDownload about %s into %s?" % (fmt_size(fetch), d), args.yes, ask):
         print("nuc-console-ai: nothing downloaded.", file=sys.stderr)
         return 1
     ensure_dirs(d)
-    for n, e, p, mode, is_m in todo:
-        url = model_url(e) if is_m else e["url"]
-        if ok[n]:
-            record(d, p, e["sha256"])
-            print("%s: already there, SHA-256 verified: not downloaded again" % n)
-            continue
-        print("%s: downloading %s" % (n, fmt_size(e["size"])))
-        how = download(url, p, e["sha256"], e["size"], mode=mode, allow_loopback_http=allow_loopback_http, progress=make_progress(n))
-        record(d, p, e["sha256"])
-        print("%s: %s, SHA-256 verified" % (n, how))
+    if have_rt:
+        print("server: Ollama %s already there: not downloaded again" % runtime["version"])
+    else:
+        if have_arch:
+            record(d, arch, a["sha256"])
+            print("server: %s already there, SHA-256 verified: not downloaded again" % a["file"])
+        else:
+            print("server: downloading %s (%s)" % (a["file"], fmt_size(a["size"])))
+            how = download(a["url"], arch, a["sha256"], a["size"], allow_loopback_http=allow_loopback_http, progress=make_progress("server"))
+            record(d, arch, a["sha256"])
+            print("server: %s, SHA-256 verified" % how)
+        print("server: unpacking into %s" % aiollama.runtime_dir(d, runtime), flush=True)
+        unpack_runtime(d, runtime)
+    for m in chosen:
+        if m not in todo:
+            print("%s: already installed: not downloaded again" % m["id"])
+    if todo:
+        with TempServer(d, runtime, popen) as api:
+            for m in todo:
+                print("%s: downloading %s from the Ollama library (%s)" % (m["id"], model_name(m), size_text(m)), flush=True)
+                prog = make_progress(m["id"])
+                install_model(api, d, m, lambda done, tot, _st: prog(done, tot) if tot else None, insecure=allow_loopback_http)
+                print("%s: installed (%s)" % (m["id"], fmt_size(aiollama.model_bytes(aiollama.models_dir(d), m["id"]))))
     if not args.no_config:
         offer_config(config_path(args.config), endpoint_for(args.port), chosen[0]["id"], args.yes, ask)
     print("\nready. Run it:   nuc-console-ai serve --port %d     (foreground; Ctrl+C stops)\n"
           "or as a service: sudo nuc-console-ai serve --install-service\nThen set [ai] enabled = yes. Check: nuc-console-ai status" % args.port)
     if len(chosen) > 1:
-        print("The server runs one model at a time (%s here): switch with nuc-console-ai use ID, then restart it." % ", ".join(m["id"] for m in chosen))
+        print("The server serves every installed model; the advisor asks one (%s here): switch with nuc-console-ai use ID." % ", ".join(m["id"] for m in chosen))
     return 0
 
 
-def restart_hint(plat=None):
-    """How the running server is switched to the model in [ai] model: the service has every value explicit, so it is installed again."""
-    admin = "in an administrator prompt: " if _is_win(plat) else "sudo "
-    return ["service   : %snuc-console-ai serve --install-service  (writes it again for this model, restarts it)" % admin,
-            "foreground: stop it (Ctrl+C) and run: nuc-console-ai serve"]
-
-
 def cmd_use(args, runtime=None, models=None, hw=None):
-    """Make an installed, verified model the one the advisor asks for: [ai] model in config.ini (nothing else is changed)."""
+    """Make an installed model the one the advisor asks for: [ai] model in config.ini (nothing else is changed)."""
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     d = args.dir or default_dir()
     m = find_model(args.model, models)
     if m not in installed_models(d, models, runtime):
-        raise SetupError("%s is not installed (or not verified) in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
+        raise SetupError("%s is not installed in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
     a = assess_model(m, hw if hw is not None else _hardware())
     if a and a["verdict"] == "no" and not args.force:
         raise SetupError("%s will not work on this machine: %s. Add --force to use it anyway" % (m["id"], safe(a["why"], 200)))
@@ -1063,12 +1210,11 @@ def cmd_use(args, runtime=None, models=None, hw=None):
     ai = nuc_config.load(path)["ai"]
     print("config: %s: [ai] model = %s" % (path, m["id"]))
     if ai["endpoint"] == SHIPPED_ENDPOINT:
-        print("note: [ai] endpoint is still the Ollama default; for the server of this tool set endpoint = %s" % endpoint_for(DEFAULT_PORT))
+        print("note: [ai] endpoint is still the default of an Ollama you run yourself (port 11434); for the server of this tool set endpoint = %s"
+              % endpoint_for(DEFAULT_PORT))
     if not ai["enabled"]:
         print("note: [ai] enabled = no: the advisor does not use it yet")
-    print("The server runs one model at a time. To switch the running one to %s:" % m["id"])
-    for ln in restart_hint():
-        print("  " + ln)
+    print("The server serves every installed model: the advisor asks %s from its next question, nothing to restart." % m["id"])
     return 0
 
 
@@ -1076,11 +1222,11 @@ def cmd_use(args, runtime=None, models=None, hw=None):
 # serve and services
 # ---------------------------------------------------------------------------------------------------------------------------
 def installed_models(d, models=None, runtime=None):
-    """Models of the list that are on disk and verified (by stamp) while the runtime is too."""
+    """Models of the list that are installed while the server is too."""
     runtime = runtime if runtime is not None else RUNTIME
-    if not is_verified(d, runtime_path(d, runtime), runtime):
+    if not runtime_ready(d, runtime):
         return []
-    return [m for m in (models if models is not None else MODELS) if is_verified(d, model_path(d, m), m)]
+    return [m for m in (models if models is not None else MODELS) if model_ready(d, m)]
 
 
 def choose_model(args, d, models=None, runtime=None, cfg_model=None):
@@ -1088,11 +1234,11 @@ def choose_model(args, d, models=None, runtime=None, cfg_model=None):
     if args.model:
         m = find_model(args.model, models)
         if m not in installed_models(d, models, runtime):
-            raise SetupError("%s is not installed (or not verified) in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
+            raise SetupError("%s is not installed in %s: run nuc-console-ai setup %s" % (m["id"], d, m["id"]))
         return m
     have = installed_models(d, models, runtime)
     if not have:
-        raise SetupError("no verified runtime and model in %s: run nuc-console-ai setup first" % d)
+        raise SetupError("no server and model installed in %s: run nuc-console-ai setup first" % d)
     return next((m for m in have if m["id"] == cfg_model), None) or next((m for m in have if m["id"] == DEFAULT_MODEL), have[0])
 
 
@@ -1106,9 +1252,9 @@ def systemd_quote(arg):
 def systemd_unit(argv, ram_mb=None, gpu=False, groups=()):
     """gpu: the server uses the GPU, so the device nodes (/dev/nvidia*, /dev/dri, /dev/kfd) must exist for it and `groups` (render,
     video: the ones the machine has) let the service user open them; everything else of the sandbox stays."""
-    state = "/var/lib/" + SERVICE_NAME  # writable by the service user only (StateDirectory): the runtime unpacks its loader here
+    state = "/var/lib/" + SERVICE_NAME  # writable by the service user only (StateDirectory): the server keeps its key here (~/.ollama)
     lines = [
-        "[Unit]", "Description=nuc-console local AI model server (llamafile, %s only)" % LOOPBACK, "After=network.target", "",
+        "[Unit]", "Description=nuc-console local AI model server (Ollama, %s only)" % LOOPBACK, "After=network.target", "",
         "[Service]", "Type=simple", "User=" + SERVICE_NAME,
         "ExecStart=" + " ".join(systemd_quote(a) for a in argv),
         "Environment=HOME=%s TMPDIR=%s" % (state, state), "StateDirectory=" + SERVICE_NAME,
@@ -1116,7 +1262,7 @@ def systemd_unit(argv, ram_mb=None, gpu=False, groups=()):
         "NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "PrivateDevices=" + ("no" if gpu else "yes"),
         "ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes", "ProtectClock=yes",
         "ProtectHostname=yes", "CapabilityBoundingSet=", "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
-        "RestrictNamespaces=yes", "RestrictSUIDSGID=yes", "LockPersonality=yes", "TasksMax=128",
+        "RestrictNamespaces=yes", "RestrictSUIDSGID=yes", "LockPersonality=yes", "TasksMax=512",
     ]
     if ram_mb:
         lines.append("MemoryMax=%dM" % int(ram_mb * 1.5))
@@ -1138,7 +1284,7 @@ def task_xml(command, arguments):
     return (
         '<?xml version="1.0" encoding="UTF-16"?>\n'
         '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
-        "  <RegistrationInfo><Description>nuc-console local AI model server (llamafile, 127.0.0.1 only)</Description></RegistrationInfo>\n"
+        "  <RegistrationInfo><Description>nuc-console local AI model server (Ollama, 127.0.0.1 only)</Description></RegistrationInfo>\n"
         "  <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>\n"
         '  <Principals><Principal id="Author"><UserId>S-1-5-19</UserId><LogonType>ServiceAccount</LogonType>'
         "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\n"
@@ -1151,14 +1297,15 @@ def task_xml(command, arguments):
         "</Task>\n" % (xml_escape(command), xml_escape(arguments)))
 
 
-def service_argv(d, model, port, threads, ctx, plat=None, python=None, script=None, gpu_layers=0):
-    """The service runs `aisetup.py serve ...` with every value explicit (the service user reads no config of ours): the GPU layers
-    too, decided when the service is installed (0 = CPU only). A new model or [ai] gpu = a new `serve --install-service`."""
+def service_argv(d, model, port, ctx, plat=None, python=None, script=None, gpu=True):
+    """The service runs `aisetup.py serve ...` with every value explicit (the service user reads no config of ours): --cpu too, decided when
+    the service is installed. A new model or [ai] gpu = a new `serve --install-service`."""
     python = python or sys.executable
     if _is_win(plat) and python.lower().endswith("python.exe") and os.path.exists(python[:-10] + "pythonw.exe"):
         python = python[:-10] + "pythonw.exe"  # no console window
-    argv = [python, "-B", script or os.path.realpath(__file__), "serve", "--dir", d, "--model", model["id"], "--port", str(port),
-            "--threads", str(threads), "--ctx", str(ctx), "--gpu-layers", str(int(gpu_layers or 0))]
+    argv = [python, "-B", script or os.path.realpath(__file__), "serve", "--dir", d, "--model", model["id"], "--port", str(port), "--ctx", str(ctx)]
+    if not gpu:
+        argv.append("--cpu")
     if _is_win(plat):
         argv += ["--log", ntpath.join(os.environ.get("ProgramData") or r"C:\ProgramData", "nuc-console", "logs", "ai.log")]
     return argv
@@ -1230,13 +1377,13 @@ def _gpu_groups():
     return out
 
 
-def install_service(d, model, port, threads, ctx, plat=None, gpu_layers=0):
+def install_service(d, model, port, ctx, plat=None, gpu=True):
     if not is_root():
         raise SetupError("--install-service needs %s" % ("an administrator prompt" if _is_win(plat) else "root: sudo nuc-console-ai serve --install-service"))
     if not _is_win(plat) and not (_readable_by_all(runtime_path(d)) and _readable_by_all(model_path(d, model))):
         raise SetupError("%s is not readable by other users (the service runs as its own account): run setup as root, or use --dir "
                          "on a shared path" % d)
-    argv = service_argv(d, model, port, threads, ctx, plat, gpu_layers=gpu_layers)
+    argv = service_argv(d, model, port, ctx, plat, gpu=gpu)
     if _is_win(plat):
         # a task that is running keeps its old model and ignores /Run: stop it first
         subprocess.run([tool("schtasks", plat), "/End", "/TN", "\\nuc-console\\ai"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
@@ -1269,14 +1416,14 @@ def install_service(d, model, port, threads, ctx, plat=None, gpu_layers=0):
     else:
         _linux_user()
         unit = "/etc/systemd/system/%s.service" % SERVICE_NAME
-        _write_root_file(unit, systemd_unit(argv, model["ram_mb"], gpu=bool(gpu_layers), groups=_gpu_groups() if gpu_layers else ()))
+        _write_root_file(unit, systemd_unit(argv, model["ram_mb"], gpu=gpu, groups=_gpu_groups() if gpu else ()))
         systemctl = tool("systemctl")
         run([systemctl, "daemon-reload"])
         run([systemctl, "enable", SERVICE_NAME + ".service"])
         run([systemctl, "restart", SERVICE_NAME + ".service"])
         print("service: %s.service (user %s, sandboxed, 127.0.0.1 only) started. Logs: journalctl -u %s" % (SERVICE_NAME, SERVICE_NAME, SERVICE_NAME))
     print("model %s on %s, %s (the first answer may take a minute: the model is loaded into memory)"
-          % (model["id"], endpoint_for(port), gpu_text(gpu_layers, model)))
+          % (model["id"], endpoint_for(port), gpu_text(gpu)))
 
 
 def remove_service(plat=None):
@@ -1310,32 +1457,35 @@ def cmd_serve(args, runtime=None, models=None, hw=None):
     model = choose_model(args, d, models, runtime, ai["model"])
     if model.get("ctx_max") and args.ctx > model["ctx_max"]:
         raise SetupError("%s handles %d tokens of context at most: use --ctx %d or less" % (model["id"], model["ctx_max"], model["ctx_max"]))
-    threads = args.threads or default_threads()
-    if args.gpu_layers is not None:  # explicit (the service passes it: it was decided when the service was installed)
-        layers, why = args.gpu_layers, "GPU layers as given by --gpu-layers"
+    if args.cpu or args.gpu_layers == 0:  # explicit (the service passes it: it was decided when the service was installed); --gpu-layers 0: older services
+        gpu, why = False, "CPU only (--cpu)"
     else:
-        layers, why = gpu_plan(model, hw if hw is not None else (_hardware() if ai["gpu"] != "no" else {}), ai["gpu"], args.ctx)
-    argv = serve_argv(d, model, args.port, threads, args.ctx, runtime, gpu_layers=layers)
+        gpu, why = gpu_plan(ai["gpu"])
+    argv = serve_argv(d, runtime)
+    env = serve_env(d, args.port, args.ctx, gpu)
     if args.install_service:
         # the AI page and screen download into this folder as the unprivileged web account, which can then replace what is in it: the service runs
-        # these files as another account, so they are hashed again now, not trusted by their stamp (docs/AI.md)
+        # these files as another account, so the server's archive is hashed again and unpacked again, and every layer of the model is hashed (docs/AI.md)
         print("checking the SHA-256 of the files the service will run...", flush=True)
-        for name, path, entry in (("the runtime", runtime_path(d, runtime), runtime), ("model %s" % model["id"], model_path(d, model), model)):
-            if not is_verified(d, path, entry, rehash=True):
-                raise SetupError("%s in %s is not the pinned file (its SHA-256 differs): run nuc-console-ai setup again to download it, nothing was installed" % (name, d))
-        install_service(d, model, args.port, threads, args.ctx, gpu_layers=layers)
+        if not runtime_ready(d, runtime, rehash=True):
+            raise SetupError("the server's archive in %s is missing or not the pinned file (its SHA-256 differs): run nuc-console-ai setup again, nothing was installed" % d)
+        unpack_runtime(d, runtime)
+        if not model_ready(d, model, rehash=True):
+            raise SetupError("model %s in %s has a file whose SHA-256 is not its name: run nuc-console-ai remove %s and setup %s again, nothing was installed"
+                             % (model["id"], d, model["id"], model["id"]))
+        install_service(d, model, args.port, args.ctx, gpu=gpu)
         return 0
     if args.dry_run:
-        print(subprocess.list2cmdline(argv) if _is_win() else " ".join(shlex.quote(a) for a in argv))
+        shown = ["%s=%s" % (k, v) for k, v in sorted(env.items()) if k.startswith("OLLAMA_") or k in aiollama.GPU_HIDE]
+        print(" ".join(shown + ([subprocess.list2cmdline(argv)] if _is_win() else [shlex.quote(x) for x in argv])))
         return 0
     if args.log:
         nuc_config.log_to(args.log)
-    print("nuc-console-ai: %s on %s (%d threads, context %d, %s, low priority). Ctrl+C stops."
-          % (model["id"], endpoint_for(args.port), threads, args.ctx, gpu_text(layers, model)),
-          flush=True)
+    print("nuc-console-ai: Ollama %s on %s (models in %s, context %d, %s, low priority); the advisor asks %s. Ctrl+C stops."
+          % (runtime["version"], endpoint_for(args.port), aiollama.models_dir(d), args.ctx, gpu_text(gpu), model["id"]), flush=True)
     if why:
         print("nuc-console-ai: %s" % safe(why, 200), flush=True)
-    return run_server(argv)
+    return run_server(argv, env)
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -1356,12 +1506,19 @@ def probe(endpoint, timeout=3):
         return False, [], safe(getattr(e, "reason", e))
     try:
         data = json.loads(body.decode("utf-8", "replace"))
-        items = data.get("data") if isinstance(data, dict) else None
+        items = data.get("data", False) if isinstance(data, dict) else False
+        if items is None:  # Ollama with no model yet
+            items = []
         if not isinstance(items, list):
             return False, [], "the answer has no model list (is this an OpenAI-compatible /v1?)"
-        return True, [safe(m.get("id")) for m in items if isinstance(m, dict) and m.get("id")], ""
+        return True, [short_id(safe(m.get("id"))) for m in items if isinstance(m, dict) and m.get("id")], ""
     except ValueError:
         return False, [], "the answer is not JSON"
+
+
+def short_id(model_id):
+    """'qwen3-8b:latest' -> 'qwen3-8b': Ollama lists a model with its tag, the catalog and [ai] model name it without the default one."""
+    return model_id[:-7] if model_id.endswith(":latest") else model_id
 
 
 def is_loopback_endpoint(endpoint):
@@ -1378,38 +1535,38 @@ def cmd_status(args, runtime=None, models=None):
     ai = nuc_config.load(cfg_file)["ai"]
     print("nuc-console-ai status")
     print("  directory : %s  (%s)" % (d, space_text(dir_space(d))))
-    rp = runtime_path(d, runtime)
-
-    def state(path, entry, is_model):
-        if missing_pins(entry, is_model):
-            return "not pinned in this build (setup refuses to download it)"
-        if not os.path.exists(path):
-            return "not installed"
-        return "installed, SHA-256 verified" if is_verified(d, path, entry, rehash=args.verify) else "present but NOT verified (run setup again)"
-    print("  runtime   : %s %s: %s" % (runtime["name"], runtime["version"], state(rp, runtime, False)))
+    if missing_pins(runtime, False):
+        rt = "not pinned for this system in this build (setup refuses to download it): %s" % ", ".join(missing_pins(runtime, False))
+    elif runtime_ready(d, runtime, rehash=args.verify):
+        rt = "installed%s" % (", its archive SHA-256 verified" if args.verify else "")
+    elif os.path.exists(runtime_path(d, runtime)):
+        rt = "present but NOT verified (run setup again)"
+    else:
+        rt = "not installed"
+    print("  server    : Ollama %s: %s" % (runtime["version"], rt))
     absent = 0
     for m in models:
-        st = state(model_path(d, m), m, True)
-        if st.startswith(("not installed", "not pinned")):  # the catalog is long: only what is on disk is listed here
+        if not os.path.isfile(model_path(d, m)):  # the catalog is long: only what is on disk is listed here
             absent += 1
             continue
+        st = ("installed%s" % (", every layer SHA-256 verified" if args.verify else "")) if model_ready(d, m, rehash=args.verify) else \
+            "present but INCOMPLETE (run nuc-console-ai setup %s again)" % m["id"]
         print("  model     : %-15s %-28s %s%s" % (m["id"], m["name"], st, "  (active)" if m["id"] == ai["model"] else ""))
     if absent:
         print("  models    : %d more in the catalog, not installed (nuc-console-ai models)" % absent)
-    ready = installed_models(d, models, runtime) if not args.verify else [
-        m for m in models if is_verified(d, rp, runtime, True) and is_verified(d, model_path(d, m), m, True)]
+    ready = [m for m in models if runtime_ready(d, runtime) and model_ready(d, m)]
     print("  config    : %s: [ai] enabled = %s, endpoint = %s, model = %s, allow_remote = %s"
           % (cfg_file, "yes" if ai["enabled"] else "no", safe(ai["endpoint"]), safe(ai["model"]) or "(empty)", "yes" if ai["allow_remote"] else "no"))
     endpoint = args.endpoint or ai["endpoint"]
     if not is_loopback_endpoint(endpoint) and not ai["allow_remote"] and not args.endpoint:
-        print("  server    : %s is not on this machine and allow_remote = no: the advisor refuses it" % safe(endpoint))
+        print("  endpoint  : %s is not on this machine and allow_remote = no: the advisor refuses it" % safe(endpoint))
         return 3 if ready else 1
     ok, ids, why = probe(endpoint)
     if not ok:
-        print("  server    : %s: not answering (%s)" % (safe(endpoint), why))
+        print("  endpoint  : %s: not answering (%s)" % (safe(endpoint), why))
         print("  next      : %s" % ("nuc-console-ai serve  (or sudo nuc-console-ai serve --install-service)" if ready else "nuc-console-ai setup"))
         return 3 if ready else 1
-    print("  server    : %s: answering, /v1/models lists: %s" % (safe(endpoint), ", ".join(ids) or "(nothing)"))
+    print("  endpoint  : %s: answering, /v1/models lists: %s" % (safe(endpoint), ", ".join(ids) or "(nothing)"))
     if ai["model"] and ai["model"] not in ids:
         print("  warning   : [ai] model = %s is not in that list" % safe(ai["model"]))
         return 3
@@ -1421,68 +1578,120 @@ def cmd_status(args, runtime=None, models=None):
 # ---------------------------------------------------------------------------------------------------------------------------
 # remove
 # ---------------------------------------------------------------------------------------------------------------------------
+def du(path):
+    """Bytes of the files under `path` (a file or a folder; links are not followed); 0 when there is nothing."""
+    if os.path.isfile(path) and not os.path.islink(path):
+        return os.path.getsize(path)
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            q = os.path.join(root, f)
+            try:
+                total += 0 if os.path.islink(q) else os.path.getsize(q)
+            except OSError:
+                pass
+    return total
+
+
+def removal_plan(d, model=None, models=None):
+    """What would be deleted: [(what, path, bytes)]. One model: its manifest and the layers no other model uses (aiollama.prune);
+    everything: the folders runtime/ and models/ of the AI folder (the server's builds and archives, every model, partial downloads too)."""
+    if model is not None:
+        mdir = aiollama.models_dir(d)
+        return [(model["id"], model_path(d, model), aiollama.model_bytes(mdir, model["id"]))] if os.path.isfile(model_path(d, model)) else []
+    out = []
+    for sub in ("runtime", "models"):
+        p = os.path.join(d, sub)
+        if os.path.isdir(p) and os.listdir(p):
+            out.append((sub + "/", p, du(p)))
+    return out
+
+
+def remove_files(d, model=None, runtime=None):
+    """Delete what removal_plan() lists (everything: the server's home too) -> (bytes freed, [(name, why)] that could not be deleted)."""
+    runtime = runtime or RUNTIME
+    if model is not None:
+        return aiollama.prune(aiollama.models_dir(d), [model["id"]])
+    freed, stuck = 0, []
+    for sub in ("runtime", "models"):
+        p = os.path.join(d, sub)
+        if not os.path.isdir(p):
+            continue
+        before = du(p)
+
+        def failed(_fn, path, exc):
+            e = exc[1]
+            stuck.append((os.path.basename(path), getattr(e, "strerror", None) or str(e)))
+        shutil.rmtree(p, onerror=failed)
+        freed += before - du(p)
+    shutil.rmtree(os.path.join(d, "home"), ignore_errors=True)  # the server's key and the log of the servers setup started
+    forget(d, runtime_key(runtime))
+    for a in (runtime.get("assets") or {}).values():
+        if a.get("file"):
+            forget(d, a["file"])
+    return freed, stuck
+
+
 def cmd_remove(args, runtime=None, models=None, ask=input):
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     d = args.dir or default_dir()
     which = args.model or args.model_opt  # MODEL, or the older --model MODEL
-    targets = [model_path(d, find_model(which, models))] if which else \
-        [model_path(d, m) for m in models] + [runtime_path(d, runtime)]
-    files = [p for t in targets for p in (t, t + ".part") if os.path.isfile(p)]
-    if not files:
+    m = find_model(which, models) if which else None
+    plan = removal_plan(d, m, models)
+    if not plan:
         print("nothing to remove in %s" % d)
         return 0
-    size = sum(os.path.getsize(p) for p in files)
+    size = sum(n for _w, _p, n in plan)
     print("will delete from %s:" % d)
-    for p in files:
-        print("  %s  (%s)" % (os.path.relpath(p, d), fmt_size(os.path.getsize(p))))
-    if not confirm("Delete %d file(s), %s?" % (len(files), fmt_size(size)), args.yes, ask):
+    for what, _p, n in plan:
+        print("  %s  (%s)" % (what if m else what + " (everything in it)", fmt_size(n) if n else "empty"))
+    if not confirm("Delete %s, %s?" % (m["id"] if m else "the server and every model", fmt_size(size)), args.yes, ask):
         print("nothing deleted.")
         return 1
-    bad = 0
-    for p in files:
-        try:
-            os.unlink(p)
-            forget(d, p)
-        except OSError as e:
-            bad += 1
-            print("cannot delete %s: %s (is the server still running?)" % (p, e.strerror or e), file=sys.stderr)
-    for sub in ("models", "runtime"):
-        try:
-            os.rmdir(os.path.join(d, sub))  # only when empty
-        except OSError:
-            pass
-    print("deleted. [ai] in config.ini is not changed: set enabled = no there if you do not use another server." if not bad else "some files remain.")
-    if which and not bad and nuc_config.load(config_path(args.config))["ai"]["model"] == which:
-        print("note: %s is the active model ([ai] model): choose another with nuc-console-ai use ID, and restart the server" % which)
-    return 1 if bad else 0
+    freed, stuck = remove_files(d, m, runtime)
+    for name, why in stuck[:5]:
+        print("cannot delete %s: %s (is the server still running?)" % (name, why), file=sys.stderr)
+    print("deleted, %s freed. [ai] in config.ini is not changed: set enabled = no there if you do not use another server." % fmt_size(freed)
+          if not stuck else "some files remain.")
+    if which and not stuck and nuc_config.load(config_path(args.config))["ai"]["model"] == which:
+        print("note: %s is the active model ([ai] model): choose another with nuc-console-ai use ID" % which)
+    return 1 if stuck else 0
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
-# pins (maintainers): read the values to pin from the Hugging Face and GitHub APIs
+# pins (maintainers): read the values to pin from the GitHub API and the Ollama registry
 # ---------------------------------------------------------------------------------------------------------------------------
-def fetch_json(url, timeout=30):
+def _headers(url, accept):
+    """The request's headers; $GITHUB_TOKEN (the workflow's, for the API's rate limit) goes to api.github.com and nowhere else."""
+    h = {"User-Agent": UA, "Accept": accept}
+    if os.environ.get("GITHUB_TOKEN") and urllib.parse.urlsplit(url).hostname == "api.github.com":
+        h["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
+    return h
+
+
+def fetch_json(url, timeout=30, accept="application/json"):
     check_url(url)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    req = urllib.request.Request(url, headers=_headers(url, accept))
     with urllib.request.build_opener(_HttpsRedirects()).open(req, timeout=timeout) as r:
         return json.loads(r.read(8 << 20).decode("utf-8"))
 
 
-def pin_from_hub(info, tree, path):
-    """Hub model JSON + tree JSON (at that commit) -> {"revision", "sha256", "size", "license"} of file `path`."""
-    rev = info.get("sha")
-    if not isinstance(rev, str) or not HEX40.match(rev):
-        raise SetupError("the Hub gave no commit id")
-    for e in tree if isinstance(tree, list) else []:
-        if isinstance(e, dict) and e.get("path") == path:
-            lfs = e.get("lfs") or {}
-            if not HEX64.match(str(lfs.get("oid", ""))) or not isinstance(lfs.get("size"), int):
-                raise SetupError("%s is not an LFS file with a SHA-256 on the Hub" % path)
-            lic = (info.get("cardData") or {}).get("license") or next((t[8:] for t in info.get("tags", []) if t.startswith("license:")), "?")
-            return {"revision": rev, "sha256": lfs["oid"], "size": lfs["size"], "license": lic}
-    near = sorted(e["path"] for e in (tree if isinstance(tree, list) else [])
-                  if isinstance(e, dict) and str(e.get("path", "")).lower().endswith(".gguf") and "q4_k_m" in str(e.get("path", "")).lower())
-    raise SetupError("no file %s in that repository" % path + ("; Q4_K_M files there: %s" % ", ".join(near[:5]) if near else ""))
+def fetch_text(url, n=400, timeout=30):
+    check_url(url)
+    req = urllib.request.Request(url, headers=_headers(url, "*/*"))
+    with urllib.request.build_opener(_HttpsRedirects()).open(req, timeout=timeout) as r:
+        return r.read(n).decode("utf-8", "replace")
+
+
+def sums_of(text):
+    """A release's sha256sum.txt ('<hex>  ./<file>' per line) -> {file: hex}."""
+    out = {}
+    for ln in text.splitlines():
+        m = re.match(r"^([0-9a-f]{64})\s+\*?(?:\./)?(\S+)$", ln.strip())
+        if m:
+            out[m.group(2)] = m.group(1)
+    return out
 
 
 def pin_from_release(release, url):
@@ -1498,32 +1707,49 @@ def pin_from_release(release, url):
                                                                   ", ".join(names[:12]) or "none"))
 
 
+def licence_words(text):
+    """The first words of a licence text, enough to tell which it is ('Apache License Version 2.0', 'MIT License')."""
+    return safe(" ".join(text.split())[:60], 60)
+
+
 def cmd_pins(args, runtime=None, models=None):
     runtime = runtime if runtime is not None else RUNTIME
     models = models if models is not None else MODELS
     bad = 0
     print("# paste into RUNTIME / MODELS of aisetup.py, check the licence, run the tests, try `setup` and `serve` for real\n")
-    try:  # the newest runtime knows the newest model families: say which one it is
-        print("RUNTIME latest release: %s" % fetch_json("https://api.github.com/repos/mozilla-ai/llamafile/releases/latest").get("tag_name"))
+    try:  # the newest server knows the newest model families: say which one it is
+        print("RUNTIME latest release: %s" % fetch_json("https://api.github.com/repos/ollama/ollama/releases/latest").get("tag_name"))
     except (OSError, ValueError, http.client.HTTPException) as e:
         print("RUNTIME latest release: ERROR %s" % safe(e, 200))
     try:
-        rel = fetch_json("https://api.github.com/repos/mozilla-ai/llamafile/releases/tags/" + runtime["version"])
-        print("RUNTIME %s: %s" % (runtime["version"], json.dumps(pin_from_release(rel, runtime["url"]))))
-    except (SetupError, OSError, ValueError, KeyError, http.client.HTTPException) as e:
+        rel = fetch_json("https://api.github.com/repos/ollama/ollama/releases/tags/v" + runtime["version"])
+        for key, a in sorted((runtime.get("assets") or {}).items()):
+            try:
+                print("RUNTIME %s %s: %s" % (runtime["version"], key, json.dumps(dict(file=a["file"], **pin_from_release(rel, runtime["base"] + a["file"])))))
+            except (SetupError, KeyError) as e:
+                bad += 1
+                print("RUNTIME %s %s: ERROR %s" % (runtime["version"], key, safe(e, 200)))
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
         bad += 1
         print("RUNTIME %s: ERROR %s" % (runtime["version"], safe(e, 200)))
+    try:  # the release's own list of SHA-256, a second source for the same numbers
+        sums = sums_of(fetch_text(runtime["base"] + "sha256sum.txt", 1 << 16))
+        for key, a in sorted((runtime.get("assets") or {}).items()):
+            ok = sums.get(a["file"]) == a["sha256"]
+            bad += 0 if ok else 1
+            print("RUNTIME %s %s: sha256sum.txt %s" % (runtime["version"], key, "agrees" if ok else "DIFFERS: %s" % sums.get(a["file"])))
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
+        bad += 1
+        print("RUNTIME %s sha256sum.txt: ERROR %s" % (runtime["version"], safe(e, 200)))
     for m in models:
         try:
-            base = "https://huggingface.co/api/models/" + m["repo"]
-            info = fetch_json(base)
-            if not isinstance(info.get("sha"), str):
-                raise SetupError("the Hub gave no commit id")
-            tree = fetch_json("%s/tree/%s" % (base, info.get("sha")))
-            print("%s (%s): %s" % (m["id"], m["repo"], json.dumps(pin_from_hub(info, tree, m["file"]))))
+            man = fetch_json(aiollama.manifest_url(m["ollama"]), accept=aiollama.MANIFEST_TYPES)
+            info = aiollama.manifest_summary(man)
+            lic = licence_words(fetch_text(aiollama.blob_url(m["ollama"], info["license"]))) if info["license"] else "(no licence layer)"
+            print("%s (%s): %s licence: %s" % (m["id"], m["ollama"], json.dumps({"size": info["size"], "approx_mb": round(info["model"] / 1e6)}), lic))
         except (SetupError, OSError, ValueError, KeyError, http.client.HTTPException) as e:
             bad += 1
-            print("%s (%s): ERROR %s" % (m["id"], m["repo"], safe(e, 200)))
+            print("%s (%s): ERROR %s" % (m["id"], m.get("ollama"), safe(e, 200)))
     return 1 if bad else 0
 
 
@@ -1559,7 +1785,7 @@ def build_parser():
     p = sub.add_parser("models", help="the hardware found and every model: does it fit, how fast, installed, active, recommended")
     common(p, reads=True)
     p.set_defaults(func=cmd_models)
-    p = sub.add_parser("setup", help="download the runtime and one or more models once, verify them, offer to write config.ini")
+    p = sub.add_parser("setup", help="download the server (Ollama) and one or more models once, offer to write config.ini")
     common(p)
     p.add_argument("models", nargs="*", metavar="MODEL", help="model id(s) (default: the one recommended for this machine; see `models`)")
     p.add_argument("--model", action="append", dest="model_opt", metavar="MODEL", help=argparse.SUPPRESS)  # the older spelling of MODEL
@@ -1568,32 +1794,33 @@ def build_parser():
     p.add_argument("--yes", "-y", action="store_true", help="agree to the download and to writing a first [ai] config")
     p.add_argument("--no-config", action="store_true", help="do not offer to write config.ini")
     p.set_defaults(func=cmd_setup)
-    p = sub.add_parser("use", help="make an installed model the one the advisor asks for ([ai] model), and say how to restart the server")
+    p = sub.add_parser("use", help="make an installed model the one the advisor asks for ([ai] model)")
     common(p)
     p.add_argument("model", metavar="MODEL", help="model id: one of those `models` lists as installed")
     p.add_argument("--force", action="store_true", help="use a model that will not work on this machine anyway")
     p.set_defaults(func=cmd_use)
-    p = sub.add_parser("serve", help="run the server in the foreground on 127.0.0.1, at low priority, on the GPU when the model fits there")
+    p = sub.add_parser("serve", help="run the server in the foreground on 127.0.0.1, at low priority, on the GPU when one holds the model")
     common(p)
     p.add_argument("--model", help="model id (default: [ai] model if installed, else the default one)")
     p.add_argument("--port", type=_port, default=DEFAULT_PORT, help="default %(default)s")
-    p.add_argument("--threads", type=_ranged(1, 512), help="default: cores minus two (at least 1)")
+    p.add_argument("--threads", type=_ranged(1, 512), help=argparse.SUPPRESS)  # older services pass it: Ollama chooses its threads
     p.add_argument("--ctx", type=_ranged(512, 131072), default=DEFAULT_CTX, help="context tokens, default %(default)s")
-    p.add_argument("--gpu-layers", type=_ranged(0, ALL_LAYERS), metavar="N", help="layers on the GPU: 0 = CPU only, the model's own number "
-                   "or more (%d) = all of them (default: decided from this machine's hardware, unless [ai] gpu = no)" % ALL_LAYERS)
+    p.add_argument("--cpu", action="store_true", help="hide the GPUs from the server: CPU only (default: the GPU when one holds the model, "
+                   "unless [ai] gpu = no)")
+    p.add_argument("--gpu-layers", type=_ranged(0, 999), metavar="N", help=argparse.SUPPRESS)  # older services: 0 = --cpu, other numbers: ignored
     p.add_argument("--dry-run", action="store_true", help="print the command, do not start it")
     p.add_argument("--install-service", action="store_true", help="install and start it as a system service (root / administrator)")
     p.add_argument("--remove-service", action="store_true", help="stop and remove that service")
     p.add_argument("--log", help="Windows service: send output to this file")
     p.set_defaults(func=cmd_serve)
-    p = sub.add_parser("status", help="what is installed and verified, whether the configured endpoint answers")
+    p = sub.add_parser("status", help="what is installed, whether the configured endpoint answers")
     common(p, reads=True)
     p.add_argument("--endpoint", help="probe this /v1 URL instead of [ai] endpoint")
-    p.add_argument("--verify", action="store_true", help="hash the files again instead of trusting the stamp")
+    p.add_argument("--verify", action="store_true", help="hash the files again (the server's archive against its pin, every layer of the models against its name)")
     p.set_defaults(func=cmd_status)
     p = sub.add_parser("remove", help="delete the downloaded files of one model (or of everything)")
     common(p)
-    p.add_argument("model", nargs="?", metavar="MODEL", help="only this model (default: every model and the runtime)")
+    p.add_argument("model", nargs="?", metavar="MODEL", help="only this model (default: every model and the server)")
     p.add_argument("--model", dest="model_opt", metavar="MODEL", help=argparse.SUPPRESS)  # the older spelling of MODEL
     p.add_argument("--yes", "-y", action="store_true", help="do not ask")
     p.set_defaults(func=cmd_remove)

@@ -20,7 +20,7 @@
 <button class="bt off" type="submit" title="stop the model server and turn the advisor off">Turn AI off</button>
 </form>
 </div>
-<div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+<div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 5.0 GB downloaded, 412.0 GB free on that disk</div>
 </section>
 <section class="chat" id="chat">
 <div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>
@@ -431,13 +431,13 @@
  <span class="d">endpoint </span> http://127.0.0.1:8080/v1
  <span class="d">server   </span> <span class="g">✔ answering</span><span class="d"> · 1 model: qwen3-4b</span>
  <span class="d">model    </span> <span class="c">●</span> <span class="B">qwen3-4b</span><span class="d">  in the catalog</span>
- <span class="d">runtime  </span> <span class="g">✔ installed</span><span class="d"> (0.10.6)</span>
+ <span class="d">runtime  </span> <span class="g">✔ installed</span><span class="d"> (Ollama 0.35.0)</span>
  <span class="d">files    </span> <span class="d">/var/lib/nuc-console/ai</span></pre>
 <div class="mg">manage: <form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b">
 <button class="bt del" type="submit" title="asks first">delete everything</button>
-</form> the runtime and every model (4.0 GB)</div>
+</form> the runtime and every model (5.0 GB)</div>
 <footer>
 <a href="/?">dashboard</a> · <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;cols=100#m-1">compact</a> · <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;cols=200#m-1">wide</a> · text <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;zoom=90#m-1">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;zoom=110#m-1">A+</a> · reloads by itself while something runs · <a href="/?view=ai&amp;sel=qwen3-30b-a3b#m-1">reload</a> · 14:13:20</footer>
 </html>

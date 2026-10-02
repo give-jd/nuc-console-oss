@@ -2,11 +2,11 @@
 with progress, cancel, never twice, delete, start and stop of the model server, the chat), the on/off switch and web.json, the lock, and
 the demo; then the POST endpoints of the web view (CSRF, Origin, token, body, redirect), the page and its forms, and the console keys.
 
-Hermetic: a fake loopback server stands in for GitHub and Hugging Face (allow_loopback_http), a fake runtime script for llamafile, the
-fake OpenAI-compatible server of test_advisor.py for the model, a temporary AI folder; no test waits for the clock (events and joins).
-Platform-aware: the start and stop tests are for Unix (/bin/sh, process groups, signals); on Windows, where the engine starts the runtime as an
-.exe, the fake one is Python source that Base.popen runs with this interpreter. macOS runners are arm64, and a temporary folder's parents are not
-always readable by others.
+Hermetic: a fake loopback server stands in for GitHub (the server's archive, allow_loopback_http), the fake Ollama of fakeollama.py for the
+model server (it pulls from its fake registry), the fake OpenAI-compatible server of test_advisor.py for the chat, a temporary AI folder; no test
+waits for the clock (events and joins). Platform-aware: the tests that start the model server are for Unix (/bin/sh, process groups, signals); on
+Windows, where the engine starts ollama.exe, the fake one is Python source that Base.popen runs with this interpreter. macOS runners are arm64,
+and a temporary folder's parents are not always readable by others.
 """
 import contextlib
 import hashlib
@@ -16,7 +16,6 @@ import io
 import json
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -33,6 +32,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "src"))
 sys.path.insert(0, HERE)
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import advisor  # noqa: E402
+import aiollama  # noqa: E402
 import aiweb  # noqa: E402
 import aisetup  # noqa: E402
 import nuc_config  # noqa: E402
@@ -44,43 +44,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
+import fakeollama as fo  # noqa: E402  (the fake model server)
 
 POSIX = os.name == "posix"
-RUNTIME_NAME = "llamafile-0.0"
-unix_only = unittest.skipUnless(POSIX, "start and stop on Unix: /bin/sh, process groups, signals")
+unix_only = unittest.skipUnless(POSIX, "the model server started and stopped on Unix: /bin/sh, process groups, signals")
 
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
-
-
-def runtime_script(kind="serve"):
-    """The bytes of a fake llamafile for `/bin/sh runtime --server --host H --port N -m FILE -a ID ...`: serve = answers GET /v1/models on that port
-    until it is stopped; die = writes a line and exits; stubborn = ignores SIGTERM. Windows starts `runtime.exe --server ...`: serve and stubborn
-    are then the Python source itself, which Base.popen hands to this interpreter (a script cannot be an .exe)."""
-    serve = ("import faulthandler, http.server, json, signal, socketserver, sys\\nif hasattr(signal, \"SIGUSR1\"): faulthandler.register(signal.SIGUSR1)\\n"  # Unix: where it is (Base.where)
-             "a = sys.argv[1:]\\nport = int(a[a.index(\"--port\") + 1])\\nmodel = a[a.index(\"-a\") + 1]\\n"
-             "print(\"fake runtime up on\", port, flush=True)\\n"
-             "class H(http.server.BaseHTTPRequestHandler):\\n"
-             "    def log_message(self, *x): pass\\n"
-             "    def do_GET(self):\\n"
-             "        b = json.dumps({\"data\": [{\"id\": model}]}).encode()\\n"
-             "        self.send_response(200); self.send_header(\"Content-Length\", str(len(b))); self.end_headers(); self.wfile.write(b)\\n"
-             "class S(http.server.ThreadingHTTPServer):\\n"
-             "    def server_bind(self): socketserver.TCPServer.server_bind(self)\\n"  # not HTTPServer's: its socket.getfqdn() hangs on macOS runners
-             "s = S((\"127.0.0.1\", port), H)\\nprint(\"listening\", flush=True)\\ns.serve_forever()\\n")
-    stubborn = ("import signal, time\\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\\nprint(\"up\", flush=True)\\n"
-                "while True:\\n    time.sleep(0.05)\\n")
-    if kind == "die":
-        return b"#!/bin/sh\necho 'boom: unknown flag --server' >&2\nexit 3\n"
-    if kind == "dies-loading":
-        return b"#!/bin/sh\necho 'loading the model...'\nsleep 0.6\necho 'out of memory' >&2\nexit 4\n"
-    if kind == "mute":  # loads for ever: it never answers
-        return ("#!/bin/sh\nexec '%s' -c 'import time\nprint(\"loading\", flush=True)\nwhile True:\n    time.sleep(0.05)\n'\n" % sys.executable).encode()
-    code = (stubborn if kind == "stubborn" else serve).replace("\\n", "\n")
-    if not POSIX:
-        return code.encode()
-    return ("#!/bin/sh\nexec '%s' -c '%s' \"$@\"\n" % (sys.executable, code.replace("'", "'\"'\"'"))).encode()
 
 
 def free_port():
@@ -92,9 +63,10 @@ def free_port():
 
 
 class Base(unittest.TestCase):
-    """An engine on a temporary AI folder with a fake catalog (a runtime and two models), the fake download server and the fake model server."""
+    """An engine on a temporary AI folder with a fake catalog (the server's build and two models), the fake download server, and the fake
+    Ollama that the engine starts (it pulls the two models from its fake registry)."""
 
-    MODEL_BYTES = {"tiny": tas.blob(2_600_000, b"tiny"), "other": tas.blob(30_000, b"other")}
+    SIZES = {"tiny": 2_600_000, "other": 30_000}
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -104,20 +76,13 @@ class Base(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.cfg = nuc_config.load("/nonexistent")
-        self.rt_bytes = runtime_script("serve")
-        self.runtime, _m = tas.fake_manifest("http://127.0.0.1:1", self.rt_bytes, b"x")
-        self.models = []
-        for name, data in self.MODEL_BYTES.items():
-            m = tas.fake_manifest("http://127.0.0.1:1", self.rt_bytes, data, name)[1]
-            self.models.append(dict(m, rank=len(self.models) + 1, approx_mb=3, ram_mb=100))
+        self.archive = fo.runtime_archive()
         self.dl = tas.Server()
         self.httpd = self.dl.__enter__()
         self.addCleanup(self.dl.__exit__)
-        self.httpd.files = {"/" + RUNTIME_NAME: self.rt_bytes, "/tiny.gguf": self.MODEL_BYTES["tiny"], "/other.gguf": self.MODEL_BYTES["other"]}
-        patch = mock.patch.object(aisetup, "model_url", lambda m: self.dl.base + "/" + m["file"])
-        patch.start()
-        self.addCleanup(patch.stop)
-        self.runtime = dict(self.runtime, url=self.dl.base + "/" + RUNTIME_NAME)
+        self.httpd.files = {"/" + self.archive[0]: self.archive[1]}
+        self.runtime = fo.fake_runtime(self.dl.base, self.archive)[0]
+        self.models = [fo.fake_model(name, size, rank, approx_mb=3, ram_mb=100) for rank, (name, size) in enumerate(self.SIZES.items(), 1)]
         self.hw = {}
         self.popens = []
         port = mock.patch.object(aisetup, "DEFAULT_PORT", free_port())  # the servers of these tests start where no other test run (or program) is
@@ -125,31 +90,34 @@ class Base(unittest.TestCase):
         self.addCleanup(port.stop)
         self.eng = aiweb.Engine(directory=self.d, runtime=self.runtime, models=self.models, allow_loopback_http=True, cfg_fn=lambda: self.cfg,
                                 hw_fn=lambda: self.hw, popen=self.popen)
-        self.eng.start_wait, self.eng.stop_grace, self.eng.poll_s = 0.2, 0.5, 0.05
+        self.eng.start_wait, self.eng.stop_grace, self.eng.poll_s, self.eng.answer_wait, self.eng.load_wait = 0.2, 0.5, 0.05, 30, 30
         self.addCleanup(self.eng.shutdown)
+        self.control()
+
+    def control(self, **kw):
+        """What the fake Ollama can pull (the two models) and how it misbehaves (fakeollama.py)."""
+        fo.write_control(self.d, registry=fo.registry_for(self.models), **kw)
 
     def popen(self, argv, **kw):
         self.popens.append((argv, kw))
-        if not POSIX and argv and argv[0] == aisetup.runtime_path(self.d, self.runtime):
-            argv = [sys.executable] + list(argv)  # the fake runtime.exe is Python source (runtime_script): this interpreter runs it
+        if not POSIX and argv and argv[0].lower().endswith("ollama.exe"):
+            argv = [sys.executable] + list(argv)  # the fake ollama.exe is Python source (fakeollama.py): this interpreter runs it
         return subprocess.Popen(argv, **kw)
 
     def m(self, name="tiny"):
         return next(m for m in self.models if m["id"] == name)
 
-    def install(self, names=("tiny", "other"), script=None):
-        aisetup.ensure_dirs(self.d)
-        rt = aisetup.runtime_path(self.d, self.runtime)
-        tas.put(rt, script if script is not None else self.rt_bytes)
-        aisetup.record(self.d, rt, sha(script if script is not None else self.rt_bytes))
-        if script is not None:  # the pin is of the script that runs
-            self.runtime.update(sha256=sha(script), size=len(script))
+    def install(self, names=("tiny", "other")):
+        fo.install_runtime(self.d, self.runtime)
         for n in names:
-            tas.put(aisetup.model_path(self.d, self.m(n)), self.MODEL_BYTES[n])
-            aisetup.record(self.d, aisetup.model_path(self.d, self.m(n)), self.m(n)["sha256"])
+            fo.install_model(self.d, self.m(n))
+        self.control()
 
     def installed(self, name="tiny"):
-        return aisetup.is_verified(self.d, aisetup.model_path(self.d, self.m(name)), self.m(name))
+        return aisetup.model_ready(self.d, self.m(name))
+
+    def pulls(self):
+        return [r["body"]["model"] for r in fo.requests_seen(self.d) if r["path"] == "/api/pull"]
 
     def job(self):
         if not self.eng.wait(30):
@@ -157,16 +125,9 @@ class Base(unittest.TestCase):
         return self.eng.snapshot()["job"]
 
     def where(self):
-        """What a job that does not end is doing: its phase, the server's last lines (the fake runtime adds where it is, on SIGUSR1) and what
-        its endpoint answers."""
+        """What a job that does not end is doing: its phase, the server's last lines and what its endpoint answers."""
         info = self.eng.child_info or {}
         pid = info.get("pid")
-        if POSIX and pid and alive(pid):
-            try:
-                os.kill(pid, signal.SIGUSR1)
-            except OSError:
-                pass
-            threading.Event().wait(1)
         snap = self.eng.snapshot()
         job, srv = snap["job"] or {}, snap["server"]
         probe = aisetup.probe(srv["endpoint"], 2) if srv["endpoint"] else None
@@ -195,7 +156,7 @@ class Base(unittest.TestCase):
 
 @unix_only
 class UseModel(Base):
-    """Choosing a model does everything: fetch what is missing, start the server, wait until it answers, make it the advisor's, turn it on."""
+    """Choosing a model does everything: fetch the server if it is missing, start it, pull the model, load it, make it the advisor's, turn it on."""
 
     def use(self, name="tiny"):
         ok, text = self.eng.use_model(name)
@@ -208,14 +169,17 @@ class UseModel(Base):
         self.assertTrue(ok, why)
         return srv, ids
 
-    def test_one_choice_downloads_starts_waits_and_turns_the_advisor_on(self):
+    def test_one_choice_downloads_starts_pulls_loads_and_turns_the_advisor_on(self):
         job = self.use("tiny")
-        self.assertEqual((job["state"], job["error"]), ("done", ""))
+        self.assertEqual((job["state"], job["error"]), ("done", ""), self.where())
         self.assertIn("tiny is in use", job["note"])
         self.assertTrue(self.installed("tiny"))
-        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+        self.assertEqual(self.requests(), ["/" + self.archive[0]], "the server's build, once")
+        self.assertEqual(self.pulls(), ["tiny:test"], "the model, through the server")
         srv, ids = self.answering()
         self.assertEqual((srv["running"], srv["model"], ids), (True, "tiny", ["tiny"]), "it answers when the job is done")
+        loads = [r["body"] for r in fo.requests_seen(self.d) if r["path"] == "/api/generate"]
+        self.assertEqual(loads, [{"model": "tiny"}], "loaded once, before the job says it is done")
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {"enabled": True, "model": "tiny", "endpoint": srv["endpoint"]})
         snap = self.eng.snapshot()
         self.assertEqual(snap["switch"], {"on": True, "by": "web", "locked": False})
@@ -223,6 +187,11 @@ class UseModel(Base):
         self.assertIn("tiny runs here and answers at %s" % srv["endpoint"], snap["state"][1])
         self.assertEqual(self.eng.ecfg()["ai"]["model"], "tiny")
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "config.ini")))
+        argv, kw = self.popens[0]
+        self.assertEqual(argv[-2:], [aisetup.runtime_path(self.d, self.runtime), "serve"])
+        self.assertEqual(kw["env"]["OLLAMA_HOST"], "127.0.0.1:%d" % aisetup.port_of(srv["endpoint"]))
+        self.assertEqual(kw["env"]["OLLAMA_MODELS"], os.path.join(self.d, "models"))
+        self.assertEqual(kw["env"]["HOME"], os.path.join(self.d, "home"), "its key goes to the AI folder: the web account has no home")
 
     def test_the_progress_is_the_jobs_while_it_runs(self):
         phases = []
@@ -230,7 +199,7 @@ class UseModel(Base):
         self.use("tiny")
         self.assertTrue(any(step == "runtime" for step, _p, _t in phases))
         self.assertTrue(any("downloading the model" in text for _s, _p, text in phases))
-        self.assertTrue(any(p == "verifying" for _s, p, _t in phases))
+        self.assertTrue(any(p == "verifying" and s == "tiny" for s, p, _t in phases), "Ollama's own check of the layers")
 
     def test_the_same_model_again_is_not_fetched_or_started_again(self):
         self.use("tiny")
@@ -238,33 +207,45 @@ class UseModel(Base):
         job = self.use("tiny")
         self.assertEqual(job["state"], "done")
         self.assertEqual(self.eng.snapshot()["server"]["pid"], pid, "the server runs: nothing to start")
-        self.assertEqual(len(self.httpd.requests), n)
+        self.assertEqual((len(self.httpd.requests), self.pulls()), (n, ["tiny:test"]))
         self.assertEqual(len(self.popens), 1)
 
-    def test_another_model_replaces_the_server_one_at_a_time(self):
+    def test_another_model_is_loaded_by_the_same_server(self):
         self.use("tiny")
         first = self.eng.snapshot()["server"]["pid"]
         self.use("other")
         srv, ids = self.answering()
-        self.assertEqual((srv["model"], ids), ("other", ["other"]))
-        self.assertNotEqual(srv["pid"], first)
-        self.assertFalse(alive(first), "the first server is stopped")
-        self.assertEqual(len(self.popens), 2)
+        self.assertEqual(srv["model"], "other")
+        self.assertEqual(sorted(ids), ["other", "tiny"], "the server serves every installed model")
+        self.assertEqual(srv["pid"], first, "one server: it loads the other model (and unloads the first, one at a time)")
+        self.assertEqual(len(self.popens), 1)
         self.assertEqual(advisor.read_web_state(self.eng.web_path())["model"], "other")
-        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf", "/other.gguf"], "the runtime is fetched once")
+        self.assertEqual(self.requests(), ["/" + self.archive[0]], "the server is fetched once")
+        self.assertEqual(self.pulls(), ["tiny:test", "other:test"])
 
     def test_a_download_that_fails_leaves_the_advisor_as_it_was(self):
-        self.httpd.files.pop("/tiny.gguf")
+        self.httpd.files.clear()
         job = self.use("tiny")
         self.assertEqual(job["state"], "failed")
         self.assertIn("HTTP 404", job["error"])
-        self.assertEqual(self.popens, [], "no server for a model that is not there")
+        self.assertEqual(self.popens, [], "no server without its build")
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {})
         self.assertEqual(self.eng.snapshot()["state"][0], "off")
 
+    def test_a_pull_that_fails_says_why_and_stops_the_server_it_started(self):
+        self.control(pull_error="pull model manifest: file does not exist")
+        job = self.use("tiny")
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("the model server says: pull model manifest: file does not exist", job["error"])
+        self.assertFalse(self.installed("tiny"))
+        self.assertTrue(self.eng.child_info["gone"].wait(30), "a server without a model would only hold memory")
+        self.assertNotIn("enabled", advisor.read_web_state(self.eng.web_path()))
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+        self.assertTrue(aisetup.runtime_ready(self.d, self.runtime), "the server stays installed: the next try only pulls")
+
     def test_a_server_that_dies_while_it_loads_fails_the_job_and_the_advisor_stays_off(self):
-        self.install(script=runtime_script("dies-loading"))
-        self.eng.start_wait = 0.0   # not at once: while it loads
+        self.install()
+        self.control(load_die=True)
         job = self.use("tiny")
         self.assertEqual(job["state"], "failed")
         self.assertIn("stopped while it loaded the model (exit status 4)", job["error"])
@@ -274,8 +255,18 @@ class UseModel(Base):
         self.assertNotIn("endpoint", st, "nobody answers there")
         self.assertEqual(self.eng.snapshot()["state"][0], "off")
 
+    def test_a_model_the_server_cannot_load_is_said(self):
+        self.install()
+        self.control(load_error="model requires more system memory (12 GiB) than is available (4 GiB)")
+        job = self.use("tiny")
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("tiny could not be loaded: the model server says: model requires more system memory", job["error"])
+        self.assertTrue(self.eng.child_info["gone"].wait(30))
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+
     def test_cancel_while_the_model_loads_stops_the_server_it_started(self):
-        self.install(script=runtime_script("mute"))
+        self.install()
+        self.control(load_hold=True)
         self.assertTrue(self.eng.use_model("tiny")[0])
         job = self.wait_phase("loading")
         self.assertEqual(job["phase"], "loading")
@@ -287,6 +278,16 @@ class UseModel(Base):
         self.assertFalse(alive(info["pid"]))
         self.assertFalse(self.eng.snapshot()["server"]["running"])
         self.assertNotIn("enabled", advisor.read_web_state(self.eng.web_path()))
+
+    def test_a_server_that_never_answers_is_stopped_and_said(self):
+        self.install()
+        self.control(mute=True)
+        self.eng.answer_wait = 1.0
+        job = self.use("tiny")
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("did not answer within 1 s", job["error"])
+        self.assertIn("loading", job["error"], "its last words")
+        self.assertFalse(self.eng.snapshot()["server"]["running"])
 
     def test_turn_off_stops_the_server_and_the_advisor_and_turn_on_brings_the_same_model_back_without_a_download(self):
         self.use("tiny")
@@ -301,7 +302,7 @@ class UseModel(Base):
         self.assertEqual(self.job()["state"], "done")
         self.assertEqual(self.eng.snapshot()["state"][0], "running")
         self.assertEqual(self.eng.snapshot()["server"]["model"], "tiny")
-        self.assertEqual(len(self.httpd.requests), n, "nothing fetched again")
+        self.assertEqual((len(self.httpd.requests), self.pulls()), (n, ["tiny:test"]), "nothing fetched again")
 
     def test_a_model_that_will_not_work_here_is_refused_before_anything_is_fetched(self):
         hw = tas.hw_of(8192, 5500)
@@ -318,7 +319,7 @@ class UseModel(Base):
         self.eng.hw_fn = lambda: hw
         with mock.patch.dict(sys.modules, {"aihw": tas.FakeAihw(hw)}):
             ch = self.eng.choice()
-            total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
+            total = len(self.archive[1]) + self.SIZES["tiny"]
             self.assertEqual(ch, {"model": None, "by": "", "recommended": "tiny", "target": "tiny", "size": total, "installed": False})
             ok, text = self.eng.turn_on()
             self.assertFalse(ok)
@@ -339,18 +340,22 @@ class UseModel(Base):
             self.assertEqual((ch["installed"], ch["size"]), (True, 0))
             self.assertTrue(self.eng.turn_on()[0])
             self.assertEqual(self.job()["state"], "done")
-            self.assertEqual(self.requests(), [], "installed: not one request")
+            self.assertEqual((self.requests(), self.pulls()), ([], []), "installed: not one download")
 
     def test_the_size_to_fetch_counts_what_is_partly_there_and_says_unknown_when_not_pinned(self):
-        part = aisetup.model_path(self.d, self.m("tiny")) + ".part"
+        part = aisetup.archive_path(self.d, self.runtime) + ".part"
         os.makedirs(os.path.dirname(part))
         tas.put(part, b"p" * 1000)
-        self.assertEqual(self.eng._missing_bytes(self.d, self.m("tiny")), len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"]) - 1000)
-        self.assertIsNone(self.eng._missing_bytes(self.d, dict(self.m("tiny"), sha256=None)))
+        self.assertEqual(self.eng._missing_bytes(self.d, self.m("tiny")), len(self.archive[1]) - 1000 + self.SIZES["tiny"])
+        self.assertIsNone(self.eng._missing_bytes(self.d, dict(self.m("tiny"), ollama=None)))
+        self.assertIsNone(self.eng._missing_bytes(self.d, self.m("tiny")) if False else None)
+        self.eng.runtime = dict(self.runtime, assets={})
+        self.assertIsNone(self.eng._missing_bytes(self.d, self.m("tiny")), "no build for this system")
 
 
 # ---------------------------------------------------------------------------------------------------------------------- download
 
+@unix_only
 class Download(Base):
     def test_download_runtime_and_model_with_progress_and_the_checks_of_the_command(self):
         seen = []
@@ -359,28 +364,41 @@ class Download(Base):
         self.assertTrue(ok, text)
         self.assertIn("downloading tiny", text)
         job = self.job()
-        self.assertEqual((job["state"], job["error"]), ("done", ""))
+        self.assertEqual((job["state"], job["error"]), ("done", ""), self.where())
         self.assertEqual(job["pct"], 100)
-        total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
+        total = len(self.archive[1]) + self.SIZES["tiny"]
         self.assertEqual((job["done"], job["total"]), (total, total))
-        self.assertEqual([s for s, *_ in seen][0], "runtime", "the runtime first")
+        self.assertEqual([s for s, *_ in seen][0], "runtime", "the server first")
         self.assertEqual(seen[-1][0], "tiny")
         dones = [d for _s, d, _t, _p in seen]
         self.assertEqual(dones, sorted(dones), "progress only goes forward")
-        self.assertGreater(len(seen), 2, "the model is several chunks: there is progress to show")
-        self.assertTrue({t for _s, _d, t, _p in seen} == {total})
-        self.assertIn("verifying", {p for *_x, p in seen}, "after the last byte the SHA-256 is checked")
+        self.assertGreater(len([x for x in seen if x[0] == "tiny"]), 2, "the model is several chunks: there is progress to show")
+        self.assertEqual({t for s_, _d, t, _p in seen if s_ == "tiny"}, {total})
+        self.assertIn("verifying", {p for s_, *_x, p in seen if s_ == "runtime"}, "after the last byte the SHA-256 of the archive is checked")
+        self.assertIn("verifying", {p for s_, *_x, p in seen if s_ == "tiny"}, "and Ollama checks the layers")
         self.assertTrue(self.installed("tiny"))
-        self.assertTrue(aisetup.is_verified(self.d, aisetup.runtime_path(self.d, self.runtime), self.runtime))
-        self.assertEqual(aisetup.sha256_file(aisetup.model_path(self.d, self.m())), self.m()["sha256"])
-        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.m()) + ".part"))
+        self.assertTrue(aisetup.runtime_ready(self.d, self.runtime, rehash=True))
+        self.assertTrue(aisetup.model_ready(self.d, self.m(), rehash=True))
         self.assertIn("tiny is installed", self.notice())
         if POSIX:
             self.assertEqual(os.stat(aisetup.runtime_path(self.d, self.runtime)).st_mode & 0o777, 0o755)
-            self.assertEqual(os.stat(aisetup.model_path(self.d, self.m())).st_mode & 0o777, 0o644)
-        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+        self.assertEqual(self.requests(), ["/" + self.archive[0]])
+        self.assertEqual(self.pulls(), ["tiny:test"])
+        self.assertTrue(self.eng.child_info["gone"].wait(30), "the server started for the download is stopped after it")
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+        self.assertNotIn("endpoint", advisor.read_web_state(self.eng.web_path()))
 
-    def test_a_file_that_is_there_and_verified_is_never_fetched_again(self):
+    def test_a_download_goes_through_the_server_that_runs(self):
+        self.install(("tiny",))
+        self.eng.start_server("tiny")
+        self.assertEqual(self.job()["state"], "done")
+        pid = self.eng.snapshot()["server"]["pid"]
+        self.eng.download("other")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertEqual(self.pulls(), ["other:test"])
+        self.assertEqual((self.eng.snapshot()["server"]["pid"], len(self.popens)), (pid, 1), "the same server, still running")
+
+    def test_a_file_that_is_there_is_never_fetched_again(self):
         self.eng.download("tiny")
         self.job()
         n = len(self.httpd.requests)
@@ -389,10 +407,11 @@ class Download(Base):
         job = self.job()
         self.assertEqual(job["state"], "done")
         self.assertIn("already installed", job["note"])
-        self.assertEqual(len(self.httpd.requests), n, "not one request")
-        self.eng.download("other")  # a second model: only its own file, the runtime is there
+        self.assertEqual((len(self.httpd.requests), self.pulls()), (n, ["tiny:test"]), "not one request")
+        self.assertEqual(len(self.popens), 1, "not even a server started to look")
+        self.eng.download("other")  # a second model: only its own pull, the server is there
         self.job()
-        self.assertEqual(self.requests()[n:], ["/other.gguf"])
+        self.assertEqual((self.requests()[n:], self.pulls()), ([], ["tiny:test", "other:test"]))
 
     def test_one_job_at_a_time(self):
         reached, release = threading.Event(), threading.Event()
@@ -412,32 +431,50 @@ class Download(Base):
         finally:
             release.set()
         self.assertEqual(self.job()["state"], "done")
-        self.assertEqual(self.requests().count("/tiny.gguf"), 1)
+        self.assertEqual(self.pulls(), ["tiny:test"])
 
-    def test_cancel_keeps_what_was_fetched_and_the_next_download_goes_on_from_there(self):
-        self.eng.progress_hook = lambda job: self.eng.cancel() if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+    def test_cancel_of_the_servers_archive_keeps_what_was_fetched_and_the_next_download_goes_on_from_there(self):
+        big = fo.runtime_archive(fo.runtime_exe() + b"\n#" + tas.blob(3_000_000, b"pad").hex().encode())
+        self.httpd.files = {"/" + big[0]: big[1]}
+        self.eng.runtime = fo.fake_runtime(self.dl.base, big)[0]
+        self.eng.progress_hook = lambda job: self.eng.cancel() if job["step"] == "runtime" and job["done"] > 0 else None
         self.eng.download("tiny")
         job = self.job()
         self.assertEqual(job["state"], "cancelled")
         self.assertIn("kept", job["note"])
-        self.assertFalse(self.installed("tiny"))
-        part = aisetup.model_path(self.d, self.m()) + ".part"
+        part = aisetup.archive_path(self.d, self.eng.runtime) + ".part"
         size = os.path.getsize(part)
-        self.assertTrue(0 < size < len(self.MODEL_BYTES["tiny"]), size)
-        self.assertTrue(aisetup.is_verified(self.d, aisetup.runtime_path(self.d, self.runtime), self.runtime), "the runtime was done before")
+        self.assertTrue(0 < size < len(big[1]), size)
         self.assertIn("cancelled", self.notice())
         self.eng.progress_hook = None
         self.eng.download("tiny")
+        self.assertEqual(self.job()["state"], "done", self.where())
+        self.assertIn(("/" + big[0], "bytes=%d-" % size), self.httpd.requests)
+        self.assertTrue(self.installed("tiny"))
+
+    def test_cancel_of_a_pull_keeps_what_was_pulled_and_stops_the_server_started_for_it(self):
+        self.install(())
+        self.control(pull_hold=True)
+        self.eng.progress_hook = lambda job: self.eng.cancel() if job["step"] == "tiny" and job["done"] > 0 else None
+        self.eng.download("tiny")
+        job = self.job()
+        self.assertEqual(job["state"], "cancelled", self.where())
+        self.assertFalse(self.installed("tiny"))
+        partial = [f for f in os.listdir(os.path.join(self.d, "models", "blobs")) if f.endswith("-partial")]
+        self.assertEqual(len(partial), 1, "what was pulled stays: the server resumes it")
+        self.assertTrue(self.eng.child_info["gone"].wait(30))
+        self.eng.progress_hook = None
+        self.control()
+        self.eng.download("tiny")
         self.assertEqual(self.job()["state"], "done")
-        self.assertEqual(self.httpd.requests[-1], ("/tiny.gguf", "bytes=%d-" % size))
         self.assertTrue(self.installed("tiny"))
 
     def test_cancel_without_a_job_and_of_a_job_that_is_not_a_download(self):
         self.assertEqual(self.eng.cancel(), (False, "nothing to cancel"))
         self.install()
         reached, release = threading.Event(), threading.Event()
-        real = aisetup.forget
-        with mock.patch.object(aisetup, "forget", side_effect=lambda *a: (reached.set(), release.wait(30), real(*a))[2]):
+        real = aisetup.remove_files
+        with mock.patch.object(aisetup, "remove_files", side_effect=lambda *a: (reached.set(), release.wait(30), real(*a))[2]):
             self.eng.delete("other")
             self.assertTrue(reached.wait(30))
             ok, text = self.eng.cancel()
@@ -447,32 +484,60 @@ class Download(Base):
         self.assertEqual(self.job()["state"], "done")
 
     def test_failures_say_why_and_leave_nothing_installed(self):
-        self.httpd.files.pop("/tiny.gguf")
+        self.httpd.files.clear()
         self.eng.download("tiny")
         job = self.job()
         self.assertEqual(job["state"], "failed")
         self.assertIn("HTTP 404", job["error"])
         self.assertIn("failed", self.notice())
         self.assertFalse(self.installed("tiny"))
-        self.httpd.files["/tiny.gguf"] = bytes(len(self.MODEL_BYTES["tiny"]))   # the right size, the wrong bytes
+        self.httpd.files["/" + self.archive[0]] = bytes(len(self.archive[1]))   # the right size, the wrong bytes
         self.eng.download("tiny")
         job = self.job()
         self.assertEqual(job["state"], "failed")
         self.assertIn("SHA-256 is", job["error"])
-        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.m())))
-        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.m()) + ".part"), "a wrong hash deletes the download")
+        arch = aisetup.archive_path(self.d, self.runtime)
+        self.assertFalse(os.path.exists(arch))
+        self.assertFalse(os.path.exists(arch + ".part"), "a wrong hash deletes the download")
+        self.assertFalse(os.path.exists(aiollama.runtime_dir(self.d, self.runtime)), "nothing unpacked")
+        self.assertEqual(self.popens, [])
+
+    def test_an_archive_that_holds_a_way_out_is_refused(self):
+        import tarfile
+        import io as _io
+        buf = _io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as t:
+            info = tarfile.TarInfo("../../escape")
+            info.size = 1
+            t.addfile(info, _io.BytesIO(b"x"))
+        bad = ("ollama-bad.tgz" if POSIX else "ollama-bad.zip", buf.getvalue())
+        if not POSIX:
+            import zipfile
+            buf = _io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("../../escape", "x")
+            bad = ("ollama-bad.zip", buf.getvalue())
+        self.httpd.files = {"/" + bad[0]: bad[1]}
+        self.eng.runtime = fo.fake_runtime(self.dl.base, bad)[0]
+        self.eng.download("tiny")
+        job = self.job()
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("unsafe name", job["error"])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "escape")))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "escape")))
+        self.assertFalse(os.path.exists(aiollama.runtime_dir(self.d, self.eng.runtime) + ".part"))
 
     def test_the_server_never_gets_a_bad_wish(self):
         n = len(self.httpd.requests)
         self.assertEqual(self.eng.download("../../etc/passwd")[0], False)
         self.assertIn("unknown model", self.notice())
-        unpinned = dict(self.m("other"), id="loose", sha256=None)
+        unpinned = dict(self.m("other"), id="loose", ollama=None)
         self.eng.models.append(unpinned)
         self.eng.download("loose")
         job = self.job()
         self.assertEqual(job["state"], "failed")
         self.assertIn("not pinned", job["error"])
-        self.assertEqual(len(self.httpd.requests), n)
+        self.assertEqual((len(self.httpd.requests), self.pulls()), (n, []))
 
     def test_not_enough_disk_stops_before_the_network(self):
         with mock.patch.object(aisetup, "free_bytes", return_value=1000):
@@ -531,7 +596,7 @@ class Download(Base):
         self.assertFalse(os.path.exists(lock), "ours is gone with the job")
 
     def test_the_lock_is_released_when_the_job_fails_too(self):
-        self.httpd.files.pop("/" + RUNTIME_NAME)
+        self.httpd.files.clear()
         self.eng.download("tiny")
         self.assertEqual(self.job()["state"], "failed")
         self.assertFalse(os.path.exists(os.path.join(self.d, aiweb.LOCK_FILE)))
@@ -543,6 +608,7 @@ class Download(Base):
         self.assertEqual(aiweb.job_text(job, False), "downloading qwen3-8b")
         self.assertEqual(aiweb.job_text(dict(job, step="runtime")), "qwen3-8b: downloading the runtime, 42%, 2.1 GB of 5.0 GB, 12.3 MB/s, about 4 min left")
         self.assertEqual(aiweb.job_text(dict(job, phase="verifying")), "qwen3-8b: checking the SHA-256 of the model")
+        self.assertEqual(aiweb.job_text(dict(job, step="runtime", phase="unpacking")), "qwen3-8b: unpacking the runtime")
         self.assertEqual(aiweb.job_text(dict(job, kind="use", phase="starting")), "qwen3-8b: starting the model server")
         self.assertIn("loading the model", aiweb.job_text(dict(job, kind="use", phase="loading")))
         self.assertEqual(aiweb.job_text(dict(job, total=0, done=0)), "qwen3-8b: checking what is there")
@@ -559,38 +625,37 @@ class Download(Base):
 # ----------------------------------------------------------------------------------------------------------------------- delete
 
 class Delete(Base):
-    def test_one_model_with_its_partial_download_and_its_stamp(self):
+    def test_one_model_and_the_layers_only_it_used(self):
         self.install()
-        part = aisetup.model_path(self.d, self.m("tiny")) + ".part"
-        tas.put(part, b"p" * 100)
         self.eng._web(lambda st: st.update(model="tiny"))
         ok, _t = self.eng.delete("tiny")
         self.assertTrue(ok)
         job = self.job()
-        self.assertEqual(job["state"], "done")
-        self.assertIn("deleted 2 files", job["note"])
+        self.assertEqual(job["state"], "done", job["error"])
+        self.assertIn("deleted tiny, ", job["note"])
+        self.assertIn("freed", job["note"])
         self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.m("tiny"))))
-        self.assertFalse(os.path.exists(part))
-        self.assertNotIn("tiny.gguf", aisetup.load_stamp(self.d))
-        self.assertTrue(self.installed("other"), "the others stay")
-        self.assertTrue(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
+        self.assertTrue(self.installed("other"), "the others stay, with the layers they share")
+        self.assertTrue(aisetup.runtime_ready(self.d, self.runtime))
         self.assertNotIn("model", advisor.read_web_state(self.eng.web_path()), "the model the page had chosen is gone")
         self.assertFalse(os.path.exists(os.path.join(self.d, aiweb.LOCK_FILE)))
+        self.assertEqual(self.popens, [], "no server is started to delete")
 
-    def test_everything_the_runtime_the_models_and_the_loader_it_unpacked(self):
+    def test_everything_the_server_the_models_and_its_home(self):
         self.install()
-        os.makedirs(os.path.join(self.d, "home", ".llamafile"))
-        tas.put(os.path.join(self.d, "home", ".llamafile", "x"), b"x")
+        os.makedirs(os.path.join(self.d, "home", ".ollama"))
+        tas.put(os.path.join(self.d, "home", ".ollama", "id_ed25519"), b"x")
         tas.put(os.path.join(self.d, "notes.txt"), "not ours")
         self.eng._web(lambda st: st.update(model="other", enabled=True))
         self.eng.delete_all()
         job = self.job()
-        self.assertEqual(job["state"], "done")
+        self.assertEqual(job["state"], "done", job["error"])
+        self.assertIn("deleted the server and every model", job["note"])
         for m in self.models:
             self.assertFalse(os.path.exists(aisetup.model_path(self.d, m)))
         self.assertFalse(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
         self.assertFalse(os.path.exists(os.path.join(self.d, "home")))
-        self.assertTrue(os.path.exists(os.path.join(self.d, "notes.txt")), "only what the catalog put there")
+        self.assertTrue(os.path.exists(os.path.join(self.d, "notes.txt")), "only the folders of the server and the models")
         st = advisor.read_web_state(self.eng.web_path())
         self.assertEqual(st, {"enabled": True}, "the switch stays, the model is gone")
         self.assertEqual(aisetup.dir_space(self.d)["used"], 0)
@@ -617,37 +682,76 @@ class Delete(Base):
     def test_files_this_account_cannot_delete_name_the_command_to_run_instead(self):
         self.install()
         real = os.unlink
+        tiny_blobs = {d for d, _s in aiollama.read_manifest(aisetup.model_path(self.d, self.m("tiny")))}
 
         def unlink(p, *a):
-            if p.endswith("tiny.gguf"):
+            if any(os.path.basename(p) == d.replace(":", "-") for d in tiny_blobs) or p.endswith(os.path.join("tiny", "latest")):
                 raise PermissionError(13, "Permission denied", p)
             return real(p, *a)
-        with mock.patch.object(aiweb.os, "unlink", side_effect=unlink):
+        with mock.patch.object(aiollama.os, "unlink", side_effect=unlink):
             self.eng.delete("tiny")
             job = self.job()
         self.assertEqual(job["state"], "failed")
-        self.assertIn("tiny.gguf", job["error"])
+        self.assertIn("latest", job["error"])
         self.assertIn("belong to another account", job["error"])
         self.assertIn(aisetup.commands_for("tiny")["remove"], job["error"])
         self.assertTrue(self.installed("tiny"), "still there, and still known as installed")
-        with mock.patch.object(aiweb.os, "unlink", side_effect=unlink):
+        real_rmtree = shutil.rmtree
+
+        def rmtree(path, ignore_errors=False, onerror=None):
+            if path.endswith("models") and onerror:
+                onerror(os.unlink, os.path.join(path, "blobs", "x"), (PermissionError, PermissionError(13, "Permission denied"), None))
+                return
+            return real_rmtree(path, ignore_errors=ignore_errors, onerror=onerror)
+        with mock.patch.object(aisetup.shutil, "rmtree", side_effect=rmtree):
             self.eng.delete_all()
             job = self.job()
         self.assertEqual(job["state"], "failed")
         self.assertIn("nuc-console-ai remove", job["error"])
-        self.assertFalse(os.path.exists(aisetup.model_path(self.d, self.m("other"))), "what could be deleted was")
+        self.assertFalse(os.path.exists(aisetup.runtime_path(self.d, self.runtime)), "what could be deleted was")
 
-    def test_a_model_the_server_started_here_runs_is_not_deleted_under_it(self):
-        if not POSIX:
-            self.skipTest("alive() is POSIX's: on Windows os.kill(pid, 0) sends a Ctrl+C")
+    @unix_only
+    def test_the_model_the_server_runs_is_deleted_through_it_and_the_server_and_the_advisor_stop(self):
         self.install()
-        self.eng.start_server("tiny")
+        self.eng.use_model("tiny")
         self.assertEqual(self.job()["state"], "done")
         pid = self.eng.snapshot()["server"]["pid"]
         self.eng.delete("tiny")
         self.assertEqual(self.job()["state"], "done")
-        self.assertFalse(self.eng.snapshot()["server"]["running"])
-        self.assertFalse(alive(pid))
+        seen = [(r["path"], r["body"]) for r in fo.requests_seen(self.d)][-2:]
+        self.assertEqual(seen, [("/api/generate", {"model": "tiny", "keep_alive": 0}), ("/api/delete", {"model": "tiny"})],
+                         "unloaded first (Windows cannot delete a file in use), then deleted by the server")
+        self.assertFalse(self.installed("tiny"))
+        self.assertFalse(alive(pid), "it answered with that model: it is stopped too")
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+        st = advisor.read_web_state(self.eng.web_path())
+        self.assertNotIn("enabled", st, "nothing answers with that model any more: the advisor is off")
+        self.assertNotIn("model", st)
+
+    @unix_only
+    def test_another_model_than_the_one_in_use_is_deleted_through_the_server_that_stays(self):
+        self.install()
+        self.eng.use_model("tiny")
+        self.assertEqual(self.job()["state"], "done")
+        pid = self.eng.snapshot()["server"]["pid"]
+        self.eng.delete("other")
+        self.assertEqual(self.job()["state"], "done")
+        self.assertEqual(fo.requests_seen(self.d)[-1]["path"], "/api/delete")
+        self.assertFalse(self.installed("other"))
+        snap = self.eng.snapshot()
+        self.assertEqual((snap["server"]["pid"], snap["server"]["model"], snap["state"][0]), (pid, "tiny", "running"))
+
+    @unix_only
+    def test_everything_stops_the_server_first(self):
+        self.install()
+        self.eng.use_model("tiny")
+        self.assertEqual(self.job()["state"], "done")
+        info = self.eng.child_info
+        self.eng.delete_all()
+        self.assertEqual(self.job()["state"], "done")
+        self.assertTrue(info["gone"].wait(30))
+        self.assertFalse(alive(info["pid"]))
+        self.assertFalse(aisetup.runtime_ready(self.d, self.runtime))
 
 
 def alive(pid):
@@ -716,7 +820,7 @@ class Server(Base):
         self.assertTrue(ok, text)
         return self.job()
 
-    def test_start_runs_the_server_as_a_child_on_loopback_and_stop_ends_it(self):
+    def test_start_runs_the_server_as_a_child_on_loopback_loads_the_model_and_stop_ends_it(self):
         self.install()
         job = self.start()
         self.assertEqual((job["state"], job["error"]), ("done", ""))
@@ -724,28 +828,28 @@ class Server(Base):
         self.assertTrue(srv["running"])
         self.assertEqual(srv["model"], "tiny")
         self.assertTrue(alive(srv["pid"]))
-        port = int(srv["endpoint"].rsplit(":", 1)[1].split("/")[0])
+        port = aisetup.port_of(srv["endpoint"])
         self.assertEqual(srv["endpoint"], "http://127.0.0.1:%d/v1" % port)
         ok, ids, why = aisetup.probe(srv["endpoint"], 2)
-        self.assertEqual((ok, ids), (True, ["tiny"]), "the job ends when the server answers: %s" % why)
+        self.assertEqual((ok, sorted(ids)), (True, ["other", "tiny"]), "it serves every installed model: %s" % why)
+        self.assertEqual([r["body"] for r in fo.requests_seen(self.d) if r["path"] == "/api/generate"], [{"model": "tiny"}], "tiny loaded")
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {"model": "tiny", "endpoint": srv["endpoint"]})
         eff = self.eng.ecfg()["ai"]
         self.assertEqual((eff["model"], eff["endpoint"]), ("tiny", srv["endpoint"]))
-        # how it was started: the command line of `serve`, 127.0.0.1 only, a small environment, its own process group, low priority
+        # how it was started: `ollama serve`, 127.0.0.1 only, a small environment, its own process group, low priority
         argv, kw = self.popens[0]
-        sh = argv.index("/bin/sh")
-        self.assertIn(sh, (0, 3))
-        if sh:
+        self.assertEqual(argv[-2:], [aisetup.runtime_path(self.d, self.runtime), "serve"])
+        if len(argv) > 2:
             self.assertEqual((os.path.basename(argv[0]), argv[1:3]), ("nice", ["-n", "10"]), "low priority, like `serve`")
-        self.assertEqual(argv[argv.index("/bin/sh") + 1], aisetup.runtime_path(self.d, self.runtime))
-        self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1")
-        self.assertEqual(argv[argv.index("-m") + 1], aisetup.model_path(self.d, self.m()))
-        self.assertEqual(argv[argv.index("-a") + 1], "tiny")
-        self.assertEqual(argv[argv.index("--gpu") + 1], "disable", "no hardware reading: CPU only")
         self.assertTrue(kw["start_new_session"])
-        self.assertEqual(set(kw["env"]), {"PATH", "HOME", "TMPDIR", "LANG"})
-        self.assertEqual(kw["env"]["HOME"], os.path.join(self.d, "home"))
-        self.assertNotIn("NUC_CONSOLE_HOME", kw["env"], "this process's environment is not the server's")
+        env = kw["env"]
+        self.assertEqual(env["OLLAMA_HOST"], "127.0.0.1:%d" % port)
+        self.assertEqual(env["OLLAMA_MODELS"], os.path.join(self.d, "models"))
+        self.assertEqual(env["OLLAMA_NO_CLOUD"], "1")
+        self.assertEqual({k for k in env if not k.startswith("OLLAMA_")}, {"PATH", "HOME", "TMPDIR", "LANG"})
+        self.assertEqual(env["HOME"], os.path.join(self.d, "home"))
+        self.assertNotIn("NUC_CONSOLE_HOME", env, "this process's environment is not the server's")
+        self.assertFalse(set(aiollama.GPU_HIDE) & set(env), "the GPU is Ollama's to use")
         info = self.eng.child_info
         ok, text = self.eng.stop_server()
         self.assertTrue(ok, text)
@@ -781,7 +885,8 @@ class Server(Base):
         self.assertEqual(self.eng.snapshot()["server"]["model"], "other")
 
     def test_a_server_that_ends_at_once_is_a_failed_job_with_its_last_line(self):
-        self.install(script=runtime_script("die"))
+        self.install()
+        self.control(die="boom: unknown flag --models")
         job = self.start()
         self.assertEqual(job["state"], "failed")
         self.assertIn("stopped at once (exit status 3)", job["error"])
@@ -804,10 +909,9 @@ class Server(Base):
         self.assertEqual(advisor.read_web_state(self.eng.web_path()).get("endpoint"), None, "nobody answers there now")
 
     def test_a_server_that_ignores_the_request_to_end_is_killed(self):
-        self.install(script=runtime_script("stubborn"))
-        self.eng.start_wait, self.eng.load_wait = 0.1, 0.2   # it never answers: the job gives up, the server stays
-        job = self.start()
-        self.assertIn("has not answered", job["error"])
+        self.install()
+        self.control(stubborn=True)
+        self.start()
         pid = self.eng.snapshot()["server"]["pid"]
         self.eng.stop_grace = 0.2
         info = self.eng.child_info
@@ -859,29 +963,21 @@ class Server(Base):
         taken = holder.getsockname()[1]
         self.addCleanup(holder.close)
         with mock.patch.object(aisetup, "DEFAULT_PORT", taken):
-            port = self.eng._pick_port(None)
+            port = aisetup.pick_port(None)
         self.assertNotEqual(port, taken)
-        self.assertTrue(taken < port < taken + aiweb.PORT_TRIES)
-        with mock.patch.object(aisetup, "DEFAULT_PORT", taken), mock.patch.object(aiweb, "PORT_TRIES", 1):
-            self.assertRaises(aisetup.SetupError, self.eng._pick_port, None)
+        self.assertTrue(taken < port < taken + aisetup.PORT_TRIES)
+        with mock.patch.object(aisetup, "DEFAULT_PORT", taken), mock.patch.object(aisetup, "PORT_TRIES", 1):
+            self.assertRaises(aisetup.SetupError, aisetup.pick_port, None)
 
-    def test_the_gpu_plan_of_serve_decides_the_layers(self):
+    def test_config_gpu_no_hides_the_gpus_from_the_server(self):
         self.install()
-        hw = tas.hw_of(65536, 60000, [tas.gpu_of("RTX", 24576, 22000)])
-        self.eng.hw_fn = lambda: hw
-        self.eng.models[0] = dict(self.m("tiny"), approx_mb=2000, ram_mb=2800, layers=32)
-        with mock.patch.dict(sys.modules, {"aihw": tas.FakeAihw(hw)}):
-            self.start()
-            argv = self.popens[0][0]
-            self.assertEqual(argv[argv.index("--gpu") + 1], "auto")
-            self.assertEqual(argv[argv.index("-ngl") + 1], str(aisetup.ALL_LAYERS))
-            self.eng.stop_server()
-            self.eng.child_info["gone"].wait(30)
-            self.cfg["ai"]["gpu"] = "no"
-            self.start()
-            argv = self.popens[1][0]
-            self.assertEqual(argv[argv.index("--gpu") + 1], "disable", "[ai] gpu = no")
-        self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1", "whatever the plan, this machine only")
+        self.cfg["ai"]["gpu"] = "no"
+        self.start()
+        env = self.popens[0][1]["env"]
+        for k in aiollama.GPU_HIDE:
+            self.assertEqual(env[k], "-1", k)
+        self.assertEqual(env["OLLAMA_HOST"].split(":")[0], "127.0.0.1", "whatever the plan, this machine only")
+        self.assertEqual(self.eng.snapshot()["server"]["where"], "CPU only")
 
 
 # ------------------------------------------------------------------------------------------------------------------------- chat
@@ -1296,7 +1392,7 @@ class WebUse(WebBase):
 
     def test_one_click_on_a_model_sets_it_up_and_the_page_shows_it_working_and_then_on(self):
         reached, release = threading.Event(), threading.Event()
-        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.archive[1]) else None
         where = self.go("use", {"model": "tiny", "back": "view=ai"})
         self.assertEqual(where, "/?view=ai&sel=tiny")
         self.assertTrue(reached.wait(30))
@@ -1418,7 +1514,7 @@ class WebUse(WebBase):
             self.assertIn('<a class="bt" href="/?view=ai&amp;sel=tiny">No</a>', body)
             self.assertEqual(self.go("on", yes), "/?view=ai&sel=tiny")
             self.assertEqual(self.job()["state"], "done")
-        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+        self.assertEqual((self.requests(), self.pulls()), (["/" + self.archive[0]], ["tiny:test"]))
         self.assertIn('<span class="pl g big">ON</span>', self.page())
 
     def test_without_a_recommendation_there_is_nothing_to_ask_the_notice_says_so(self):
@@ -1455,7 +1551,7 @@ class WebUse(WebBase):
 
     def test_cancel_over_http(self):
         reached, release = threading.Event(), threading.Event()
-        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.archive[1]) else None
         self.go("use", {"model": "tiny"})
         self.assertTrue(reached.wait(30))
         self.go("cancel")
@@ -1465,7 +1561,7 @@ class WebUse(WebBase):
         self.assertFalse(self.installed("tiny"))
 
     def test_a_failure_is_shown_in_red_with_its_reason(self):
-        self.httpd.files.pop("/tiny.gguf")
+        self.httpd.files.clear()
         self.go("use", {"model": "tiny"})
         self.job()
         body = self.page()
@@ -1739,7 +1835,7 @@ class ConsoleKeys(WebBase):
             data, av, rows = self.view()
             self.press(av, rows, "e")
             self.assertEqual(av.confirm[:2], ("on", "tiny"))
-            total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
+            total = len(self.archive[1]) + self.SIZES["tiny"]
             self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % screens.ai_mb(total / 2 ** 20))
             self.assertIn("Turn AI on with Tiny test model", self.screen(av, data).splitlines()[-1])
             self.assertEqual(self.httpd.requests, [], "nothing is fetched before the y")
@@ -1751,11 +1847,11 @@ class ConsoleKeys(WebBase):
             self.assertIsNone(av.confirm)
             self.assertEqual(self.job()["state"], "done")
         self.assertEqual(self.eng.snapshot()["state"][0], "running")
-        self.assertEqual(self.requests(), ["/" + RUNTIME_NAME, "/tiny.gguf"])
+        self.assertEqual((self.requests(), self.pulls()), (["/" + self.archive[0]], ["tiny:test"]))
 
     def test_the_screen_shows_the_progress_and_c_cancels(self):
         reached, release = threading.Event(), threading.Event()
-        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.rt_bytes) else None
+        self.eng.progress_hook = lambda job: (reached.set(), release.wait(30)) if job["step"] == "tiny" and job["done"] > len(self.archive[1]) else None
         data, av, rows = self.view()
         self.select(av, rows, "tiny")
         self.press(av, rows, "u")
@@ -1808,7 +1904,7 @@ class ConsoleKeys(WebBase):
         self.assertEqual(av.msg, ("warn", "nothing is downloaded: nothing to delete"))
 
     def test_a_failure_is_a_line_and_the_screen_goes_on(self):
-        self.httpd.files.pop("/tiny.gguf")
+        self.httpd.files.clear()
         data, av, rows = self.view()
         self.select(av, rows, "tiny")
         self.press(av, rows, "u")

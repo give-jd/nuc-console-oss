@@ -1694,7 +1694,8 @@ def ai_status_parts(st, cat, ids):
     model = hclean(st.get("model"), 80)
     out["model"] = ([_sp("●", "accent"), _sp(" "), _sp(model, None, True), _sp("  in the catalog", "muted") if model in ids else _sp("  not in the catalog", "warn")]
                     if model else [_sp("· none chosen ([ai] model is empty)", "muted")])
-    out["run"] = ([_sp("✔ installed", "ok")] + ([_sp(f" ({hclean(rt.get('version'), 20)})", "muted")] if rt.get("version") else []) if rt.get("installed")
+    rt_name = " ".join(x for x in (hclean(rt.get("name"), 20), hclean(rt.get("version"), 20)) if x)
+    out["run"] = ([_sp("✔ installed", "ok")] + ([_sp(f" ({rt_name})", "muted")] if rt_name else []) if rt.get("installed")
                   else [_sp("! not installed", "warn"), _sp(": setup downloads it", "muted")])
     out["files"] = hclean(dd(cat).get("dir"), 120)
     out["ans"] = [out["short"]] + ([_sp(" · " + out["detail"], "muted")] if out["detail"] else [])
