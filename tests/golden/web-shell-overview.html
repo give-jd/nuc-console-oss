@@ -9,7 +9,7 @@
 <meta http-equiv="refresh" content="2">
 </noscript>
 <title>demo-host · overview · nuc-console</title>
-<link rel="stylesheet" href="/s/app.17e43282.css">
+<link rel="stylesheet" href="/s/app.4c0024d8.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="c04f169b2e">
@@ -97,67 +97,97 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?app=1&amp;frag=1">
-<article class="card s2 st-err" data-card="attention" data-rev="ff0cc129ea" id="c-attention" data-state="err">
+<article class="card s2 st-err" data-card="attention" data-rev="6bdda947b3" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
-<p class="msg prob lv-err" data-problem="db-open-lan">
-<span class="sym">✖</span> 1 DB/broker open on LAN<span class="d why">
-<code class="pid" title="Database/broker open on the LAN">db-open-lan</code> · data services should not be reachable from the network</span>
-<span class="d fix">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>
+<div class="msg prob lv-err" data-problem="db-open-lan">
+<span class="sym">✖</span>
+<span class="pr">1 DB/broker open on LAN <code class="pid" title="Database/broker open on the LAN">db-open-lan</code>
+</span>
+<span class="d why">data services should not be reachable from the network</span>
+<details class="fix" data-k="fix-db-open-lan">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>
 </span>
-</p>
-<p class="msg prob lv-err" data-problem="over-exposed">
-<span class="sym">✖</span> 2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet, shop-db :5432 LAN &gt; local<span class="d why">
-<code class="pid" title="Service reaches further than config.ini says">over-exposed</code> · you declared under [expose] how far it should be reachable, and it is reachable from more places</span>
-<span class="d fix">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
+</details>
+</div>
+<div class="msg prob lv-err" data-problem="over-exposed">
+<span class="sym">✖</span>
+<span class="pr">2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet, shop-db :5432 LAN &gt; local <code class="pid" title="Service reaches further than config.ini says">over-exposed</code>
+</span>
+<span class="d why">you declared under [expose] how far it should be reachable, and it is reachable from more places</span>
+<details class="fix" data-k="fix-over-exposed">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem over-exposed --reason &quot;...&quot;</code>
 </span>
-</p>
-<p class="msg prob lv-warn" data-problem="container-exited">
-<span class="sym">!</span> 1 container exited with an error<span class="d why">
-<code class="pid" title="Container exited with an error">container-exited</code> · a service that should run is down</span>
-<span class="d fix">fix: <code class="cmd">docker ps -a; docker logs &lt;name&gt;; docker start &lt;name&gt; or remove it if obsolete</code>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="container-exited">
+<span class="sym">!</span>
+<span class="pr">1 container exited with an error <code class="pid" title="Container exited with an error">container-exited</code>
+</span>
+<span class="d why">a service that should run is down</span>
+<details class="fix" data-k="fix-container-exited">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">docker ps -a; docker logs &lt;name&gt;; docker start &lt;name&gt; or remove it if obsolete</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem container-exited --reason &quot;...&quot;</code>
 </span>
-</p>
-<p class="msg prob lv-warn" data-problem="journal-errors">
-<span class="sym">!</span> 2 errors in this boot&#x27;s journal<span class="d why">
-<code class="pid" title="Errors in this boot&#x27;s journal">journal-errors</code> · usually noise (docker veth races, firmware ACPI), sometimes a real fault</span>
-<span class="d fix">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="journal-errors">
+<span class="sym">!</span>
+<span class="pr">2 errors in this boot&#x27;s journal <code class="pid" title="Errors in this boot&#x27;s journal">journal-errors</code>
+</span>
+<span class="d why">usually noise (docker veth races, firmware ACPI), sometimes a real fault</span>
+<details class="fix" data-k="fix-journal-errors">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem journal-errors --reason &quot;...&quot;</code>
 </span>
-</p>
-<p class="msg prob lv-warn" data-problem="docker-bypass">
-<span class="sym">!</span> 1 Docker port bypassing ufw (DOCKER-USER empty)<span class="d why">
-<code class="pid" title="Docker ports bypass ufw">docker-bypass</code> · a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
-<span class="d fix">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="docker-bypass">
+<span class="sym">!</span>
+<span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
+</span>
+<span class="d why">a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
+<details class="fix" data-k="fix-docker-bypass">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
 </span>
-</p>
-<p class="msg prob lv-warn" data-problem="funnel-public">
-<span class="sym">!</span> 1 service public on the Internet (Funnel :8444)<span class="d why">
-<code class="pid" title="Service public on the Internet (Tailscale Funnel)">funnel-public</code> · anyone on the Internet can reach it</span>
-<span class="d fix">fix: <code class="cmd">tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off</code>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="funnel-public">
+<span class="sym">!</span>
+<span class="pr">1 service public on the Internet (Funnel :8444) <code class="pid" title="Service public on the Internet (Tailscale Funnel)">funnel-public</code>
+</span>
+<span class="d why">anyone on the Internet can reach it</span>
+<details class="fix" data-k="fix-funnel-public">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem funnel-public --reason &quot;...&quot;</code>
 </span>
-</p>
+</details>
+</div>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>
 <p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
 </p>
 </div>
 </article>
-<article class="card s2 st-err" data-card="exposure" data-rev="5da042b598" id="c-exposure" data-state="err">
+<article class="card s2 st-err" data-card="exposure" data-rev="be3ec8a9b8" id="c-exposure" data-state="err">
 <div class="ch">
 <h3>EXPOSURE</h3>
 <span class="chip st-err">✖ err</span>
@@ -180,13 +210,13 @@
 </colgroup>
 <thead>
 <tr>
-<th scope="col">Port</th>
+<th class="n" scope="col">Port</th>
 <th scope="col">Service</th>
-<th class="c" scope="col">Loc</th>
+<th class="c p3" scope="col">Loc</th>
 <th class="c" scope="col">LAN</th>
 <th class="c" scope="col">TS</th>
 <th class="c" scope="col">Net</th>
-<th scope="col">Note</th>
+<th class="p2" scope="col">Note</th>
 </tr>
 </thead>
 <tbody>
@@ -195,9 +225,9 @@
 </th>
 </tr>
 <tr data-key="8444/t:INTERNET">
-<td>8444/tcp</td>
+<td class="n">8444/tcp</td>
 <td> funnel /webhook → 127.0.0.1:5678/webhook</td>
-<td class="c">
+<td class="c p3">
 <span class="t-muted">·</span>
 </td>
 <td class="c">
@@ -209,7 +239,7 @@
 <td class="c">
 <span class="t-err-strong">●</span>
 </td>
-<td>
+<td class="p2">
 <span class="t-err">beyond config.ini: tailnet</span>
 </td>
 </tr>
@@ -218,10 +248,10 @@
 </th>
 </tr>
 <tr data-key="5432/t:LAN">
-<td>5432/tcp</td>
+<td class="n">5432/tcp</td>
 <td>
 <span class="t-err">⚠</span>shop-db-1</td>
-<td class="c">
+<td class="c p3">
 <span class="t-neutral">●</span>
 </td>
 <td class="c">
@@ -233,14 +263,14 @@
 <td class="c">
 <span class="t-muted">·</span>
 </td>
-<td>
+<td class="p2">
 <span class="t-err">beyond config.ini: local</span>
 </td>
 </tr>
 <tr data-key="8080/t:LAN">
-<td>8080/tcp</td>
+<td class="n">8080/tcp</td>
 <td> shop-web-1</td>
-<td class="c">
+<td class="c p3">
 <span class="t-neutral">●</span>
 </td>
 <td class="c">
@@ -252,14 +282,14 @@
 <td class="c">
 <span class="t-muted">·</span>
 </td>
-<td>
+<td class="p2">
 <span class="t-muted">expected: LAN · declared: docker</span>
 </td>
 </tr>
 <tr data-key="22/t:LAN">
-<td>22/tcp</td>
+<td class="n">22/tcp</td>
 <td> sshd</td>
-<td class="c">
+<td class="c p3">
 <span class="t-neutral">●</span>
 </td>
 <td class="c">
@@ -271,7 +301,7 @@
 <td class="c">
 <span class="t-muted">·</span>
 </td>
-<td>
+<td class="p2">
 <span class="t-muted">LAN only 192.168.0.0/24</span>
 </td>
 </tr>
@@ -289,7 +319,7 @@
 </ul>
 </div>
 </article>
-<article class="card s1 st-err" data-card="databases" data-rev="382f8d600a" id="c-databases" data-state="err">
+<article class="card s1 st-err" data-card="databases" data-rev="37abbee8d1" id="c-databases" data-state="err">
 <div class="ch">
 <h3>DATABASE</h3>
 <span class="note">3 running · 1 exposed</span>
@@ -310,7 +340,7 @@
 </th>
 <th scope="col">Kind</th>
 <th scope="col">Name</th>
-<th scope="col">Ports</th>
+<th class="n p2" scope="col">Ports</th>
 <th scope="col">Reach</th>
 </tr>
 </thead>
@@ -323,7 +353,7 @@
 <span class="t-strong">postgres </span>
 </td>
 <td>shop-db-1</td>
-<td>*5432</td>
+<td class="n p2">*5432</td>
 <td>
 <span class="t-err">exposed</span>
 </td>
@@ -349,7 +379,7 @@
 <span class="t-strong">postgres </span>
 </td>
 <td>blog-db-1</td>
-<td>lo:5433</td>
+<td class="n p2">lo:5433</td>
 <td>
 <span class="t-muted">local only</span>
 </td>
@@ -375,7 +405,7 @@
 <span class="t-strong">redis    </span>
 </td>
 <td>cache-1</td>
-<td>lo:6379</td>
+<td class="n p2">lo:6379</td>
 <td>
 <span class="t-muted">local only</span>
 </td>
@@ -399,7 +429,7 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="firewall" data-rev="2b8907c1c2" id="c-firewall" data-state="warn">
+<article class="card s1 st-warn" data-card="firewall" data-rev="b0462b1a7b" id="c-firewall" data-state="warn">
 <div class="ch">
 <h3>FIREWALL</h3>
 <span class="chip st-warn">! warn</span>
@@ -439,25 +469,25 @@
 <thead>
 <tr>
 <th scope="col">To</th>
-<th scope="col">Action</th>
-<th scope="col">From</th>
+<th class="n" scope="col">Action</th>
+<th class="p1" scope="col">From</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>22/tcp</td>
-<td>ALLOW IN</td>
-<td>192.168.0.0/24</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">192.168.0.0/24</td>
 </tr>
 <tr>
 <td>Anywhere on tailscale0</td>
-<td>ALLOW IN</td>
-<td>Anywhere</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
 </tr>
 <tr class="t-warn">
 <td>41641/udp</td>
-<td>ALLOW IN</td>
-<td>Anywhere</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
 </tr>
 </tbody>
 </table>
@@ -503,7 +533,7 @@
 </section>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="boot" data-rev="5e932180b8" id="c-boot" data-state="warn">
+<article class="card s1 st-warn" data-card="boot" data-rev="bf4e1929b3" id="c-boot" data-state="warn">
 <div class="ch">
 <h3>BOOT</h3>
 <span class="chip st-warn">! warn</span>
@@ -512,30 +542,30 @@
 <p class="ln">   boot finished in <span class="t-strong">58.4s</span>   kernel 6.8.0-demo   up 5d 0h</p>
 <figure class="timeline">
 <svg class="tl" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="boot timeline" preserveAspectRatio="none">
-<rect class="seg seg-firmware" x="0.0" y="0" width="8.7" height="8"/>
-<rect class="seg seg-loader" x="8.7" y="0" width="3.4" height="8"/>
-<rect class="seg seg-kernel" x="12.2" y="0" width="2.1" height="8"/>
-<rect class="seg seg-initrd" x="14.2" y="0" width="1.9" height="8"/>
-<rect class="seg seg-userspace" x="16.1" y="0" width="83.9" height="8"/>
+<rect class="tp tp-firmware" x="0.0" y="0" width="8.7" height="8"/>
+<rect class="tp tp-loader" x="8.7" y="0" width="3.4" height="8"/>
+<rect class="tp tp-kernel" x="12.2" y="0" width="2.1" height="8"/>
+<rect class="tp tp-initrd" x="14.2" y="0" width="1.9" height="8"/>
+<rect class="tp tp-userspace" x="16.1" y="0" width="83.9" height="8"/>
 </svg>
 <ul class="legend">
-<li class="seg-firmware">
+<li class="tp-firmware">
 <span class="sw">
 </span> firmware <span class="n">5.1s</span>
 </li>
-<li class="seg-loader">
+<li class="tp-loader">
 <span class="sw">
 </span> loader <span class="n">2.0s</span>
 </li>
-<li class="seg-kernel">
+<li class="tp-kernel">
 <span class="sw">
 </span> kernel <span class="n">1.2s</span>
 </li>
-<li class="seg-initrd">
+<li class="tp-initrd">
 <span class="sw">
 </span> initrd <span class="n">1.1s</span>
 </li>
-<li class="seg-userspace">
+<li class="tp-userspace">
 <span class="sw">
 </span> userspace <span class="n">49.0s</span>
 </li>
@@ -553,7 +583,7 @@
 <thead>
 <tr>
 <th scope="col">Unit</th>
-<th scope="col">
+<th class="p2" scope="col">
 </th>
 <th class="r n" scope="col">Time</th>
 </tr>
@@ -561,7 +591,7 @@
 <tbody>
 <tr>
 <td>systemd-networkd-wait-online.service</td>
-<td>
+<td class="p2">
 <svg class="bar st-err t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="100%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="100" height="8"/>
@@ -573,7 +603,7 @@
 </tr>
 <tr>
 <td>docker.service</td>
-<td>
+<td class="p2">
 <svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="20%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="20" height="8"/>
@@ -585,7 +615,7 @@
 </tr>
 <tr>
 <td>snapd.service</td>
-<td>
+<td class="p2">
 <svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="15%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="15" height="8"/>
@@ -595,7 +625,7 @@
 </tr>
 <tr>
 <td>cloud-init.service</td>
-<td>
+<td class="p2">
 <svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="10%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="10" height="8"/>
@@ -623,7 +653,7 @@
 </th>
 <th scope="col">Entry</th>
 <th class="r n" scope="col">Count</th>
-<th scope="col">Last</th>
+<th class="p1" scope="col">Last</th>
 </tr>
 </thead>
 <tbody>
@@ -633,7 +663,7 @@
 </td>
 <td>kernel</td>
 <td class="r n">4×</td>
-<td>
+<td class="p1">
 <span class="t-muted">example warning</span>
 </td>
 </tr>
@@ -691,7 +721,7 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="webapps" data-rev="a49548f196" id="c-webapps" data-state="ok">
+<article class="card s1 st-ok" data-card="webapps" data-rev="c1c2febf80" id="c-webapps" data-state="ok">
 <div class="ch">
 <h3>WEB APPS</h3>
 <span class="note">4 active · 1 down (expected)</span>
@@ -711,9 +741,9 @@
 <th scope="col">
 </th>
 <th scope="col">Web app</th>
-<th scope="col">Ports</th>
+<th class="n p2" scope="col">Ports</th>
 <th scope="col">Reach</th>
-<th scope="col">
+<th class="p1" scope="col">
 </th>
 </tr>
 </thead>
@@ -723,11 +753,11 @@
 <span class="t-ok">●</span>
 </td>
 <td>shop-web</td>
-<td>8080</td>
+<td class="n p2">8080</td>
 <td>
 <span class="t-warn">LAN+tailnet</span>
 </td>
-<td>
+<td class="p1">
 </td>
 </tr>
 <tr data-key="admin-console">
@@ -735,11 +765,11 @@
 <span class="t-warn">○</span>
 </td>
 <td>admin-console</td>
-<td>9443</td>
+<td class="n p2">9443</td>
 <td>
 <span class="t-muted">not listening</span>
 </td>
-<td>
+<td class="p1">
 <span class="t-warn">DOWN (expected)</span>
 </td>
 </tr>
@@ -748,11 +778,11 @@
 <span class="t-warn">●</span>
 </td>
 <td>funnel /webhook</td>
-<td>8444</td>
+<td class="n p2">8444</td>
 <td>
 <span class="t-err">Internet</span>
 </td>
-<td>
+<td class="p1">
 <span class="t-muted">not declared</span>
 </td>
 </tr>
@@ -761,11 +791,11 @@
 <span class="t-warn">●</span>
 </td>
 <td>blog-app-1</td>
-<td>8081</td>
+<td class="n p2">8081</td>
 <td>
 <span class="t-muted">local only</span>
 </td>
-<td>
+<td class="p1">
 <span class="t-muted">not declared</span>
 </td>
 </tr>
@@ -774,11 +804,11 @@
 <span class="t-warn">●</span>
 </td>
 <td>node</td>
-<td>5678</td>
+<td class="n p2">5678</td>
 <td>
 <span class="t-muted">local only</span>
 </td>
-<td>
+<td class="p1">
 <span class="t-muted">not declared</span>
 </td>
 </tr>
@@ -786,138 +816,185 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="system" data-rev="2c431ede94" id="c-system" data-state="ok">
+<article class="card s1 st-ok" data-card="system" data-rev="b97c3be3aa" id="c-system" data-state="ok">
 <div class="ch">
 <h3>SYSTEM</h3>
 <span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="cb">
-<p class="ln"> RAM   <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<p class="ln bl">
+<span class="lb">RAM</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="32.6" height="8"/>
 </svg>
-<span class="n">10.2G/31.2G   cache 4.8G</span>
+<span class="n">10.2G/31.2G</span>
+<span class="bx">cache 4.8G</span>
 </p>
-<p class="ln"> DISK  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<p class="ln bl">
+<span class="lb">DISK</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="37.5" height="8"/>
 </svg>
 <span class="n">180.0G/480.0G</span>
 </p>
-<p class="ln"> TEMP  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="72%" preserveAspectRatio="none">
+<p class="ln bl">
+<span class="lb">TEMP</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="72%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="72" height="8"/>
 </svg>
 <span class="n">72°C/100°C</span>
+<span class="bx">limits 80/90°C   clock 4.1/4.8 GHz</span>
 </p>
-<p class="ln"> NVMe  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="52%" preserveAspectRatio="none">
+<p class="ln bl">
+<span class="lb">NVMe</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="52%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="51.9" height="8"/>
 </svg>
-<span class="n">44°C/85°C</span>   limits 68/76°C</p>
-<p class="ln"> CPU   <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<span class="n">44°C/85°C</span>
+<span class="bx">limits 68/76°C</span>
+</p>
+<p class="ln bl">
+<span class="lb">CPU</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="6.3" height="8"/>
 </svg>
-<span class="n">6%   16 threads</span>
+<span class="n">6%</span>
+<span class="bx">16 threads</span>
 </p>
 <ul class="grid">
-<li>  0 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">0</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="4" height="8"/>
 </svg>
-<span class="n">  4%</span>
+<span class="n">4%</span>
 </li>
-<li>  1 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">1</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="2" height="8"/>
 </svg>
-<span class="n">  2%</span>
+<span class="n">2%</span>
 </li>
-<li>  2 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">2</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="6" height="8"/>
 </svg>
-<span class="n">  6%</span>
+<span class="n">6%</span>
 </li>
-<li>  3 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">3</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="1" height="8"/>
 </svg>
-<span class="n">  1%</span>
+<span class="n">1%</span>
 </li>
-<li>  4 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="62%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">4</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="62%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="62" height="8"/>
 </svg>
-<span class="n"> 62%</span>
+<span class="n">62%</span>
 </li>
-<li>  5 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">5</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="4" height="8"/>
 </svg>
-<span class="n">  4%</span>
+<span class="n">4%</span>
 </li>
-<li>  6 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">6</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="2" height="8"/>
 </svg>
-<span class="n">  2%</span>
+<span class="n">2%</span>
 </li>
-<li>  7 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">7</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="1" height="8"/>
 </svg>
-<span class="n">  1%</span>
+<span class="n">1%</span>
 </li>
-<li>  8 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">8</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="3" height="8"/>
 </svg>
-<span class="n">  3%</span>
+<span class="n">3%</span>
 </li>
-<li>  9 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">9</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="2" height="8"/>
 </svg>
-<span class="n">  2%</span>
+<span class="n">2%</span>
 </li>
-<li> 10 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">10</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="2" height="8"/>
 </svg>
-<span class="n">  2%</span>
+<span class="n">2%</span>
 </li>
-<li> 11 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">11</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="1" height="8"/>
 </svg>
-<span class="n">  1%</span>
+<span class="n">1%</span>
 </li>
-<li> 12 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">12</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="6" height="8"/>
 </svg>
-<span class="n">  6%</span>
+<span class="n">6%</span>
 </li>
-<li> 13 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">13</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="1" height="8"/>
 </svg>
-<span class="n">  1%</span>
+<span class="n">1%</span>
 </li>
-<li> 14 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">14</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="2" height="8"/>
 </svg>
-<span class="n">  2%</span>
+<span class="n">2%</span>
 </li>
-<li> 15 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<li class="bl">
+<span class="lb">15</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="1" height="8"/>
 </svg>
-<span class="n">  1%</span>
+<span class="n">1%</span>
 </li>
 </ul>
 <p class="ln">
@@ -932,16 +1009,16 @@
 <thead>
 <tr>
 <th scope="col">Container</th>
-<th scope="col">RAM</th>
-<th scope="col">
+<th class="n" scope="col">RAM</th>
+<th class="p2" scope="col">
 </th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>shop-api-1</td>
-<td>520M</td>
-<td>
+<td class="n">520M</td>
+<td class="p2">
 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="100%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="100" height="8"/>
@@ -950,8 +1027,8 @@
 </tr>
 <tr>
 <td>shop-db-1</td>
-<td>410M</td>
-<td>
+<td class="n">410M</td>
+<td class="p2">
 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="79%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="78.8" height="8"/>
@@ -960,8 +1037,8 @@
 </tr>
 <tr>
 <td>shop-web-1</td>
-<td>310M</td>
-<td>
+<td class="n">310M</td>
+<td class="p2">
 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="60%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="59.6" height="8"/>
@@ -970,8 +1047,8 @@
 </tr>
 <tr>
 <td>blog-db-1</td>
-<td>260M</td>
-<td>
+<td class="n">260M</td>
+<td class="p2">
 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="50%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="50" height="8"/>
@@ -980,8 +1057,8 @@
 </tr>
 <tr>
 <td>blog-app-1</td>
-<td>150M</td>
-<td>
+<td class="n">150M</td>
+<td class="p2">
 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="29%" preserveAspectRatio="none">
 <rect class="bg" x="0" y="0" width="100" height="8"/>
 <rect class="fg" x="0" y="0" width="28.8" height="8"/>
@@ -995,7 +1072,7 @@
 </p>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="network_traffic" data-rev="67e3517dab" id="c-network_traffic" data-state="ok">
+<article class="card s1 st-ok" data-card="network_traffic" data-rev="998dbd494a" id="c-network_traffic" data-state="ok">
 <div class="ch">
 <h3>NETWORK TRAFFIC</h3>
 <span class="note">↓ received · ↑ sent</span>
@@ -1015,12 +1092,12 @@
 <tr>
 <th scope="col">Interface</th>
 <th class="n" scope="col">Received</th>
-<th scope="col">
+<th class="p3" scope="col">
 </th>
-<th class="n" scope="col">Sent</th>
-<th scope="col">
+<th class="n p1" scope="col">Sent</th>
+<th class="p3" scope="col">
 </th>
-<th scope="col">Total</th>
+<th class="p2" scope="col">Total</th>
 </tr>
 </thead>
 <tbody>
@@ -1028,19 +1105,19 @@
 <td>eth0</td>
 <td class="n">
 <span class="t-ok">↓</span> 1.8 MB/s</td>
-<td>
+<td class="p3">
 <svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
 <polyline fill="none" points="0.0,7.6 2.8,8.2 5.5,6.0 8.3,6.5 11.0,4.3 13.8,2.2 16.6,3.0 19.3,1.2 22.1,2.4 24.8,1.0 27.6,2.6 30.3,1.6 33.1,3.6 35.9,3.1 38.6,2.6 41.4,5.1 44.1,4.8 46.9,7.3 49.7,7.0 52.4,9.4 55.2,8.9 57.9,11.0 60.7,10.1 63.4,11.8 66.2,10.5 69.0,9.0 71.7,10.0 74.5,8.1 77.2,8.8 80.0,6.7"/>
 </svg>
 </td>
-<td class="n">
+<td class="n p1">
 <span class="t-accent">↑</span> 372.4 kB/s</td>
-<td>
+<td class="p3">
 <svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
 <polyline fill="none" points="0.0,5.3 2.8,3.3 5.5,1.4 8.3,2.5 11.0,1.0 13.8,2.5 16.6,1.4 19.3,3.3 22.1,2.6 24.8,4.9 27.6,4.5 30.3,4.2 33.1,6.7 35.9,6.4 38.6,8.8 41.4,8.4 44.1,10.5 46.9,9.7 49.7,11.5 52.4,10.3 55.2,11.7 57.9,10.1 60.7,8.3 63.4,9.1 66.2,7.0 69.0,7.6 71.7,5.4 74.5,5.9 77.2,3.8 80.0,4.5"/>
 </svg>
 </td>
-<td>
+<td class="p2">
 <span class="t-muted"> ↓40.2G ↑6.3G</span>
 </td>
 </tr>
@@ -1063,7 +1140,7 @@
 </ul>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="docker_disk" data-rev="2dbc1b51e7" id="c-docker_disk" data-state="ok">
+<article class="card s1 st-ok" data-card="docker_disk" data-rev="f2e79d87cb" id="c-docker_disk" data-state="ok">
 <div class="ch">
 <h3>DOCKER · DISK</h3>
 <span class="chip st-ok">✔ ok</span>
@@ -1080,33 +1157,33 @@
 <thead>
 <tr>
 <th scope="col">Type</th>
-<th class="r n" scope="col">Count</th>
-<th scope="col">In use</th>
+<th class="r n p3" scope="col">Count</th>
+<th class="n p2" scope="col">In use</th>
 <th class="n" scope="col">Size</th>
-<th scope="col">Unused</th>
+<th class="p1" scope="col">Unused</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Images</td>
-<td class="r n">14</td>
-<td>(6 in use)</td>
+<td class="r n p3">14</td>
+<td class="n p2">(6 in use)</td>
 <td class="n">5.2GB</td>
-<td>unused 2.1GB (40%)</td>
+<td class="p1">unused 2.1GB (40%)</td>
 </tr>
 <tr>
 <td>Containers</td>
-<td class="r n">7</td>
-<td>(6 in use)</td>
+<td class="r n p3">7</td>
+<td class="n p2">(6 in use)</td>
 <td class="n">180MB</td>
-<td>unused 0B (0%)</td>
+<td class="p1">unused 0B (0%)</td>
 </tr>
 <tr>
 <td>Local Volumes</td>
-<td class="r n">5</td>
-<td>(5 in use)</td>
+<td class="r n p3">5</td>
+<td class="n p2">(5 in use)</td>
 <td class="n">1.4GB</td>
-<td>unused 0B (0%)</td>
+<td class="p1">unused 0B (0%)</td>
 </tr>
 </tbody>
 </table>

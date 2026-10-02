@@ -389,6 +389,26 @@ class Shell(unittest.TestCase):
         for c in used - {"card", "s1", "st-ok", "state", "bg", "fg", "c-a", "tbl"}:  # the article and its header are the shell's own (card_article)
             self.assertIn("." + c, css, c)
 
+    def test_every_class_of_the_thirteen_cards_is_styled(self):
+        """The markup of all the cards of the demo (the three demo systems), not of a hand-made sample: a class without a rule is a card that
+        looks like the console's text. Matched as whole class names: `.c` is not `.cb`."""
+        css, used, saved = webcss.CSS, set(), render.DEMO_OS
+        try:
+            for os_name in (None, "darwin", "windows"):
+                render.DEMO_OS = os_name
+                self.srv.cache.clear()
+                _, _, body = get(self.srv, "/?app=1")
+                for art in re.findall(r"<article.*?</article>", body, re.S):
+                    used.update(c for cl in re.findall(r'class="([^"]*)"', art) for c in cl.split())
+        finally:
+            render.DEMO_OS = saved
+            self.srv.cache.clear()
+        self.assertGreater(len(used), 40)
+        own = {"card", "s1", "s2", "s3", "s4", "st-ok", "st-warn", "st-err", "st-down", "st-unknown", "st-info"}  # the article's: card_article
+        bare = [c for c in sorted(used - own) if not c.startswith("c-")  # <col class="c-KEY">: a hook for the column's key, not a style
+                and not re.search(r"\.%s(?![\w-])" % re.escape(c), css)]
+        self.assertEqual(bare, [], "classes the cards emit that the style sheet does not know")
+
     # ---- the settings page
     def test_the_settings_page_has_appearance_export_and_about(self):
         st, h, body = get(self.srv, "/?view=settings", headers={"Cookie": "nuc_ui=1.tl.pv"})

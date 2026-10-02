@@ -293,7 +293,8 @@ class WebOnlyFieldsTests(unittest.TestCase):
         out = htmlview.html(p)
         self.assertIn('class="msg prob lv-err"', out)
         self.assertIn('data-problem="db-open-lan"', out)
-        self.assertIn('<code class="pid" title="Title &lt;b&gt;">db-open-lan</code> · data services stay home', out)
+        self.assertIn('<code class="pid" title="Title &lt;b&gt;">db-open-lan</code></span><span class="d why">data services stay home</span>', out)
+        self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('fix: <code class="cmd">publish on 127.0.0.1</code>', out)
         self.assertIn('accept if known: <code class="cmd">sudo x --problem db-open-lan --reason &quot;...&quot;</code>', out)
         bare = htmlview.html(ui.Problem("warn", "no id"))
@@ -302,13 +303,21 @@ class WebOnlyFieldsTests(unittest.TestCase):
 
     def test_accepted_hint_rich_msg_and_full_names(self):
         out = htmlview.html(ui.Accepted("text", "docker-bypass", "known <i>", "3 h ago", "sudo x --forget docker-bypass"))
-        self.assertIn('<code class="pid">docker-bypass</code> text', out)
+        self.assertIn('<span class="pr">text <code class="pid">docker-bypass</code></span>', out)
         self.assertIn("reason: “known &lt;i&gt;” · accepted 3 h ago · undo: <code class=\"cmd\">sudo x --forget docker-bypass</code>", out)
         self.assertEqual(htmlview.html(ui.Hint("list", "nuc-console-problems")), '<p class="hint d">list: <code class="cmd">nuc-console-problems</code></p>')
         rich = htmlview.html(ui.RichMsg("err", [Span("ufw OFF", "err_strong"), ": no"]))
         self.assertIn('<span class="t-err-strong">ufw OFF</span>: no', rich)
         self.assertIn("a-very-long-name", htmlview.html(Span("a-very-lo…", full="a-very-long-name")))
         self.assertNotIn("…", htmlview.html(Span("a-very-lo…", full="a-very-long-name")))
+
+    def test_a_line_with_a_bar_is_boxed_and_a_column_has_its_web_priority(self):
+        out = htmlview.html(Line([" RAM  ", ui.Bar(.33, "10.2G/31.2G   cache 4.8G")]))
+        self.assertTrue(out.startswith('<p class="ln bl"><span class="lb">RAM</span><svg'), out)
+        self.assertIn('<span class="n">10.2G/31.2G</span><span class="bx">cache 4.8G</span></p>', out)
+        t = htmlview.html(Table([Col("a", "A", prio=1, wprio=3), Col("b", "B", prio=2), Col("c", "C")], [Row(["x", "y", "z"])]))
+        self.assertIn('<th class="p3" scope="col">A</th><th class="p2" scope="col">B</th><th scope="col">C</th>', t)
+        self.assertEqual(Col("a", "A", prio=1), Col("a", "A", prio=1))
 
     def test_blank_lines_are_for_the_console_and_titled_groups_count_their_rows(self):
         self.assertEqual(htmlview.html(Line()), "")

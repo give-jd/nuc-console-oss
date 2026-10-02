@@ -407,9 +407,10 @@ class AttentionExtrasTests(Base):
 
     def test_the_problems_html(self):
         out = htmlview.html(self.card("attention", self.frame(), -2))
-        self.assertEqual(len(re.findall(r'<p class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 4)
-        self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code> · data services should not be reachable from the network', out)
-        self.assertIn('fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)
+        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 4)
+        self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code></span><span class="d why">data services should not be reachable from the network</span>', out)
+        self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
+        self.assertIn('<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)
         self.assertIn('accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>', out)
         self.assertIn('<p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code></p>', out)
         self.assertEqual(len(re.findall("<article", out)), 1)
