@@ -230,6 +230,7 @@ fi
 # the chat is paired; outbound HTTPS to api.telegram.org only. Its folder holds the bot token: nobody else can list it (0711)
 ensure_service_user
 install -d -m 0711 -o "$SVC_USER" -g "$SVC_USER" "$NOTIFY_LIB"
+install -d -m 0700 -o "$SVC_USER" -g "$SVC_USER" "$NOTIFY_LIB/inbox"  # the web view's Telegram page leaves its requests there (the same account)
 touch "$LOG/notify.log" && chown "$SVC_USER:$SVC_USER" "$LOG/notify.log"
 echo "$LOG/notify.log  $SVC_USER:$SVC_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
 fill launchd/com.nuc-console.notify.plist > "$LD/com.nuc-console.notify.plist"

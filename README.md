@@ -42,7 +42,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Web view** | optional: a shell of cards in a browser (overview, MAP, CPU, HEALTH, AI; dark, light, wall display) over Tailscale/LAN, read-only except the AI page's buttons ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only; `[ai] web_actions = no` makes it read-only for good |
-| 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
+| 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps, from the web view's Telegram page or the command line: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
 | 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
@@ -235,7 +235,7 @@ web_actions = yes     # yes | no: the AI page and screen may set a model up, swi
 enabled = no
 
 [telegram]            # optional alerts on your phone, see docs/TELEGRAM.md
-enabled = no          # set up with: sudo nuc-console-telegram --setup
+enabled = no          # set up on the web view's Telegram page, or: sudo nuc-console-telegram --setup
 ```
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
@@ -305,7 +305,7 @@ Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the 
 
 ## Telegram alerts (optional)
 
-Want the problems on your phone? Create a bot with @BotFather (free), run `sudo nuc-console-telegram --setup` (token and your `@username`), tap the link it prints and press Start: new and resolved ATTENTION problems then arrive as messages (titles only unless `detail = full`).
+Want the problems on your phone? Create a bot with @BotFather (free), paste its token and your `@username` on the web view's **Telegram page** (settings › Telegram page) or run `sudo nuc-console-telegram --setup`, tap the link it shows and press Start: new and resolved ATTENTION problems then arrive as messages (titles only unless `detail = full`).
 It only sends: no listener, no webhook, the service never reads messages and has no commands; the token stays in its own 0600 folder, never in `config.ini`. Off by default.
 Set-up, what leaves the machine, troubleshooting: **[docs/TELEGRAM.md](docs/TELEGRAM.md)**.
 

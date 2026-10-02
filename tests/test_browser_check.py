@@ -86,6 +86,7 @@ class Landmarks(unittest.TestCase):
         pages = {"overview": '<div class="kpis"></div><article class="card st-ok">', "map": '<div class="scr mapv"></div>',
                  "map-graph": '<div id="gv"><svg></svg></div>', "cpu": '<div class="scr scr-cpu"></div>', "health": '<div class="hv"></div>',
                  "ai": '<div class="scr av"></div>', "settings": '<div class="settings"></div>',
+                 "telegram": '<div class="settings av" id="tg"><form action="/telegram/pair"></form></div>',
                  "layout": '<span data-edit></span><article class="card x">', "wall": '<div class="kpis"></div><article class="card st-ok">'}
         self.assertEqual(set(pages), set(bc.VIEW_LANDMARKS))
         for kind, inner in pages.items():
