@@ -692,11 +692,23 @@ class Seg(_Component):
 class Title(_Component):
     """The heading of a screen: its label, parts (Span / Line: what it is about, and the figures) and seg (a Seg, or None). The console draws
     '-- LABEL  part · part ------ seg' on one line and, when it is too wide for the console, drops the parts from the second on, one by one,
-    last of them first, until it fits (the first one always stays)."""
-    __slots__ = ("label", "parts", "seg")
+    last of them first, until it fits (the first one always stays).
+    legend (a Legend, or None) goes where the console puts the seg when there is none: right-aligned, its last items dropped first while the
+    line is too wide. segs: more choices after seg (the web draws all of them, in a row; the console only draws seg)."""
+    __slots__ = ("label", "parts", "seg", "legend", "segs")
 
-    def __init__(self, label, parts=(), seg=None):
+    def __init__(self, label, parts=(), seg=None, legend=None, segs=()):
         self.label, self.parts, self.seg = _text(label), [_inline(p) for p in parts], seg
+        self.legend, self.segs = legend, list(segs)
+
+
+class Legend(_Component):
+    """What the signs of a drawing mean: items [(glyph, word, tone)], the glyph drawn in the tone (None: the surface's own colour) and the
+    word muted. The console writes 'glyph word' for each, two spaces between."""
+    __slots__ = ("items",)
+
+    def __init__(self, items=()):
+        self.items = [(_text(g), _text(w), _tone(t)) for g, w, t in items]
 
 
 class Series(_Component):
@@ -760,6 +772,43 @@ class Advice(_Component):
     def __init__(self, head="", paras=(), notes=(), kind="advice", lines=()):
         self.head, self.paras = _text(head), [[_text(x) for x in p] for p in paras]
         self.notes, self.kind, self.lines = [(_text(k), _text(t)) for k, t in notes], kind if kind in ("advice", "shared", "error", "none") else "advice", list(lines)
+
+
+# ---- components of the Map screen (screens.py): an outline of rows that open and close, and what is known of one of them ------------------
+
+class Branch(_Component):
+    """One row of an Outline: key (stable: the same path is the same key at every refresh), depth, mark (a Span: the sign that says the row
+    opens, is open, is a leaf, or repeats one above), body (a Line: what the row says, from its arrow to its note), state (the node's: its
+    symbol and class on the web), href (where the web goes to select the row; None: no link) and mark_href (to open or close it; None: the
+    mark is no link). cursor: the keyboard's row (reverse video on the console, aria-current on the web). prefix: the console's tree glyphs
+    before the mark (the web has the depth); tip: what the mark's link says on the web."""
+    __slots__ = ("key", "depth", "mark", "body", "state", "href", "mark_href", "cursor", "prefix", "tip")
+
+    def __init__(self, key, depth, mark, body, state="info", href=None, mark_href=None, cursor=False, prefix="", tip=""):
+        self.key, self.depth, self.mark, self.body = _text(key), int(depth), _inline(mark), _inline(body)
+        self.state, self.href, self.mark_href = check_state(state), href, mark_href
+        self.cursor, self.prefix, self.tip = bool(cursor), _text(prefix), _text(tip)
+
+
+class Outline(_Component):
+    """Rows (Branch) of a tree drawn as a list, one line each: the console cuts every row to its width (the cursor's row is padded to it, in
+    reverse video), the web draws a list whose rows are links, deeper ones indented by their depth."""
+    __slots__ = ("rows",)
+
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+
+
+class Props(_Component):
+    """Everything known about one thing: title and items [(label, value, level)], level one of err, warn, ok, info or '' (a label that starts with
+    spaces belongs to the one above; the first item is the thing itself, in bold). h: the console cuts it to that many lines (the last says how
+    many were left out; None: not cut). close: where the web goes to close it (None: no link)."""
+    __slots__ = ("title", "items", "h", "close")
+
+    def __init__(self, title, items=(), h=None, close=None):
+        self.title = _text(title)
+        self.items = [(_text(k), _text(v), lv if lv in ("err", "warn", "ok", "info") else "") for k, v, lv in items]
+        self.h, self.close = None if h is None else int(h), close
 
 
 def check_level(level):

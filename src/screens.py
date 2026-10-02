@@ -1,8 +1,8 @@
 """The full screens' view-models (stdlib only, Python 3.8+): what each screen is made of, as the components of ui.py.
 
-A screen of the console (CPU and Health today, later the Map and the AI) is a function of its data and of the size it is drawn at: it
+A screen of the console (CPU, Health and the Map today, later the AI) is a function of its data and of the size it is drawn at: it
 returns components (ui.py) and, for a list, the numbers the live loop needs (the first row shown, how many are visible). The state a screen
-keeps while it is open lives here too (CpuView, HealthView and their keys: ui.KEYMAP says what each key does). The console draws the
+keeps while it is open lives here too (CpuView, HealthView, MapView and their keys: ui.KEYMAP says what each key does). The console draws the
 components with ansi.render, the web with htmlview.html: one model, two renderers.
 
 Nothing here reads a file, the configuration, the host or the clock, and nothing draws: what a screen needs to know of the world comes in as
@@ -20,6 +20,7 @@ import textwrap
 import time
 
 import ansi
+import graph
 import ui
 from ui import (KV, THERMAL_ERR, THERMAL_WARN, Bar, Cap, Col, Finding, Grid, Group, Head, Kpi, Line, Meter, More, Msg, Only, Pane, Row, Series, Span,
                 Split, Table, Tiles, Wrap, dd, dget, fmt_ago, fmt_cputime, fmt_dur, fmt_k, fmt_min, fmt_size, hclean, hcount, hnum, human, idict,
@@ -1095,3 +1096,256 @@ def health_lines(data, hv, fl, w, h, advice, now=None):
     else:
         out.append(health_tables(R, w, max(0, avail - area), now))
     return [ansi.clip(x, w) for x in ansi.render(ui.Group(out), w)[0][:h]]
+
+
+# ---- MAP ------------------------------------------------------------------------------------------------------------------------
+# Data: graph.build()'s graph (nodes, edges, notes) and graph.rows()' rows of it (docs/DESIGN.md, src/graph.py). Every name in it is data from the
+# machine (a container, a process, a remote address): it goes through ui.safe when a component is built, whatever it holds.
+
+MAP_PANE_W = 140  # from this width up the details pane sits beside the tree, below it otherwise
+MAP_IDLE_S = 600  # the Map left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
+MAP_TONE = {"err": "err", "down": "err", "warn": "warn", "unknown": "unknown", "ok": "ok"}  # the tone of a row's name by state (info: none)
+MAP_ROOT_TONE = {"err": "err", "down": "err", "warn": "warn"}  # a root's name is bold, and accent when nothing is wrong
+MAP_EV_TONE = {"seen": "strong", "declared": None, "possible": "muted", "bind": "muted"}  # how sure the link is: bright, normal, dim
+MAP_MARK = {"down": "✖ ", "unknown": "? "}  # a symbol before the name besides its colour (the web draws the symbol of every state itself)
+
+
+_SP1, _SP2 = Span(" "), Span("  ")  # the spaces between the parts of a row: shared (a component is never changed once built)
+
+
+class MapView(object):
+    """The interactive Map: open branches (graph.State), the selected row (its key survives refreshes; its index is where
+    the cursor stays when that row vanishes), the scroll position, the details pane, when it was opened and last touched."""
+
+    def __init__(self, now=None):
+        self.st, self.cur, self.idx, self.top, self.details = graph.State(), None, 0, 0, False
+        self.opened = self.touched = now or time.time()
+
+
+class MapLinks(object):
+    """The links of the web's Map: row(row) -> the URL that selects (or, for the selected one, deselects) a row, toggle(row) -> the one that opens
+    or closes its branch, close (the URL without the selection), expand and collapse (every branch open / only the roots), paths(only) -> the
+    view of every path (False) or of the paths that lead to a problem (True), graph (the graph view, or None)."""
+    __slots__ = ("row", "toggle", "close", "expand", "collapse", "paths", "graph")
+
+    def __init__(self, row, toggle, close=None, expand=None, collapse=None, paths=None, graph=None):
+        self.row, self.toggle, self.close, self.expand, self.collapse, self.paths, self.graph = row, toggle, close, expand, collapse, paths, graph
+
+
+class MapScreen(object):
+    """The Map as components: nodes, and top (the first tree row shown: where the live loop keeps its scroll position)."""
+    __slots__ = ("nodes", "top")
+
+    def __init__(self, nodes, top=0):
+        self.nodes, self.top = nodes, top
+
+
+def map_sync(mv, rs):
+    """The cursor back on its row after the rows changed: by key, else the same index (clamped). Returns the index."""
+    i = graph.find(rs, mv.cur) if mv.cur else None
+    mv.idx = i if i is not None else max(0, min(mv.idx, len(rs) - 1))
+    mv.cur = rs[mv.idx]["key"] if rs else None
+    return mv.idx
+
+
+def map_parent(rs, i):
+    d = rs[i]["depth"]
+    return next((j for j in range(i - 1, -1, -1) if rs[j]["depth"] < d), i)
+
+
+def map_key(mv, key, rs, page=10):
+    """One key in the Map, on the rows rs drawn from mv.st (what each key does: ui.KEYMAP, scope map). Returns 'back' (leave the Map: Esc or q
+    when no details pane is open), 'rows' (branches opened or closed: rebuild the rows, then map_sync) or '' (only the cursor or the
+    details pane changed). The keys of every screen (digits, Tab, ?) are the dispatcher's."""
+    act = ui.action("map", key)
+    if act == "back":
+        if mv.details:  # Esc closes the details pane first
+            mv.details = False
+            return ""
+        return "back"
+    if act == "details":
+        mv.details = not mv.details
+        return ""
+    if act in ("expand", "problems"):
+        if act == "expand":
+            mv.st.expand_all()
+        else:
+            mv.st.only = not mv.st.only
+        return "rows"
+    if not rs or act not in ("move", "page", "open", "close", "collapse"):
+        return ""
+    i = map_sync(mv, rs)
+    row = rs[i]
+    if act == "collapse":  # every branch closes: the cursor goes up to its root, which stays
+        i = next((j for j in range(i, -1, -1) if rs[j]["depth"] == 0), i)
+        mv.idx, mv.cur = i, rs[i]["key"]
+        mv.st.collapse_all()
+        return "rows"
+    if act in ("open", "close") and (row["open"] if act == "close" else row["kids"] and not row["open"]):
+        mv.st.toggle(row)
+        return "rows"
+    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rs) - 1,
+         "right": i + 1 if row["open"] else i, "l": i + 1 if row["open"] else i,  # already open: down to its first child
+         "left": map_parent(rs, i), "h": map_parent(rs, i)}.get(key, i)  # closed or a leaf: up to its parent
+    mv.idx = max(0, min(i, len(rs) - 1))
+    mv.cur = rs[mv.idx]["key"]
+    return ""
+
+
+def map_select(G, mv, text):
+    """The cursor on the first row whose name (or port owner) contains text, the branches above it opened. False: none."""
+    t = text.lower()
+    for rs in (graph.rows(G, mv.st), graph.rows(G, graph.State(all=True, only=mv.st.only))):
+        i = next((j for j, r in enumerate(rs) if t in (G["nodes"][r["node"]]["label"] + " " + graph.parts(G, r)["owner"]).lower()), None)
+        if i is None:
+            continue
+        d = rs[i]["depth"]
+        for r in reversed(rs[:i]):  # its ancestors: the nearest row above it at each smaller depth
+            if r["depth"] < d:
+                d = r["depth"]
+                mv.st.shut.discard(r["key"])
+                if d:
+                    mv.st.open.add(r["key"])
+        mv.cur = rs[i]["key"]
+        return True
+    return False
+
+
+def map_layout(G, w, h, details=False):
+    """(notes shown, tree rows, details rows, details beside the tree?) of a Map body h lines tall."""
+    notes = min(len(G["notes"]), max(0, (h - 4) // 4))
+    avail = max(1, h - 1 - notes)
+    if not details or avail < 6:
+        return notes, avail, 0, False
+    if w >= MAP_PANE_W:
+        return notes, avail, avail, True
+    return notes, avail - avail // 2, avail // 2, False
+
+
+# -- the pieces ------------------------------------------------------------------------------------------------------------------
+
+def map_legend():
+    """What the arrows of the tree mean (graph.LEGEND): each glyph in the tone of how sure the link is."""
+    items = []
+    for item in graph.LEGEND.split("  "):
+        glyph, _, word = item.partition(" ")
+        ev = "seen" if "━" in glyph else "declared" if "╌" in glyph else "possible" if "┄" in glyph else "bind"
+        items.append((glyph, word, MAP_EV_TONE[ev]))
+    return ui.Legend(items)
+
+
+def map_title(G, only=False, links=None, st=None, web=False):
+    """'-- MAP  27 nodes · 14 links · ✖ 7 need attention ----- ━━► seen  ╌╌► declared ...': the legend goes right, its last items first when narrow.
+    The web (web=True) has its figures apart and, besides the legend, the choices as links (links: MapLinks, st: graph.State)."""
+    k = graph.counts(G)
+    probs = (Span(f"✖ {k['problems']} need" + ("s" if k["problems"] == 1 else "") + " attention", "err") if k["problems"]
+             else Span("none needs attention", "muted"))  # not a green: missing data also draws nothing
+    if not web:  # one coloured line: the figures' separators are part of its muted text
+        parts = [Line([Span(f"{plural(k['nodes'], 'node')} · {plural(k['edges'], 'link')} · ", "muted"), probs]
+                      + ([Span("  problems only", "warn", True)] if only else []))]
+        return ui.Title("MAP", parts, None, map_legend())
+    parts = [Span(plural(k["nodes"], "node"), "muted"), Span(plural(k["edges"], "link"), "muted"), probs]
+    parts += [Span("problems only", "warn", True)] if only else []
+    segs = []
+    if links is not None and st is not None:
+        segs = [ui.Seg("expand", [("expand all", "e", bool(st.all), links.expand), ("collapse all", "c", not (st.all or st.open or st.shut), links.collapse)]),
+                ui.Seg("paths", [("all paths", "p", not only, links.paths(False)), ("problems only", "p", only, links.paths(True))])]
+        if links.graph:
+            segs.append(ui.Seg("view", [("tree", "", True, None), ("graph", "", False, links.graph)]))
+    return ui.Title("MAP", parts, None, map_legend(), segs)
+
+
+def map_notes(G, n=None, w=None):
+    """The graph's notes as lines ('· text'), at most n (the last says how many were left out), each cut to w columns (None: not cut)."""
+    nl = [ui.safe(x) for x in G["notes"]]
+    if n is not None and len(nl) > n:
+        nl = nl[:max(0, n - 1)] + ([f"… +{len(nl) - n + 1} more notes"] if n else [])
+    return [Line([Span("  · " + x, "muted")], clip=w) for x in nl]
+
+
+def map_branch(G, row, cursor=False, links=None, web=False):
+    """One tree row as a component: tree glyphs (console), the mark (▸ opens, ▾ is open, · a leaf, ↻ already above), the arrow by evidence, the name
+    by state (a symbol too: colour alone is not enough), the owner of a port, the port used, the qualifier, the note (the worst finding)."""
+    p, n = graph.parts(G, row), G["nodes"].get(row["node"]) or {}
+    st, spans = p["state"], []
+    if p["arrow"]:
+        spans += [Span(p["arrow"], MAP_EV_TONE.get(p["ev"])), _SP1]
+    if not row["depth"]:
+        spans.append(Span(p["label"], MAP_ROOT_TONE.get(st, "accent"), True))
+    else:
+        spans.append(Span(("" if web else MAP_MARK.get(st, "")) + p["label"], MAP_TONE.get(st)))
+    if p["kind"] == "port":
+        spans += [_SP2, Span("?", "warn") if p["owner"] in ("", "?") else Span(p["owner"], "strong")]
+    if p["port"]:
+        spans.append(Span(" " + p["port"]))
+    if p["sub"]:
+        spans += [_SP2, Span(p["sub"], "muted")]
+    if p["note"]:
+        lv = next((lv for lv, t in n.get("findings") or [] if t == p["note"]), "")
+        spans += [_SP2, Span(p["note"], {"err": "err", "warn": "warn"}.get(lv, "muted"))]
+    mark = Span(p["toggle"], "accent" if p["toggle"] in ("▸", "▾") else "muted")
+    href = mark_href = None
+    tip = "already shown above on this path" if row["cycle"] else "nothing below"
+    if links is not None:
+        href = links.row(row)
+        if row["kids"] and not row["cycle"]:
+            mark_href, tip = links.toggle(row), "close" if row["open"] else f"open: {row['kids']} below"
+    return ui.Branch(row["key"], row["depth"], mark, Line(spans), st if st in ui.STATES else "unknown", href, mark_href, cursor, p["tree"], tip)
+
+
+def map_props(G, nid, h=None, close=None):
+    """Everything known about a node (graph.details) as the DETAILS pane, cut to h lines on the console."""
+    return ui.Props("DETAILS", graph.details(G, nid), h, close)
+
+
+def map_nodes(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
+    """The Map's body as components for a console w columns wide and at most h lines tall: the title and the legend, the notes, the tree (its
+    rows from `top`, scrolled so that the cursor's row stays in sight) and the details pane (beside the tree from MAP_PANE_W, below it
+    otherwise). details: True = the selected row's node, or a node id. Without a cursor (the rotation slide) what does not fit is counted on
+    the last line. -> MapScreen: the nodes (the console cuts them to h lines) and the first tree row shown."""
+    notes, tree_h, pane_h, side = map_layout(G, w, h, bool(details))
+    out = [map_title(G, only)] + map_notes(G, notes, w)
+    i = graph.find(rs, cursor_key) if cursor_key else None
+    if not rs:
+        tree, top, n = [Msg("info", "no problem on any path: p shows every path" if only else "nothing to draw: see the notes above")], 0, 1
+    elif cursor_key is None and len(rs) > tree_h:
+        tree, top, n = [ui.Outline([map_branch(G, r) for r in rs[:tree_h - 1]]), More(len(rs) - tree_h + 1, "more rows", indent=3)], 0, tree_h
+    else:
+        top = ansi.scroll(top or 0, i or 0, len(rs), tree_h)
+        shown = range(top, min(len(rs), top + tree_h))
+        tree, n = [ui.Outline([map_branch(G, rs[j], j == i) for j in shown])], len(shown)
+    nid = details if isinstance(details, str) else rs[i if i is not None else 0]["node"] if rs else None
+    if pane_h and nid:
+        if side:
+            tw = w - (int(w * 0.42) + 3)
+            out.append(ui.Split(tree, [map_props(G, nid, pane_h)], tw, tree_h))
+        else:
+            out += tree + [Line()] * (tree_h - n) + [map_props(G, nid, pane_h)]
+    else:
+        out += tree
+    return MapScreen(out, top)
+
+
+def map_view(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
+    """(the Map body as console lines: at most h, none wider than w; the first tree row shown)."""
+    sc = map_nodes(G, rs, w, h, cursor_key, details, top, only)
+    return [ansi.clip(x, w) for x in ansi.render(ui.Group(sc.nodes), w)[0][:h]], sc.top
+
+
+def map_web(G, rs, st, sel, nid, links, limit=None, truncated=False):
+    """The Map for the web, nothing cut: the title with its choices, the notes, the tree (every row a link that selects it, its mark one that
+    opens or closes it) and, beside it, the details of the selected node (nid: its node; None: no pane) with a link that closes them.
+    limit: the rows the page draws at most (truncated: there were more)."""
+    out = [map_title(G, st.only, links, st, True)] + map_notes(G)
+    if rs:
+        tree = [Group([ui.Outline([map_branch(G, r, r["key"] == sel, links, True) for r in rs])])]
+        if truncated:
+            tree.append(Msg("info", f"… more than {limit} rows: close some branches, or show problems only"))
+    else:
+        tree = [Msg("info", "no problem on any path: show every path to see the map" if st.only else
+                    "nothing to show yet" + (": see the notes above" if G["notes"] else ""))]
+    if nid is not None:
+        out.append(ui.Split(tree, [Group([map_props(G, nid, None, links.close)])]))
+    else:
+        out += tree
+    return out

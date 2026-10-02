@@ -435,6 +435,8 @@ def _tiles_html(t):
 
 # ---- the components of the full screens (ui.py: Seg, Title, Series, Cols, Split, Pane, Finding, Advice) ------------------------------
 #   <header class="st"><h2>      Title (its parts in <span class="bit">, then the Seg)        <div class="seg">   Seg: links with data-key
+#   <ul class="ol"><li class="ob st-STATE" data-depth><a class="tg">, <a class="oa" data-row data-k aria-current>   Outline (a Branch each)
+#   <aside class="props"><div class="ph">, <dl><dt><dd class="lv-LEVEL">   Props          <ul class="legend lgd">   Legend (in a Title)
 #   <div class="cols"><div class="col">   Cols       <div class="split">   Split       <svg class="series"><rect>   Series
 #   <div class="fd lv-LEVEL" data-k><details data-k><summary>   Finding, its Pane inside as <dl class="pane">
 #   <div class="advice [advice-shared|advice-error|advice-none]">   Advice: <p class="advice-head">, paragraphs, <p class="advice-cites|advice-tools">
@@ -444,9 +446,40 @@ def _seg_html(sg):
                           for text, key, chosen, href in sg.options])
 
 
+def _legend_html(lg):
+    return ('<ul class="legend lgd">' + "".join(f'<li><span{_cls("t-" + tone if tone else "")}>{_e(glyph)}</span> {_e(word)}</li>' for glyph, word, tone in lg.items) + "</ul>")
+
+
 def _title_html(t):
     bits = "".join(f'<span class="bit">{_inline(p)}</span>' for p in t.parts)
-    return f'<header class="st"><h2>{_e(t.label)}</h2><p class="bits">{bits}</p>{_seg_html(t.seg) if t.seg is not None else ""}</header>'
+    segs = ([t.seg] if t.seg is not None else []) + list(t.segs)
+    return (f'<header class="st"><h2>{_e(t.label)}</h2><p class="bits">{bits}</p>{_legend_html(t.legend) if t.legend is not None else ""}'
+            + "".join(_seg_html(sg) for sg in segs) + "</header>")
+
+
+_BRANCH_MAX = 12  # the deepest a tree goes (graph.MAX_DEPTH): a deeper row is drawn as deep as that
+
+
+def _branch_html(b):
+    """A row of an Outline: the mark (a link that opens or closes, or plain), then the row's own link that selects it (data-row: the keys move
+    over these), the state's symbol first."""
+    d = max(0, min(b.depth, _BRANCH_MAX))
+    k = _e(b.key)
+    link, tog = _href(b.href), _href(b.mark_href)
+    mark = (f'<a class="tg" href="{_e(tog)}" title="{_e(b.tip)}" data-k="t-{k}">{_inline(b.mark)}</a>' if tog
+            else f'<span class="tg d" title="{_e(b.tip)}">{_inline(b.mark)}</span>')
+    inner = f'<span class="sym">{_e(ui.SYMBOLS[b.state])}</span> {_inline(b.body)}'
+    cur = ' aria-current="true"' if b.cursor else ""
+    row = (f'<a class="oa" href="{_e(link)}" data-row data-k="o-{k}"{cur}>{inner}</a>' if link else f'<span class="oa"{cur}>{inner}</span>')
+    return f'<li{_cls("ob", "st-" + b.state, "sel" if b.cursor else "")} data-depth="{d}">{mark}{row}</li>'
+
+
+def _props_html(p):
+    close = _href(p.close)
+    head = f'<div class="ph"><h3 class="sub">{_e(p.title)}</h3>' + (f'<a href="{_e(close)}">close ✕</a>' if close else "") + "</div>"
+    rows = "".join(f'<dt{_cls("in" if raw.startswith("  ") else "")}>{_e(raw.strip())}</dt><dd{_cls("lv-" + lv if lv else "", "top" if i == 0 else "")}>{_e(v)}</dd>'
+                   for i, (raw, v, lv) in enumerate(p.items))
+    return f'<aside class="props">{head}<dl>{rows}</dl></aside>'
 
 
 def _pane_html(p):
@@ -477,6 +510,9 @@ def _advice_html(a):
 _HTML = {
     ui.Title: _title_html,
     ui.Seg: _seg_html,
+    ui.Legend: _legend_html,
+    ui.Outline: lambda n: '<ul class="ol">' + "".join(_branch_html(b) for b in n.rows) + "</ul>",
+    ui.Props: _props_html,
     ui.Series: _series_svg,
     ui.Cols: lambda n: '<div class="cols">' + "".join(f'<div class="col">{html(c)}</div>' for c, _w in n.children) + "</div>",
     ui.Pane: _pane_html,

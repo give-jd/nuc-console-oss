@@ -567,6 +567,44 @@ svg.series rect{fill:currentColor}
 @container app (max-width:45.7em){.hv .st .seg{margin-left:0}dl.pane{margin-left:.4em;grid-template-columns:minmax(0,1fr)}dl.pane dd{margin-bottom:.3em}}
 """
 
+# the Map screen drawn from components (screens.map_web; htmlview: Title, Legend, Seg, Outline, Props): everything under .mapv (and .scr, for the panels)
+MAP_VIEW = """
+.mapv>*{min-width:0}
+.mapv .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
+.mapv .st h2{margin:0;font:650 .8em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.mapv .bits{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2em 1.1em;margin:0;min-width:0;flex:1 1 18em;color:var(--muted)}
+.mapv .bit{white-space:nowrap}
+.mapv ul.lgd{order:9;flex:1 1 100%;margin:0;font:.84em var(--mono)}
+.mapv ul.lgd li{padding:0}
+.mapv .st .seg:first-of-type{margin-left:auto}
+.mapv .split>div>section.grp{overflow-x:auto}
+.mapv .split{align-items:start}
+@container app (min-width:60em){.mapv .split{grid-template-columns:minmax(0,1.5fr) minmax(20em,1fr)}}
+ul.ol{list-style:none;margin:0;padding:0;font:.92em/1.45 var(--mono)}
+.ob{display:flex;align-items:baseline;gap:.1em;padding:.1em .3em;border-radius:4px}
+DEPTHS
+.ob .tg{flex:none;width:1.6em;text-align:center;color:var(--accent);text-decoration:none}
+.ob .tg.d{color:var(--muted)}
+a.tg:hover{color:var(--fg-strong)}
+.ob .oa{flex:1 1 auto;min-width:0;color:inherit;text-decoration:none;overflow-wrap:anywhere}
+.ob:hover,.ob:focus-within{background:var(--surface-2)}
+.ob.sel{background:var(--accent-bg)}
+.ob.sel .oa{color:var(--fg-strong)}
+.ob .sym{min-width:1.1em}
+.ob.st-ok .sym{color:var(--ok)}.ob.st-warn .sym,.ob.st-unknown .sym{color:var(--warn)}.ob.st-err .sym,.ob.st-down .sym{color:var(--err)}.ob.st-info .sym{color:var(--muted)}
+.props{font-size:.92em;min-width:0}
+.props .ph{display:flex;align-items:baseline;justify-content:space-between;gap:1em;border-bottom:1px solid var(--line);margin-bottom:.5em}
+.props .ph h3.sub{margin:0;border:0;padding-bottom:.3em}
+.props dl{display:grid;grid-template-columns:minmax(6em,max-content) minmax(0,1fr);gap:.25em 1em;margin:0}
+.props dt{color:var(--muted);font-family:var(--mono)}
+.props dt.in{padding-left:1.2em}
+.props dd{margin:0;min-width:0;overflow-wrap:anywhere;font-family:var(--mono)}
+.props dd.top{font-weight:700;color:var(--fg-strong)}
+.props dd.lv-err{color:var(--err)}.props dd.lv-warn{color:var(--warn)}.props dd.lv-ok{color:var(--ok)}.props dd.lv-info{color:var(--muted)}
+@container app (max-width:45.7em){.props dl{grid-template-columns:minmax(0,1fr);gap:0}.props dd{margin-bottom:.4em}}
+"""
+MAP_VIEW = MAP_VIEW.replace("DEPTHS", "".join('.ob[data-depth="%d"]{padding-left:%.1fem}' % (d, 0.3 + 1.3 * d) for d in range(1, 13)))
+
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
 ANSI = """
 .r{color:var(--err)}.g{color:var(--ok)}.y{color:var(--warn)}.b{color:var(--accent)}.m{color:var(--magenta)}.c{color:var(--cyan)}
@@ -641,7 +679,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

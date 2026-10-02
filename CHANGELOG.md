@@ -79,6 +79,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - The shell as a wall display: `/?app=1&ui=1.dw&kiosk=1` scrolls one screen every `[dashboard] rotate_seconds` seconds (`&rotate=N` for one URL), shifts the top bar
   every ten minutes against burn-in and keeps a footer with only the way to close the window. With `[ui] web = app`, `render.py --kiosk` and `--open` open the shell
   (the full-screen window its wall display); `web = classic`, the default, opens the classic page as before.
+- In the shell the **Map** (`?app=1&view=map`) is drawn natively too: the tree as a list whose rows are links (a symbol and a class for the state, an indent for
+  the depth, a mark that opens or closes a branch), the details of the selected row beside it (below it in a narrow window), and expand all, collapse all and
+  problems only as a segmented control of links with their keys (`e`, `c`, `p`), next to a link to the graph view. The console draws the same model and
+  looks exactly as before.
 
 **Windows and macOS**
 
