@@ -690,14 +690,20 @@ class Keys(CpuCase):
         self.assertEqual((acts, cv.details), ([""], False))
         self.assertNotIn("── PROCESS ", render.ANSI.sub("", render.cpu_screen(d, [], cv, 119, 33)[0]))
 
-    def test_c_esc_q_leave_and_change_nothing(self):
+    def test_esc_q_leave_and_change_nothing(self):
         cv = render.CpuView(now=NOW)
-        self.press(cv, ["down", "enter", "m"])
+        self.press(cv, ["down", "m"])
         before = (cv.idx, cv.cur, cv.details, cv.sort)
-        for k in ("c", "C", "esc", "q", "Q"):
+        for k in ("esc", "q"):
             rows, acts = self.press(cv, [k])
             self.assertEqual(acts, ["back"], k)
             self.assertEqual((cv.idx, cv.cur, cv.details, cv.sort), before, k)
+        for k in ("c", "C", "tab", "3", "?", "r", "Z"):  # c is the overview's letter now, the others are the dispatcher's
+            rows, acts = self.press(cv, [k])
+            self.assertEqual(acts, [""], k)
+            self.assertEqual((cv.idx, cv.cur, cv.details, cv.sort), before, k)
+        self.press(cv, ["enter"])
+        self.assertEqual(self.press(cv, ["esc", "esc"])[1], ["", "back"])  # the details pane closes first
 
     def test_other_keys_do_nothing_and_no_rows_is_not_an_error(self):
         cv = render.CpuView(now=NOW)
@@ -710,7 +716,7 @@ class Keys(CpuCase):
         keys = ["up", "down", "pgup", "pgdn", "home", "end", "j", "k", "x"]
         rows, acts = self.press(cv, keys, empty)
         self.assertEqual((rows, acts, cv.idx, cv.cur), ([], [""] * len(keys), 0, None))
-        self.assertEqual(self.press(cv, ["enter", "u", "esc"], empty)[1], ["", "rows", "back"])
+        self.assertEqual(self.press(cv, ["enter", "u", "esc", "esc"], empty)[1], ["", "rows", "", "back"])
 
     def test_the_cursor_stays_in_place_when_its_process_disappears(self):
         d = self.data()
@@ -963,34 +969,35 @@ class Footer(CpuCase):
     def test_the_overview_offers_the_cpu_screen_when_there_is_a_keyboard_and_the_feature_is_on(self):
         slide = ("Overview", 1, 1, ["x"])
         on = render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
-        self.assertIn("m: map   c: cpu", on)
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, cpukey=False)))
-        self.assertIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, cpukey=True)))
+        self.assertIn("1-5: screens", on)                                                         # 3 is the CPU screen
+        self.assertNotIn("screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
+        self.assertIn("1 2 4 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, cpukey=False)))
+        self.assertIn("1 3: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, cpukey=True)))
         render.CFG["features"]["cpu"] = False
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1 2 4 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         render.CFG["features"]["cpu"] = True
         render.CFG["features"]["map"] = False
-        self.assertIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1 3-5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         two = render.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
-        self.assertIn("c: cpu", two)                                                              # and it fits the narrowest footer
+        self.assertIn("1 3-5: screens", two)                                                      # and it fits the narrowest footer
         self.assertLessEqual(len(two), 79)
 
     def test_the_cpu_footer_gives_up_keys_from_the_least_needed_when_narrow(self):
         cv = render.CpuView(now=NOW)
         seen = []
-        for w in (140, 100, 78, 60, 40, 24, 12):
+        for w in (200, 100, 78, 60, 40, 24, 12):
             f = render.ANSI.sub("", render.cpu_footer(cv, 40, w))
             self.assertLessEqual(len(f), w, w)
             seen.append(f)
         self.assertIn("PgUp/PgDn/Home/End: page", seen[0])
-        self.assertIn("c/Esc: back", seen[0])
+        self.assertIn("Esc: back", seen[0])
+        self.assertIn("?: help", seen[0])
         self.assertIn("sort: P cpu  M mem  T time  N pid  U user", seen[0])
-        self.assertIn("c: back", seen[2])                                                       # the way back is the last thing to go
+        self.assertIn("Esc: back", seen[2])                                                     # the way back is the last thing to go
         self.assertIn("P cpu", seen[2])
         self.assertNotIn("PgUp", seen[2])
         cv.details = True
-        self.assertIn("Enter: hide details", render.ANSI.sub("", render.cpu_footer(cv, 40, 140)))
+        self.assertIn("Enter: hide details", render.ANSI.sub("", render.cpu_footer(cv, 40, 200)))
         cv.cur, cv.idx = 5, 5
         self.assertIn("row 6/40", render.ANSI.sub("", render.cpu_footer(cv, 40, 140)))
         self.assertIn("0/0", render.ANSI.sub("", render.cpu_footer(cv, 0, 140)))
@@ -1051,9 +1058,9 @@ class MainLoop(CpuCase):
         self.feed()
 
     def test_c_opens_the_cpu_screen_its_keys_move_and_sort_it_c_and_esc_go_back(self):
-        frames, restored = self.run_main([b"c", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"M", b"c", b"c", b"\x1b"])
+        frames, restored = self.run_main([b"c", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"M", b"1", b"c", b"\x1b"])
         self.assertEqual([self.is_cpu(f) for f in frames], [False, True, True, True, True, True, True, True, False, True, False])
-        self.assertIn("c: cpu", frames[0][-1])                                                    # a keyboard: the footer offers the screen
+        self.assertIn("1-5: screens", frames[0][-1])                                              # a keyboard: the footer offers the screens (3 is this one)
         self.assertEqual(self.row(frames[1]), 1)
         self.assertEqual(self.row(frames[2]), 3)                                                  # ↓ (CSI) ↓ (SS3)
         self.assertEqual(self.row(frames[3]), 4)
@@ -1062,7 +1069,7 @@ class MainLoop(CpuCase):
         self.assertGreater(self.row(frames[5]), 4)                                                # PgDn
         self.assertEqual(self.row(frames[6]), 1)                                                  # Home
         self.assertIn("by memory", "\n".join(frames[7]))                                          # M
-        self.assertNotIn("CPU", frames[8][0])                                                     # c: back to the dashboard
+        self.assertNotIn("CPU", frames[8][0])                                                     # 1: back to the dashboard
         self.assertIn("overview page (stub)", "\n".join(frames[8]))
         self.assertIn("by CPU%", "\n".join(frames[9]))                                            # a new screen: the defaults again
         self.assertNotIn("── PROCESS ", "\n".join(frames[9]))
@@ -1094,7 +1101,7 @@ class MainLoop(CpuCase):
         log = self.producers()
         render.DEMO = False
         self.feed()
-        self.run_main([2, 2, b"c", 2, b"c", 2, 2, 2])
+        self.run_main([2, 2, b"c", 2, b"1", 2, 2, 2])
         made_while_open = (log["cpu_made"], log["proc_made"])
         self.assertEqual(made_while_open, (1, 1))
         self.assertEqual(log["proc_sampled"], 2)                                                  # the frame it opened with, one refresh later
@@ -1102,21 +1109,22 @@ class MainLoop(CpuCase):
         self.run_main([2, 2, 2])
         self.assertEqual((log2["cpu_made"], log2["proc_made"], log2["proc_sampled"]), (0, 0, 0))   # the dashboard alone never touches them
         log3 = self.producers()
-        self.run_main([b"c", b"c", 2, 2])
+        self.run_main([b"c", b"1", 2, 2])
         self.assertEqual(log3["proc_made"], 1)
-        self.run_main([b"c", b"c", b"c", b"c"])
+        self.run_main([b"c", b"1", b"c", b"1"])
         self.assertEqual(log3["proc_made"], 3)                                                    # each opening: fresh samplers, no old averages
 
     def test_without_a_keyboard_the_cpu_screen_is_not_offered(self):
         frames, _ = self.run_main([2, 2], keyboard=False)
         self.assertEqual(len(frames), 3)
-        self.assertFalse([f for f in frames if self.is_cpu(f) or "c: cpu" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_cpu(f) or "screens" in f[-1]])
 
     def test_feature_off_c_does_nothing(self):
         render.CFG["features"]["cpu"] = False
-        frames, _ = self.run_main([b"c", b"c", b"m"])
+        frames, _ = self.run_main([b"c", b"3", b"m"])
         self.assertFalse([f for f in frames if self.is_cpu(f)])
-        self.assertNotIn("c: cpu", frames[0][-1])
+        self.assertNotIn("1-5: screens", frames[0][-1])
+        self.assertIn("1 2 4 5: screens", frames[0][-1])
         self.assertEqual(len(frames), 4)
 
     def test_the_cpu_slide_runs_its_samplers_only_while_it_is_the_one_on_screen(self):
@@ -1143,13 +1151,13 @@ class MainLoop(CpuCase):
                 raise ValueError("bad state " + ESC + "[2J")
             return real(d, pb, cv, w, h)
         render.cpu_screen = broken
-        frames, _ = self.run_main([b"c", b"x", b"x", b"c"])
+        frames, _ = self.run_main([b"c", b"x", b"x", b"1"])
         self.assertIn("error on the CPU screen", "\n".join(frames[1]))
         self.assertNotIn(ESC, "".join("".join(f) for f in frames))
         before = int(re.search(r"(\d+) (PROBLEMS|WARNINGS)", frames[0][0]).group(1))
         self.assertIn(f"{before + 1} PROBLEMS", frames[1][0])                                      # one more: it could not be drawn
         self.assertTrue(self.is_cpu(frames[3]))                                                    # drawn again once it works
-        self.assertFalse(self.is_cpu(frames[-1]))                                                  # and c still went back
+        self.assertFalse(self.is_cpu(frames[-1]))                                                  # and 1 still went back
 
     def test_the_status_pill_is_the_dashboards_while_the_cpu_screen_is_open(self):
         data = demo.snapshot(now=NOW)
