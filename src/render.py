@@ -643,6 +643,11 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+def telegram_on():
+    """The notifier is on: config.ini's [telegram] enabled, or the web view's Telegram page turned it on (nuc_config.telegram). The demo: config only."""
+    return bool(CFG["telegram"]["enabled"] if DEMO else nuc_config.telegram(CFG)["enabled"])
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -749,7 +754,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             lost = expose_unmatched(net, cont, boot) if ok else []
             if lost:
                 out.append((1, "[expose] " + ", ".join(f"'{safe(k)}'" for k in lost) + (" matches" if len(lost) == 1 else " match") + " no service", "expose-unmatched"))
-    if CFG["telegram"]["enabled"]:  # notify.py (docs/TELEGRAM.md): only then its status.json is read; switched off = nothing to say
+    if telegram_on():  # notify.py (docs/TELEGRAM.md): only then its status.json is read; switched off = nothing to say
         state, why = telegram_state(now)
         if state == "unpaired":
             out.append((1, "Telegram notifications on, but not paired", "telegram-unpaired"))
@@ -847,24 +852,26 @@ OS_CATALOG = {
                      "identify it (sudo lsof -nP -iTCP -sTCP:LISTEN); if intended: sudo nuc-console-accept; if not, stop it"),
     },
 }
-CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when [telegram] enabled = yes
+CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when it is on (config.ini, or the web view's Telegram page)
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), then tap the link it prints and press Start"),
+                          "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
+                          "then tap the link it shows and press Start"),
     "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
                          "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; journalctl -u nuc-console-notify; "
                          "sudo systemctl restart nuc-console-notify"),
 })
 OS_CATALOG["windows"].update({
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "nuc-console-telegram.cmd --setup (administrator prompt: the bot token from @BotFather, your @username), "
-                          "then tap the link it prints and press Start"),
+                          "the web view's Telegram page (settings), or nuc-console-telegram.cmd --setup (administrator prompt: the bot token from "
+                          "@BotFather, your @username), then tap the link it shows and press Start"),
     "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
                          "nuc-console-telegram.cmd --status; nuc-console-telegram.cmd --test; log: %ProgramData%\\nuc-console\\logs\\notify.log; "
                          "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
 })
 OS_CATALOG["darwin"].update({
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), then tap the link it prints and press Start"),
+                          "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
+                          "then tap the link it shows and press Start"),
     "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
                          "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; log: /var/log/nuc-console/notify.log; "
                          "restart: sudo launchctl kickstart -k system/com.nuc-console.notify"),
