@@ -1000,6 +1000,44 @@ class Builder(unittest.TestCase):
         self.assertEqual(first(mine)[:2], ["system", "containers"])  # fixed: as the reader put them
         self.assertEqual(first(self.page("/?app=1", cookie="1.tl")[2])[0], "attention")  # a cookie of another field: still by severity
 
+    def test_a_layout_from_config_ini_fixes_the_order_unless_severity_is_written(self):
+        first = lambda t: [x["data-card"] for tag, x, _ in t.tags if tag == "article"][:2]  # noqa: E731
+        layout = [("system", 2), ("containers", 1), ("attention", 2)]
+        with mock.patch.dict(render.CFG["ui"], {"layout": layout}):
+            self.assertEqual(first(self.page("/?app=1")[2]), ["system", "containers"])
+            _, body, _ = self.page("/?app=1&view=settings")
+            self.assertIn("so for now the cards stay in its order", body)
+            self.assertEqual(first(self.page("/?app=1", cookie="1.os")[2])[0], "attention", "By severity chosen in the browser")
+            self.assertEqual(first(self.page("/?app=1", cookie="1.of")[2]), ["system", "containers"])
+            self.assertNotIn("so for now the cards stay in its order", self.page("/?app=1&view=settings", cookie="1.os")[1])
+        with mock.patch.dict(render.CFG["ui"], {"layout": layout, "order": "severity"}):
+            self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "order = severity written in config.ini")
+        self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "no layout: by severity")
+
+    def test_a_hidden_card_comes_back_as_wide_as_it_was(self):
+        ck = ""
+        for op in ("g", "g", "g"):  # databases: 1 -> 4
+            st, _, ck = self.follow("/?set=e%sdb&back=app%%3D1%%26edit%%3D1" % op, ck)
+            self.assertEqual(st, 302)
+        width = lambda tree: dict((c, [x for x in cls if re.fullmatch(r"s[1-4]", x)][0]) for c, cls in self.cards_of(tree))  # noqa: E731
+        self.assertEqual(width(self.page(cookie=ck)[2])["databases"], "s4")  # three steps from 1
+        st, _, ck = self.follow("/?set=ehdb&back=app%3D1%26edit%3D1", ck)
+        self.assertIn("db4x", ck)
+        _, body, tree = self.page(cookie=ck)
+        hidden = [(c, cls) for c, cls in self.cards_of(tree) if c == "databases"]
+        self.assertIn("off", hidden[0][1])
+        self.assertIn("s4", hidden[0][1], "the hidden card is drawn at its width")
+        st, _, ck = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck)
+        self.assertNotIn("db4x", ck)
+        cards_ = self.cards_of(self.page(cookie=ck)[2])
+        self.assertEqual(cards_[-1][0], "databases", "last")
+        self.assertIn("s4", cards_[-1][1])
+        self.assertNotIn("off", cards_[-1][1])
+        # the script's whole-layout form keeps it too
+        st, _, ck2 = self.follow("/?set=lat2_db3x&back=app%3D1%26edit%3D1")
+        st, _, ck2 = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck2)
+        self.assertEqual(dict(prefs.parse_cookie(ck2)["layout"])["databases"], 3)
+
     def test_the_footer_and_the_settings_lead_to_the_editor(self):
         _, _, tree = self.page("/?app=1")
         links = [a for t, a, s in tree.tags if t == "a" and a.get("href") == "/?app=1&edit=1"]
