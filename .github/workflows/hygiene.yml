@@ -1,0 +1,29 @@
+name: hygiene
+
+# Every pull request: who wrote its commits, and what its commits, title, description and added lines say
+# (CONTRIBUTING.md, "Branches, commits and pull requests"). Runs again when the title or the description is edited.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Authors, commit messages, title, description and added lines
+        env:  # the title and the description are data: passed in the environment, never pasted into the script
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 tools/check_hygiene.py --base "$BASE" --head "$HEAD"
