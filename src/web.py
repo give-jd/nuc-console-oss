@@ -79,7 +79,7 @@ PILL_CLASS = {"err": "r", "warn": "y", "info": "d"}  # htmlview.HEALTH_CSS
 AI_SEL_MAX = render.AI_ID_MAX + 1  # characters of a model id taken from a URL: one more than an id has, so that a longer text never equals one
 # the MAP's graph view (?view=map&as=graph): the same graph as circles and lines
 GRAPH_NODES = 400    # nodes drawn on one graph page: beyond, the most relevant ones, and a note says how to see the others
-GZOOMS = (50, 67, 80, 100, 125, 150, 200, 250, 300)  # z=: the drawing's size in % of the window (no script needed)
+GZOOMS = webcss.GZOOMS  # z=: the drawing's size in % of the window (no script needed)
 ZONES = tuple(rid for rid, _, _, group in graph.ROOTS if group)  # INTERNET, LAN, TAILNET, LOCAL: the hubs (IMPACT etc. are views)
 GBAD = ("err", "down", "warn", "unknown")  # needs attention, in the graph view (the colours: red, yellow)
 KINDS = ("root", "port", "ct", "proc", "ext", "stack", "unit", "webapp")
@@ -97,9 +97,9 @@ def page_csp(scripts=(), shell=False, forms=False):
     scripts: the texts of the inline scripts the page has; script-src lists exactly their SHA-256 and nothing else, and a page without
     one has no script-src (default-src 'none' then forbids every script). connect-src 'self' only where a script talks to this server
     (refresh, preferences, layout editor); where the refresh script is, Trusted Types: its one policy, nuc-frag, is the only way to hand
-    markup to the parser. shell: the page loads /s/app.<sha8>.css. forms: the page's forms post to this server (the AI page) and nowhere else."""
+    markup to the parser. shell: the page loads /s/app.<sha8>.css and has no inline style at all (no <style>, no style= attribute: style-src 'self'). forms: the page's forms post to this server (the AI page) and nowhere else."""
     scripts = [s for s in scripts if s]
-    parts = ["default-src 'none'", "style-src " + ("'self' " if shell else "") + "'unsafe-inline'", "base-uri 'none'",
+    parts = ["default-src 'none'", "style-src " + ("'self'" if shell else "'unsafe-inline'"), "base-uri 'none'",
              "form-action " + ("'self'" if forms else "'none'"), "frame-ancestors 'none'"]
     if scripts:
         parts.append("script-src " + " ".join(dict.fromkeys(webjs.csp_source(s) for s in scripts)))
@@ -123,14 +123,14 @@ class Page(str):
 
 class View(object):
     """What a page gives the shell instead of a document: its body, its own controls (the toolbar above it), the URL parameters that make the view
-    (the footer's links change one of them), whether it reloads (and how soon, when `wait` says), its script and the style it needs, and whether it
+    (the footer's links change one of them), whether it reloads (and how soon, when `wait` says), its script and a class for <html> (the style sheet sizes the page by it), and whether it
     has forms (the CSP then allows them to post here). grid: the body is the overview's cards; legacy: it is one of the pages made before the
     shell (their classes are styled in webcss.py); bar: a block above the grid (the layout editor's controls)."""
-    __slots__ = ("body", "tools", "here", "live", "script", "forms", "wait", "style", "grid", "legacy", "bar")
+    __slots__ = ("body", "tools", "here", "live", "script", "forms", "wait", "cls", "grid", "legacy", "bar")
 
-    def __init__(self, body, tools=(), here=None, live=True, script="", forms=False, wait=0, style="", grid=False, legacy=True, bar=""):
+    def __init__(self, body, tools=(), here=None, live=True, script="", forms=False, wait=0, cls="", grid=False, legacy=True, bar=""):
         self.body, self.tools, self.here, self.live, self.script, self.forms = body, list(tools), here, live, script, forms
-        self.wait, self.style, self.grid, self.legacy, self.bar = wait, style, grid, legacy, bar
+        self.wait, self.cls, self.grid, self.legacy, self.bar = wait, cls, grid, legacy, bar
 
 
 TAB_TITLES = {name: title for name, _feature, title in ui.SCREENS}
@@ -731,7 +731,7 @@ class Server(http.server.ThreadingHTTPServer):
             [webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS] + ([v.script] if v.script else [])
         page = Page(htmlview.shell_doc(f"{host} · {name} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], zoom,
                                        int(time.time() // 600) % 3, here["kiosk"], "url" if here["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
-                                       cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.style, scripts, pause))
+                                       cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.cls, scripts, pause))
         page.csp = page_csp(scripts, shell=True, forms=v.forms)
         page.referrer = "same-origin" if v.forms else "no-referrer"
         page.blocks = None if edit else top + kpis + blocks  # the editor has no refresh script: ?frag=1 gets the whole page, as a classic page does
@@ -1120,8 +1120,8 @@ class Server(http.server.ThreadingHTTPServer):
                "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
-        if shell:  # the drawing's own size is in the style sheet's variable (no inline style of its own): see View.style
-            return View(body, tools, gh, not pause, script=script, style="#gsvg{width:%s}" % (f"{z}%" if z else "100%;max-height:calc(100vh - 150px)"))
+        if shell:  # the drawing's size is a class of <html> (gzNNN) the style sheet sizes: no inline style (View.cls)
+            return View(body, tools, gh, not pause, script=script, cls=f"gz{z}" if z else "gzfit")
         page = Page(graph_doc(r, zoom, z, body, bar, not pause, script))
         if script:
             page.csp = page_csp([script])

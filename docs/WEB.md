@@ -122,8 +122,14 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 **The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-new-interface-being-built)
 (`1.tl.dw.pv`), at most 256 bytes; the server validates and canonicalises it on every request and ignores a value that is wrong, a field at a time.
 Only the browser keeps it: the server writes nothing for the interface. Pages vary by it (`Vary: Cookie`) and the cache key holds the canonical preferences.
-The shell's pages have the strict CSP of the classic ones with `style-src 'self' 'unsafe-inline'` (the page loads its style sheet from `/s/`) and the
-policy for their scripts, composed per page by `web.page_csp()` ([below](#the-shells-scripts)).
+The shell's pages have the strict CSP of the classic ones, but with `style-src 'self'` and no `'unsafe-inline'` (the page loads its style sheet from `/s/`
+and carries no `<style>` element and no `style=` attribute; the graph's size per zoom step is a class of `<html>`, `gz<NN>` / `gzfit`, that the sheet
+sizes; the scripts only set CSSOM properties, never the `style` attribute), and the policy for their scripts, composed per page by `web.page_csp()` ([below](#the-shells-scripts)).
+
+| page | `style-src` |
+|---|---|
+| shell (`?app=1`: overview, settings, layout editor, MAP tree and graph, CPU, HEALTH, AI, wall) | `'self'` |
+| classic (`?app=0`) | `'unsafe-inline'` (each page has its own `<style>`) |
 
 ### The shell's scripts
 
