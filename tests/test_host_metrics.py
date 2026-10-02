@@ -172,7 +172,7 @@ class DrawnFromTheSample(FakeProc):
         sm = dict(self.sample(), mem=None, cpu={"cpu0": 0.5, "cpu1": 0.25})
         block = text(render.ov_sistema(sm, 119, 0))
         self.assertIn("CPU   ", block)
-        self.assertIn("2 cores", block)
+        self.assertIn("2 threads", block)
         self.assertNotIn("error", block.lower())
 
     def test_up_load_note(self):

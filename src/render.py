@@ -1428,7 +1428,7 @@ def ov_sistema(s, w, k, cont=None):
     if cores:
         mean = sum(cores) / len(cores)
         if k <= 2:  # one bar per core, in columns: the normal look; only the tiny-console levels (k>=3) compress to one character per core
-            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   {len(cores)} cores")
+            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   {len(cores)} threads")
             cells = [f" {i:>2} {bar(v, 9)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
             per = max(1, min(6, (w - 1) // 20))
             lines += ["".join(pad(x, 20) for x in cells[i:i + per]) for i in range(0, len(cells), per)]

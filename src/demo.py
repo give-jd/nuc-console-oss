@@ -28,8 +28,8 @@ MACHINES = {
         "up": 5 * 86400, "load": (0.82, 0.64, 0.51),
         "temp": {"cpu": 72.0, "high": 90.0, "crit": 100.0, "ccd": 66.5, "nvme": 44.0, "nvme_max": 84.85},
         "boot": {"total": 58.4, "median": 23.0, "before": (21.8, 22.7, 23.0, 21.9, 24.6, 23.1, 23.5)},   # the last boot took 2.5x the median of 7
-        "disks": (("/", 180.0, 480.0), ("/data", 1660.4, 2000.0)),                        # GiB used, GiB total
-        "growth_gb_day": 27.4,                                                          # /data: 340 GB left, so full in about 12 days
+        "disks": (("/", 180.0, 480.0), ("/data", 249.0, 300.0)),                        # GiB used, GiB total
+        "growth_gb_day": 4.1,                                                            # /data: 51 GB left, so full in about 12 days
     },
     # A Windows desktop: the same Ryzen with an RTX 3060 Ti (8 GB), only 16 GiB of RAM, up since yesterday morning.
     "windows": {

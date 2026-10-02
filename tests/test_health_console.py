@@ -372,7 +372,7 @@ class Once(HealthCase):
         self.assertIn("Disk filling up: /data", pane)
         self.assertIn("what", pane)
         self.assertIn("facts", pane)
-        self.assertIn("used_gb 1660.4", pane)
+        self.assertIn("used_gb 249", pane)
         self.assertIn("days_to_full 12.4", pane)
         self.assertIn("fix", pane)
         self.assertIn("du -xh --max-depth=1", pane)

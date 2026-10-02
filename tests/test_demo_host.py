@@ -161,7 +161,7 @@ class TheOverview(DemoHost):
             wide = render.ANSI.sub("", self.once(["--cols", "226", "--rows", "50"]))        # 3 columns: the blocks sit side by side
             small = system_block(self.once(["--cols", "120", "--rows", "33"]))
         self.assertRegex(small[0], r"── SYSTEM ─+  up 5d 0h · load 0\.82 0\.64 0\.51$")
-        for want in ("10.2G/31.2G   cache 4.8G", "180.0G/480.0G", "72°C/100°C", "44°C/85°C", "6%   16 cores"):
+        for want in ("10.2G/31.2G   cache 4.8G", "180.0G/480.0G", "72°C/100°C", "44°C/85°C", "6%   16 threads"):
             self.assertIn(want, wide)
         self.assertRegex(wide, r" 4 █+░+ +62%")                                            # the busy thread of the demo machine
         for want in ("10.2G/31.2G   cache 4.8G", "180.0G/480.0G", "72°C/100°C", "6%   core "):  # the compact levels: one character per core
@@ -328,7 +328,7 @@ class OneMachine(DemoHost):
             threads, cores = m["cpu"]["threads"], m["cpu"]["cores"]
             ram_gib = "%.1f" % (m["ram_mib"] / 1024.0)
             o = facts(overview, up=r"SYSTEM ─+\s+(up \d+d \d+h)", load=r"SYSTEM ─+\s+up \d+d \d+h · load (\d\.\d\d \d\.\d\d \d\.\d\d)",
-                      ram=r"RAM +[█░]+ (\d+\.\d)G/(\d+\.\d)G", cpus=r"CPU +[█░]+ +\d+% +(\d+) cores", boot=r"finished in (\d+\.\d)s")
+                      ram=r"RAM +[█░]+ (\d+\.\d)G/(\d+\.\d)G", cpus=r"CPU +[█░]+ +\d+% +(\d+) threads", boot=r"finished in (\d+\.\d)s")
             c = facts(cpu, up=r"(up \d+d \d+h)", load=r"load (\d\.\d\d \d\.\d\d \d\.\d\d)", cores=r"cores (\d+)  ·", threads=r"threads (\d+)")
             a = facts(ai, cpu=r"CPU +(.+?) · (\d+) cores(?: / (\d+) threads)? · ", ram=r"RAM +[█░]+ +\d+\.\d GB free of (\d+\.\d) GB",
                       gpu=r"GPU +(\S.*?) · (?:CUDA|Metal)")
@@ -381,7 +381,7 @@ class OneMachine(DemoHost):
         rep = demo.health_report(None, 7, NOW)
         data = [d for d in rep["disks"] if d["mount"] == "/data"][0]
         full = [f for f in rep["findings"] if f["id"] == "disk-full:/data"][0]
-        left = (2000.0 - 1660.4) / full["facts"]["growth_gb_day"]                            # the days to full follow from the figures
+        left = (300.0 - 249.0) / full["facts"]["growth_gb_day"]                            # the days to full follow from the figures
         self.assertAlmostEqual(data["days_to_full"], left, delta=0.1)
         self.assertEqual(full["facts"]["days_to_full"], data["days_to_full"])
         self.assertIn("83%", full["text"])
