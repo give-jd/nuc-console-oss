@@ -135,7 +135,7 @@ Full description, what is collected per OS and every rule: [docs/HEALTH.md](HEAL
 
 Standard library only, and flat: every module is one file in `src/` (the installers copy `src/*.py`, `tools/build_release.py` ships
 `src/`), no packages. Each process has **one entry script**; the modules it imports sit next to it. The dependencies run one way: `ui` is
-read by `ansi` and `exposure`, `exposure` by `graph`, `graph` by `render`, `render` by `web` and `notify`.
+read by `ansi`, `exposure` and `cards`, `exposure` by `graph` and `cards`, `graph` and `cards` by `render`, `render` by `web` and `notify`.
 
 | Entry script | Process |
 |---|---|
@@ -149,9 +149,11 @@ read by `ansi` and `exposure`, `exposure` by `graph`, `graph` by `render`, `rend
 | Module | Holds |
 |---|---|
 | `render.py` | the inputs (`snapshot`, `Sampler`, `CpuFeed`, the HEALTH and AI data), the problem list, the drawing of every screen, the TTY layout engine (`pack`, the levels, `slides`, `frame`) and the main loop. It still holds `FULL`/`TRUNC`/`EXPAND` and what reads them (`lim`, `wrap_items`), and re-exports the names that moved out of it (marked "moved; kept for tests and tools") |
-| `ui.py` | what a colour **means**: the semantic tokens (`ok`, `warn`, `err`, `unknown`, `info`, `muted`, `accent`, `strong`, the header banners, `sel`), the ANSI themes (`default` is the SGR codes the console has always written; `light`, `hc`, `mono`) and the CSS palettes (`dark`, `light`, `hc`) as plain data, `sgr(token)`; and the text helpers that have no colour and no clock: `safe`, `plural`, the human sizes, durations, rates and ages |
+| `ui.py` | what a colour **means**: the semantic tokens (`ok`, `warn`, `err`, `unknown`, `info`, `muted`, `accent`, `strong`, the header banners, `sel`), the ANSI themes (`default` is the SGR codes the console has always written; `light`, `hc`, `mono`) and the CSS palettes (`dark`, `light`, `hc`) as plain data, `sgr(token)`; the text helpers that have no colour and no clock: `safe`, `plural`, the human sizes, durations, rates and ages; and **the components** every screen is to be built from (`Span`, `Line`, `Card`, `Kpi`, `Table`, `KV`, `Bar`, `Spark`, `Pill`, `Msg`, `Wrap`, `Group`, `Tree`, `Details`, `Notice`, `More`, and `Raw`, the lines of a section drawn the old way). Plain classes with `__slots__`; text from the machine is cleaned in the constructor; no value without a state (`ok`, `warn`, `err`, `down`, `unknown`, `info`): a `Bar` or a `Kpi` that could not be read is `unknown` and reads `?`, never fine |
 | `ansi.py` | the console primitives every screen is drawn from: `c`, `section`, `msg`, `msg_wrap`, `kv`, `bar`, `sparkline`, `pad`, `clip`, `columns`, `fit_join`, `cell` (the exposure matrix glyph). A colour that is a state is asked of `ui.sgr(token)` |
+| `cards.py` | the **card registry** and the **KPI model**. `register(id, title, feature, builder)` puts a card (the ids are `nuc_config.SECTIONS`) in `CARDS`; `build(id, ctx, k, caps)` returns its `ui.Card` at detail level `k` and remembers it for the frame by (id, level, caps), so the layout engine never builds a card twice. `Ctx` is the data of a frame (the Sampler's reading, the collectors' state, the problems, the configuration, a memo); `Caps` replaces `FULL`/`TRUNC`/`EXPAND` (render still holds the globals and passes a `Caps` around them). A card's state comes from the problems that belong to it (`PROBLEM_CARDS`) and is `unknown` when its source is missing. `KPIS` has one builder per `prefs.KPI_IDS`; `kpis(ctx, ids)` returns the row, each `unknown` (`?`) when its source is missing. Nothing in it draws or reads the host |
 | `exposure.py` | the exposure model: the rows of ports and their verdict per way in, the firewall rules read, the `[expose]` check, the web apps, the baseline comparison, and who is behind a row. No drawing, no files |
+| `prefs.py` | the preferences of the interface: the `[ui]` section, the cookie and `?ui=` grammar, the presets, which cards and KPIs show (`visible_cards`, `KPI_IDS`). Pure: nothing is read or drawn |
 | `graph.py`, `graphlayout.py`, `graphjs.py` | the MAP model (nodes, edges, the tree's rows), the positions of the graph view, the one script of the web view |
 | `htmlview.py` | ANSI to HTML (`to_html`) and the CSS of the web pages |
 | `nuc_config.py` | `config.ini`, the paths of each OS and of the portable run. `load()` reads the file; `current()` is the process's one configuration dict, loaded once (`render.CFG` is that object) |
@@ -161,7 +163,7 @@ read by `ansi` and `exposure`, `exposure` by `graph`, `graph` by `render`, `rend
 | `demo.py` | the synthetic data of `--demo` |
 
 Where a change goes: a colour that means a state is a token in `ui.py`, not a literal code in new drawing code; a rule about what is
-reachable is `exposure.py` (or `graph.py` for the MAP), not a line of a screen; the screen itself, its layout and its words are
+reachable is `exposure.py` (or `graph.py` for the MAP), not a line of a screen; a card of the overview is registered with `cards.register` (`render.py` does it for the sections it still draws, `OV_CARDS`) and a KPI with `@cards.kpi(id)` in `cards.py` (add its id to `prefs.KPI_IDS`, its label to `KPI_LABELS` and its cookie code to `prefs.KPI_CODES`); the screen itself, its layout and its words are
 `render.py`. On-screen strings are English. A test that replaces a name must replace it where it is used (`exposure.X`, not `render.X`).
 
 ## macOS and Windows
