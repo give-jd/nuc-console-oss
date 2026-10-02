@@ -47,4 +47,4 @@
   1102 root      S   0   1   0.0   0.0     2M   0:00.0 agetty                                                    [90m │ [0m[0m[0m[K
   1502 root      S   0  11   0.0   0.0    12M   1:10.3 containerd-shim                                           [90m │ [0m[0m[0m[K
   1702 root      S   0   1   0.0   0.0     8M   0:03.2 nginx                                                     [90m │ [0m[0m[0m[K
-[90m row 2/40   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   sort: [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user   c/Esc: back[0m[0m[0m
+[90m row 2/40   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   sort: [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user   1-5: screens   Esc: back   ?: help[0m[0m[0m

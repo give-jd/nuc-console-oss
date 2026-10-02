@@ -47,4 +47,4 @@
 [K
 [K
 [K
-[90m model 5/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   e: AI on/off   u: use model   x: delete   X: delete all   c: cancel   a/Esc: back   questions: web page or nuc-console-ask[0m[0m[0m
+[90m model 5/12  ↑↓: move  Enter: hide  e: on/off  u: use  x: del  X: all  c: cancel  1-5: screens  Esc: back  ?: help[0m[0m[0m

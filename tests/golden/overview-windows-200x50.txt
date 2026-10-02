@@ -47,4 +47,4 @@
  finished in [1m23.3s[0m   [32m✔ 0 failed services[0m   events [31m3[0m err · [33m12[0m warn[0m[K
 [K
 [K
-[90m single screen   m: map   c: cpu   h: health   a: ai   console 200x50[0m[0m
+[90m single screen   1-5: screens   ?: help   console 200x50[0m[0m

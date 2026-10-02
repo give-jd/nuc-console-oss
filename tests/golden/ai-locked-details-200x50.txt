@@ -47,4 +47,4 @@
 [K
 [K
 [K
-[90m model 8/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   a/Esc: back[0m[0m[0m
+[90m model 8/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   1-5: screens   Esc: back   ?: help[0m[0m[0m

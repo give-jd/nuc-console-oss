@@ -47,4 +47,4 @@
    701 root      S   0   1   0.0   0.0     3M   0:06.1 cron                                                      [90m │ [0m[0m[0m[K
   1102 root      S   0   1   0.0   0.0     2M   0:00.0 agetty                                                    [90m │ [0m[0m[0m[K
      2 root      S   0   1   0.0   0.0     0B   0:00.4 kthreadd                                                  [90m │ [0m[0m[0m[K
-[90m row 1/40   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   sort: P cpu  [0m[1;7mM mem[0m[90m  T time  N pid  U user   c/Esc: back[0m[0m[0m
+[90m row 1/40   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   sort: P cpu  [0m[1;7mM mem[0m[90m  T time  N pid  U user   1-5: screens   Esc: back   ?: help[0m[0m[0m

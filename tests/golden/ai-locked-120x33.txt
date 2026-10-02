@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m model 3/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   a/Esc: back[0m[0m[0m
+[90m model 3/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   1-5: screens   Esc: back   ?: help[0m[0m[0m

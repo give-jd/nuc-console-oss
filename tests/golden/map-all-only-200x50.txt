@@ -47,4 +47,4 @@
 [K
 [K
 [K
-[90m row 1/22   ↑↓: move   PgUp/PgDn/Home/End: page   ←→: close/open   Enter: details   e/c: expand/collapse all   p: all paths   m/Esc: back[0m[0m[0m
+[90m row 1/22   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   ←→: close/open   e/c: expand/collapse all   p: all paths   1-5: screens   Esc: back   ?: help[0m[0m[0m

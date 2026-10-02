@@ -1,5 +1,5 @@
 [1;41;37m  demo-host │ Health │ 14:13:20                                                                                                                                                          ✖ 6 PROBLEMS  [0m[0m[K
-[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[90msince 2026-09-21 09:00 UTC · 5 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 1 warn[0m [36m──────────────────────────────────────────────────────────────────────────────────────────[0m [90m 1:24h [0m [7m 7:7d [0m [90m 3:30d [0m[0m[0m[0m[K
+[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[90msince 2026-09-21 09:00 UTC · 5 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 1 warn[0m [36m──────────────────────────────────────────────────────────────────────────────────────────[0m [90m d:24h [0m [7m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
 [90m  · collecting: 5 hours so far; trends need 24 hours of data[0m[0m[0m[0m[K
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
 [7m  ✖ ERR   Out of memory: shop-worker-1  shop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (last 2026-09-21 11:43 UTC).                                                        [0m[0m[0m[K
@@ -47,4 +47,4 @@
 [K
 [K
 [K
-[90m finding 1/2   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   1/7/3: 24h/7d/30d   h/Esc: back[0m[0m[0m
+[90m finding 1/2   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   d/w/m: 24h/7d/30d   1-5: screens   Esc: back   ?: help[0m[0m[0m

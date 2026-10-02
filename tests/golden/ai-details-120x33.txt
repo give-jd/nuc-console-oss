@@ -30,4 +30,4 @@
  [90mmodel    [0m8.2B parameters · Q4_K_M · context up to 40960 tokens[0m[0m[0m[K
  [90mlicence  [0mApache-2.0[0m[0m[0m[K
  [90mnotes    [0mthinking mode: /no_think turns it off[0m[0m[0m[K
-[90m model 5/12  ↑↓: move  Enter: hide  e: on/off  u: use  x: del  X: all  c: cancel  a: back[0m[0m[0m
+[90m model 5/12  ↑↓: move  Enter: hide  e: on/off  u: use  x: del  X: all  c: cancel  1-5: screens  Esc: back  ?: help[0m[0m[0m

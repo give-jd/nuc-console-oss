@@ -1,5 +1,5 @@
 [1;41;37m  demo-host │ Health │ 14:13:20                                                                          ✖ 6 PROBLEMS  [0m[0m[K
-[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[31m✖ 1 err[0m  [33m! 6 warn[0m  [90m· 3 info[0m [36m───────────────────────────────────────────[0m [90m 1:24h [0m [7m 7:7d [0m [90m 3:30d [0m[0m[0m[0m[K
+[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[31m✖ 1 err[0m  [33m! 6 warn[0m  [90m· 3 info[0m [36m───────────────────────────────────────────[0m [90m d:24h [0m [7m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
  [1;41;37m ✖ ERR  [0m [1mOut of memory: shop-worker-1[0m  [90mshop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (l…[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an…[0m[0m[0m[0m[K
@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m finding 4/10   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   1/7/3: 24h/7d/30d   h/Esc: back[0m[0m[0m
+[90m finding 4/10  ↑↓: move  Enter: hide  d/w/m: period  1-5: screens  Esc: back  ?: help[0m[0m[0m

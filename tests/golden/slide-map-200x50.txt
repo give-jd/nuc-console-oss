@@ -47,4 +47,4 @@
 [90m└─ [0m[36m▾[0m [32mshop-api-1[0m  [90mcontainer · shop[0m[0m[0m[0m[K
 [90m   └─ [0m[90m·[0m [1m━━►[0m 198.51.100.25 :443  [90mInternet[0m  [90mnow[0m[0m[0m[0m[K
 [K
-[90m screen 2/4   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 200x50[0m[0m
+[90m screen 2/4   ←→: slide   1-5: screens   ?: help   console 200x50[0m[0m

@@ -30,4 +30,4 @@
   1703 www-data  S   0   1   0.4   0.0    11M   3:30.4 nginx[0m[0m[K
     14 root      S   0   1   0.3   0.0     0B   1:38.1 ksoftirqd/0[0m[0m[K
   1520 999       S   0   1   0.3   0.2    58M   5:01.0 postgres[0m[0m[K
-[90m 1/40  ↑↓: move  Enter: details  [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user  c: back[0m[0m[0m
+[90m row 1/40  ↑↓: move  Enter: details  [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user  1-5: screens  Esc: back  ?: help[0m[0m[0m

@@ -21,4 +21,4 @@
 [K
 [K
 [K
-[90m screen 4/4   m: map   c: cpu   h: health   a: ai   details: everything the ov[0m
+[90m screen 4/4  ←→: slide  1-5: screens  ?: help  console 79x24[0m[0m

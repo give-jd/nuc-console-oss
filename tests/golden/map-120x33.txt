@@ -30,4 +30,4 @@
 [90m◄ from          [0mshop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop][0m[0m[K
 [90m► to            [0mshop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside[0m[0m[K
 [90m … +3 more lines[0m[0m[0m[K
-[90m 21/21  ↑↓: move  ←→: open  Enter: hide  e/c: all  p: problems  m: back[0m[0m[0m
+[90m row 21/21  ↑↓: move  Enter: hide  ←→: open  e/c: all  p: problems  1-5: screens  Esc: back  ?: help[0m[0m[0m

@@ -47,4 +47,4 @@
 [90m└─ [0m[36m▾[0m [32mshop-api-1[0m  [90mcontainer · shop[0m[0m                                                                                [90m │ [0m[0m[0m[K
 [90m   └─ [0m[90m·[0m [1m━━►[0m 198.51.100.25 :443  [90mInternet[0m  [90mnow[0m[0m                                                                    [90m │ [0m[0m[0m[K
                                                                                                                  [90m │ [0m[0m[0m[K
-[90m row 9/45   ↑↓: move   PgUp/PgDn/Home/End: page   ←→: close/open   Enter: hide details   e/c: expand/collapse all   p: problems only   m/Esc: back[0m[0m[0m
+[90m row 9/45   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: hide details   ←→: close/open   e/c: expand/collapse all   p: problems only   1-5: screens   Esc: back   ?: help[0m[0m[0m

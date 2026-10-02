@@ -30,4 +30,4 @@
  [90mthreads  [0m52[0m                                                [90mstarted  [0m2026-09-16 14:23:20 (120 h ago)[0m[0m[0m[K
  [90mnice     [0m0[0m                                                 [90mchildren [0m0[0m[0m[0m[K
  [90mpriority [0m20[0m[0m[0m[K
-[90m 1/40  ↑↓: move  Enter: details  P cpu  [0m[1;7mM mem[0m[90m  T time  N pid  U user  c: back[0m[0m[0m
+[90m row 1/40  ↑↓: move  Enter: details  P cpu  [0m[1;7mM mem[0m[90m  T time  N pid  U user  1-5: screens  Esc: back  ?: help[0m[0m[0m

@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m 1/21  ↑↓: move  ←→: open  Enter: details  e/c: all  p: problems  m: back[0m[0m[0m
+[90m row 1/21  ↑↓: move  Enter: details  ←→: open  e/c: all  p: problems  1-5: screens  Esc: back  ?: help[0m[0m[0m

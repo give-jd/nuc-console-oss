@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m screen 1/4   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 120x33[0m[0m
+[90m screen 1/4   ←→: slide   1-5: screens   ?: help   console 120x33[0m[0m

@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m model 3/12  ↑↓: move  Enter: details  e: on/off  u: use  x: del  X: all  c: cancel  a: back[0m[0m[0m
+[90m model 3/12  ↑↓: move  Enter: details  e: on/off  u: use  x: del  X: all  c: cancel  1-5: screens  Esc: back  ?: help[0m[0m[0m

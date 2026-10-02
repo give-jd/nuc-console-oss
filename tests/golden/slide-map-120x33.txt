@@ -30,4 +30,4 @@
 [36m▾[0m [1;36mOUTBOUND[0m  [90mconnections this machine opens to other hosts[0m[0m[0m[0m[K
 [90m├─ [0m[36m▸[0m [32mnode[0m  [90mn8n.service[0m[0m[0m[0m[K
 [90m└─ [0m[36m▸[0m [32mshop-api-1[0m  [90mcontainer · shop[0m[0m[0m[0m[K
-[90m screen 3/5   m: map   c: cpu   h: health   a: ai   keys 1-3: jump to page   console 120x33[0m[0m
+[90m screen 3/5   ←→: slide   1-5: screens   ?: help   console 120x33[0m[0m
