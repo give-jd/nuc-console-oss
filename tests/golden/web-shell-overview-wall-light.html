@@ -127,22 +127,114 @@
  <span class="r">⚠5432 shop-db-1</span> <span class="r">beyond config.ini: local</span>  ·  8080 shop-web-1 <span class="d">expected: LAN</span>  ·  22 sshd</pre>
 </div>
 </article>
-<article class="card s1 st-err" data-card="databases" data-rev="17c513f66f" id="c-databases" data-state="err">
+<article class="card s1 st-err" data-card="databases" data-rev="382f8d600a" id="c-databases" data-state="err">
 <div class="ch">
 <h3>DATABASE</h3>
 <span class="note">3 running · 1 exposed</span>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> <span class="r">●</span> <span class="B">postgres </span>shop-db-1                      *5432    <span class="r">exposed</span>
-      <span class="d">→</span> <span class="g">in use now: </span>api
-        <span class="r">external clients now: 192.16</span>
- <span class="g">●</span> <span class="B">postgres </span>blog-db-1                      lo:5433  <span class="d">local only</span>
-      <span class="d">→</span> <span class="g">in use now: </span>app
-        <span class="d">no external client seen in 6</span>
- <span class="g">●</span> <span class="B">redis    </span>cache-1                        lo:6379  <span class="d">local only</span>
-      <span class="d">→</span> <span class="y">no known service</span><span class="d"> (bridge: ca</span>
-        <span class="d">no external client seen in 6</span></pre>
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-kind">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Kind</th>
+<th scope="col">Name</th>
+<th scope="col">Ports</th>
+<th scope="col">Reach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-err">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>shop-db-1</td>
+<td>*5432</td>
+<td>
+<span class="t-err">exposed</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>api</span>
+<span class="fi">
+<span class="t-err">external clients now: 192.168.0.50</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>blog-db-1</td>
+<td>lo:5433</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>app</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">redis    </span>
+</td>
+<td>cache-1</td>
+<td>lo:6379</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-warn">no known service</span>
+<span class="t-muted"> (bridge: cannot tell)</span>
+</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+</tbody>
+</table>
 </div>
 </article>
 <article class="card s1 st-warn" data-card="firewall" data-rev="4748540381" id="c-firewall" data-state="warn">
@@ -157,29 +249,56 @@
    fail2ban sshd:2   drop 1h 41</pre>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="containers" data-rev="b574be6745" id="c-containers" data-state="warn">
+<article class="card s1 st-warn" data-card="containers" data-rev="10a71ecb86" id="c-containers" data-state="warn">
 <div class="ch">
 <h3>CONTAINER</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> 7 containers   RAM 1.6G   <span class="g">●</span> 6 ok   <span class="r">✖ 1 stopped</span>
- <span class="c B">▸</span> <span class="B">blog                       </span>2/2 running   RAM 410M
-     <span class="g">●</span> app   <span class="g">●</span> db
- <span class="c B">▸</span> <span class="B">shop                       </span>3/4 running   RAM 1.2G<span class="r">   ✖ 1</span>
-     <span class="g">●</span> api   <span class="g">●</span> db   <span class="g">●</span> web   <span class="r">✖</span> worker
- <span class="c B">▸</span> <span class="B">(no stack)                 </span>1/1 running   RAM 30M
-     <span class="g">●</span> cache</pre>
+<p class="ln"> 7 containers   RAM 1.6G   <span class="t-ok">●</span> 6 ok   <span class="t-err">✖ 1 stopped</span>
+</p>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">blog                       </span>2/2 running   RAM 410M</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> app</li>
+<li>
+<span class="t-ok">●</span> db</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">shop                       </span>3/4 running   RAM 1.2G<span class="t-err">   ✖ 1</span>
+</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> api</li>
+<li>
+<span class="t-ok">●</span> db</li>
+<li>
+<span class="t-ok">●</span> web</li>
+<li>
+<span class="t-err">✖</span> worker</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">(no stack)                 </span>1/1 running   RAM 30M</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> cache</li>
+</ul>
+</section>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="boot" data-rev="c76ea29e20" id="c-boot" data-state="warn">
+<article class="card s1 st-warn" data-card="boot" data-rev="809b1677bf" id="c-boot" data-state="warn">
 <div class="ch">
 <h3>BOOT</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> finished in <span class="B">58.4s</span>   <span class="g">✔ 0 failed units</span>
- slowest: <span class="d">systemd-networkd-wait-online 33.5s</span></pre>
+<p class="ln"> finished in <span class="t-strong">58.4s</span>   <span class="t-ok">✔ 0 failed units</span>
+</p>
+<p class="ln"> slowest: <span class="t-muted">systemd-networkd-wait-online 33.5s</span>
+</p>
 </div>
 </article>
 <article class="card s1 st-warn" data-card="tailscale" data-rev="5aa95e2591" id="c-tailscale" data-state="warn">
@@ -245,26 +364,140 @@
  <span class="y">●</span> node     5678         <span class="d">local only</span>    <span class="d">not declared</span></pre>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="system" data-rev="ddd4b4dde4" id="c-system" data-state="ok">
+<article class="card s1 st-ok" data-card="system" data-rev="62877485f2" id="c-system" data-state="ok">
 <div class="ch">
 <h3>SYSTEM</h3>
 <span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> RAM   <span class="g">███</span><span class="d">░░░░░</span> 10.2G/31.2G   cache 4.8G
- DISK  <span class="g">███</span><span class="d">░░░░░</span> 180.0G/480.0G
- TEMP  <span class="g">██████</span><span class="d">░░</span> 72°C/100°C
- NVMe  <span class="g">████</span><span class="d">░░░░</span> 44°C/85°C   limits 68/76°C
- CPU   <span class="g">█</span><span class="d">░░░░░░░</span> 6%   16 threads
-  0 <span class="d">░░░░░░░░░</span>   4%    1 <span class="d">░░░░░░░░░</span>   2%  
-  2 <span class="g">█</span><span class="d">░░░░░░░░</span>   6%    3 <span class="d">░░░░░░░░░</span>   1%  
-  4 <span class="g">██████</span><span class="d">░░░</span>  62%    5 <span class="d">░░░░░░░░░</span>   4%  
-  6 <span class="d">░░░░░░░░░</span>   2%    7 <span class="d">░░░░░░░░░</span>   1%  
-  8 <span class="d">░░░░░░░░░</span>   3%    9 <span class="d">░░░░░░░░░</span>   2%  
- 10 <span class="d">░░░░░░░░░</span>   2%   11 <span class="d">░░░░░░░░░</span>   1%  
- 12 <span class="g">█</span><span class="d">░░░░░░░░</span>   6%   13 <span class="d">░░░░░░░░░</span>   1%  
- 14 <span class="d">░░░░░░░░░</span>   2%   15 <span class="d">░░░░░░░░░</span>   1%  </pre>
+<p class="ln"> RAM   <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>
+<span class="n">10.2G/31.2G   cache 4.8G</span>
+</p>
+<p class="ln"> DISK  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</p>
+<p class="ln"> TEMP  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="72%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="72" height="8"/>
+</svg>
+<span class="n">72°C/100°C</span>
+</p>
+<p class="ln"> NVMe  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="52%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="51.9" height="8"/>
+</svg>
+<span class="n">44°C/85°C</span>   limits 68/76°C</p>
+<p class="ln"> CPU   <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6.3" height="8"/>
+</svg>
+<span class="n">6%   16 threads</span>
+</p>
+<ul class="grid">
+<li>  0 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">  4%</span>
+</li>
+<li>  1 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">  2%</span>
+</li>
+<li>  2 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">  6%</span>
+</li>
+<li>  3 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">  1%</span>
+</li>
+<li>  4 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="62%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="62" height="8"/>
+</svg>
+<span class="n"> 62%</span>
+</li>
+<li>  5 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">  4%</span>
+</li>
+<li>  6 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">  2%</span>
+</li>
+<li>  7 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">  1%</span>
+</li>
+<li>  8 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="3" height="8"/>
+</svg>
+<span class="n">  3%</span>
+</li>
+<li>  9 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">  2%</span>
+</li>
+<li> 10 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">  2%</span>
+</li>
+<li> 11 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">  1%</span>
+</li>
+<li> 12 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">  6%</span>
+</li>
+<li> 13 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">  1%</span>
+</li>
+<li> 14 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">  2%</span>
+</li>
+<li> 15 <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">  1%</span>
+</li>
+</ul>
 </div>
 </article>
 <article class="card s1 st-ok" data-card="network_traffic" data-rev="67e3517dab" id="c-network_traffic" data-state="ok">
