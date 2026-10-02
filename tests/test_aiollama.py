@@ -168,9 +168,9 @@ class UnpackTests(unittest.TestCase):
             from compression import zstd
             data = zstd.compress(raw.getvalue())
         except ImportError:
-            tool = shutil.which("zstd")
+            tool = shutil.which("zstd", path=aiollama.UNIX_PATH)  # where unpack() looks for it, not the PATH of the tests
             if not tool:
-                self.skipTest("neither Python 3.14's compression.zstd nor the zstd tool")
+                self.skipTest("neither Python 3.14's compression.zstd nor the zstd tool in the system's folders")
             import subprocess
             data = subprocess.run([tool, "-q", "-c"], input=raw.getvalue(), stdout=subprocess.PIPE, check=True).stdout
         aiollama.unpack(self.archive("o.tar.zst", data), self.dest)

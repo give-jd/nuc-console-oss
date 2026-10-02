@@ -19,6 +19,7 @@ Every request is appended to <AI folder>/fake-ollama.log as one JSON line (metho
 The runtime archive holds the program at the executable's place for this system (aiollama.exe_rel()): a shell script that runs it with this
 interpreter (Unix), or the Python source itself (Windows: the tests' popen hands an .exe that is Python to this interpreter).
 """
+import gzip
 import hashlib
 import io
 import json
@@ -239,16 +240,18 @@ def runtime_exe():
 
 def runtime_archive(exe=None):
     """-> (file name, bytes): the fake build, a .zip on Windows and a .tgz elsewhere, with the executable where aiollama.exe_rel() says
-    and a library beside it (like the real builds)."""
+    and a library beside it (like the real builds). The same bytes on every call: a test pins them once and installs them later, so no
+    member and no gzip header carries the time."""
     exe = runtime_exe() if exe is None else exe
     rel = aiollama.exe_rel()
     buf = io.BytesIO()
     if not POSIX:
         with zipfile.ZipFile(buf, "w") as z:
-            z.writestr(rel, exe)
-            z.writestr("lib/ollama/LICENSE", "fake")
+            for name, data in ((rel, exe), ("lib/ollama/LICENSE", b"fake")):
+                z.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), data)
         return "ollama-fake.zip", buf.getvalue()
-    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as t:
         for name, data, mode in ((rel, exe, 0o755), ("lib/ollama/LICENSE", b"fake", 0o644)):
             info = tarfile.TarInfo(name)
             info.size, info.mode = len(data), mode
@@ -256,6 +259,8 @@ def runtime_archive(exe=None):
         link = tarfile.TarInfo("lib/ollama/LICENSE.txt")
         link.type, link.linkname = tarfile.SYMTYPE, "LICENSE"
         t.addfile(link)
+    with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as g:
+        g.write(raw.getvalue())
     return "ollama-fake.tgz", buf.getvalue()
 
 

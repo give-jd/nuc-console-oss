@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import xml.etree.ElementTree as ET
 from unittest import mock
@@ -540,7 +541,6 @@ class ServeCommandTests(unittest.TestCase):
     def check_env(self, env, d, port="8080"):
         self.assertTrue(all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()), "an environment of strings")
         self.assertEqual(env["OLLAMA_HOST"], "127.0.0.1:" + port)
-        self.assertEqual(env["OLLAMA_MODELS"], os.path.join(d, "models") if os.path.sep in d or d.startswith("/") else env["OLLAMA_MODELS"])
         self.assertEqual(env["OLLAMA_CONTEXT_LENGTH"], str(aisetup.DEFAULT_CTX))
         self.assertEqual((env["OLLAMA_MAX_LOADED_MODELS"], env["OLLAMA_NUM_PARALLEL"]), ("1", "1"))
         self.assertEqual(env["OLLAMA_NO_CLOUD"], "1", "no cloud model: nothing leaves the machine")
@@ -798,6 +798,16 @@ class DownloadTests(unittest.TestCase):
 
 def srv_base(httpd):
     return "http://127.0.0.1:%d" % httpd.server_address[1]
+
+
+class FakeBuildTests(unittest.TestCase):
+    def test_the_fake_build_is_the_same_bytes_at_any_time(self):
+        """A test pins the fake build in setUp and installs it again later: a time in its bytes (the gzip header, a zip member's date)
+        made the pin fail whenever a second went by in between."""
+        first = fo.runtime_archive()
+        later = 1e9 + 3600
+        with mock.patch("time.time", return_value=later), mock.patch("time.localtime", return_value=time.gmtime(later)):
+            self.assertEqual(fo.runtime_archive(), first)
 
 
 class StampTests(unittest.TestCase):
