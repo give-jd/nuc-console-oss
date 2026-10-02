@@ -9,7 +9,7 @@ and tests/test_webjs.py runs those rules on every script.
     REFRESH_JS   partial refresh: polls the page's fragment and swaps in the cards whose revision changed (~10 KB)
     KEYS_JS      keyboard: clicks the links the server marked with data-key, moves over the rows of a list (~3 KB)
     PREFS_JS     preferences: theme and density without a reload, the browser-side copy, the "Copy" button (~4 KB)
-    BUILDER_JS   layout editor, only on ?edit=1 pages: drag, resize, hide, with a keyboard alternative (~10 KB)
+    BUILDER_JS   layout editor, only on ?edit=1 pages: drag, resize, hide, with a keyboard alternative, saved at every change (~10 KB)
 
 The scripts only ever GET: they never send a form. A form POST (the AI screen's actions) stays a native form.
 
@@ -71,13 +71,15 @@ Server-rendered controls the scripts click or intercept:
     [data-copy="#export"]                   a button: copies the text of #export (the [ui] snippet, an element with id "export");
                                             data-done / data-fail are optional labels it shows for a moment
     main.grid[data-edit] > article.card[data-card]   the editor's cards, nothing else in the grid; width classes s1..s4 (exactly one)
-    [data-drag]      the drag handle in a card (the server's CSS gives it touch-action: none)
-    [data-grow] [data-shrink] [data-hide]   buttons in a card (links without the script): wider, narrower, hide/show
+    [data-drag]      the drag handle in a card: it moves the card (the server's CSS gives it touch-action: none, and shows it only on a
+                     card that has tabindex, that is, once BUILDER_JS runs)
+    [data-size]      the resize handle in a card: dragged sideways, it sets the width (snapped to 1-4 quarters of the grid)
+    [data-earlier] [data-later] [data-shrink] [data-grow] [data-hide]   links in a card: one place earlier or later, narrower, wider,
+                     hide/show. Each is an href="/?set=e<step>..." of the server (the editor without the script); BUILDER_JS takes a
+                     plain click, changes the page and sends the whole layout instead. They carry no data-set.
     class off        a card that is hidden in the layout: it stays in the grid, dimmed, so it can be shown again
     class drag       set on the card being dragged;  data-grab: set on a card grabbed with the keyboard (KEYS_JS stands aside)
     [data-title]     optional: the card's name for the screen reader (else data-card is used)
-    [data-save]      the Save button, data-done="/?..." is where to go after saving (must start with "/?")
-    [data-reset]     a button that undoes every change since the page was opened
     #live            the editor's aria-live region
     cards get tabindex=0 from BUILDER_JS; the server's CSS marks them with :focus-visible, .drag and [data-grab]
 
@@ -95,10 +97,12 @@ THE FRAGMENT CONTRACT (REFRESH_JS)
     GET /?set=<prefs string>&frag=1  (PREFS_JS, BUILDER_JS)
         204  Set-Cookie: nuc_ui=... (HttpOnly: no script can read or write it), and optionally X-Nuc-Prefs: <canonical string>
              that PREFS_JS keeps in localStorage["nuc-ui"]. Anything but 204 is a failure.
-        Layout strings (BUILDER_JS) use the cookie grammar l<card2><1-4>[x]_... , the codes are CARD_CODES.
+        Layout strings (BUILDER_JS) use the cookie grammar l<card2><1-4>[x]_... , the codes are CARD_CODES. Each change of the editor
+        is one such request; BUILDER_JS sends them one after the other and puts the page back to the last layout the server
+        confirmed (204) when one fails.
 
-Browser storage: localStorage "nuc-ui" (PREFS_JS: the preferences string), "nuc-ui-sync" (when it last re-sent it) and
-"nuc-draft" (BUILDER_JS: the layout being edited), always inside try/catch. document.cookie is never touched.
+Browser storage: localStorage "nuc-ui" (PREFS_JS: the preferences string) and "nuc-ui-sync" (when it last re-sent it), always
+inside try/catch. BUILDER_JS keeps nothing in the browser: the cookie is the layout. document.cookie is never touched.
 """
 import base64
 import hashlib
@@ -397,11 +401,13 @@ _PREFS = r"""// nuc-console web view: preferences (src/webjs.py PREFS_JS). A cli
 """
 
 _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS), only on the ?edit=1 page: main.grid[data-edit]. Cards are
-// reordered by moving the ones already there; no markup is made. Drag a card by its [data-drag] handle; [data-grow], [data-shrink]
-// and [data-hide] change its width and whether it shows. Keyboard: Space grabs or drops a card, arrows move it, + and - resize,
-// x hides or shows, Escape puts everything back. #live announces each step ("exposure: position 3 of 12, width 2"). [data-save]
-// sends the layout (cookie grammar l<card2><1-4>[x]_...) and goes to its data-done address; until then it is a draft in
-// localStorage["nuc-draft"], taken up again after a reload.
+// reordered by moving the ones already there; no markup is made. Pointer: drag a card by its [data-drag] handle to move it, drag its
+// [data-size] handle sideways to resize it (it snaps to 1-4 columns). The links [data-earlier], [data-later], [data-shrink],
+// [data-grow] and [data-hide] do the same one step at a time. Keyboard: Space on a card grabs or drops it, arrows move it, + and -
+// resize, x hides or shows, Escape puts it back. #live announces each step ("exposure: position 3 of 12, width 2").
+// Every change is saved at once: the whole layout (cookie grammar l<card2><1-4>[x]_...) goes to the server as
+// GET /?set=...&frag=1; when that fails, the page goes back to the last layout the server kept. Without this script the same
+// controls are links to the server's own steps.
 // Classes it sets, for the server's CSS:
 //   s1 s2 s3 s4   the card's width      off    the card is hidden in the layout (it stays in the grid, dimmed)
 //   drag          the card being dragged (data-grab marks a card grabbed with the keyboard)
@@ -410,19 +416,16 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
   const grid = document.querySelector("main.grid[data-edit]");
   if (!grid) return;
-  const KEY = "nuc-draft", CODES = new Map("@CODES@".split(" ").map(p => p.split(":"))), live = document.getElementById("live");
+  const CODES = new Map("@CODES@".split(" ").map(p => p.split(":"))), live = document.getElementById("live");
   const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
 @LOAD@
-  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
-  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
-  const drop = k => { try { localStorage.removeItem(k); } catch (err) { /* storage off */ } };
   const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
   const cards = () => Array.from(grid.querySelectorAll("article.card[data-card]"));
   const code = c => CODES.get(c.getAttribute("data-card"));
   const width = c => c.classList.contains("s4") ? 4 : c.classList.contains("s3") ? 3 : c.classList.contains("s2") ? 2 : 1;
   const setWidth = (c, n) => { c.classList.toggle("s1", n === 1); c.classList.toggle("s2", n === 2); c.classList.toggle("s3", n === 3); c.classList.toggle("s4", n === 4); };
   const inside = (r, x, y) => x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-  let drag = null, grab = null;  // a pointer drag {id, c, s, over, x, y}; a keyboard grab {c, s}
+  let drag = null, grab = null;  // a pointer drag {id, c, h, s, over, x, y, size}; a keyboard grab {c, s}
 
   function layout() { return "l" + cards().filter(code).map(c => code(c) + width(c) + (c.classList.contains("off") ? "x" : "")).join("_"); }
   const snap = () => cards().map(c => ({c, w: width(c), off: c.classList.contains("off")}));
@@ -436,62 +439,58 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
       if (!c || done.has(c)) continue;
       done.add(c); grid.append(c); setWidth(c, Number(part[2])); c.classList.toggle("off", part.length > 3); sync(c);
     }
-    for (const c of cards()) if (!done.has(c)) grid.append(c);  // cards the string does not know keep their order, after the others
     return true;
   }
-  const base = layout(), first = snap();
+  let sent = layout(), kept = sent, queue = Promise.resolve();  // the layout last sent, the one the server confirmed, the requests in turn
   function say(c, extra) {  // "exposure: position 3 of 12, width 2"
     const all = cards(), name = (c.getAttribute("data-title") || c.getAttribute("data-card")).replace(/_/g, " ");
     if (live) live.textContent = name + ": position " + (all.indexOf(c) + 1) + " of " + all.length + ", width " + width(c) + (c.classList.contains("off") ? ", hidden" : "") + (extra ? ". " + extra : "");
   }
-  function changed(c, extra) {  // keep the draft, tell the reader
-    const now = layout();
-    if (now === base) drop(KEY); else write(KEY, base + "/" + now);
+  function commit(c, extra) {  // tell the reader, and the server when the layout is not the one it has
     say(c, extra);
+    if (layout() === sent) return;
+    sent = layout();
+    queue = queue.then(() => {
+      const str = sent;  // the latest: a request that failed before this one has put the page back
+      return load("/?set=" + str + "&frag=1").then(r => {
+        if (r.status !== 204) throw new Error("status " + r.status);
+        kept = str;
+      });
+    }).catch(() => {
+      arrange(kept); sent = kept;
+      if (live) live.textContent = "Saving failed; the layout is back as the server has it";
+    });
   }
-  function resize(c, d) {
-    const n = Math.max(1, Math.min(4, width(c) + d));
-    if (n !== width(c)) setWidth(c, n);
-    changed(c);
-  }
-  function flip(c) { c.classList.toggle("off"); sync(c); changed(c); }
+  function resize(c, d) { setWidth(c, Math.max(1, Math.min(4, width(c) + d))); commit(c); }
+  function flip(c) { c.classList.toggle("off"); sync(c); commit(c); }
   function nudge(c, d) {  // one place earlier or later
     const all = cards(), o = all[all.indexOf(c) + d];
     if (!o) { say(c); return; }
     if (d < 0) o.before(c); else o.after(c);
     c.focus({preventScroll: true});  // moving a node drops its focus
     c.scrollIntoView({block: "nearest", behavior: calm.matches ? "auto" : "smooth"});
-    changed(c);
+    commit(c);
   }
   function release(extra) { const c = grab.c; grab = null; c.removeAttribute("data-grab"); say(c, extra); }
-  function save(b) {
-    const str = layout(), done = b.getAttribute("data-done") || "";
-    if (!done.startsWith("/?") || str === "l") { if (live) live.textContent = "Nothing to save here"; return; }
-    load("/?set=" + str + "&frag=1").then(r => {
-      if (r.status !== 204) throw new Error("status " + r.status);
-      drop(KEY);
-      location.assign(done);
-    }).catch(() => { if (live) live.textContent = "Saving failed; the layout is kept as a draft"; });
-  }
 
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-grow], [data-shrink], [data-hide], [data-save], [data-reset]"), c = t && t.closest("article.card[data-card]");
-    if (!t || !plain(e)) return;
-    e.preventDefault();  // without the script these are links to the server's own step-by-step editor
-    if (t.hasAttribute("data-save")) save(t);
-    else if (t.hasAttribute("data-reset")) { restore(first); drop(KEY); if (live) live.textContent = "Layout reset"; }
-    else if (!c) return;
+    const t = e.target.closest("[data-earlier], [data-later], [data-grow], [data-shrink], [data-hide]"), c = t && t.closest("article.card[data-card]");
+    if (!t || !c || !plain(e)) return;
+    e.preventDefault();  // without the script these are links to the server's own step
+    if (t.hasAttribute("data-earlier")) nudge(c, -1);
+    else if (t.hasAttribute("data-later")) nudge(c, 1);
     else if (t.hasAttribute("data-grow")) resize(c, 1);
     else if (t.hasAttribute("data-shrink")) resize(c, -1);
     else flip(c);
+    t.focus({preventScroll: true});
   });
   function hold() {  // the handle keeps the pointer even outside the window; moving a node in the page drops that, so ask again
     try { drag.h.setPointerCapture(drag.id); } catch (err) { /* the pointer is gone */ }
   }
   document.addEventListener("pointerdown", e => {
-    const h = e.target.closest("[data-drag]"), c = h && h.closest("article.card[data-card]");
+    const h = e.target.closest("[data-drag], [data-size]"), c = h && h.closest("article.card[data-card]");
     if (!c || e.button > 0 || drag || grab) return;
-    drag = {id: e.pointerId, c, h, s: snap(), over: null, x: e.clientX, y: e.clientY};
+    drag = {id: e.pointerId, c, h, s: snap(), over: null, x: e.clientX, y: e.clientY, size: h.hasAttribute("data-size")};
     hold();
     c.classList.add("drag");
     e.preventDefault();
@@ -499,6 +498,11 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
   document.addEventListener("pointermove", e => {
     if (!drag || e.pointerId !== drag.id) return;
     const x = e.clientX, y = e.clientY;
+    if (drag.size) {  // the card ends where the pointer is, to the nearest quarter of the grid: 1 to 4 columns
+      const n = Math.max(1, Math.min(4, Math.round((x - drag.c.getBoundingClientRect().left) / (grid.getBoundingClientRect().width / 4))));
+      if (n !== width(drag.c)) setWidth(drag.c, n);
+      return;
+    }
     if (y < 48 || y > window.innerHeight - 48) window.scrollBy(0, y < 48 ? -24 : 24);
     const hit = cards().find(c => c !== drag.c && c.getClientRects().length && inside(c.getBoundingClientRect(), x, y));
     if (!hit) { drag.over = null; return; }
@@ -512,7 +516,7 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
     const d = drag;
     drag = null;
     d.c.classList.remove("drag");
-    if (ok) changed(d.c); else { restore(d.s); say(d.c); }
+    if (ok) commit(d.c); else { restore(d.s); say(d.c); }
   }
   document.addEventListener("pointerup", e => end(e, true));
   document.addEventListener("pointercancel", e => end(e, false));
@@ -533,7 +537,7 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
       return;
     }
     const c = grab.c;
-    if (k === "Escape") { restore(grab.s); release("Cancelled"); c.focus({preventScroll: true}); }
+    if (k === "Escape") { restore(grab.s); grab = null; c.removeAttribute("data-grab"); c.focus({preventScroll: true}); commit(c, "Cancelled"); }
     else if (k === " " || k === "Enter") release("Dropped");
     else if (k === "ArrowLeft" || k === "ArrowUp") nudge(c, -1);
     else if (k === "ArrowRight" || k === "ArrowDown") nudge(c, 1);
@@ -548,8 +552,6 @@ _BUILDER = r"""// nuc-console web view: layout editor (src/webjs.py BUILDER_JS),
   });
 
   for (const c of cards()) { c.tabIndex = 0; sync(c); }
-  const draft = (read(KEY) || "").split("/");
-  if (draft.length === 2 && draft[0] === base && draft[1] !== base && arrange(draft[1]) && live) live.textContent = "Draft restored";
 })();
 """
 

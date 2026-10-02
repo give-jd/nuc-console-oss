@@ -124,12 +124,12 @@ class View(object):
     """What a page gives the shell instead of a document: its body, its own controls (the toolbar above it), the URL parameters that make the view
     (the footer's links change one of them), whether it reloads (and how soon, when `wait` says), its script and the style it needs, and whether it
     has forms (the CSP then allows them to post here). grid: the body is the overview's cards; legacy: it is one of the pages made before the
-    shell (their classes are styled in webcss.py)."""
-    __slots__ = ("body", "tools", "here", "live", "script", "forms", "wait", "style", "grid", "legacy")
+    shell (their classes are styled in webcss.py); bar: a block above the grid (the layout editor's controls)."""
+    __slots__ = ("body", "tools", "here", "live", "script", "forms", "wait", "style", "grid", "legacy", "bar")
 
-    def __init__(self, body, tools=(), here=None, live=True, script="", forms=False, wait=0, style="", grid=False, legacy=True):
+    def __init__(self, body, tools=(), here=None, live=True, script="", forms=False, wait=0, style="", grid=False, legacy=True, bar=""):
         self.body, self.tools, self.here, self.live, self.script, self.forms = body, list(tools), here, live, script, forms
-        self.wait, self.style, self.grid, self.legacy = wait, style, grid, legacy
+        self.wait, self.style, self.grid, self.legacy, self.bar = wait, style, grid, legacy, bar
 
 
 TAB_TITLES = {name: title for name, _feature, title in ui.SCREENS}
@@ -302,11 +302,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if site is not None and site not in ("same-origin", "none"):  # a link on another site does not change this one's look
             return self._send(403, b"a link of another site cannot change the preferences\n")
         whole = field.startswith(prefs.COOKIE_VERSION + ".") or field == prefs.COOKIE_VERSION  # PREFS_JS sends back the string it was given: all of it
+        step = prefs.edit_parts(field) is not None  # one step of the layout editor (e<op><card>, ereset)
         if whole and (not prefs.parse_cookie(field) and field != prefs.COOKIE_VERSION):
             return self._send(400, b"not a preference\n")
-        if not whole and field != "reset" and ("." in field or not prefs.parse_cookie("1." + field)):
+        if not whole and not step and field != "reset" and ("." in field or not prefs.parse_cookie("1." + field)):
             return self._send(400, b"not a preference\n")
-        value = prefs.dump_cookie(prefs.parse_cookie(field)) if whole else prefs.apply_set(self._cookie(prefs.COOKIE_NAME), field)
+        current = self._cookie(prefs.COOKIE_NAME)
+        if step:  # only the layout changes; the step is applied to the layout in force (cookie, else config.ini, else the preset)
+            value = prefs.apply_edit(current, field, render.CFG.get("ui"), [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])
+        else:
+            value = prefs.dump_cookie(prefs.parse_cookie(field)) if whole else prefs.apply_set(current, field)
         try:
             back = parse_qs((q.get("back") or [""])[0][:400], max_num_fields=40)
         except ValueError:
@@ -428,12 +433,14 @@ def view_params(q):
     report does not have), pause=1 no reload.
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
     confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel).
+    edit=1: the layout editor (the shell's overview in edit mode; with app=0 or another view it is dropped).
     The shell: app=1 (0: the classic page, whatever [ui] web says), ui=<the preferences string> for this URL only (prefs.parse_cookie: an invalid one
     is dropped), view=settings (the settings page), card=<id> (one card of the overview in full), pause=1 (the overview too)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
     view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings") else ""
+    edit = not view and one("edit") == "1" and one("app") != "0"  # the layout editor: the shell's overview in edit mode (the classic page has none)
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
         str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
@@ -443,7 +450,7 @@ def view_params(q):
             "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
             "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0,  # 0 = config
             "app": one("app") if one("app") in ("0", "1") else "", "ui": ui_oneshot(one("ui")),
-            "card": one("card") if not view and one("card") in prefs.CARDS else "",
+            "card": one("card") if not view and one("card") in prefs.CARDS and not edit else "", "edit": edit,
             "view": view, "open": map_keys(one("open")), "shut": map_keys(one("shut")),
             "all": one("all") == "1", "sel": sel, "only": one("only") == "1", "pause": one("pause") == "1",
             "as": "graph" if one("as") == "graph" else "", "stacks": one("stacks") == "1",
@@ -457,7 +464,7 @@ def view_params(q):
 
 HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card",)}  # and what each view reads besides (settings: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card", "edit")}  # and what each view reads besides (settings: nothing)
 
 
 def ui_oneshot(raw):
@@ -549,7 +556,7 @@ class Server(http.server.ThreadingHTTPServer):
         """Characters of the cached pages (the cached map graph is not a page: it counts 0)."""
         return sum(len(v) for _, v in self.cache.values() if isinstance(v, (str, bytes)))
 
-    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0, view="", app="", ui="", card="", cookie="", **state):
+    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0, view="", app="", ui="", card="", edit=False, cookie="", **state):
         """zoom/refresh 0 = the configured ones: only what the viewer changed is written in the links.
         view='map': the MAP page, state = its open/shut/all/sel/only/pause parameters (see view_params).
         The shell (uses_shell) draws the same views in its own frame; cookie is the nuc_ui cookie the request came with (prefs.effective checks it)."""
@@ -557,12 +564,12 @@ class Server(http.server.ThreadingHTTPServer):
         here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh, "app": app, "ui": ui}
         zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
         self.cpu_feed.max_age = r  # processes are read at most once per refresh interval, however many viewers and pages ask
-        shell = self.uses_shell(view, app, card)
-        pause = bool(state.get("pause"))
+        shell = self.uses_shell(view, app, card, edit)
+        pause = bool(state.get("pause")) and not edit  # the editor does not reload by itself: a page that moves under your hand is no editor
         if shell:
-            eff, _src = prefs.effective(render.CFG.get("ui"), cookie, ui)
+            eff, src = prefs.effective(render.CFG.get("ui"), cookie, "" if edit else ui)  # the editor edits the browser's layout, not a ?ui= one
             cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing)
-            norm = {"": {"pause": pause}, "settings": {}}.get(view, {})
+            norm = {"": {"pause": pause, "edit": edit}, "settings": {}}.get(view, {})
         else:
             norm = {}
 
@@ -571,7 +578,8 @@ class Server(http.server.ThreadingHTTPServer):
             if not shell:
                 return self.cached(key, ttl, lambda: build(False))
             skey = ("shell", view, card, zoom, r, prefs.dump_cookie(eff), cookie) + tuple(here.items()) + tuple(sorted(norm.items()))
-            return self.cached(skey, ttl, lambda: self.shell_render(view, build, here, zoom, r, eff, cookie, pause, card))
+            return self.cached(skey, ttl, lambda: self.shell_render(view, build, here, zoom, r, eff, cookie, pause, card, edit,
+                                                                     prefs.custom_layout(src)))
         if view == "cpu":
             norm = {"sort": state.get("sort", ""), "sel": state.get("sel", ""), "pause": pause}
             key = ("cpu", zoom, r) + tuple(here.items()) + (state.get("sort", ""), state.get("sel", ""))
@@ -604,10 +612,10 @@ class Server(http.server.ThreadingHTTPServer):
 
     # ---- the shell: `[ui] web = app` or ?app=1 --------------------------------------------------------------------------------------
 
-    def uses_shell(self, view, app, card):
-        """The shell is the page for ?app=1, for the settings and a single card (they exist only there), and for every page when [ui] web = app
-        (?app=0 asks for the classic page anyway)."""
-        return view == "settings" or bool(card) or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
+    def uses_shell(self, view, app, card, edit=False):
+        """The shell is the page for ?app=1, for the settings, a single card and the layout editor (they exist only there), and for every page
+        when [ui] web = app (?app=0 asks for the classic page anyway)."""
+        return view == "settings" or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
 
     def shell_frame(self, r):
         """The data of a shell page (cards.Ctx), read once per half refresh interval whatever the number of viewers."""
@@ -627,16 +635,19 @@ class Server(http.server.ThreadingHTTPServer):
         return cards.Ctx(s=sm, cont=st["cont"], net=st["net"], boot=st["boot"], problems=pb, cfg=render.CFG, now=time.time(), baseline=st["baseline"],
                          new=render.new_ports(st["net"], st["cont"], st["baseline"]), health=health, ai=ai)
 
-    def shell_render(self, view, build, here, zoom, r, eff, cookie, pause, card):
+    def shell_render(self, view, build, here, zoom, r, eff, cookie, pause, card, edit=False, custom=False):
         """One page of the shell: the top bar and the key figures (blocks the page is refreshed by), the view, the footer and the help. `build(True)`
-        gives the View of a Map, CPU, Health or AI page (the page's own builder, which then returns its body and its controls, not a document)."""
+        gives the View of a Map, CPU, Health or AI page (the page's own builder, which then returns its body and its controls, not a document).
+        edit: the overview as the layout editor (no refresh, its own script); custom: the layout in force is the reader's own (the cards keep their order)."""
         ctx = self.shell_frame(r)
         feats = lambda f: render.CFG["features"].get(f, True)  # noqa: E731
         visible = [c for c, _w in prefs.visible_cards(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])]
         if view == "settings":
             v = self.settings_view(here, eff, cookie, r)
+        elif view == "" and edit:
+            v = self.edit_view(here, eff, ctx)
         elif view == "":
-            v = self.overview_view(here, eff, ctx, r, pause, card, visible)
+            v = self.overview_view(here, eff, ctx, r, pause, card, visible, custom)
         else:
             v = build(True)
         vhere = dict(v.here) if v.here is not None else dict({"view": view}, **here)
@@ -673,8 +684,10 @@ class Server(http.server.ThreadingHTTPServer):
             attrs = f' data-refresh="{int(v.wait or r)}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
         if pause:
             attrs += ' data-paused="1"'
+        if edit:
+            attrs += " data-edit"
         if v.grid:
-            main = f'<main class="grid"{attrs}>{v.body}</main>'
+            main = v.bar + f'<main class="grid"{attrs}>{v.body}</main>'
             blocks = v.body
         else:
             inner = v.body.replace("<main ", "<div ").replace("</main>", "</div>") if v.legacy else v.body  # one <main> a page: the old bodies' became <div>
@@ -685,9 +698,10 @@ class Server(http.server.ThreadingHTTPServer):
             else:
                 blocks = ""
             main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>{inner}</main>'
-        groups = ["refresh every " + self.every(link, r) if view != "settings" else "",
+        groups = ["refresh every " + self.every(link, r) if view != "settings" and not edit else "",
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
-                  + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" else "",
+                  + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" and not edit else "",
+                  link("Done", edit=False) if edit else link("Edit layout", edit=True) if view == "" and not card else "",
                   "text " + self.sizes(link, zoom),
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
@@ -695,16 +709,19 @@ class Server(http.server.ThreadingHTTPServer):
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
         scope = view if view in ("map", "cpu", "health", "ai") else "global" if view == "settings" else "overview"
-        helps = htmlview.help_dialog(ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause))
+        groups_help = (ui.help_rows("editor", feats) + ui.help_rows("global", feats, bool(nuc_config.PORTABLE))) if edit \
+            else ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause)
+        helps = htmlview.help_dialog(groups_help)
         body = top + kpis + '<div id="stale" class="stale-banner" role="status" hidden></div>' + main + htmlview.foot([g for g in groups if g], clock) + helps
-        name = {"": "overview", "settings": "settings"}.get(view, view)
-        scripts = [webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS] + ([v.script] if v.script else [])
+        name = "layout" if edit else {"": "overview", "settings": "settings"}.get(view, view)
+        scripts = [webjs.KEYS_JS, webjs.PREFS_JS, webjs.BUILDER_JS] if edit else \
+            [webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS] + ([v.script] if v.script else [])
         page = Page(htmlview.shell_doc(f"{host} · {name} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], zoom,
                                        int(time.time() // 600) % 3, here["kiosk"], "url" if here["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
                                        cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.style, scripts, pause))
         page.csp = page_csp(scripts, shell=True, forms=v.forms)
         page.referrer = "same-origin" if v.forms else "no-referrer"
-        page.blocks = top + kpis + blocks
+        page.blocks = None if edit else top + kpis + blocks  # the editor has no refresh script: ?frag=1 gets the whole page, as a classic page does
         return page
 
     @staticmethod
@@ -737,16 +754,17 @@ class Server(http.server.ThreadingHTTPServer):
             out.append(htmlview.tab(digit, TAB_TITLES[name], href, view == ("" if name == "overview" else name), badges.get(name, "")))
         return out
 
-    def overview_view(self, here, eff, ctx, r, pause, only, visible):
+    def overview_view(self, here, eff, ctx, r, pause, only, visible, custom=False):
         """The overview: the cards in the order the preferences give (by severity, or fixed), each the body the console draws for it (the
-        components come later), in a grid. only: one card in full (?card=)."""
+        components come later), in a grid. only: one card in full (?card=). custom: the layout is the reader's own (the editor's): the cards
+        stay where they put them, whatever the order preference says."""
         k = DETAIL_K.get(eff["density"], -2)
         if only:
             order = [(only, 4)] if cards.enabled(only, render.CFG) else []
         else:
             order = prefs.visible_cards(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])
         built = [self.shell_card(ctx, cid, w, k, here, bool(only)) for cid, w in order]
-        if eff["order"] == "severity" and not only:
+        if eff["order"] == "severity" and not only and not custom:
             built.sort(key=lambda x: STATE_RANK.get(x[0], 3))  # stable: equal states keep the layout's order
         body = "".join(x[1] for x in built)
         vhere = dict(here, pause=pause, card=only)
@@ -754,9 +772,45 @@ class Server(http.server.ThreadingHTTPServer):
             body = body or '<p class="sm">this card is not shown: its feature is off in config.ini ([features])</p>'
         return View(body, ['<a href="%s">&larr; overview</a>' % html.escape(page_url(here))] if only else [], vhere, True, grid=True, legacy=False)
 
-    def shell_card(self, ctx, cid, size, k, here, full):
+    def edit_view(self, here, eff, ctx):
+        """The layout editor: the overview's cards in the order of the layout (never by severity), each with its own buttons (earlier, later,
+        narrower, wider, hide: plain links, `?set=e<step>`), then the hidden cards, each with a button to show it. Every control is a link:
+        without JavaScript a click is a step on the server that comes back here; BUILDER_JS turns the same links into changes of the page."""
+        k = DETAIL_K.get(eff["density"], -2)
+        vhere = dict(here, edit=True)
+        back = urlsplit(page_url(vhere)).query
+        esc = html.escape
+        lay = prefs.layout_of(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])
+        title = lambda cid: cards.CARDS[cid].title if cid in cards.CARDS else cid  # noqa: E731
+
+        def controls(cid, hidden=False):
+            def link(op, glyph, what, attr):
+                return (f'<a class="eb" {attr} href="{esc(set_url(prefs.edit_field(op, cid), back))}" aria-label="{esc(what)}: {esc(title(cid))}" '
+                        f'title="{esc(what)}">{glyph}</a>')
+            show = (f'<a class="eb eb-hide" data-hide href="{esc(set_url(prefs.edit_field("w" if hidden else "h", cid), back))}" '
+                    f'aria-label="{esc(title(cid))}: hide or show" title="Hide or show"><span class="t-hide">\u2715</span><span class="t-show">show</span></a>')
+            return ('<div class="ectl" role="group" aria-label="Layout of ' + esc(title(cid)) + '"><span class="grip" data-drag aria-hidden="true" title="Drag to move">'
+                    '\u283f</span>' + link("u", "\u2191", "Earlier", "data-earlier") + link("d", "\u2193", "Later", "data-later")
+                    + link("s", "\u2212", "Narrower", "data-shrink") + '<span class="wv" aria-hidden="true"></span>' + link("g", "+", "Wider", "data-grow")
+                    + show + '<span class="grip rz" data-size aria-hidden="true" title="Drag to resize">\u2194</span></div>')
+        built = [self.shell_card(ctx, cid, w, k, here, False, controls(cid))[1] for cid, w in lay["layout"]]
+        for cid in lay["hidden"]:
+            if cards.enabled(cid, render.CFG):  # built like the others (showing it with the script needs its body); the style sheet hides the body
+                built.append(self.shell_card(ctx, cid, 1, k, here, False, controls(cid, True), True)[1])
+        done, reset = page_url(here), set_url("ereset", back)
+        bar = ('<section class="ebar" aria-label="Layout editor"><div class="eh"><h2>Edit layout</h2>'
+               f'<a class="lnk" href="{esc(done)}">Done</a><a class="lnk" data-set href="{esc(reset)}">Reset layout</a></div>'
+               '<p class="hintl">Each card has its own buttons: \u2191 \u2193 move it, \u2212 + make it narrower or wider (1 to 4 columns), '
+               '\u2715 hides it, and a hidden card has a <b>show</b> button. With JavaScript you can also drag a card by its \u283f handle, drag its '
+               'right edge to resize it, or focus a card and press Space, then the arrow keys, + and \u2212, x and Esc (<a href="#help">help</a>). '
+               'Every change is saved at once.</p>'
+               '<p class="hintl">While you have a layout of your own the cards stay in this order (the order is fixed), instead of moving by '
+               'severity. <b>Reset layout</b> brings the preset\'s back.</p><p id="live" class="sr-only" role="status" aria-live="polite"></p></section>')
+        return View("".join(built), [], vhere, False, grid=True, legacy=False, bar=bar)
+
+    def shell_card(self, ctx, cid, size, k, here, full, tools="", off=False):
         """(state, the article) of one card: the lines the console has always drawn for it (cards.build), colours as spans. A card that fails is
-        shown unknown, with the reason in the log."""
+        shown unknown, with the reason in the log. tools: the editor's buttons of the card (the body is then not clickable); off: the editor lists it as hidden."""
         saved = render.FULL
         render.FULL = bool(full)  # the console's own switch: nothing is cut in the full card
         try:
@@ -769,11 +823,11 @@ class Server(http.server.ThreadingHTTPServer):
                 parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
                 note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
             more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full else ""
-            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more)
+            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more, tools, off)
         except Exception as e:  # noqa: BLE001 - a broken card must not take the page down
             print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
             entry = cards.CARDS.get(cid)
-            return "unknown", htmlview.card_article(cid, entry.title if entry else cid, "", "unknown", size, '<p class="sm">this card could not be drawn (see the service log)</p>')
+            return "unknown", htmlview.card_article(cid, entry.title if entry else cid, "", "unknown", size, '<p class="sm">this card could not be drawn (see the service log)</p>', "", tools, off)
         finally:
             render.FULL = saved
 
@@ -797,7 +851,8 @@ class Server(http.server.ThreadingHTTPServer):
         preset = group("Preset", "preset", [(name.capitalize(), "p" + prefs.PRESET_CODES[name], name, {}) for name in prefs.PRESETS],
                        "A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.")
         order = group("Order", "order", [("By severity", "o" + prefs.ORDER_CODES["severity"], "severity", {}), ("Fixed", "o" + prefs.ORDER_CODES["fixed"], "fixed", {})],
-                      "By severity: what needs you comes first. Fixed: the layout's order, nothing moves.")
+                      "By severity: what needs you comes first. Fixed: the layout's order, nothing moves."
+                      + (" You have a layout of your own, so for now the cards stay in its order." if prefs.custom_layout(source) else ""))
         start = group("Start view", "start_view", [(TAB_TITLES[n], "v" + prefs.VIEW_CODES[n], n, {}) for n in prefs.VIEWS])
         cur, boxes = list(eff["kpis"]), []
         for kid in prefs.KPI_IDS:
@@ -810,8 +865,11 @@ class Server(http.server.ThreadingHTTPServer):
             boxes.append(f'<li class="{"on" if on else "off"}">{link_}' + (f'<span class="o">{cur.index(kid) + 1}</span>' if on else "") + "</li>")
         kpis = (f'<div class="fs"><span class="lab">Key figures (at most {prefs.MAX_KPIS}, shown in the order chosen) {where("kpis")}</span>'
                 f'<ul class="kchk">{"".join(boxes)}</ul></div>')
+        edit_href = esc(page_url(dict(here, view="", edit=True)))
+        layout = (f'<div class="fs"><span class="lab">Layout {where("layout")}</span><div><a class="lnk" href="{edit_href}">Edit layout</a></div>'
+                  '<p class="hintl">Move, resize and hide the cards of the overview. It is kept in this browser; a preset or Reset layout brings the preset\'s back.</p></div>')
         export = prefs.export_ini(dict(eff, web="app"))
-        appearance = (f'<section class="sec" aria-labelledby="sec-app"><h3 class="sech" id="sec-app">Appearance</h3>{theme}{dens}{preset}{order}{start}{kpis}'
+        appearance = (f'<section class="sec" aria-labelledby="sec-app"><h3 class="sech" id="sec-app">Appearance</h3>{theme}{dens}{preset}{layout}{order}{start}{kpis}'
                       f'<div class="fs expo"><span class="lab" id="exp-lab">Export</span><pre id="export" tabindex="0" aria-labelledby="exp-lab">{esc(export)}</pre>'
                       f'<button type="button" class="lnk" data-copy="#export" data-done="Copied" data-fail="Selected: press Ctrl+C">Copy</button>'
                       f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'

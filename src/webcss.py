@@ -7,7 +7,7 @@ the first 8 digits of the SHA-256, a changed sheet is a new URL). Nothing is bui
               prefers-color-scheme and prefers-contrast, and forced-colors hands the colours to the system
   densities   html[data-density=wall|desk|compact] set the base font size and the paddings; the zoom classes z50..z200 (A-/A+) scale it
   components  top bar, tabs, status pill, KPI tiles, the card grid (12 / 6 / 1 columns by container queries), card header and state chip,
-              tables, bars and sparklines, footer, settings page, help (:target), stale banner, the AI page's forms
+              tables, bars and sparklines, footer, settings page, the layout editor (?edit=1), help (:target), stale banner, the AI page's forms
   legacy      the classes of htmlview (.r .g .y ... and the CSS of the Map, CPU, Health and AI pages) with their colours turned into the
               variables above: the existing bodies of those pages sit in the shell and follow its theme (themed())
 
@@ -281,6 +281,36 @@ SETTINGS = """
 @container app (max-width:45.7em){.kchk{grid-template-columns:minmax(0,1fr)}.about{grid-template-columns:minmax(0,1fr);gap:.1em}.about dd{margin-bottom:.6em}}
 """
 
+# the layout editor (?edit=1, src/webjs.py BUILDER_JS): the bar above the grid, and the buttons of each card. The handles show only on a card that
+# BUILDER_JS has made focusable (tabindex), so that without the script there is no handle that does nothing; the cards' bodies are previews.
+EDITOR = """
+.ebar{display:grid;gap:.5em;margin:0 var(--pad) var(--gap);padding:var(--pad);background:var(--surface);border:1px solid var(--accent);border-radius:8px}
+.ebar .eh{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3em 1.4em}
+.ebar h2{margin:0 auto 0 0;font:650 .9em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.ebar p{margin:0}
+.ectl{display:flex;align-items:center;flex-wrap:wrap;gap:.35em;padding:.45em var(--pad);border-bottom:1px solid var(--line);background:var(--surface-2)}
+.eb,.grip{display:inline-grid;place-items:center;min-width:2em;height:2em;padding:0 .5em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface);color:var(--fg-strong);text-decoration:none;font-weight:700;line-height:1}
+.eb:hover,.grip:hover{border-color:var(--accent);color:var(--accent)}
+.grip{display:none;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.grip.rz{margin-left:auto;cursor:ew-resize}
+.card[tabindex] .grip{display:inline-grid}
+.wv{min-width:2.4em;text-align:center;font:600 .8em var(--mono);color:var(--muted)}
+.card.s1 .wv::before{content:"1/4"}.card.s2 .wv::before{content:"2/4"}.card.s3 .wv::before{content:"3/4"}.card.s4 .wv::before{content:"4/4"}
+.eb-hide .t-show{display:none}
+.card.off .eb-hide .t-hide{display:none}.card.off .eb-hide .t-show{display:inline}
+.card.off{border-style:dashed;background:transparent}
+.card.off .ch h3,.card.off .ch .note{opacity:.6}
+.card.off .ch h3::after{content:" \\00b7 hidden";text-transform:none;letter-spacing:0;font-weight:400}
+.card.off .cb,.card.off .ectl>:not(.eb-hide){display:none}
+.card.off .ectl{border-bottom:0;background:transparent}
+.grid[data-edit] .cb{max-height:9em;overflow:hidden;position:relative}
+.grid[data-edit] .cb::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2.5em;background:linear-gradient(transparent,var(--surface))}
+.card.drag{opacity:.75;outline:2px dashed var(--accent);outline-offset:2px}
+.card[data-grab]{outline:3px solid var(--accent);outline-offset:2px}
+.grid[data-edit] .card:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media (pointer:coarse){.eb,.grip{min-width:2.75em;height:2.75em}}
+"""
+
 # the components htmlview.html draws (ui.Span/Line/Table/KV/Msg/Wrap/More/Group/Pill/Tree/Details/Bar/Spark): every class it emits is here.
 # Tones are t-<token>; a state is st-<state> or lv-<level>. Columns carry p1..p3 (ui.Col.prio): a bigger number is dropped sooner, by the
 # width of the card (container queries on the card, not on the page). The classes r / b / n of these elements share their names with the ANSI
@@ -427,7 +457,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, COMPONENTS, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

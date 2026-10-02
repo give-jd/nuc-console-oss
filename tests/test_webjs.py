@@ -9,6 +9,7 @@ import base64
 import hashlib
 import importlib
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -389,13 +390,13 @@ class DomContract(unittest.TestCase):
 
     def test_the_fragment_contract_is_documented(self):
         for needle in ("X-Nuc-Fragment", "ETag", "If-None-Match", "304", "401", "204", "Set-Cookie", "X-Nuc-Prefs", "&frag=1",
-                       "FRAG_TAGS", "FRAG_ATTRS", "CARD_CODES", "data-rev", "__top", "__kpis", "localStorage", "nuc-draft", "nuc-ui"):
+                       "FRAG_TAGS", "FRAG_ATTRS", "CARD_CODES", "data-rev", "__top", "__kpis", "localStorage", "nuc-ui"):
             self.assertIn(needle, self.doc, needle)
 
     def test_the_names_are_in_the_scripts_and_the_docs_say_the_same(self):
         self.assertIn('"nuc-ui"', webjs.PREFS_JS)
         self.assertIn('"nuc-ui-sync"', webjs.PREFS_JS)
-        self.assertIn('"nuc-draft"', webjs.BUILDER_JS)
+        self.assertNotIn("localStorage", webjs.BUILDER_JS)  # the editor keeps nothing in the browser: the cookie is the layout
         self.assertIn("X-Nuc-Prefs", webjs.PREFS_JS)
         self.assertIn("X-Nuc-Fragment", webjs.REFRESH_JS)
 
@@ -410,6 +411,48 @@ class Syntax(unittest.TestCase):
                     f.write(js)
                 r = subprocess.run([shutil.which("node"), "--check", p], capture_output=True, text=True, timeout=60)
                 self.assertEqual(r.returncode, 0, "%s: %s" % (name, r.stderr))
+
+
+class BuilderRules(unittest.TestCase):
+    """What the layout editor's script may and may not do, beyond the rules every script obeys (the browser check is in the work log)."""
+
+    def test_it_obeys_every_rule(self):
+        self.assertEqual(jsrules.check("builder", webjs.BUILDER_JS), [])
+
+    def test_it_saves_with_the_one_door_and_keeps_nothing_in_the_browser(self):
+        js = webjs.BUILDER_JS
+        self.assertEqual(js.count('load("/?set=" + str + "&frag=1")'), 1)
+        for banned in ("localStorage", "sessionStorage", "location", "document.cookie", "navigator"):
+            self.assertNotIn(banned, js)
+        self.assertEqual(jsrules.POLICIES["builder"].location, set())
+        self.assertEqual(jsrules.POLICIES["builder"].storage, {})
+
+    def test_it_moves_nodes_the_server_made_and_makes_none(self):
+        js = webjs.BUILDER_JS
+        for banned in ("createElement", "innerHTML", "cloneNode", "appendChild", "insertAdjacent", "importNode", "DOMParser"):
+            self.assertNotIn(banned, js)
+        self.assertEqual(len(re.findall(r"\.(?:before|after)\(", js)), 4)  # one place earlier or later, and the drag
+        self.assertEqual(len(re.findall(r"\.append\(", js)), 2)
+
+    def test_a_rule_breaker_is_caught(self):
+        for line, label in (('document.body.innerHTML = "x";', "innerHTML"), ('localStorage.setItem("a", "b");', "localStorage"),
+                            ('document.createElement("a");', "createElement"), ('location.assign("/?x");', "location"),
+                            ('fetch("/?x");', "fetch"), ('eval("1");', "eval"), ('const q = document.querySelector("#other");', "selectors"),
+                            ('document.cookie;', "document.cookie")):
+            self.assertTrue(flagged("builder", inject(webjs.BUILDER_JS, line), label), line)
+
+    def test_the_layout_it_writes_is_the_one_the_server_reads(self):
+        js = webjs.BUILDER_JS
+        self.assertIn('"l" + cards().filter(code).map(c => code(c) + width(c) + (c.classList.contains("off") ? "x" : "")).join("_")', js)
+        self.assertIn("/^l[a-z]{2}[1-4]x?(_[a-z]{2}[1-4]x?)*$/", js)  # what it takes back after a failed save: the same grammar
+        # the whole of the editor's output is a field the server accepts, whatever the order or the widths
+        rnd = random.Random(3)
+        for _ in range(50):
+            ids = list(prefs.CARDS)
+            rnd.shuffle(ids)
+            field = "l" + "_".join(prefs.CARD_CODES[c] + str(rnd.randint(1, 4)) + ("x" if rnd.random() < 0.3 else "") for c in ids)
+            self.assertEqual(prefs.apply_set("1", field), prefs.dump_cookie(prefs.parse_cookie("1." + field)))
+            self.assertLessEqual(len(prefs.apply_set("1.tl.dw.vo.pv.os.kpb_in_la_be_dl_fw_cp_rm", field)), prefs.COOKIE_MAX)
 
 
 if __name__ == "__main__":
