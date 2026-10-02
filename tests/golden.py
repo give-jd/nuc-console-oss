@@ -17,7 +17,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   time, in every src module that imported it: time(), sleep(), localtime(), gmtime(), strftime(), mktime(), ctime(), asctime()
   sum, abs, math.hypot, in every src module: Python 3.12+ adds floats differently from the older ones, and the C library rounds hypot()
           (the abs of a complex number) differently on Linux, macOS and Windows: the figures would differ in the last digit (see _sum, _abs)
-  socket.gethostname, os.cpu_count, nuc_config.PORTABLE
+  socket.gethostname, os.cpu_count, nuc_config.PORTABLE, nuc_config.VERSION
   render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD, CATALOG,
           KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
   render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
@@ -209,6 +209,7 @@ class FrozenWorld(object):
             os.environ.pop("NO_COLOR", None)
             os.environ.update(self.env)
             self.set(nuc_config, "PORTABLE", "")  # NUC_CONSOLE_HOME: the portable run words some advice and footers differently
+            self.set(nuc_config, "VERSION", "0.0.0")  # the settings page shows it: a release must not change the golden pages
             self.set(socket, "gethostname", lambda: HOST)  # render.demo_defaults() puts the same name on it
             self.set(os, "cpu_count", lambda: CPUS)
             self._freeze_config()
