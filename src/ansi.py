@@ -5,6 +5,7 @@ ones that mean nothing but themselves (the boot stages' colours, a CPU bar's par
 terminal, the sections to hide or the data being drawn: that is render.py's.
 """
 import re
+import textwrap
 
 import ui
 
@@ -69,20 +70,21 @@ def fit_join(items, sep, w, lead="", c90=False):
     return lead + (c(ui.sgr("muted"), text) if c90 else text)
 
 
+_ANSI_SPLIT = re.compile("(" + ANSI.pattern + ")")
+
+
 def clip(s, w):
-    """Cut to w visible columns, leaving ANSI sequences intact."""
-    out, n, i = [], 0, 0
-    while i < len(s):
-        m = ANSI.match(s, i)
-        if m:
-            out.append(m.group())
-            i = m.end()
-        elif n >= w:
-            break
-        else:
-            out.append(s[i])
-            n += 1
-            i += 1
+    """Cut to w visible columns, leaving ANSI sequences intact (those right after the last column too, up to the next character)."""
+    out, room = [], max(w, 0)
+    for i, part in enumerate(_ANSI_SPLIT.split(s)):
+        if i & 1:  # a sequence
+            out.append(part)
+        elif part:
+            if len(part) > room:
+                out.append(part[:room])
+                break
+            out.append(part)
+            room -= len(part)
     return "".join(out) + "\x1b[0m"
 
 
@@ -100,6 +102,33 @@ def bar(frac, w, warn=0.7, err=0.9):
     n = round(frac * w)
     level = "ok" if frac < warn else "warn" if frac < err else "err"
     return c(ui.sgr(level), "█" * n) + c(ui.sgr("muted"), "░" * (w - n))
+
+
+# the parts of a Meter (one CPU in the CPU screen) as the console has always drawn them: raw codes, they mean nothing but themselves (htop's
+# meter: user green, system red, other work blue, a plain busy part cyan, I/O wait grey with its own glyph, so that colour is not all that tells it)
+METER_STYLE = {"user": ("32", "█"), "system": ("31", "█"), "other": ("34", "█"), "busy": ("36", "█"), "iowait": ("90", "▒")}
+
+
+def meter(parts, w):
+    """A w-wide bar of consecutive segments [(percent, kind)], the rest idle."""
+    out, done, acc = "", 0, 0.0
+    for pct, kind in parts:
+        acc += pct
+        end = min(w, int(round(acc * w / 100.0)))
+        if end > done:
+            code, ch = METER_STYLE[kind]
+            out += c(code, ch * (end - done))
+            done = end
+    return out + c(90, "░" * (w - done))
+
+
+def cut_lines(lines, n, what="lines"):
+    """The first n lines; when some are left out the last one says how many ('… +3 more lines'). what None: cut, say nothing."""
+    if len(lines) <= n:
+        return lines
+    if what is None:
+        return lines[:n]
+    return lines[:max(n - 1, 0)] + ([c(ui.sgr("muted"), f" … +{len(lines) - n + 1} more {what}")] if n else [])
 
 
 def sparkline(values, width, floor=1024):
@@ -209,6 +238,8 @@ def inline(x, tone=None):
         return _bar(x)
     if isinstance(x, ui.Spark):
         return sparkline(x.values, x.w, x.floor)
+    if isinstance(x, ui.Meter):
+        return meter(x.parts, x.w)
     return style("?", "unknown")
 
 
@@ -231,6 +262,24 @@ def _wrap(items, w, indent, sep, max_lines):
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + style(f"  … +{hidden}", "muted")], True
 
 
+def _cell(x, col, tone):
+    """A cell as text; a Span of a pad_in column is padded to the column's width inside its colour first."""
+    if col.pad_in and col.w is not None and isinstance(x, ui.Span):
+        text = x.text.rjust(col.w) if col.align == "r" else x.text.ljust(col.w)
+        x = ui.Span(text, x.tone, x.bold, x.mono)
+    return inline(x, tone)
+
+
+def _head_cell(t, j, last):
+    """The label of column j in a table with a head_tone: padded to the column's width inside its colour (not the last column: no padding
+    after it), the sorted one warn and bold with its arrow."""
+    col = t.cols[j]
+    label = col.label + {"desc": "▼", "asc": "▲"}.get(col.sort, "")
+    if col.w is not None and not (last and col.align != "r"):
+        label = label.rjust(col.w) if col.align == "r" else label.ljust(col.w)
+    return style(label, "warn" if col.sort else t.head_tone, bool(col.sort))
+
+
 def _table_lines(t, w):
     """A Table as lines: a column with a w is padded to it (right-aligned: on the left, centred: on both sides), the others are the text as
     it is; gap spaces follow every column but the last, and t.indent spaces come before the first. When a line is wider than w the columns
@@ -242,9 +291,10 @@ def _table_lines(t, w):
     while True:
         grid = []
         if t.head and t.head_line is None:
-            grid.append(([style(t.cols[j].label, "muted") for j in cols], None))
+            grid.append(([_head_cell(t, j, n == len(cols) - 1) if t.head_tone else style(t.cols[j].label, "muted")
+                          for n, j in enumerate(cols)], None))
         fill = t.fill
-        grid += [([inline(r.cells[j], None if fill else r.tone) for j in cols], r.tone if fill else None) for r in t.rows]
+        grid += [([_cell(r.cells[j], t.cols[j], None if fill else r.tone) for j in cols], r.tone if fill else None) for r in t.rows]
         lines = []
         for row, tone in grid:
             parts = []
@@ -262,6 +312,8 @@ def _table_lines(t, w):
                     text = pad(text, col.w)
                 parts.append(text + ("" if last else " " * col.gap))
             line = lead + "".join(parts)
+            if tone and t.solid is not None:  # the cursor row: its own colours go, it is as wide as the list
+                line = pad(ANSI.sub("", clip(line, t.solid)), t.solid)
             lines.append(style(line, tone) if tone else line)
         droppable = [j for j in cols if t.cols[j].prio > 0]
         if droppable and max([vlen(x) for x in lines] + [0]) > w:
@@ -292,7 +344,7 @@ def render(node, w):
         return card_lines(node, w)
     if isinstance(node, ui.Line) and node.clip is not None:
         return [clip(inline(node), node.clip)], False
-    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
+    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark, ui.Meter)):
         return [inline(node)], False  # as it is: a line carries its own indent (a coloured line starts with its space)
     if isinstance(node, ui.Problem):
         return msg_wrap(node.level, node.text, w), False  # the long ones go on under their text, at the commas
@@ -303,11 +355,15 @@ def render(node, w):
     if isinstance(node, ui.Hint):
         return [], False  # for the web
     if isinstance(node, ui.KV):
-        return [kv(k, inline(v), node.lw) for k, v in node.pairs], False
+        return _kv_lines(node, w), False
     if isinstance(node, ui.Table):
         return _table_lines(node, w), False
     if isinstance(node, ui.Wrap):
-        return _wrap([inline(x) for x in node.items], w, node.indent, node.sep, node.max_lines)
+        lines, hid = _wrap([inline(x) for x in node.items], w, node.indent, node.sep, node.max_lines)
+        if node.lead is not None and lines:
+            lead = inline(node.lead)
+            lines[0] = " " + lead + " " * max(1, node.indent - 1 - vlen(lead)) + lines[0][node.indent:]
+        return lines, hid
     if isinstance(node, ui.More):
         return ([" " + style(node.text, "muted")] if node.indent is None else [style(" " * node.indent + node.text, "muted")]), False
     if isinstance(node, ui.Group):
@@ -336,6 +392,27 @@ def render(node, w):
     if drawn is not None:
         return drawn(node, w)
     return [" " + style("?", "unknown")], False
+
+
+def _kv_lines(node, w):
+    """A KV as lines. As it is: three spaces, the label padded to lw, the value. wrap: the value in as many lines as the room asks
+    (the label only on the first). cols: the pairs in columns, each label and value cut to its share of the room."""
+    if node.cols > 1:
+        cw = (w - node.indent - 1) // node.cols
+        cells = [style(pad(k, node.lw), "muted") + inline(v) for k, v in node.pairs]
+        per = -(-len(cells) // node.cols)
+        out = []
+        for i in range(per):
+            row = [cells[j * per + i] for j in range(node.cols) if j * per + i < len(cells)]
+            out.append(" " * node.indent + "".join(pad(clip(x, cw), cw + 1) for x in row).rstrip())
+        return out
+    if node.wrap:
+        out = []
+        for k, v in node.pairs:
+            chunks = textwrap.wrap(inline(v), max(8, w - node.lw - 1), break_on_hyphens=False) or [""]
+            out += [" " * node.indent + (style(pad(k, node.lw), "muted") if j == 0 else " " * node.lw) + x for j, x in enumerate(chunks)]
+        return out
+    return [" " * (node.indent - 3) + kv(k, inline(v), node.lw) for k, v in node.pairs]
 
 
 def card_lines(card, w):
@@ -396,8 +473,37 @@ def _indent_lines(node, w):
 
 
 def _grid_lines(g, w):
+    if g.fit:
+        cells = [pad(clip(inline(x), g.cw), g.cw) for x in g.items]
+        return [" " * g.lead + (" " * g.gap).join(cells[i:i + g.per]).rstrip() for i in range(0, len(cells), g.per)], False
     cells = [pad(inline(x), g.cw) for x in g.items]
     return ["".join(cells[i:i + g.per]) for i in range(0, len(cells), g.per)], False
+
+
+def _many(nodes, w):
+    out, hid = [], False
+    for child in nodes:
+        part, h = render(child, w)
+        out += part
+        hid = hid or h
+    return out, hid
+
+
+def _cap_lines(node, w):
+    lines, hid = _many(node.children, w)
+    return cut_lines(lines, node.n, node.what), hid
+
+
+def _split_lines(node, w):
+    left, hl = _many(node.left, node.lw)
+    right, hr = _many(node.right, max(1, w - node.lw - 3))
+    rule = c(ui.sgr("muted"), " │ ")
+    return [pad(left[k] if k < len(left) else "", node.lw) + rule + (right[k] if k < len(right) else "")
+            for k in range(max(len(left), len(right)))], hl or hr
+
+
+def _only_lines(node, w):
+    return _many(node.children, w) if node.surface == "console" else ([], False)
 
 
 _DRAW = {
@@ -407,6 +513,10 @@ _DRAW = {
     ui.Timeline: _timeline_lines,
     ui.NoteTable: _notetable_lines,
     ui.Flow: _flow_lines,
+    ui.Cap: _cap_lines,
+    ui.Split: _split_lines,
+    ui.Only: _only_lines,
+    ui.Tiles: lambda n, w: ([], False),  # the web's key figures
 }
 
 

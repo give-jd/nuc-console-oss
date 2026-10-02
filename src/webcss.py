@@ -461,6 +461,52 @@ html[data-density="wall"] ul.grid{display:none}
 html[data-density="compact"] ul.grid{grid-template-columns:repeat(auto-fill,minmax(5.8em,1fr))}
 """
 
+# the full screens built of components (screens.py): a page of panels (ui.Group), key figures (ui.Tiles), meters, a list whose rows are links
+SCREENS = """
+.scr{display:grid;gap:var(--gap);min-width:0}
+.scr section.grp{container:panel / inline-size;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:var(--pad)}
+.scr section.grp>*+*{margin-top:.6em}
+.scr p{margin:0}
+.scr table.tbl td{white-space:nowrap}
+.scr h3 .note{margin-left:.8em;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.scr .tiles{padding:0;grid-template-columns:repeat(auto-fit,minmax(8em,1fr))}
+.scr .tiles .kpi{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"s l" "n u";align-items:baseline;column-gap:.4em;padding:.5em .7em .55em}
+.scr .tiles .kpi .sym{grid-area:s;font-size:.7em;min-width:0}
+.scr .tiles .kpi .lbl{grid-area:l;font:600 .68em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.scr .tiles .kpi .n{grid-area:n;font:700 1.5em/1.15 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg-strong)}
+.scr .tiles .kpi .unit{grid-area:u;font-size:.8em;font-weight:600;color:var(--muted)}
+.scr .tiles .kpi.st-unknown .n{color:var(--warn)}
+.scr ul.wrap li.lead{color:var(--muted)}
+.scr ul.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(19em,1fr));gap:.2em 1.6em;font:.88em var(--mono);font-variant-numeric:tabular-nums;white-space:pre}
+.scr ul.grid li{min-width:0;overflow:hidden}
+svg.meter{display:inline-block;width:8em;height:.6em;vertical-align:middle;border-radius:2px;overflow:hidden}
+svg.meter .bg{fill:color-mix(in srgb,var(--fg) 13%,transparent)}
+svg.meter .m-user{fill:var(--ok)}svg.meter .m-system{fill:var(--err)}svg.meter .m-other{fill:var(--accent)}svg.meter .m-busy{fill:var(--cyan)}svg.meter .m-iowait{fill:var(--faint)}
+.scr p.ln svg.meter{width:min(100%,22em)}
+.scr p.ln{font-variant-numeric:tabular-nums}
+.scr table.tbl{font-size:.9em}
+.scr table.tbl th a{color:inherit;text-decoration:none}
+.scr table.tbl th a:hover{color:var(--accent)}
+.scr table.tbl th.sorted,.scr table.tbl th.sorted a{color:var(--warn)}
+.scr table.tbl th[aria-sort="descending"] a::after{content:" ▼"}
+.scr table.tbl th[aria-sort="ascending"] a::after{content:" ▲"}
+.scr table.tbl th.r,.scr table.tbl td.r{text-align:right}
+.scr table.tbl tr{position:relative}
+.scr table.tbl tr[data-row]{cursor:pointer}
+.scr table.tbl tr[data-row] td:first-child a{color:inherit;text-decoration:none}
+.scr table.tbl tr[data-row] td:first-child a::after{content:"";position:absolute;inset:0}
+.scr table.tbl tr[data-row]:hover td,.scr table.tbl tr[data-row]:focus-within td{background:var(--surface-2)}
+.scr table.tbl tr.t-sel td{background:var(--accent-bg);color:var(--fg-strong)}
+.scr table.tbl td:last-child{width:100%;white-space:normal;overflow-wrap:anywhere}
+.scr section.grp>p.ln+p.ln{margin-top:.2em}
+.scr .split{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--gap)}
+.scr .split>div{min-width:0;display:grid;gap:var(--gap);align-content:start}
+@container app (min-width:60em){.scr .split{grid-template-columns:minmax(0,1.7fr) minmax(18em,1fr)}}
+@container panel (max-width:44em){.scr th.p3,.scr td.p3{display:none}}
+@container panel (max-width:34em){.scr th.p2,.scr td.p2{display:none}}
+@container panel (max-width:24em){.scr th.p1,.scr td.p1{display:none}}
+"""
+
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
 ANSI = """
 .r{color:var(--err)}.g{color:var(--ok)}.y{color:var(--warn)}.b{color:var(--accent)}.m{color:var(--magenta)}.c{color:var(--cyan)}
@@ -535,7 +581,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

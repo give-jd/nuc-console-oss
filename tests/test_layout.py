@@ -175,7 +175,7 @@ class Moved(unittest.TestCase):
     def test_ui_and_ansi_import_nothing_of_ours_but_each_other(self):
         std = {"math", "re", "unicodedata"}
         self.assertEqual(imports_of("ui"), std)
-        self.assertEqual(imports_of("ansi"), {"re", "ui"})
+        self.assertEqual(imports_of("ansi"), {"re", "textwrap", "ui"})
 
 
 EXPOSURE_NAMES = ("CELL", "DOCKER_PROXIES", "EXPOSE_LABEL", "EXPOSED_RANK", "EXPOSURE_SECTIONS", "GROUPS", "INFRA_PROCS", "PRIVATE_NETS",

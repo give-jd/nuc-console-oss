@@ -139,6 +139,29 @@ def qf(x, spec=".0f", unit=""):
     return "?" if x is None else format(x, spec) + unit
 
 
+def dget(d, *keys):
+    """d[k1][k2]... or None when any step is missing or not a dict."""
+    for k in keys:
+        d = d.get(k) if isinstance(d, dict) else None
+    return d
+
+
+def dd(x):
+    """x when it is a dict, else an empty one: a producer's section that is not what the contract says is a section with nothing in it."""
+    return x if isinstance(x, dict) else {}
+
+
+def idict(d):
+    """{int: value} of a dict whose keys may be digits or strings (JSON keys are always strings); other keys are dropped."""
+    out = {}
+    for k, v in (d.items() if isinstance(d, dict) else ()):
+        try:
+            out[int(k)] = v
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def fmt_size(b):
     b = num(b)
     if b is None:
@@ -245,7 +268,7 @@ def _tone(tone):
 
 def _inline(x):
     """What fits in a line or a table cell: a Span, a Line, a Bar or a Spark; anything else is text."""
-    return x if isinstance(x, (Span, Line, Bar, Spark)) else Span(x)
+    return x if isinstance(x, (Span, Line, Bar, Spark, Meter)) else Span(x)
 
 
 class Span(_Component):
@@ -264,8 +287,8 @@ class Line(_Component):
     __slots__ = ("spans", "clip")
 
     def __init__(self, spans=(), clip=None):
-        self.spans = [x if isinstance(x, (Span, Bar, Spark)) else Span(x)
-                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark)) else spans)]
+        self.spans = [x if isinstance(x, (Span, Bar, Spark, Meter)) else Span(x)
+                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark, Meter)) else spans)]
         self.clip = None if clip is None else int(clip)
 
     @property
@@ -329,15 +352,23 @@ class Col(_Component):
     """A column of a Table: key, label, align ('l' | 'r' | 'c' centred), prio (0 = never dropped; a bigger number is dropped sooner when
     the room is short), num (the cells are numbers: mono, aligned). w, gap and clip are the console's: w is the columns the cell is
     padded to (None: the text as it is, no padding), gap the spaces after the column, clip the columns the cell is cut to (None: not
-    cut). The web ignores all three. wprio: the web's own priority (None: prio), by the width of the card it is drawn in: the console's
-    prio is tuned to its columns, a card of the grid has its own sizes."""
-    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap", "clip", "wprio")
+    cut), pad_in (the padding of a Span cell is inside its colour: a coloured cell is as wide as the column). The web ignores all four.
+    wprio: the web's own priority (None: prio), by the width of the card it is drawn in: the console's prio is tuned to its columns, a
+    card of the grid has its own sizes.
+    A column the rows can be sorted by has href (the link of its label; None: not a link), hkey (the keys that do the same, as the
+    keymap writes them: 'p P') and, on the one the rows are in the order of, sort: 'desc' or 'asc' (the console writes an arrow after
+    the label), or 'mark' for a second column that belongs to the same order (no arrow, no aria-sort)."""
+    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap", "clip", "pad_in", "href", "hkey", "sort", "wprio")
 
-    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1, clip=None, wprio=None):
+    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1, clip=None, pad_in=False, href=None, hkey="", sort=None, wprio=None):
         self.key, self.label, self.align, self.prio, self.num = key, _text(label), align if align in ("r", "c") else "l", int(prio), bool(num)
         self.wprio = None if wprio is None else int(wprio)
         self.w, self.gap = None if w is None else int(w), int(gap)
         self.clip = None if clip is None else int(clip)
+        self.pad_in, self.href, self.hkey = bool(pad_in), href, _text(hkey)
+        if sort not in (None, "asc", "desc", "mark"):
+            raise ValueError(f"unknown sort {sort!r}: asc, desc or mark")
+        self.sort = sort
 
 
 class Row(_Component):
@@ -354,12 +385,16 @@ class Table(_Component):
     head: the console draws the labels as a first row (the web always has them in <thead>).
     The rest is the console's own (the web ignores it): indent (the columns before the first one), head_line (the header drawn bold, as this
     text, in place of the labels), titled (each group is a bold title with its row count after a blank line; the web adds the count),
-    fill (a row with a tone is drawn in that colour from end to end, the spaces between the cells too)."""
-    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill")
+    fill (a row with a tone is drawn in that colour from end to end, the spaces between the cells too), head_tone (the labels are drawn in
+    that tone, the one of a sorted column warn and bold, with its arrow: the labels are padded inside their colour) and solid (a row with a
+    tone is cut to that many columns, stripped of the colours of its cells and padded to them: the cursor row of a list).
+    A row with a link (Row.href) is a row of a list: the web marks it data-row, and the one with the tone 'sel' aria-current."""
+    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill", "head_tone", "solid")
 
-    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False):
+    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False, head_tone=None, solid=None):
         self.head = bool(head) or head_line is not None
         self.indent, self.head_line, self.titled, self.fill = int(indent), None if head_line is None else _text(head_line), bool(titled), bool(fill)
+        self.head_tone, self.solid = _tone(head_tone), None if solid is None else int(solid)
         self.cols, self.rows = list(cols), list(rows)
         for r in self.rows:
             if len(r.cells) != len(self.cols):
@@ -368,12 +403,14 @@ class Table(_Component):
 
 
 class KV(_Component):
-    """Labels and values: pairs of (label, Span / Line / str) and the label column's width on the console."""
-    __slots__ = ("pairs", "lw")
+    """Labels and values: pairs of (label, Span / Line / str) and the label column's width on the console. The rest is the console's (the
+    web ignores it): indent (the columns before the label), wrap (a long value goes on under itself at the width of the room; the values
+    are plain text) and cols (the pairs in that many columns, filled one after the other, each cut to its share of the room)."""
+    __slots__ = ("pairs", "lw", "indent", "wrap", "cols")
 
-    def __init__(self, pairs=(), lw=13):
+    def __init__(self, pairs=(), lw=13, indent=3, wrap=False, cols=1):
         self.pairs = [(_text(k), _inline(v)) for k, v in pairs]
-        self.lw = int(lw)
+        self.lw, self.indent, self.wrap, self.cols = int(lw), int(indent), bool(wrap), max(1, int(cols))
 
 
 class Bar(_Component):
@@ -429,11 +466,13 @@ class Notice(Msg):
 
 
 class Wrap(_Component):
-    """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one; indent: the console's)."""
-    __slots__ = ("items", "sep", "max_lines", "indent")
+    """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one; indent: the console's).
+    lead: a label (a Span) before the first item: the console puts it in the indent of the first line (one column in), the web before the list."""
+    __slots__ = ("items", "sep", "max_lines", "indent", "lead")
 
-    def __init__(self, items=(), sep="  ·  ", max_lines=None, indent=1):
+    def __init__(self, items=(), sep="  ·  ", max_lines=None, indent=1, lead=None):
         self.items, self.sep, self.max_lines, self.indent = [_inline(x) for x in items], sep, max_lines, int(indent)
+        self.lead = None if lead is None else _inline(lead)
 
 
 class Group(_Component):
@@ -539,11 +578,13 @@ class Indent(_Component):
 
 class Grid(_Component):
     """Items of one line each (a Line with a Bar: one CPU core) in columns: the console pads each to cw columns and puts per of them on
-    a line; the web lays them out in a CSS grid."""
-    __slots__ = ("items", "cw", "per")
+    a line; the web lays them out in a CSS grid. fit (the console's): each item is cut to cw columns too, lead spaces come before a line,
+    gap spaces between its items, and the blanks at its end are dropped."""
+    __slots__ = ("items", "cw", "per", "gap", "lead", "fit")
 
-    def __init__(self, items=(), cw=20, per=1):
+    def __init__(self, items=(), cw=20, per=1, gap=0, lead=0, fit=False):
         self.items, self.cw, self.per = [_inline(x) for x in items], max(1, int(cw)), max(1, int(per))
+        self.gap, self.lead, self.fit = max(0, int(gap)), max(0, int(lead)), bool(fit)
 
 
 class Timeline(_Component):
@@ -577,6 +618,63 @@ class Flow(_Component):
     def __init__(self, items=(), lead=None, indent=8, sep="   ", cut=None):
         self.items, self.lead = [_inline(x) for x in items], None if lead is None else _inline(lead)
         self.indent, self.sep, self.cut = max(2, int(indent)), sep, None if cut is None else int(cut)
+
+
+# ---- components of the full screens (screens.py) -----------------------------------------------------------------------------------
+
+METER_KINDS = ("user", "system", "other", "busy", "iowait")
+
+
+class Meter(_Component):
+    """A whole in parts drawn side by side, the rest idle (one CPU: user, system, other work, I/O wait): parts [(percent, kind)] with
+    kind one of METER_KINDS, in the order they are drawn; w: the console's width in columns (the web sizes it in CSS). No parts at all is
+    an idle meter: what could not be read is drawn '?' next to it by whoever builds the line."""
+    __slots__ = ("parts", "w")
+
+    def __init__(self, parts=(), w=10):
+        self.parts = []
+        for pct, kind in parts:
+            if kind not in METER_KINDS:
+                raise ValueError(f"unknown kind {kind!r}: one of {', '.join(METER_KINDS)}")
+            self.parts.append((max(num(pct) or 0.0, 0.0), kind))
+        self.w = max(1, int(w))
+
+
+class Cap(_Component):
+    """Children that take at most n lines of the console: when they are more, the last line says how many were left out ('... +3 more
+    <what>'); what None cuts without saying. The web draws every child: it has the room."""
+    __slots__ = ("children", "n", "what")
+
+    def __init__(self, children=(), n=0, what="lines"):
+        self.children, self.n, self.what = list(children), max(0, int(n)), None if what is None else _text(what)
+
+
+class Split(_Component):
+    """Two blocks side by side: left (lw columns wide on the console) and right (the rest, less the 3 of the rule between them). The web
+    puts them in a grid that stacks them in a narrow window."""
+    __slots__ = ("left", "right", "lw")
+
+    def __init__(self, left=(), right=(), lw=40):
+        self.left, self.right, self.lw = list(left), list(right), max(1, int(lw))
+
+
+class Only(_Component):
+    """Children one surface draws and the other does not: surface 'console' or 'web' (the key figures of the web have the header lines of
+    the console as their counterpart)."""
+    __slots__ = ("surface", "children")
+
+    def __init__(self, surface, children=()):
+        if surface not in ("console", "web"):
+            raise ValueError(f"unknown surface {surface!r}: console or web")
+        self.surface, self.children = surface, list(children)
+
+
+class Tiles(_Component):
+    """A row of key figures (Kpi) of a screen: the web draws them as tiles, the console nothing (it writes the same facts as text)."""
+    __slots__ = ("items",)
+
+    def __init__(self, items=()):
+        self.items = list(items)
 
 
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------

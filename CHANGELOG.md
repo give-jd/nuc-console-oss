@@ -57,6 +57,9 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
 - The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.
   The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-new-shell-preview-opt-in).
+- In the shell the CPU screen is real HTML, not a text screen: key figures, a meter per logical CPU, the temperatures and the process table, whose column
+  heads are the sort links (the keys `p m t n u` work too) and whose rows select a process, with its details beside the table. The classic page and the
+  console are unchanged.
 - The shell has three small first-party scripts, inline and pinned by their hashes in each page's CSP (`script-src`, `connect-src 'self'`, Trusted Types):
   **partial refresh** (it polls the page's fragment, `&frag=1` with an `ETag` and `304`, and replaces only the cards that changed; the focus, the open
   details and the scroll stay; a stopped server shows *stale since HH:MM:SS*, never fresh numbers), **keys** (1-5, `Z`, `?`, arrows and `j`/`k` over lists, from the

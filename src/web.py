@@ -42,6 +42,7 @@ import htmlview
 import nuc_config
 import prefs
 import render
+import screens
 import ui
 import webcss
 import webjs
@@ -967,9 +968,30 @@ class Server(http.server.ThreadingHTTPServer):
         lo, hi = nuc_config.REFRESH_MIN, nuc_config.REFRESH_MAX  # − = more often, + = less often
         return (link("−", refresh=r - 1) if r > lo else "−") + f" {r}s " + (link("+", refresh=r + 1) if r < hi else "+")
 
+    def cpu_native(self, here, r, sort, sel):
+        """The CPU screen of the shell: the screen's components (screens.cpu_view, the model the console draws too) as HTML, no <pre>: key
+        figures, the CPUs, the temperatures and the process table, whose column heads are the sort links (data-key: the keymap's letters) and
+        whose rows are links (sel= shows that process's details beside it, the selected row closes them)."""
+        esc = html.escape
+        chere = {"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}
+        chere.update(here)
+        try:
+            d = self.cpu_feed.read()
+            sel = sel if sel and int(sel) in {p["pid"] for p in d["procs"]["procs"]} else ""  # no such process (any more): dropped
+            chere["sel"] = sel
+            links = screens.CpuLinks(lambda by: page_url(chere, sort="" if by == "cpu" else by), lambda pid: page_url(chere, sel="" if str(pid) == sel else str(pid)))
+            sc = screens.cpu_view(d, render.cpu_ctx(False), screens.WEB_W, 10 ** 4, sort, int(sel) if sel else None, bool(sel), 0, links)
+            body = '<div class="scr scr-cpu">' + "".join(htmlview.html(node) for node in sc.nodes) + "</div>"
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+            print("nuc-console web: cpu render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+            body = '<p class="sm">render error (see the service log)</p>'
+        tools = [f'<a href="{esc(page_url(chere, sel=""))}">close details</a>' if sel else "a process: its details"]
+        return View(body, tools, chere, True, legacy=False)
+
     def cpu_page(self, here, zoom, r, sort, sel, shell=False):
         """The CPU screen as a page: the console's own screen through the ANSI path, its process rows links (sel= shows that process's
-        details), the sort as links in the bottom bar. The processes are read once per refresh interval, whoever asks (cpu_feed)."""
+        details), the sort as links in the bottom bar. The processes are read once per refresh interval, whoever asks (cpu_feed). In the
+        shell (shell=True) it is built of components instead (cpu_native)."""
         esc = html.escape
 
         def doc(body, foot, style="", refresh=True, tools=(), vhere=None):  # the host name after cpu_problems(): --demo names the host there
@@ -982,6 +1004,8 @@ class Server(http.server.ThreadingHTTPServer):
         dash = f'<a href="{esc(page_url(here))}">dashboard</a>'  # back to the normal view, same size and refresh
         if not render.CFG["features"].get("cpu", True):
             return doc("<p>CPU screen disabled in config.ini (<b>[features] cpu = no</b>)</p>", [dash, "read-only"], refresh=False)
+        if shell:
+            return self.cpu_native(here, r, sort, sel)
         gcols, grows, style = self.grid(here, zoom)
         chere = {"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}
         chere.update(here)

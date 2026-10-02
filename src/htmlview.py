@@ -223,8 +223,20 @@ def _spark_svg(sp):
             f'<polyline fill="none" points="{pts}"/></svg>')
 
 
+def _meter_svg(m):
+    x, rects, said = 0.0, [], []
+    for pct, kind in m.parts:
+        w = min(pct, _BAR_W - x)
+        if w > 0:
+            rects.append(f'<rect{_cls("m-" + kind)} x="{x:.1f}" y="0" width="{w:.1f}" height="{_BAR_H}"/>')
+        x += max(w, 0.0)
+        said.append(f"{kind} {pct:.0f}%")
+    return (f'<svg class="meter" viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="img" aria-label="{_e(", ".join(said) or "idle")}" '
+            f'preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>{"".join(rects)}</svg>')
+
+
 def _inline(x):
-    """A Span, a Line, a Bar or a Spark as markup that sits in a line or a cell."""
+    """A Span, a Line, a Bar, a Meter or a Spark as markup that sits in a line or a cell."""
     if isinstance(x, ui.Span):
         return _span(x)
     if isinstance(x, ui.Line):
@@ -233,6 +245,8 @@ def _inline(x):
         return _bar_svg(x)
     if isinstance(x, ui.Spark):
         return _spark_svg(x)
+    if isinstance(x, ui.Meter):
+        return _meter_svg(x)
     return '<span class="st-unknown">?</span>'
 
 
@@ -258,9 +272,18 @@ def _barline(line):
             + (f'<span class="bx">{extra}</span>' if extra else ""))
 
 
+def _th(c):
+    """The head of a column: its label, a link when the rows can be sorted by it (data-key: the keys of the keymap that do the same)."""
+    link, label = _href(c.href), _e(c.label)
+    if link:
+        label = f'<a href="{_e(link)}"' + (f' data-key="{_e(c.hkey)}"' if c.hkey else "") + f">{label}</a>"
+    aria = {"desc": ' aria-sort="descending"', "asc": ' aria-sort="ascending"'}.get(c.sort, "")
+    cls = _cls(c.align if c.align != "l" else "", "n" if c.num else "", _wprio(c), "sorted" if c.sort else "")
+    return f'<th{cls}{aria} scope="col">{label}</th>'
+
+
 def _table(t, notes=None):
-    heads = "".join(f'<th{_cls(c.align if c.align != "l" else "", "n" if c.num else "", _wprio(c))} scope="col">'
-                    f"{_e(c.label)}</th>" for c in t.cols)
+    heads = "".join(_th(c) for c in t.cols)
     marks = {i: label for label, i in (t.groups or ())}
     ends = sorted(marks) + [len(t.rows)]
     body = []
@@ -276,6 +299,7 @@ def _table(t, notes=None):
                 inner = f'<a href="{_e(link)}">{inner}</a>'
             cells.append(f'<td{_cls(c.align if c.align != "l" else "", "n" if c.num else "", _wprio(c))}>{inner}</td>')
         key = f' data-key="{_e(r.key)}"' if r.key is not None else ""
+        key += (" data-row" if link else "") + (' aria-current="true"' if r.tone == "sel" else "")  # a row of a list; the one the cursor is on
         body.append(f'<tr{_cls("t-" + r.tone if r.tone else "")}{key}>{"".join(cells)}</tr>')
         if notes and notes[i]:  # NoteTable: what belongs to the row, in a row of its own under it
             body.append(f'<tr class="sub"><td colspan="{len(t.cols)}">{"".join(html(x) for x in notes[i])}</td></tr>')
@@ -296,7 +320,7 @@ def html(node):
         return ""  # a blank line is for the console
     if isinstance(node, ui.Line) and _barline(node) is not None:
         return f'<p class="ln bl">{_barline(node)}</p>'
-    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
+    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark, ui.Meter)):
         return f'<p class="ln">{_inline(node)}</p>'
     if isinstance(node, ui.Problem):
         # what the console has no room for: the id (a chip after the text), why it matters (under it), the fix and how to accept it (behind a
@@ -329,7 +353,8 @@ def html(node):
         return _table(node)
     if isinstance(node, ui.Wrap):
         lm = f' data-max-lines="{int(node.max_lines)}"' if node.max_lines else ""
-        return f'<ul class="wrap"{lm}>' + "".join(f"<li>{_inline(x)}</li>" for x in node.items) + "</ul>"
+        lead = f'<li class="lead">{_inline(node.lead)}</li>' if node.lead is not None else ""
+        return f'<ul class="wrap"{lm}>' + lead + "".join(f"<li>{_inline(x)}</li>" for x in node.items) + "</ul>"
     if isinstance(node, ui.More):
         link = _href(node.href)
         return (f'<details class="more"><summary>{_e(node.text)}</summary>'
@@ -384,6 +409,10 @@ def _flow_html(f):
     return f'<p class="flow">{lead}' + "".join(f'<span class="fi">{_inline(x)}</span>' for x in f.items) + "</p>"
 
 
+def _tiles_html(t):
+    return '<div class="kpis tiles">' + "".join(html(k) for k in t.items) + "</div>"
+
+
 _HTML = {
     ui.Head: lambda n: f'<h3 class="sub">{_e(n.title)}' + (f' <span class="note">{_e(n.note)}</span>' if n.note else "") + "</h3>",
     ui.Indent: lambda n: '<div class="ind">' + "".join(html(c) for c in n.children) + "</div>",
@@ -391,6 +420,11 @@ _HTML = {
     ui.Timeline: _timeline_html,
     ui.NoteTable: lambda n: _table(ui.Table(n.cols, n.rows, None, n.head), n.notes),
     ui.Flow: _flow_html,
+    ui.Cap: lambda n: "".join(html(c) for c in n.children),
+    ui.Split: lambda n: ('<div class="split"><div class="sp-l">' + "".join(html(c) for c in n.left) + '</div><div class="sp-r">'
+                         + "".join(html(c) for c in n.right) + "</div></div>"),
+    ui.Only: lambda n: "".join(html(c) for c in n.children) if n.surface == "web" else "",
+    ui.Tiles: _tiles_html,
 }
 
 
