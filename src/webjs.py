@@ -48,6 +48,9 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     data-row            a row of a list: KEYS_JS moves the focus over them and Enter follows the link of the focused row
     <details data-k>    its open state is kept as the reader left it
                         (the Health screen: each finding is div.fd[data-k="f-<id>"] holding details[data-k]; the period links are a[data-key="d|w|m"])
+                        (the AI screen, div.scr.av: every button is a form posting to /ai/* with its hidden csrf and back fields, and carries data-key from the
+                        keymap: e on/off, c cancel, u use the selected model, x delete its files, X delete all, y yes and n no (a link) to a question, Escape
+                        closes the details; the question box is input[name="q"], which REFRESH_JS never replaces while it has focus or text)
     data-kpi="<id>" data-depth="<n>" data-max-lines="<n>"   what the components (htmlview.html) say of a KPI, a tree row and a list; for the
                         server's CSS only (the scripts never read them, a fragment may carry them)
     data-problem="<id>" the stable id of a problem in ATTENTION (a problem, or one accepted as known); for the server's CSS only

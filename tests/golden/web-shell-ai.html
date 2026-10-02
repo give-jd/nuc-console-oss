@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>demo-host · ai · nuc-console</title>
-<link rel="stylesheet" href="/s/app.d3d9be37.css">
+<link rel="stylesheet" href="/s/app.5111d1b8.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="78a50561ef">
@@ -93,452 +93,565 @@
 </div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
-<main class="view legacy">
-<div class="vb" data-card="__view" data-rev="e2a1693fcb">
-<div class="toolbar">
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=100&amp;app=1#m-7">compact</a>
+<main class="view">
+<div class="vb" data-card="__view" data-rev="4fc83acd05">
+<div class="scr av">
+<header class="st">
+<h2>AI</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">what this machine can run</span>
 </span>
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=200&amp;app=1#m-7">wide</a>
+<span class="bit">
+<span class="t-muted">12 models</span>
 </span>
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1#m-7">reload</a>
+<span class="bit">
+<span class="t-ok">✔ 10 fit</span>  <span class="t-accent">◐ 2 gpu+cpu</span>
 </span>
+</p>
+</header>
+<section class="grp">
+<div class="controls">
+<div class="ci">
+<span class="tag ok">● ON</span>
 </div>
-<div class="hd w bR B">
-<span> demo-host │ AI │ 14:13:20</span>
-<span>✖ 6 PROBLEMS </span>
+<div class="ci">
+<span class="b">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
 </div>
-<pre class="ht"><span class="c">──</span><span class="c B"> AI </span> <span class="d">what this machine can run</span><span class="d"> · </span><span class="d">12 models</span><span class="d"> · </span><span class="g">✔ 10 fit</span>  <span class="c">◐ 2 gpu+cpu</span> <span class="c">───────────────────────────────────────────────────────────────────────</span></pre>
-<section class="ctl" id="ctl">
-<div class="row">
-<span class="pl g big">ON</span>
-<span class="st">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
+<div class="ci">
 <form class="f" method="post" action="/ai/off">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<button class="bt off" type="submit" title="stop the model server and turn the advisor off">Turn AI off</button>
+<button class="bt bt-err" type="submit" title="stop the model server and turn the advisor off" data-key="e">Turn AI off</button>
 </form>
 </div>
-<div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+</div>
+<p class="ln">
+<span class="t-muted">models are downloaded to </span>
+<span class="mono">/var/lib/nuc-console/ai</span>
+<span class="t-muted"> · 4.0 GB downloaded · 412.0 GB free on that disk</span>
+</p>
 </section>
-<section class="chat" id="chat">
-<div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>
-<form class="f ask" id="ask" method="post" action="/ai/ask">
+<section class="grp">
+<h3 class="sub">CHAT <span class="note">ask the model about this machine (it reads this machine&#x27;s history; AI, check before acting)</span>
+</h3>
+<form class="f" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input class="q" type="text" name="q" maxlength="500" size="60" placeholder="ask: why is the disk filling up?" autocomplete="off"> <button class="bt on" type="submit">Ask</button>
+<input class="q" type="text" name="q" maxlength="500" placeholder="ask: why is the disk filling up?" aria-label="ask: why is the disk filling up?" autocomplete="off"> <button class="bt bt-ok" type="submit">Ask</button>
 </form>
-<div class="adv">advice now: <form class="f" method="post" action="/ai/advise">
+<div class="controls">
+<div class="ci">
+<span class="t-muted">advice now:</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="days" value="1">
-<button class="bt " type="submit">last 24 h</button>
-</form> <form class="f" method="post" action="/ai/advise">
+<button class="bt" type="submit">last 24 h</button>
+</form>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="days" value="7">
-<button class="bt " type="submit">last 7 days</button>
-</form> <form class="f" method="post" action="/ai/advise">
+<button class="bt" type="submit">last 7 days</button>
+</form>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="days" value="30">
-<button class="bt " type="submit">last 30 days</button>
+<button class="bt" type="submit">last 30 days</button>
 </form>
 </div>
+</div>
 </section>
-<pre class="ht"><span class="c">──</span><span class="c B"> HARDWARE </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span><span class="d">  linux x86_64</span>
- <span class="d">CPU  </span> <span class="B">AMD Ryzen 7 5800X</span><span class="d"> · 8 cores / 16 threads</span><span class="d"> · AVX2</span>
- <span class="d">RAM  </span> <span class="g">████████</span><span class="d">░░░░░░░░░░░░░░░░</span>  21.0 GB free of 31.2 GB
- <span class="d">GPU  </span> <span class="B">NVIDIA GeForce RTX 3060</span><span class="d"> · CUDA</span>  <span class="g">██</span><span class="d">░░░░░░░░░░░░░░░░░░░░░░</span>  11.0 GB free of 12.0 GB</pre>
-<div class="hs">MODELS · best first</div>
-<div class="mp two">
-<div class="tree">
-<div class="mw" id="models">
-<table class="mt">
+<div class="cols">
+<div class="col">
+<section class="grp">
+<h3 class="sub">HARDWARE <span class="note">linux x86_64</span>
+</h3>
+<dl class="kv">
+<dt>CPU</dt>
+<dd>
+<span class="b">AMD Ryzen 7 5800X</span>
+<span class="t-muted"> · 8 cores / 16 threads</span>
+<span class="t-muted"> · AVX2</span>
+</dd>
+<dt>RAM</dt>
+<dd>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>  21.0 GB free of 31.2 GB</dd>
+<dt>GPU</dt>
+<dd>
+<span class="b">NVIDIA GeForce RTX 3060</span>
+<span class="t-muted"> · CUDA</span>  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="8%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="8.3" height="8"/>
+</svg>  11.0 GB free of 12.0 GB</dd>
+</dl>
+</section>
+</div>
+<div class="col">
+<section class="grp">
+<h3 class="sub">STATUS</h3>
+<dl class="kv">
+<dt>advisor</dt>
+<dd>
+<span class="t-ok">✔ on</span>
+<span class="t-muted">  (turned on from the AI page or screen)</span>
+</dd>
+<dt>endpoint</dt>
+<dd>http://127.0.0.1:8080/v1</dd>
+<dt>server</dt>
+<dd>
+<span class="t-ok">✔ answering</span>
+<span class="t-muted"> · 1 model: qwen3-4b</span>
+</dd>
+<dt>model</dt>
+<dd>
+<span class="t-accent">●</span> <span class="b">qwen3-4b</span>
+<span class="t-muted">  in the catalog</span>
+</dd>
+<dt>runtime</dt>
+<dd>
+<span class="t-ok">✔ installed</span>
+<span class="t-muted"> (0.10.6)</span>
+</dd>
+<dt>files</dt>
+<dd>
+<span class="t-muted mono">/var/lib/nuc-console/ai</span>
+</dd>
+</dl>
+</section>
+</div>
+</div>
+<div class="split">
+<div class="sp-l">
+<section class="grp">
+<h3 class="sub">MODELS <span class="note">best first</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-name">
+<col class="c-params">
+<col class="c-size">
+<col class="c-need">
+<col class="c-verdict">
+<col class="c-tok">
+<col class="c-notes">
+<col class="c-use">
+</colgroup>
 <thead>
 <tr>
-<th>
-</th>
-<th>model</th>
-<th class="pm">params</th>
-<th class="r sz">size</th>
-<th class="r">needs</th>
-<th>verdict</th>
-<th>est tok/s</th>
-<th class="nn">notes</th>
-<th>
+<th scope="col">Model</th>
+<th class="p2" scope="col">Params</th>
+<th class="r n p1" scope="col">Size</th>
+<th class="r n" scope="col">Needs</th>
+<th scope="col">Verdict</th>
+<th class="r n p3" scope="col">Est tok/s</th>
+<th class="p3" scope="col">Notes</th>
+<th scope="col">
 </th>
 </tr>
 </thead>
 <tbody>
-<tr id="m-0">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1#m-0">OpenAI gpt-oss 20B</a>
+<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1">
+<span class="b">OpenAI gpt-oss 20B</span>
+</a>
 </td>
-<td class="pm">21B-A3.6B</td>
-<td class="r sz">11.8 GB</td>
-<td class="r">12.5 GB</td>
+<td class="p2">
+<span class="t-muted">21B-A3.6B</span>
+</td>
+<td class="r n p1">11.8 GB</td>
+<td class="r n">12.5 GB</td>
 <td>
-<span class="pl c">◐ GPU+CPU</span>
+<span class="tag accent">◐ GPU+CPU</span>
 </td>
-<td>36-66</td>
-<td class="nn">
-<div>fast for its size (MoE, 3.6B active); reasoning effort is a setting</div>
+<td class="r n p3">36-66</td>
+<td class="p3">
+<span class="t-muted">fast for its size (MoE, 3.6B active); reasoning effort is a setting</span>
 </td>
-<td class="ac">
-<span class="d">not pinned yet</span>
+<td>
+<span class="t-muted">not pinned yet</span>
 </td>
 </tr>
-<tr id="m-1">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1#m-1">Qwen3 30B-A3B</a>
+<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<span class="b">Qwen3 30B-A3B</span>
+</a>
 </td>
-<td class="pm">30.5B-A3.3B</td>
-<td class="r sz">18.2 GB</td>
-<td class="r">19.3 GB</td>
+<td class="p2">
+<span class="t-muted">30.5B-A3.3B</span>
+</td>
+<td class="r n p1">18.2 GB</td>
+<td class="r n">19.3 GB</td>
 <td>
-<span class="pl c">◐ GPU+CPU</span>
+<span class="tag accent">◐ GPU+CPU</span>
 </td>
-<td>19-37</td>
-<td class="nn">
-<div>fast on CPU (MoE: only 3.3B parameters work per token)</div>
+<td class="r n p3">19-37</td>
+<td class="p3">
+<span class="t-muted">fast on CPU (MoE: only 3.3B parameters work per token)</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-30b-a3b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-2">
-<td class="mk">
-<span class="y" title="recommended">★</span>  </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=phi-4&amp;app=1#m-2">Phi-4 14B</a>
+<a href="/?view=ai&amp;sel=phi-4&amp;app=1">
+<span class="b">Phi-4 14B</span>
+<span class="t-warn">  ★ recommended</span>
+</a>
 </td>
-<td class="pm">14.7B</td>
-<td class="r sz">8.9 GB</td>
-<td class="r">9.8 GB</td>
+<td class="p2">
+<span class="t-muted">14.7B</span>
+</td>
+<td class="r n p1">8.9 GB</td>
+<td class="r n">9.8 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>17-28</td>
-<td class="nn">
-<div>strong at reasoning and code; short context (16k)</div>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">strong at reasoning and code; short context (16k)</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="phi-4">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-3">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-14b&amp;app=1#m-3">Qwen3 14B</a>
+<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1">
+<span class="b">Qwen3 14B</span>
+</a>
 </td>
-<td class="pm">14.8B</td>
-<td class="r sz">8.8 GB</td>
-<td class="r">9.7 GB</td>
+<td class="p2">
+<span class="t-muted">14.8B</span>
+</td>
+<td class="r n p1">8.8 GB</td>
+<td class="r n">9.7 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>17-28</td>
-<td class="nn">
-<div>thinking mode: /no_think turns it off</div>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-14b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-4">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-8b&amp;app=1#m-4">Qwen3 8B</a>
+<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1">
+<span class="b">Qwen3 8B</span>
+</a>
 </td>
-<td class="pm">8.2B</td>
-<td class="r sz">4.9 GB</td>
-<td class="r">5.8 GB</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p1">4.9 GB</td>
+<td class="r n">5.8 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>31-51</td>
-<td class="nn">
-<div>thinking mode: /no_think turns it off</div>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-8b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-5">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1#m-5">IBM Granite 3.3 8B</a>
+<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1">
+<span class="b">IBM Granite 3.3 8B</span>
+</a>
 </td>
-<td class="pm">8.2B</td>
-<td class="r sz">4.9 GB</td>
-<td class="r">5.8 GB</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p1">4.9 GB</td>
+<td class="r n">5.8 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>31-51</td>
-<td class="nn">
-<div>long context (128k); tuned for business tasks</div>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">long context (128k); tuned for business tasks</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="granite-3.3-8b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-6">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=phi-4-mini&amp;app=1#m-6">Phi-4-mini 3.8B</a>
+<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1">
+<span class="b">Phi-4-mini 3.8B</span>
+</a>
 </td>
-<td class="pm">3.8B</td>
-<td class="r sz">2.4 GB</td>
-<td class="r">3.3 GB</td>
+<td class="p2">
+<span class="t-muted">3.8B</span>
+</td>
+<td class="r n p1">2.4 GB</td>
+<td class="r n">3.3 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>61-102</td>
-<td class="nn">
-<div>small and good at reasoning; long context</div>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">small and good at reasoning; long context</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="phi-4-mini">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr class="sel" id="m-7">
-<td class="mk"> <span class="g" title="installed">✓</span>
-<span class="c" title="active">●</span>
+<tr class="t-sel" data-row aria-current="true">
+<td>
+<a href="/?view=ai&amp;app=1">
+<span class="b">Qwen3 4B</span>
+<span class="t-ok">  ✓ installed</span>
+<span class="t-accent">  ● active</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">4B</span>
+</td>
+<td class="r n p1">2.4 GB</td>
+<td class="r n">3.3 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">the default of nuc-console-ai: good advice in about 4 GB</span>
 </td>
 <td>
-<a class="lb" href="/?view=ai&amp;app=1#m-7">Qwen3 4B</a>
-</td>
-<td class="pm">4B</td>
-<td class="r sz">2.4 GB</td>
-<td class="r">3.3 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>61-102</td>
-<td class="nn">
-<div>the default of nuc-console-ai: good advice in about 4 GB</div>
-</td>
-<td class="ac">
-<span class="g">● in use</span>
+<span class="t-ok">● in use</span>
 </td>
 </tr>
-<tr id="m-8">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=smollm3-3b&amp;app=1#m-8">SmolLM3 3B</a>
+<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1">
+<span class="b">SmolLM3 3B</span>
+</a>
 </td>
-<td class="pm">3.1B</td>
-<td class="r sz">1.9 GB</td>
-<td class="r">2.7 GB</td>
+<td class="p2">
+<span class="t-muted">3.1B</span>
+</td>
+<td class="r n p1">1.9 GB</td>
+<td class="r n">2.7 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>81-135</td>
-<td class="nn">
-<div>small, multilingual, long context</div>
+<td class="r n p3">81-135</td>
+<td class="p3">
+<span class="t-muted">small, multilingual, long context</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="smollm3-3b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-9">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1#m-9">IBM Granite 3.3 2B</a>
+<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1">
+<span class="b">IBM Granite 3.3 2B</span>
+</a>
 </td>
-<td class="pm">2.5B</td>
-<td class="r sz">1.6 GB</td>
-<td class="r">2.5 GB</td>
+<td class="p2">
+<span class="t-muted">2.5B</span>
+</td>
+<td class="r n p1">1.6 GB</td>
+<td class="r n">2.5 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>96-160</td>
-<td class="nn">
-<div>very small; fine for short advice</div>
+<td class="r n p3">96-160</td>
+<td class="p3">
+<span class="t-muted">very small; fine for short advice</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="granite-3.3-2b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-10">
-<td class="mk"> <span class="g" title="installed">✓</span> </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1#m-10">Qwen3 1.7B</a>
+<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1">
+<span class="b">Qwen3 1.7B</span>
+<span class="t-ok">  ✓ installed</span>
+</a>
 </td>
-<td class="pm">1.7B</td>
-<td class="r sz">1.1 GB</td>
-<td class="r">1.8 GB</td>
+<td class="p2">
+<span class="t-muted">1.7B</span>
+</td>
+<td class="r n p1">1.1 GB</td>
+<td class="r n">1.8 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>140-233</td>
-<td class="nn">
-<div>runs anywhere; thinking mode: /no_think</div>
+<td class="r n p3">140-233</td>
+<td class="p3">
+<span class="t-muted">runs anywhere; thinking mode: /no_think</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-1.7b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-11">
-<td class="mk">   </td>
+<tr data-row>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1#m-11">Qwen3 0.6B</a>
+<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1">
+<span class="b">Qwen3 0.6B</span>
+</a>
 </td>
-<td class="pm">0.6B</td>
-<td class="r sz">400 MB</td>
-<td class="r">1.1 GB</td>
+<td class="p2">
+<span class="t-muted">0.6B</span>
+</td>
+<td class="r n p1">400 MB</td>
+<td class="r n">1.1 GB</td>
 <td>
-<span class="pl g">✔ FITS GPU</span>
+<span class="tag ok">✔ FITS GPU</span>
 </td>
-<td>384-640</td>
-<td class="nn">
-<div>a toy: too small to give reliable advice</div>
+<td class="r n p3">384-640</td>
+<td class="p3">
+<span class="t-muted">a toy: too small to give reliable advice</span>
 </td>
-<td class="ac">
+<td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-0.6b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
 </tbody>
 </table>
+<p class="ln"> <span class="t-warn">★</span>
+<span class="t-muted"> recommended</span>  ·  <span class="t-ok">✓</span>
+<span class="t-muted"> installed</span>  ·  <span class="t-accent">●</span>
+<span class="t-muted"> active</span>  ·  <span class="t-muted">tok/s: rough estimate</span>
+</p>
+</section>
 </div>
-<pre class="ht"> <span class="y">★</span><span class="d"> recommended</span>  ·  <span class="g">✓</span><span class="d"> installed</span>  ·  <span class="c">●</span><span class="d"> active</span>  ·  <span class="d">tok/s: rough estimate</span></pre>
-</div>
-<aside class="dp" id="details">
-<div class="dh">
-<span>DETAILS</span>
-<a href="/?view=ai&amp;app=1#m-7">close ✕</a>
-</div>
-<table>
-<tr class="top">
-<th>model</th>
-<td>Qwen3 4B</td>
-</tr>
-<tr>
-<th>verdict</th>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-</tr>
-<tr>
-<th>why</th>
-<td>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</td>
-</tr>
-<tr>
-<th>speed</th>
-<td>about 61-102 tokens/s (a rough estimate, not a promise)</td>
-</tr>
-<tr>
-<th>state</th>
-<td>✓ installed · ● active: [ai] model</td>
-</tr>
-<tr>
-<th>remove</th>
-<td>
+<div class="sp-r">
+<section class="grp">
+<section class="spec">
+<h3 class="sub">DETAILS</h3>
+<p class="spec-t">Qwen3 4B</p>
+<dl class="spec-dl">
+<dt>verdict</dt>
+<dd>
+<span class="t-ok">✔ FITS GPU</span>
+</dd>
+<dt>why</dt>
+<dd>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</dd>
+<dt>speed</dt>
+<dd>about 61-102 tokens/s (a rough estimate, not a promise)</dd>
+<dt>state</dt>
+<dd>✓ installed · ● active: [ai] model</dd>
+<dt>remove</dt>
+<dd>
 <code class="cmd">sudo nuc-console-ai remove qwen3-4b</code>
-</td>
-</tr>
-<tr>
-<th>needs</th>
-<td>3.3 GB of memory: the file (2.4 GB), the context and the runtime</td>
-</tr>
-<tr>
-<th>where</th>
-<td>all 36 layers on the GPU</td>
-</tr>
-<tr>
-<th>model</th>
-<td>4B parameters · Q4_K_M · context up to 40960 tokens</td>
-</tr>
-<tr>
-<th>licence</th>
-<td>Apache-2.0</td>
-</tr>
-<tr>
-<th>notes</th>
-<td>the default of nuc-console-ai: good advice in about 4 GB</td>
-</tr>
-<tr>
-<th>do</th>
-<td>
-<span class="g">● in use</span> <form class="f" method="post" action="/ai/delete">
+</dd>
+<dt>needs</dt>
+<dd>3.3 GB of memory: the file (2.4 GB), the context and the runtime</dd>
+<dt>where</dt>
+<dd>all 36 layers on the GPU</dd>
+<dt>model</dt>
+<dd>4B parameters · Q4_K_M · context up to 40960 tokens</dd>
+<dt>licence</dt>
+<dd>Apache-2.0</dd>
+<dt>notes</dt>
+<dd>the default of nuc-console-ai: good advice in about 4 GB</dd>
+<dt>do</dt>
+<dd class="do">
+<form class="f" method="post" action="/ai/delete">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-4b">
-<button class="bt del" type="submit" title="asks first">delete its files</button>
+<button class="bt bt-err" type="submit" title="asks first" data-key="x">delete its files</button>
 </form>
-</td>
-</tr>
-</table>
-</aside>
+</dd>
+</dl>
+</section>
+<div class="seg" role="group" aria-label="details">
+<a href="/?view=ai&amp;app=1" data-key="Escape" title="key Escape">close details ✕</a>
 </div>
-<pre class="ht"><span class="c">──</span><span class="c B"> STATUS </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
- <span class="d">advisor  </span> <span class="g">✔ on</span><span class="d">  (turned on from the AI page or screen)</span>
- <span class="d">endpoint </span> http://127.0.0.1:8080/v1
- <span class="d">server   </span> <span class="g">✔ answering</span><span class="d"> · 1 model: qwen3-4b</span>
- <span class="d">model    </span> <span class="c">●</span> <span class="B">qwen3-4b</span><span class="d">  in the catalog</span>
- <span class="d">runtime  </span> <span class="g">✔ installed</span><span class="d"> (0.10.6)</span>
- <span class="d">files    </span> <span class="d">/var/lib/nuc-console/ai</span></pre>
-<div class="mg">manage: <form class="f" method="post" action="/ai/delete-all">
+</section>
+</div>
+</div>
+<div class="controls">
+<div class="ci">
+<span class="t-muted">manage:</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<button class="bt del" type="submit" title="asks first">delete everything</button>
-</form> the runtime and every model (4.0 GB)</div>
+<button class="bt bt-err" type="submit" title="asks first" data-key="X">delete everything</button>
+</form>
+</div>
+<div class="ci">
+<span class="t-muted">the runtime and every model (4.0 GB)</span>
+</div>
+</div>
+</div>
 </div>
 </main>
 <footer class="foot">refresh every <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=3&amp;app=1">+</a>

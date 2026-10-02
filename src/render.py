@@ -2370,20 +2370,53 @@ def health_once(argv, w, h):
 # Everything in it is data (a model's name comes from a catalog file, a GPU's from a driver): text goes through hclean(), numbers through
 # num(), a value that is missing is drawn as "?". The screen runs nothing and downloads nothing: it shows the commands to type.
 
-AI_PANE_W = 140          # from this width up the details sit beside the list, below it otherwise
+# The screen's view-model moved to screens.py (the AI block: the model rows, the view and its keys, every piece drawn as components); what is
+# left here reads the world (the catalog, the engine, the probe of the model server) and runs the live loop. Moved; kept for tests and tools
+# until the cleanup PR
+from screens import (AI_ACTIONS, AI_BACKEND, AI_ID_MAX, AI_NAME_MIN, AI_PANE_W, AI_UNKNOWN, AI_VERDICT, AiView, ai_cpu_name, ai_details,  # noqa: E402,F401
+                     ai_id, ai_key, ai_layout, ai_mb, ai_params, ai_rows, ai_select, ai_sync, ai_tok, ai_where)
+aisetup_size = screens.ai_size
+
+
+def _ai_lines(nodes, w):
+    return ansi.render(ui.Group(nodes), w)[0]
+
+
+def ai_title(rows, w):
+    return ansi.render(screens.ai_title(rows, w), w)[0][0]
+
+
+def ai_hw_lines(hw, w, k=0):
+    return _ai_lines(screens.ai_hw_nodes(hw, w, k), w)
+
+
+def ai_status_lines(st, cat, ids, w, k=0):
+    return _ai_lines(screens.ai_status_nodes(st, cat, ids, w, k), w)
+
+
+def ai_work_lines(st, cat, av, w, k=0):
+    return _ai_lines(screens.ai_work_nodes(st, cat, av, w, k), w)
+
+
+def ai_legend(w):
+    return ansi.render(screens.ai_legend(w), w)[0][0]
+
+
+def ai_body(data, st, av, rows, w, h):
+    return screens.ai_lines(data, st, av, rows, w, h)
+
+
+def ai_footer(av, n, w, snap=None):
+    """The footer of the AI screen as one line (screens.ai_footer drawn)."""
+    return ansi.render(screens.ai_footer(av, n, w, snap, on), w)[0][0]
+
+
 AI_IDLE_S = 600          # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
 AI_TTL = 10              # the catalog is read at most this often, whatever the number of keys or requests
 AI_PROBE_TTL = 60        # does the model server answer? looked at most this often ...
 AI_PROBE_TIMEOUT = 1.0   # ... for at most this long ...
 AI_PROBE_STUCK = 30      # ... in a thread of its own (a key or a page never waits for it; one stuck this long is given up)
-AI_ID_MAX = 64           # characters of a model id: it is a cursor, and a value in a URL
-AI_NAME_MIN = 24         # the name column keeps this much (or its longest name) before another column is given up
 AI_NONE = "the model catalog could not be read"
-AI_VERDICT = {  # verdict -> (label: a symbol besides the colour, SGR of the pill, web class, SGR of the text)
-    "gpu": ("✔ FITS GPU", "1;42;30", "g", "32"), "partial": ("◐ GPU+CPU", "1;46;30", "c", "36"), "ram": ("✔ FITS RAM", "1;42;30", "g", "32"),
-    "slow": ("! SLOW", "1;43;30", "y", "33"), "no": ("✖ TOO BIG", "1;41;37", "r", "31")}
-AI_UNKNOWN = ("? UNKNOWN", "90", "d", "90")
-AI_BACKEND = {"cuda": "CUDA", "rocm": "ROCm", "metal": "Metal", "vulkan": "Vulkan"}
 _AI, _AI_LOCK = {}, threading.Lock()
 _AIPROBE, _AIPROBE_LOCK = {"res": None, "at": 0.0, "key": None, "thread": None, "started": 0.0}, threading.Lock()
 
@@ -2519,122 +2552,6 @@ def ai_state(smp):
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
-def ai_id(x):
-    return hclean(x, AI_ID_MAX) if isinstance(x, str) and x.strip() else None
-
-
-def ai_mb(x):
-    """Megabytes (MiB) as the usual words: 400 MB, 4.9 GB, 128 GB; '?' when it is not a number."""
-    x = num(x)
-    if x is None:
-        return "?"
-    return f"{x:.0f} MB" if x < 1024 else f"{x / 1024:.1f} GB" if x < 102400 else f"{x / 1024:.0f} GB"
-
-
-def ai_params(p, a):
-    """'8.2B', or '30B-A3B' for a mixture of experts (3B parameters work per token): the size of the model in billions of parameters."""
-    p, a = num(p), num(a)
-    return "?" if p is None else f"{p:g}B" + (f"-A{a:g}B" if a else "")
-
-
-def ai_tok(t):
-    """'40-70' tokens per second: an estimate, said so in the header, the legend and the details; '-' when there is none."""
-    if not t:
-        return "-"
-    f = lambda x: f"{x:.0f}" if x >= 10 else f"{x:.1f}".rstrip("0").rstrip(".")  # noqa: E731
-    return f(t[0]) if f(t[0]) == f(t[1]) else f"{f(t[0])}-{f(t[1])}"
-
-
-def ai_rows(cat):
-    """The models of a catalog as plain rows, best first (rank, then the catalog's own order): every text cleaned, every number checked.
-    The id of a row is what the cursor and the web's sel= are made of, so the same text is never in two rows. Console and web share it."""
-    cat = dd(cat)
-    rec, act = ai_id(cat.get("recommended")), ai_id(cat.get("active"))
-    rows, seen = [], set()
-    for i, m in enumerate(cat.get("models") if isinstance(cat.get("models"), list) else []):
-        mid = ai_id(m.get("id")) if isinstance(m, dict) else None
-        if mid is None or mid in seen:
-            continue
-        seen.add(mid)
-        a, cmds, tok = dd(m.get("assess")), dd(m.get("commands")), dd(m.get("assess")).get("tok_s")
-        tok = (num(tok[0]), num(tok[1])) if isinstance(tok, (list, tuple)) and len(tok) == 2 else None
-        size = num(m.get("approx_mb"))
-        if size is None and num(m.get("size")) is not None:
-            size = num(m.get("size")) / 2 ** 20
-        rows.append({
-            "id": mid, "i": i, "name": hclean(m.get("name") or mid, 60), "rank": num(m.get("rank")), "params": ai_params(m.get("params_b"), m.get("active_b")),
-            "size_mb": size, "need_mb": num(a.get("need_mb")), "verdict": a.get("verdict") if a.get("verdict") in AI_VERDICT else None,
-            "where": hclean(a.get("where"), 12), "gpu_layers": num(a.get("gpu_layers")), "layers": num(m.get("layers")),
-            "tok": tok if tok and None not in tok else None, "why": hclean(a.get("why"), 300), "license": hclean(m.get("license"), 40),
-            "quant": hclean(m.get("quant"), 20), "ctx_max": num(m.get("ctx_max")), "notes": hclean(m.get("notes"), 200),
-            "installed": bool(m.get("installed")), "pinned": bool(m.get("pinned")), "rec": mid == rec, "active": mid == act,
-            "commands": {k: hclean(cmds.get(k), 200) for k in ("install", "use", "remove") if isinstance(cmds.get(k), str) and cmds[k].strip()}})
-    rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0.0, r["i"]))
-    return rows
-
-
-class AiView(object):
-    """The interactive AI screen: the selected model (its id survives refreshes; its index is where the cursor stays when that model
-    vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, now=None):
-        self.cur, self.idx, self.top, self.details, self.rows = None, 0, 0, False, 10
-        self.confirm = None   # (kind, model id, the question) while a key waits for y or n
-        self.msg = None       # (level, text): a line only this screen says (the engine's own answers are in its snapshot)
-        self.opened = self.touched = now or time.time()
-
-
-def ai_sync(av, rows):
-    """The cursor back on its model: by id, else the same index (clamped); the first time on the recommended one, where Enter shows what
-    to type. Returns the index."""
-    if av.cur is None and rows:
-        av.idx = next((j for j, r in enumerate(rows) if r["rec"]), 0)
-    else:
-        i = next((j for j, r in enumerate(rows) if r["id"] == av.cur), None)
-        av.idx = i if i is not None else max(0, min(av.idx, len(rows) - 1))
-    av.cur = rows[av.idx]["id"] if rows else None
-    return av.idx
-
-
-AI_ACTIONS = ("toggle", "use", "delete", "delete-all", "cancel")  # AI on/off, use the model, delete it, delete all, cancel (ui.KEYMAP, scope ai)
-
-
-def ai_key(av, key, rows):
-    """One key on the AI screen. Returns 'back' (leave it), an action for ai_do() ('toggle', 'use', 'delete', 'delete-all', 'cancel', and 'yes' for the
-    question that is waiting) or '' (only the cursor or the details pane changed). What each key does: ui.KEYMAP, scope ai."""
-    if av.confirm:  # a question is waiting: y does it, any other key says no
-        yes = key in ("y", "Y")
-        if not yes:
-            av.confirm = None
-        return "yes" if yes else ""
-    act = ui.action("ai", key)
-    if act == "back":
-        if av.details:  # Esc closes the details pane first
-            av.details = False
-            return ""
-        return "back"
-    if act in AI_ACTIONS:
-        return act
-    if act == "details":
-        av.details = not av.details
-        return ""
-    if not rows or act not in ("move", "page"):
-        return ""
-    i, page = ai_sync(av, rows), max(1, av.rows - 1)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(key, i)
-    av.idx = max(0, min(i, len(rows) - 1))
-    av.cur = rows[av.idx]["id"]
-    return ""
-
-
-def ai_select(rows, av, text):
-    """The cursor on the first model whose id or name contains text (any case). False: none does."""
-    t = text.strip().lower()
-    i = next((j for j, r in enumerate(rows) if t and t in (r["id"] + " " + r["name"]).lower()), None)
-    if i is None:
-        return False
-    av.idx, av.cur = i, rows[i]["id"]
-    return True
 
 
 def ai_do(av, act, rows):
@@ -2689,372 +2606,12 @@ def ai_do(av, act, rows):
     return None
 
 
-def aisetup_size(n):
-    """5000000000 -> '5.0 GB' ('nothing' for none): sizes of files, as aisetup says them."""
-    try:
-        import aisetup
-        return aisetup.fmt_size(n) if n else "nothing"
-    except Exception:  # noqa: BLE001
-        return "?"
-
-
 def ai_busy():
     """Something is running (a download, the server starting, an answer): the screen looks again every second. False without an engine."""
     try:
         return bool(ai_engine().snapshot()["busy"])
     except Exception:  # noqa: BLE001
         return False
-
-
-def ai_work_lines(st, cat, av, w, k=0):
-    """The lines under the title: whether the AI is on and what it is doing (a download with its bar, the server starting, an error), that it is locked,
-    the answer to the last key, and the folder the models are downloaded to with what it holds and what is free. At level k the folder goes first
-    when the screen is small (k 1), then the lock and the answer (k 2), the state line stays (k 3). [] when the status has no engine snapshot."""
-    snap = dd(st).get("snap")
-    if not isinstance(snap, dict) or not isinstance(snap.get("state"), (list, tuple)):
-        return []
-    state, text = snap["state"]
-    mark, col = {"off": ("○ OFF", "90"), "working": ("◐ WORKING", "36"), "running": ("● ON", "32"), "on": ("● ON", "32"), "error": ("✖ ERROR", "31")}.get(state, ("?", "90"))
-    job, extra = snap.get("job"), ""
-    if state == "working" and job and job.get("total"):
-        n = min(14, round(14 * job["done"] / job["total"]))
-        extra = " " + c(36, "█" * n) + c(90, "░" * (14 - n))
-    tail = c(90, "   (c: cancel)") if state == "working" and not snap.get("locked") else ""
-    lock = c(33, "[locked by config.ini] ") if snap.get("locked") and k >= 2 else ""  # the line that says it is gone: it goes up front, where a narrow screen keeps it
-    out = [clip(" " + c("1;" + col, pad(mark, 10)) + " " + lock + hclean(text, 200) + extra + tail, w)]
-    if k >= 3:
-        return out
-    note = av.msg if av is not None and av.msg else None
-    if note is None and isinstance(snap.get("notice"), dict):
-        note = ("ok" if snap["notice"].get("ok") else "err", snap["notice"].get("text"))
-    if snap.get("locked") and k < 2:
-        out.append(clip(" " + c(33, "locked by config.ini ([ai] web_actions = no): this screen only shows"), w))
-    if note and note[1] and k < 3:
-        out.append(clip(" " + c({"ok": 32, "err": 31, "warn": 33}.get(note[0], 90), hclean(note[1], 300)), w))
-    cat = dd(cat)
-    if cat.get("dir") and k < 1:
-        sp = dd(cat.get("space"))
-        free = num(sp.get("free"))
-        out.insert(1, clip(" " + c(90, "folder") + " " + hclean(cat["dir"], 120) + c(90, f" · {aisetup_size(sp.get('used'))} downloaded · "
-                                                                                   + (f"{aisetup_size(free)} free on that disk" if free else "free space unknown")), w))
-    return out
-
-
-def ai_title(rows, w):
-    """'── AI  what this machine can run · 12 models · ✔ 7 fit  ! 2 slow  ✖ 2 too big': the tagline goes first when narrow, then the count."""
-    n = {v: sum(1 for r in rows or [] if r["verdict"] == v) for v in AI_VERDICT}
-    counts = "  ".join(c(col, f"{sym} {k} {word}") for k, sym, word, col in ((n["gpu"] + n["ram"], "✔", "fit", 32), (n["partial"], "◐", "gpu+cpu", 36),
-                                                                           (n["slow"], "!", "slow", 33), (n["no"], "✖", "too big", 31)) if k)
-    tag, count = c(90, "what this machine can run"), c(90, plural(len(rows or []), "model"))
-    left = c(36, "──") + c("1;36", " AI ") + " "
-    for bits in ([tag, count, counts], [count, counts], [counts], [count]) if rows is not None else ([],):
-        bits = [x for x in bits if x]
-        if vlen(left + c(90, " · ").join(bits)) + 3 <= w:
-            break
-    text = left + c(90, " · ").join(bits) + " "
-    return clip(text + c(36, "─" * max(0, w - vlen(text))), w)
-
-
-def ai_simd(cpu):
-    flags = {x.lower() for x in cpu.get("flags") if isinstance(x, str)} if isinstance(cpu.get("flags"), list) else set()
-    return [n for n, ok in (("AVX2", "avx2" in flags), ("AVX-512", any(x.startswith("avx512") for x in flags)), ("NEON", "neon" in flags)) if ok], flags
-
-
-def ai_cpu_name(s):
-    """A processor's name without the trademarks, the clock and the core count: 'Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz' -> 'Intel Core i7-10750H'."""
-    s = hclean(s, 80)
-    for pat in (r"\((?:R|TM|r|tm)\)", r"\s*@\s*[0-9.]+\s*[GM]Hz", r"\s+\d+-Core Processor", r"\s+CPU\b"):
-        s = re.sub(pat, "", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def ai_cpu_text(hw, short=False):
-    """'AMD Ryzen 7 5800X · 8 cores / 16 threads · AVX2' (short: the name and the threads)."""
-    cpu = dd(hw.get("cpu"))
-    cores, threads = num(cpu.get("cores")), num(cpu.get("threads"))
-    topo = f"{threads:.0f} threads" if threads else ""
-    if cores:
-        topo = f"{cores:.0f} cores" + (f" / {threads:.0f} threads" if threads and threads != cores else "")
-    simd, flags = ai_simd(cpu)
-    x86 = any(k in str(hw.get("arch")).lower() for k in ("x86", "amd64", "i386", "i686"))
-    if short:
-        return c(1, ai_cpu_name(cpu.get("model")) or "?") + (c(90, f" · {threads or cores:.0f} threads") if threads or cores else "")
-    return (c(1, ai_cpu_name(cpu.get("model")) or "?") + (c(90, " · " + topo) if topo else "") + (c(90, " · " + " ".join(simd)) if simd else "")
-            + (c(33, " · no AVX2: slow") if x86 and flags and "avx2" not in flags and not simd else ""))
-
-
-def ai_memory_text(tot, free, bw):
-    """'██████░░░░  18.4 GB free of 31.2 GB': a bar of what is in use (bw 0: none), what is free of the total; '(free: ?)' when only the total is known."""
-    if free is None:
-        return ((c(90, "░" * bw) + "  ") if bw else "") + ai_mb(tot) + c(90, " (free: ?)")
-    return ((bar(1 - free / tot, bw) + "  ") if bw else "") + f"{ai_mb(free)} free of {ai_mb(tot)}"
-
-
-def ai_ram_text(hw, bw):
-    tot, free = num(dd(hw.get("ram")).get("total_mb")), num(dd(hw.get("ram")).get("available_mb"))
-    return ai_memory_text(tot, free, bw) if tot else c(33, "?") + c(90, " could not be read")
-
-
-def ai_gpu_text(g, bw):
-    """(the GPU's name and backend, its memory): a bar of the video memory in use (bw 0: none), or 'unified memory' when it shares the RAM."""
-    backend = AI_BACKEND.get(g.get("backend"))
-    head = c(1, hclean(g.get("name"), 48) or "?") + (c(90, " · " + backend) if backend else c(33, " · no usable backend: not used"))
-    if g.get("unified"):
-        return head, c(90, "unified memory: it shares the RAM" if bw else "unified memory")
-    tot = num(g.get("vram_mb"))
-    return head, ai_memory_text(tot, num(g.get("vram_free_mb")), bw) if tot else c(33, "?") + c(90, " video memory could not be read")
-
-
-def ai_hw_lines(hw, w, k=0):
-    """The HARDWARE section at level k: 0 everything (the bars, eight GPUs, a GPU on two lines when it does not fit on one, three notes), 1 one
-    line each without bars (three GPUs) and one note, 2 the CPU and the RAM on one line (two GPUs) and no notes, 3 nothing. Lines at most w wide."""
-    if k >= 3:
-        return []
-    hw = dd(hw)
-    gpus = [g for g in hw.get("gpus") if isinstance(g, dict)] if isinstance(hw.get("gpus"), list) else []
-    notes = [hclean(x, 200) for x in hw.get("notes") if isinstance(x, str) and x.strip()] if isinstance(hw.get("notes"), list) else []
-    bw = max(6, min(24, (w - 7) // 5))
-    lab = lambda t: " " + c(90, pad(t, 5)) + " "  # noqa: E731
-    lines = [hsec("HARDWARE", w, " ".join(hclean(hw.get(x), 12) for x in ("os", "arch") if hw.get(x)))]
-    if k >= 2:
-        lines.append(clip(" " + ai_cpu_text(hw, True) + c(90, "  ·  RAM ") + ai_ram_text(hw, 0), w))
-    else:
-        lines += [clip(lab("CPU") + ai_cpu_text(hw), w), clip(lab("RAM") + ai_ram_text(hw, bw), w)]
-    keep = (8, 3, 2)[k]  # the GPUs drawn: every one when there is room
-    for i, g in enumerate(gpus[:keep]):
-        head, mem = ai_gpu_text(g, bw if k == 0 else 0)  # the bars only at level 0
-        one = lab("GPU" if i == 0 or k >= 2 else "") + head + "  " + mem
-        lines += [clip(one, w)] if k >= 1 or vlen(one) <= w else [clip(lab("GPU" if i == 0 else "") + head, w), clip(lab("") + mem, w)]
-    if len(gpus) > keep:
-        lines.append(clip(c(90, f"       … +{len(gpus) - keep} more GPUs"), w))
-    if not gpus:
-        lines.append(clip(lab("GPU") + c(33, "none found") + c(90, ": the models run on the CPU, from RAM"), w))
-    if k < 2:
-        nn = 3 if k == 0 else 1
-        shown = notes if len(notes) <= nn else notes[:nn - 1] + [f"… +{len(notes) - nn + 1} more notes"]
-        for x in shown:
-            rows = textwrap.wrap(x, max(10, w - 4), break_on_hyphens=False) if k == 0 else [x]
-            lines += [c(90, "  · " + rows[0] if len(rows[0]) + 4 <= w else "  · " + rows[0][:max(1, w - 5)] + "…")] + [c(90, "    " + y) for y in rows[1:2]]
-    return lines
-
-
-def ai_status_texts(st, cat, ids):
-    """The STATUS section's pieces as ANSI text: what [ai] says (adv, with its note), the endpoint and whether it answers (ep, ans, and ans in
-    short), the model in use (model), the runtime (run), the directory of the files (files)."""
-    st, probe, rt = dd(st), dd(st).get("probe"), dd(dd(cat).get("runtime"))
-    on_, sw = bool(st.get("enabled")), dd(st.get("switch"))
-    note = ("  ([ai] enabled = yes)" if on_ else "  ([ai] enabled = no in config.ini)") if not sw else \
-        "  ([ai] enabled = yes)" if sw.get("by") == "config" else "  (turned on from the AI page or screen)" if on_ else "  (off: the AI switch turns it on)"
-    out = {"on": on_, "adv": c(32, "✔ on") if on_ else c(90, "· off"), "note": c(90, note), "ep": hclean(st.get("endpoint"), 120)}
-    out["detail"] = ""
-    if not on_ or (probe or {}).get("state") == "off":
-        out["short"] = c(90, "· not asked while the advisor is off")
-    elif probe is None:
-        out["short"] = c(90, "· checking…")
-    elif probe.get("state") == "answering":
-        names = [x for x in probe.get("models") or [] if isinstance(x, str)]
-        out["short"] = c(32, "✔ answering")
-        out["detail"] = plural(len(names), "model") + (": " + ", ".join(names[:3]) + ("…" if len(names) > 3 else "") if names else "")
-    else:
-        out["short"] = c(31, "✖ not answering")
-        out["detail"] = hclean(probe.get("msg"), 160)
-    model = hclean(st.get("model"), 80)
-    out["model"] = (c(36, "●") + " " + c(1, model) + (c(90, "  in the catalog") if model in ids else c(33, "  not in the catalog")) if model
-                    else c(90, "· none chosen ([ai] model is empty)"))
-    out["run"] = (c(32, "✔ installed") + (c(90, f" ({hclean(rt.get('version'), 20)})") if rt.get("version") else "") if rt.get("installed")
-                  else c(33, "! not installed") + c(90, ": setup downloads it"))
-    out["files"] = hclean(dd(cat).get("dir"), 120)
-    out["ans"] = out["short"] + (c(90, " · " + out["detail"]) if out["detail"] else "")
-    return out
-
-
-def ai_status_lines(st, cat, ids, w, k=0):
-    """The STATUS section at level k: 0 six lines (more when the server's answer wraps), 1 two (no endpoint, runtime or files), 2 one without a
-    title, 3 nothing."""
-    if k >= 3:
-        return []
-    t = ai_status_texts(st, cat, ids)
-    lab = lambda x: " " + c(90, pad(x, 9)) + " "  # noqa: E731
-    if k >= 2:
-        return [clip(" " + c(90, "status ") + t["adv"] + c(90, " · ") + t["short"] + c(90, " · ") + t["model"], w)]
-    if k == 1:
-        return [hsec("STATUS", w), clip(lab("advisor") + t["adv"] + (c(90, " · ") + t["short"] if t["on"] else t["note"]), w), clip(lab("model") + t["model"], w)]
-    srv = [lab("server") + t["ans"]]
-    if vlen(srv[0]) > w:  # what the server said does not fit beside the verdict: under it, wrapped
-        srv = [lab("server") + t["short"]] + [lab("") + c(90, x) for x in textwrap.wrap(t["detail"], max(10, w - 11), break_on_hyphens=False)[:2]]
-    return [hsec("STATUS", w), clip(lab("advisor") + t["adv"] + t["note"], w), clip(lab("endpoint") + t["ep"], w)] + [clip(x, w) for x in srv] \
-        + [clip(lab("model") + t["model"], w), clip(lab("runtime") + t["run"], w)] + ([clip(lab("files") + c(90, t["files"]), w)] if t["files"] else [])
-
-
-def ai_legend(w):
-    """One line: what the marks in front of a model mean, and that the speed is a guess."""
-    return hjoin([c(33, "★") + c(90, " recommended"), c(32, "✓") + c(90, " installed"), c(36, "●") + c(90, " active"),
-                  c(90, "tok/s: rough estimate")], w, " ", "  ·  ")
-
-
-def ai_layout(rows, w):
-    """(the columns to draw, the name's width, the params' width, the notes' width) of a table w wide: the notes go first when it is narrow,
-    then the parameters, the speed, the size, and the name keeps AI_NAME_MIN (or its longest name) before any of them."""
-    want = {"params": max([len(r["params"]) for r in rows] + [6]), "size": 7, "need": 7, "verdict": 12, "tok": 9}
-    names = max([len(r["name"]) for r in rows] + [5])
-    keep = ["params", "size", "need", "verdict", "tok"]
-    fixed = lambda: 6 + sum(want[k] + 2 for k in keep)  # noqa: E731  # " " + the marks + 2, and every column with its gap
-    for drop in ("params", "tok", "size", "need", "verdict"):
-        if w - fixed() >= min(names, AI_NAME_MIN):
-            break
-        keep.remove(drop)
-    nw = max(4, min(names, w - fixed()))
-    room = w - fixed() - nw - 2
-    return keep, nw, want["params"], (min(room, 100) if room >= 16 and "verdict" in keep else 0)
-
-
-def ai_header(lay):
-    keep, nw, pw, nn = lay
-    cells = {"params": pad("params", pw), "size": " size".rjust(7), "need": "needs".rjust(7), "verdict": " verdict".ljust(12), "tok": "est tok/s"}
-    return c(90, "      " + pad("model", nw + 2) + "  ".join(cells[k] for k in keep) + ("  notes" if nn else ""))
-
-
-def ai_pill(v):
-    label, code = AI_VERDICT.get(v, AI_UNKNOWN)[:2]
-    return c(code, " " + label.ljust(10) + " ")
-
-
-def ai_row_text(r, lay):
-    """One model as a table row: the marks (recommended, installed, active), the name, the columns that fit, the notes."""
-    keep, nw, pw, nn = lay
-    name = r["name"] if len(r["name"]) <= nw else r["name"][:nw - 1] + "…"
-    cells = {"params": c(90, pad(r["params"], pw)), "size": ai_mb(r["size_mb"]).rjust(7), "need": ai_mb(r["need_mb"]).rjust(7), "verdict": ai_pill(r["verdict"]),
-             "tok": pad(ai_tok(r["tok"]), 9)}
-    marks = (c(33, "★") if r["rec"] else " ") + (c(32, "✓") if r["installed"] else " ") + (c(36, "●") if r["active"] else " ")
-    return (" " + marks + "  " + (c(90, pad(name, nw)) if r["verdict"] == "no" else pad(name, nw)) + "  " + "  ".join(cells[k] for k in keep)
-            + ("  " + c(90, r["notes"][:nn - 1] + "…" if len(r["notes"]) > nn else r["notes"]) if nn else ""))
-
-
-def ai_where(r):
-    """Where the model would run, in words: 'all 36 layers on the GPU', '19 of 36 layers on the GPU, the rest in RAM', 'the CPU, from RAM'."""
-    g, n = r["gpu_layers"], r["layers"]
-    if not g:
-        return "all on the GPU" if r["verdict"] == "gpu" else "the CPU, from RAM" if r["verdict"] in ("ram", "slow") else "-"
-    if n and g >= n:
-        return f"all {n:.0f} layers on the GPU"
-    return f"{g:.0f} of {n:.0f} layers on the GPU, the rest in RAM" if n else f"{g:.0f} layers on the GPU, the rest in RAM"
-
-
-def ai_details(r, windows=False):
-    """What the details of a model say, as plain cleaned values: (title, [(label, value, kind)]). kind: the verdict for the verdict row,
-    'cmd' for a command to type, 'warn', 'dim' or ''. The commands are the catalog's, word for word, right after the state: when the screen
-    is too small the notes and the licence are cut, not what to type. Console and web share it."""
-    label = AI_VERDICT.get(r["verdict"], AI_UNKNOWN)[0]
-    items = [("verdict", label, r["verdict"] or "")]
-    if r["why"]:
-        items.append(("why", r["why"], ""))
-    items.append(("speed", f"about {ai_tok(r['tok'])} tokens/s (a rough estimate, not a promise)" if r["tok"] else "no estimate", ""))
-    state = [x for x, ok in (("★ recommended for this machine", r["rec"]), ("✓ installed", r["installed"]), ("● active: [ai] model", r["active"])) if ok]
-    items.append(("state", " · ".join(state) if state else "not installed", ""))
-    cmds = r["commands"]
-    if windows:
-        items.append(("prompt", "run the commands in an administrator prompt (PowerShell or Command Prompt)", "dim"))
-    if not r["installed"]:
-        can = r["pinned"] and "install" in cmds  # what cannot be downloaded has no command to type
-        items.append(("install", cmds["install"] if can else "not pinned yet: this build cannot download it", "cmd" if can else "warn"))
-    if r["installed"] and not r["active"] and "use" in cmds:
-        items.append(("use", cmds["use"], "cmd"))
-    if r["installed"] and "remove" in cmds:
-        items.append(("remove", cmds["remove"], "cmd"))
-    items.append(("needs", f"{ai_mb(r['need_mb'])} of memory: the file ({ai_mb(r['size_mb'])}), the context and the runtime", ""))
-    if r["verdict"] in ("gpu", "partial", "ram", "slow"):
-        items.append(("where", ai_where(r), ""))
-    ctx = f"context up to {r['ctx_max']:.0f} tokens" if r["ctx_max"] else ""
-    items.append(("model", " · ".join(x for x in (f"{r['params']} parameters", r["quant"], ctx) if x), ""))
-    items.append(("licence", r["license"] or "?", ""))
-    if r["notes"]:
-        items.append(("notes", r["notes"], ""))
-    return r["name"], items
-
-
-def ai_pane(r, w, h, windows=False):
-    """Everything known about a model, w columns, h lines at most: the sentences wrap, the commands stay whole (clipped when the screen is
-    narrower than they are), what does not fit is counted."""
-    title, items = ai_details(r, windows)
-    lw = 9
-    out = [hsec("DETAILS", w), " " + c(1, title)]
-    for label, value, kind in items:
-        chunks = [value] if kind == "cmd" else textwrap.wrap(value, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
-        for j, x in enumerate(chunks):
-            col = AI_VERDICT.get(kind, AI_UNKNOWN)[3] if kind in AI_VERDICT else {"cmd": "36", "warn": "33", "dim": "90"}.get(kind, "")
-            out.append(" " + (c(90, pad(label, lw)) if j == 0 else " " * lw) + cc(col, x))
-    return [clip(x, w) for x in hcut(out, h, w)]
-
-
-def ai_body(data, st, av, rows, w, h):
-    """The AI screen's body: at most h lines, none wider than w. Title, HARDWARE (and STATUS beside it from 110 columns), MODELS with the
-    cursor's row in reverse video, the legend, then the details (below the list, beside it from AI_PANE_W) or, without them, STATUS under
-    the list. The sections lose detail from the bottom up, as the screen gets smaller, before the list loses rows."""
-    cat = data["cat"]
-    if cat is None:  # the catalog could not be read
-        return ([ai_title(None, w)] + hmsg("err" if data.get("err") else "info", data["msg"], w))[:h]
-    n, hwd = len(rows), dd(cat.get("hw"))
-    ai_sync(av, rows)
-    sel = rows[av.idx] if rows else None
-    pane = bool(av.details and sel)
-    side, two, ids = pane and w >= AI_PANE_W, w >= 110, {r["id"] for r in rows}
-    windows = hwd.get("os") == "windows"
-    fw = int(w * 0.55) if side else w
-    lay = ai_layout(rows, fw)
-    full = len(ai_pane(sel, w - fw - 3 if side else w, 99, windows)) if pane else 0
-    for want in ((6, 4) if pane and not side else (8, 4)):  # first the comfortable list, then the tight one
-        for k in range(4):
-            work = ai_work_lines(st, cat, av, w, k)  # the switch, the folder, the last answer: they give way last, one line at a time
-            if two:
-                lw = (w - 3) * 6 // 11
-                top, bottom = columns([(ai_hw_lines(hwd, lw, k), lw), (ai_status_lines(st, cat, ids, w - 3 - lw, k), w - 3 - lw)], w, gap=3) if k < 3 else [], []
-            else:
-                top, bottom = ai_hw_lines(hwd, w, k), [] if pane else ai_status_lines(st, cat, ids, w, k)
-            avail = h - 1 - len(work) - len(top) - len(bottom) - 3  # the title and the work lines; MODELS and its header and the legend
-            if pane and not side:  # the details need their lines: the list keeps what is left
-                rows_n = min(n, max(want, avail - full))
-                fits = avail - rows_n >= full
-            else:  # the sections above give up detail before the list loses rows (or the details beside it their height)
-                rows_n = min(n, avail)
-                fits = rows_n >= min(n, want) and (not side or avail + 2 >= min(full, 12))
-            if fits:
-                break
-        if fits:
-            break
-    else:
-        rows_n = min(n, avail // 2 if pane and not side else avail)  # a screen too small for either: the list and the details share it
-    rows_n = max(1, rows_n) if n else 0
-    out = [ai_title(rows, w)] + work + top
-    av.rows, av.top = max(1, rows_n), map_scroll(av.top, av.idx, n, rows_n) if n else 0
-    note = f"{av.top + 1}-{min(n, av.top + rows_n)} of {n} · best first" if n > rows_n else "best first"
-    block = [hsec("MODELS", fw, note), ai_header(lay)]
-    if not n:
-        block.append(msg("info", "the catalog lists no model"))
-    for j in range(av.top, min(n, av.top + rows_n)):
-        line = clip(ai_row_text(rows[j], lay), fw)
-        block.append(c(7, pad(ANSI.sub("", line), fw)) if j == av.idx else line)
-    if side:
-        pn = ai_pane(sel, w - fw - 3, max(len(block), min(full, avail + 2)), windows)
-        block = [pad(x, fw) + c(90, " │ ") + (pn[i] if i < len(pn) else "") for i, x in enumerate(block + [""] * (len(pn) - len(block)))]
-    out += block + [ai_legend(w)]
-    if pane and not side:
-        out += ai_pane(sel, w, max(0, avail - rows_n), windows)
-    else:
-        out += bottom
-    return [clip(x, w) for x in out[:h]]
-
-
-def ai_footer(av, n, w, snap=None):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first. The keys that act (AI on/off,
-    use the model, delete, delete all, cancel) are there unless [ai] web_actions = no locked them (snap says); a question that waits is the footer."""
-    if av.confirm:
-        ask = " " + av.confirm[2]
-        return clip(c("1;33", ask) + c(90, "  y: yes   any other key: no" if len(ask) + 27 <= w else "  [y/n]"), w)
-    acts = isinstance(snap, dict) and not snap.get("locked")
-    pos = f"model {av.idx + 1}/{n}" if n else "no models"
-    dyn = {"details": ("Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))}
-    extra = [(8, "questions: web page or nuc-console-ask", "")] if acts else []
-    return clip(c(90, ui.footer("ai", f" {pos}   ", w, on, dyn, skip=() if acts else AI_ACTIONS, extra=extra)), w)
 
 
 def ai_screen(data, pb, av, w, h, wait=0.0):

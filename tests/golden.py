@@ -438,15 +438,18 @@ def _cases():
         add("web-" + name, query=query)
     add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # a locked page has no forms and the stricter CSP
     add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
-    # the new shell (?app=1): the overview, the settings (appearance, export, about), the CPU, Map and Health screens (native) and the AI page inside it (forms and CSRF as on the classic page)
+    # the new shell (?app=1): the overview, the settings (appearance, export, about), the CPU, Map, Health and AI screens (native: the AI forms and CSRF as on the classic page)
     for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b"),
                         ("cpu", "app=1&view=cpu"), ("cpu-details", f"app=1&view=cpu&sort=mem&sel={SELECTED['pid']}"),
                         ("map", "app=1&view=map"), ("map-details", f"app=1&view=map&all=1&sel={SELECTED['row']}"),
+                        ("ai-confirm-delete", "app=1&view=ai&sel=qwen3-1.7b&confirm=delete"),  # the AI screen's question (delete these files?) with its yes button
+                        ("ai-confirm-delete-all", "app=1&view=ai&confirm=delete-all"), ("ai-not-installed", "app=1&view=ai&sel=qwen3-30b-a3b"),
                         ("health", "app=1&view=health"), ("health-details", f"app=1&view=health&period=30&sel={SELECTED['finding']}"),
                         ("overview-wall-light", "app=1&ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
                         ("wall-kiosk", "app=1&ui=1.dw&kiosk=1"),  # the wall display: scrolls by itself (data-rotate), the footer says how to close it
                         ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
         add("web-shell-" + name, query=query)
+    add("web-shell-ai-locked", query="app=1&view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
     return out
 
 

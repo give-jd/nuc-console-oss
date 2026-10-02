@@ -267,8 +267,8 @@ def _tone(tone):
 
 
 def _inline(x):
-    """What fits in a line or a table cell: a Span, a Line, a Bar, a Spark, a Meter or a Series; anything else is text."""
-    return x if isinstance(x, (Span, Line, Bar, Spark, Meter, Series)) else Span(x)
+    """What fits in a line or a table cell: a Span, a Line, a Bar, a Spark, a Meter, a Series, a Badge or an Action; anything else is text."""
+    return x if isinstance(x, (Span, Line, Bar, Spark, Meter, Series, Badge, Action)) else Span(x)
 
 
 class Span(_Component):
@@ -282,14 +282,14 @@ class Span(_Component):
 
 
 class Line(_Component):
-    """One line of Spans (strings are made Spans); a Bar, a Spark, a Series or another Line may sit in it between the text. No spans at all is
+    """One line of Spans (strings are made Spans); a Bar, a Spark, a Series, a Badge or another Line may sit in it between the text. No spans at all is
     a blank line on the console and nothing on the web. clip: the console cuts the line to that many columns, wherever it sits (None: as it
     is); the web ignores it."""
     __slots__ = ("spans", "clip")
 
     def __init__(self, spans=(), clip=None):
-        self.spans = [x if isinstance(x, (Span, Bar, Spark, Meter, Series, Line)) else Span(x)
-                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark, Meter, Series, Line)) else spans)]
+        self.spans = [x if isinstance(x, (Span, Bar, Spark, Meter, Series, Line, Badge)) else Span(x)
+                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark, Meter, Series, Line, Badge)) else spans)]
         self.clip = None if clip is None else int(clip)
 
     @property
@@ -391,15 +391,18 @@ class Table(_Component):
     tone is cut to that many columns, stripped of the colours of its cells and padded to them: the cursor row of a list) and fit (each row on
     its own: a row wider than the console loses its last cells one by one, at least one stays, instead of the columns with a prio going from
     every row; a cell with no text and no w is not there at all, its gap neither, and a cell with a w is padded to it even when it is the last
-    one).
+    one) and clip (each row without a tone is cut to that many columns, and so ends with the reset that cutting writes: the rows of a list
+    whose cursor row is solid).
     A row with a link (Row.href) is a row of a list: the web marks it data-row, and the one with the tone 'sel' aria-current."""
-    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill", "head_tone", "solid", "fit")
+    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill", "head_tone", "solid", "fit", "clip")
 
-    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False, head_tone=None, solid=None, fit=False):
+    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False, head_tone=None, solid=None, fit=False,
+                 clip=None):
         self.head = bool(head) or head_line is not None
         self.indent, self.head_line, self.titled, self.fill = int(indent), None if head_line is None else _text(head_line), bool(titled), bool(fill)
         self.head_tone, self.solid = _tone(head_tone), None if solid is None else int(solid)
         self.fit = bool(fit)
+        self.clip = None if clip is None else int(clip)
         self.cols, self.rows = list(cols), list(rows)
         for r in self.rows:
             if len(r.cells) != len(self.cols):
@@ -725,11 +728,14 @@ class Series(_Component):
 class Cols(_Component):
     """Parts side by side: children [(node, w)]. The console draws each in its w columns (every line cut to them), gap spaces between, and a
     column that is longer than h lines is cut there (the last line says how many were left out; h None: no cut). The web lays the children
-    out in a grid, in the order given, whatever the w."""
-    __slots__ = ("children", "gap", "h")
+    out in a grid, in the order given, whatever the w. once (the console's): the lines are cut only where they are put side by side, not
+    before as well, so that a line that carries its own clip ends with two resets and one that has none with one, as the AI screen has
+    always drawn them."""
+    __slots__ = ("children", "gap", "h", "once")
 
-    def __init__(self, children=(), gap=3, h=None):
+    def __init__(self, children=(), gap=3, h=None, once=False):
         self.children, self.gap, self.h = [(n, None if w is None else int(w)) for n, w in children], int(gap), None if h is None else int(h)
+        self.once = bool(once)
 
 
 class Split(_Component):
@@ -816,6 +822,83 @@ def check_level(level):
     if level not in ("err", "warn", "info"):
         raise ValueError(f"unknown level {level!r}: one of err, warn, info")
     return level
+
+
+# ---- components of the full screens (screens.py: the AI screen) ------------------------------------------------------------------------
+# What the AI screen has that the others have not: a verdict as a pill, the buttons and the question box of the web (the console has keys for
+# them: it draws nothing for an Action), the details of a model, and the chat. Console fields are the console's own, the web ignores them.
+
+BADGE_TONES = ("ok", "accent", "warn", "err", "muted")
+
+
+class Badge(_Component):
+    """A short label with a tone, drawn as a pill (a verdict: '\u2714 FITS GPU'): tone is one of BADGE_TONES, and a symbol goes in the text,
+    because colour is never the only signal. w (the console's): the text is padded to that many columns, a space before and after, and the pill
+    is drawn in the console's own pill colours; the web draws the text in a tag."""
+    __slots__ = ("text", "tone", "w")
+
+    def __init__(self, text, tone="muted", w=0):
+        if tone not in BADGE_TONES:
+            raise ValueError(f"unknown badge tone {tone!r}: one of {', '.join(BADGE_TONES)}")
+        self.text, self.tone, self.w = _text(text), tone, max(0, int(w))
+
+
+class Action(_Component):
+    """A button of the web that does something to the machine: a form that posts to action (a path of this server, '/ai/use') with the hidden
+    fields [(name, value)] (the CSRF token, the page to come back to, a model id: whatever the server's handler checks), labelled label. key: the
+    key of the keymap that does the same (data-key); tone: ok, err or accent (the look of the button); title: what it will do, as a tooltip;
+    disabled: drawn but not clickable (a job is running). ask: (name, placeholder, maxlength) puts a text box before the button (a question to
+    type). The console has the keys: it draws nothing."""
+    __slots__ = ("action", "label", "fields", "key", "tone", "title", "disabled", "ask")
+
+    def __init__(self, action, label, fields=(), key="", tone=None, title="", disabled=False, ask=None):
+        self.action, self.label, self.key, self.title = str(action), _text(label), _text(key), _text(title)
+        self.fields = [(_text(k), _text(v)) for k, v in fields]
+        self.tone = tone if tone in ("ok", "err", "accent") else None
+        self.disabled = bool(disabled)
+        self.ask = None if ask is None else (_text(ask[0]), _text(ask[1]), int(ask[2]))
+
+
+class Controls(_Component):
+    """Parts of the web in one row, each as it is drawn inline (a Span, a Badge, a Bar, an Action...): the switch and what it is doing, a line of
+    buttons. The console has its own line for the same facts and draws nothing for this."""
+    __slots__ = ("items",)
+
+    def __init__(self, items=()):
+        self.items = [_inline(x) for x in items]
+
+
+class Question(_Component):
+    """A question that waits for an answer (delete these files?): text, yes (the Action that does it; None: no form, the page is read-only) and
+    no_href (where No goes on the web). The console draws it in place of its footer, in one line: ' text  y: yes   any other key: no' ('[y/n]'
+    when that does not fit)."""
+    __slots__ = ("text", "yes", "no_href")
+
+    def __init__(self, text, yes=None, no_href=None):
+        self.text, self.yes, self.no_href = _text(text), yes, None if no_href is None else str(no_href)
+
+
+class Spec(_Component):
+    """Everything known about one thing, labelled: title and items [(label, text, tone, whole)]: tone a token of TOKENS or None, whole True for
+    what must not be broken over lines (a command to type: the console cuts it at the edge instead, the web draws it as code). The console
+    draws 'DETAILS', the title and the items, the values wrapped at the room that is left of lw (the width of the labels), cut to h lines
+    (the last says how many were left out; None: not cut). actions [Action]: what the web lets the reader do with it (a row 'do'); the
+    console has keys."""
+    __slots__ = ("title", "items", "h", "lw", "actions")
+
+    def __init__(self, title, items=(), h=None, lw=9, actions=()):
+        self.title = _text(title)
+        self.items = [(_text(k), _text(v), _tone(t), bool(whole)) for k, v, t, whole in items]
+        self.h, self.lw, self.actions = None if h is None else int(h), int(lw), list(actions)
+
+
+class Qa(_Component):
+    """One exchange of the web's chat: kind ('you' or 'advice'), q (the question) and its answer, a ui.Advice, or None while pending (the model
+    is still writing it). The console has no chat: it draws nothing."""
+    __slots__ = ("kind", "q", "answer", "pending")
+
+    def __init__(self, kind, q, answer=None, pending=False):
+        self.kind, self.q, self.answer, self.pending = "advice" if kind == "advice" else "you", _text(q), answer, bool(pending)
 
 
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------

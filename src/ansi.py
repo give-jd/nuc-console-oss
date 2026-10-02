@@ -255,6 +255,10 @@ def _bar(b):
     return bar(b.frac, b.w, b.warn, b.err) + (" " + b.value_text if b.value_text else "")
 
 
+# the pill of a Badge as the console has always drawn a verdict: raw codes (a green, a cyan, a yellow, a red block with their text colour)
+_BADGE = {"ok": "1;42;30", "accent": "1;46;30", "warn": "1;43;30", "err": "1;41;37", "muted": "90"}
+
+
 def inline(x, tone=None):
     """A Span, a Line, a Bar or a Spark as the text of one line (tone: the colour of a Span that has none)."""
     if isinstance(x, ui.Span):
@@ -272,6 +276,10 @@ def inline(x, tone=None):
         return style(hspark(x.values, x.w), x.tone)
     if isinstance(x, ui.Seg):
         return " ".join(style(f" {key}:{text} ", "sel" if chosen else "muted") for text, key, chosen, _href in x.options)
+    if isinstance(x, ui.Badge):
+        return c(_BADGE[x.tone], " " + x.text.ljust(x.w) + " ")
+    if isinstance(x, ui.Action):
+        return ""  # a button of the web: the console has keys
     return style("?", "unknown")
 
 
@@ -371,6 +379,8 @@ def _table_lines(t, w):
             line = lead + "".join(parts)
             if tone and t.solid is not None:  # the cursor row: its own colours go, it is as wide as the list
                 line = pad(ANSI.sub("", clip(line, t.solid)), t.solid)
+            elif t.clip is not None and not tone:
+                line = clip(line, t.clip)
             lines.append(style(line, tone) if tone else line)
         droppable = [j for j in cols if t.cols[j].prio > 0]
         if droppable and max([vlen(x) for x in lines] + [0]) > w:
@@ -588,7 +598,9 @@ def _cols_lines(n, w):
     cols = []
     for node, cw in n.children:
         cw = w if cw is None else cw
-        lines = [clip(x, cw) if x else x for x in render(node, cw)[0]]  # a blank line between two parts stays blank
+        lines = render(node, cw)[0]
+        if not n.once:
+            lines = [clip(x, cw) if x else x for x in lines]  # a blank line between two parts stays blank
         cols.append((cut_to(lines, n.h, cw) if n.h is not None else lines, cw))
     if len(cols) == 1:
         return cols[0][0], False
@@ -660,9 +672,35 @@ def _props_lines(p, w):
     return (out if p.h is None else out[:p.h]), False
 
 
+def _spec_lines(p, w):
+    """A Spec as lines: 'DETAILS', the title, then each item with its label; a value is wrapped at what is left of the label (a command, whole,
+    is cut at the edge), in the colour of its tone."""
+    lw = p.lw
+    out = [section("DETAILS", w), " " + style(p.title, None, True)]
+    for label, text, tone, whole in p.items:
+        chunks = [text] if whole else textwrap.wrap(text, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
+        for j, x in enumerate(chunks):
+            out.append(" " + (style(label.ljust(lw), "muted") if j == 0 else " " * lw) + style(x, tone))
+    if p.h is not None:
+        out = cut_to(out, p.h, w)
+    return [clip(x, w) for x in out], False
+
+
+def _question_line(q, w):
+    """The question in one line: bold in the warning colour, and how to answer it as far as it fits."""
+    ask = " " + q.text
+    return clip(style(ask, "warn", True) + style("  y: yes   any other key: no" if len(ask) + 27 <= w else "  [y/n]", "muted"), w)
+
+
 _DRAW = {
     ui.Outline: lambda n, w: ([_branch_line(b, w) for b in n.rows], False),
     ui.Props: _props_lines,
+    ui.Badge: lambda n, w: ([inline(n)], False),
+    ui.Spec: _spec_lines,
+    ui.Question: lambda n, w: ([_question_line(n, w)], False),
+    ui.Action: lambda n, w: ([], False),  # the web's buttons, controls and chat: the console has keys and its own lines
+    ui.Controls: lambda n, w: ([], False),
+    ui.Qa: lambda n, w: ([], False),
     ui.Title: lambda n, w: ([_title_line(n, w)], False),
     ui.Seg: lambda n, w: ([inline(n)], False),
     ui.Series: lambda n, w: ([inline(n)], False),
