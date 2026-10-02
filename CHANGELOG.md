@@ -63,6 +63,9 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   server's own keymap) and **preferences** (theme and density apply without a reload; a **Copy** button on the settings page). Without scripts everything
   works as before and the page reloads by `<meta refresh>` inside `<noscript>`. The classic pages are unchanged and still have no script.
   See [docs/WEB.md](docs/WEB.md#the-shells-scripts) and [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
+- In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
+  (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
+  events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
 
 **Windows and macOS**
 

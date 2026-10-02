@@ -47,6 +47,7 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     data-k="<key>"      a stable key (links, rows, details): focus and the open state of <details> survive a refresh by it
     data-row            a row of a list: KEYS_JS moves the focus over them and Enter follows the link of the focused row
     <details data-k>    its open state is kept as the reader left it
+                        (the Health screen: each finding is div.fd[data-k="f-<id>"] holding details[data-k]; the period links are a[data-key="d|w|m"])
     data-kpi="<id>" data-depth="<n>" data-max-lines="<n>"   what the components (htmlview.html) say of a KPI, a tree row and a list; for the
                         server's CSS only (the scripts never read them, a fragment may carry them)
     data-problem="<id>" the stable id of a problem in ATTENTION (a problem, or one accepted as known); for the server's CSS only

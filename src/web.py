@@ -42,6 +42,7 @@ import htmlview
 import nuc_config
 import prefs
 import render
+import screens
 import ui
 import webcss
 import webjs
@@ -1056,6 +1057,8 @@ class Server(http.server.ThreadingHTTPServer):
         if not render.CFG["features"].get("health", True):
             return doc("<p>health disabled in config.ini (<b>[features] health = no</b>)</p>", [dash, "read-only"], refresh=False)
         hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": pause}, **here)
+        if shell:  # the shell draws the screen itself: the components of screens.py, as HTML
+            return View(health_native(self.smp, days, sel, hhere), [], hhere, not pause, legacy=False)
         cols, data = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), {"report": None}
         try:
             data, pb = render.health_state(self.smp, days)
@@ -1187,6 +1190,38 @@ def health_extra_html(report):
                                               f'{html.escape(render.ADVICE_NONE)}</p></div>')
     except Exception:  # noqa: BLE001 - a broken advisor is no advice
         return ""
+
+
+def health_advice_node(report):
+    """The ADVICE block of the Health page as a ui.Advice (health_extra_html's twin: the advisor's CACHED answer, never a generation on a request
+    path), or None when the advisor is off. A broken advisor is no advice."""
+    on_, res = render.health_advice(report)
+    if not on_:
+        return None
+    try:
+        if not res:
+            return ui.Advice("ADVICE (AI) \u2014 none yet", [[render.ADVICE_NONE]], kind="none")
+        p = advisor.parts(res)
+        return ui.Advice(p["head"], p["paras"], p["notes"], p["kind"]) if p else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def health_native(smp, days, sel, here):
+    """The Health screen of the shell, drawn from components (screens.health_model): the period as links with their keys, the findings with their
+    details, the ADVICE block, the sections of tables. here: the page's parameters; the links of the periods change only the period."""
+    try:
+        data, _pb = render.health_state(smp, days)
+        fl = render.health_findings(data["report"])
+        hv = screens.HealthView(days)
+        hv.cur = sel
+        advice = health_advice_node(data["report"]) if data["report"] is not None else None
+        href = lambda d: page_url(here, period=d if d != 7 else 0)  # noqa: E731
+        nodes = screens.health_model(data, hv, fl, advice, href, time.time())
+        return '<div class="hv">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+    except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+        print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+        return '<p class="sm">the health screen could not be drawn (see the service log)</p>'
 
 
 class AiUi(object):

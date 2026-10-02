@@ -1,0 +1,1328 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-9ru6eneHa6/+nFJPaD+wQAEgR+CX8BPgT/9vEGGI83g=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · health · nuc-console</title>
+<link rel="stylesheet" href="/s/app.d779b113.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="f1cb8ff6dc">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?app=1" data-key="1">
+<kbd>1</kbd>Overview</a>
+<a href="/?app=1&amp;view=map" data-key="2">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?app=1&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?app=1&amp;view=health" data-key="4" aria-current="page">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?app=1&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="fba522a530">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?app=1#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="view" data-refresh="2" data-frag="/?view=health&amp;app=1&amp;frag=1">
+<div class="vb" data-card="__view" data-rev="fa18b439c1">
+<div class="hv">
+<header class="st">
+<h2>HEALTH</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">last 7 days</span>
+</span>
+<span class="bit">
+<span class="t-muted">since 2026-09-05 14:00 UTC · 168 h of data</span>
+</span>
+<span class="bit">
+<span class="t-err">✖ 1 err</span>  <span class="t-warn">! 6 warn</span>  <span class="t-muted">· 3 info</span>
+</span>
+</p>
+<div class="seg" role="group" aria-label="period">
+<a href="/?view=health&amp;period=1&amp;app=1" data-key="d" title="key d">24h</a>
+<span aria-current="true">7d</span>
+<a href="/?view=health&amp;period=30&amp;app=1" data-key="m" title="key m">30d</a>
+</div>
+</header>
+<section class="grp">
+<h3 class="sub">FINDINGS</h3>
+<div class="fd lv-err" data-k="f-oom:shop-worker-1">
+<details data-k="f-oom:shop-worker-1-d">
+<summary>
+<span class="tag err">✖ ERR</span> <strong class="ft">Out of memory: shop-worker-1</strong> <span class="fx">shop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (last 2026-09-21 11:43 UTC).</span>
+</summary>
+<dl class="pane lv-err">
+<dt>what</dt>
+<dd>shop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (last 2026-09-21 11:43 UTC).</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">n</span> <b>3</b>
+</li>
+<li>
+<span class="k">last</span> <b>2026-09-21 11:43 UTC</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>journalctl -k | grep -i &#x27;killed process&#x27;; free -h; give it a limit it respects (docker update --memory 2g &lt;name&gt; or MemoryMax= in a drop-in) and raise it if the app really needs more; add RAM or swap; look for a leak (mem-leak)</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-restart-loop:shop-worker-1">
+<details data-k="f-restart-loop:shop-worker-1-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Restarting: shop-worker-1</strong> <span class="fx">shop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an error 3 times in the last 7 days (last 2026-09-21 11:49 UTC).</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>shop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an error 3 times in the last 7 days (last 2026-09-21 11:49 UTC).</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">max_restarts_24h</span> <b>9</b>
+</li>
+<li>
+<span class="k">restarts</span> <b>31</b>
+</li>
+<li>
+<span class="k">exit_errors</span> <b>3</b>
+</li>
+<li>
+<span class="k">last</span> <b>2026-09-21 11:49 UTC</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>docker ps -a; docker inspect &lt;name&gt; (State.ExitCode, State.OOMKilled); docker logs --tail 100 &lt;name&gt;; systemctl status &lt;unit&gt;; fix the cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-disk-full:/data">
+<details data-k="f-disk-full:/data-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Disk filling up: /data</strong> <span class="fx">/data is 83% full, growing 4.1 GB/day: full in about 12 days.</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>/data is 83% full, growing 4.1 GB/day: full in about 12 days.</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">used_gb</span> <b>249</b>
+</li>
+<li>
+<span class="k">total_gb</span> <b>300</b>
+</li>
+<li>
+<span class="k">growth_gb_day</span> <b>4.1</b>
+</li>
+<li>
+<span class="k">fit_days</span> <b>30</b>
+</li>
+<li>
+<span class="k">used_pct</span> <b>83</b>
+</li>
+<li>
+<span class="k">days_to_full</span> <b>12.4</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>df -h; du -xh --max-depth=1 / 2&gt;/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); journalctl --vacuum-size=500M; apt clean</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-mem-leak:node">
+<details data-k="f-mem-leak:node-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Memory keeps growing: node</strong> <span class="fx">node grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>node grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">slope_mb_day</span> <b>180.2</b>
+</li>
+<li>
+<span class="k">days</span> <b>5</b>
+</li>
+<li>
+<span class="k">start_mb</span> <b>920</b>
+</li>
+<li>
+<span class="k">now_mb</span> <b>1820</b>
+</li>
+<li>
+<span class="k">r2</span> <b>0.93</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart &lt;unit&gt; / docker restart &lt;name&gt;; cap it so it cannot starve the rest: docker update --memory 1g --memory-swap 1g &lt;name&gt; or MemoryMax=1G in a drop-in; then update it or report the leak</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-cpu-hog:chrome">
+<details data-k="f-cpu-hog:chrome-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Keeps the CPU busy: chrome</strong> <span class="fx">chrome used over 80% of one core for 31 hours in the last 7 days (peak 143%, busiest at 2026-09-20 11:13 UTC).</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>chrome used over 80% of one core for 31 hours in the last 7 days (peak 143%, busiest at 2026-09-20 11:13 UTC).</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">hours_over_80pct_core</span> <b>31</b>
+</li>
+<li>
+<span class="k">hours_over_half_cores</span> <b>0</b>
+</li>
+<li>
+<span class="k">cores</span> <b>16</b>
+</li>
+<li>
+<span class="k">avg_pct</span> <b>62.3</b>
+</li>
+<li>
+<span class="k">peak_pct</span> <b>143</b>
+</li>
+<li>
+<span class="k">cpu_s</span> <b>375000</b>
+</li>
+<li>
+<span class="k">peak_hour</span> <b>2026-09-20 11:13 UTC</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>top (or htop) shows it now; docker stats / systemctl status &lt;unit&gt;; cap it: docker update --cpus 2 &lt;name&gt; or CPUQuota=200% in a systemd drop-in (systemctl edit &lt;unit&gt;); check its log for a loop</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-thermal:host">
+<details data-k="f-thermal:host-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Running hot</strong> <span class="fx">14 hours at or above the temperature limit (90 C) in the last 7 days (about 2.0 h/day, max 91 C); busiest then: chrome, node, shop-worker-1.</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>14 hours at or above the temperature limit (90 C) in the last 7 days (about 2.0 h/day, max 91 C); busiest then: chrome, node, shop-worker-1.</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">hours_hot</span> <b>14</b>
+</li>
+<li>
+<span class="k">hours_per_day</span> <b>2</b>
+</li>
+<li>
+<span class="k">max_c</span> <b>91</b>
+</li>
+<li>
+<span class="k">apps</span> <b>chrome, node, shop-worker-1</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-warn" data-k="f-login-fail:sshd">
+<details data-k="f-login-fail:sshd-d">
+<summary>
+<span class="tag warn">! WARN</span> <strong class="ft">Failed logins: sshd</strong> <span class="fx">412 failed logins on 2026-09-28 against a median of 18 a day; 1204 in the last 7 days.</span>
+</summary>
+<dl class="pane lv-warn">
+<dt>what</dt>
+<dd>412 failed logins on 2026-09-28 against a median of 18 a day; 1204 in the last 7 days.</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">peak_day</span> <b>412</b>
+</li>
+<li>
+<span class="k">peak_date</span> <b>2026-09-28</b>
+</li>
+<li>
+<span class="k">median_day</span> <b>18</b>
+</li>
+<li>
+<span class="k">total</span> <b>1204</b>
+</li>
+<li>
+<span class="k">days_over</span> <b>2</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>journalctl -u ssh -u sshd | grep -i fail | tail; fail2ban-client status sshd; sudo ufw limit 22/tcp; PasswordAuthentication no in sshd_config; do not expose port 22 to the Internet (use a VPN or Tailscale)</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-info" data-k="f-log-noisy:dockerd">
+<details data-k="f-log-noisy:dockerd-d">
+<summary>
+<span class="tag info">· INFO</span> <strong class="ft">Noisy log: dockerd</strong> <span class="fx">dockerd logged one message 18420 times in the last 7 days (about 2631 a day): &quot;level=&lt;v&gt; msg=&lt;str&gt; error=&lt;str&gt;&quot;.</span>
+</summary>
+<dl class="pane lv-info">
+<dt>what</dt>
+<dd>dockerd logged one message 18420 times in the last 7 days (about 2631 a day): &quot;level=&lt;v&gt; msg=&lt;str&gt; error=&lt;str&gt;&quot;.</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">n</span> <b>18420</b>
+</li>
+<li>
+<span class="k">per_day</span> <b>2631</b>
+</li>
+<li>
+<span class="k">source</span> <b>journal</b>
+</li>
+<li>
+<span class="k">template</span> <b>level=&lt;v&gt; msg=&lt;str&gt; error=&lt;str&gt;</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>journalctl -u &lt;unit&gt; -n 50 -p warning; docker logs --tail 50 &lt;name&gt;; fix what it complains about or lower its log level; LogRateLimitIntervalSec in journald.conf as a stopgap</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-info" data-k="f-log-new:host">
+<details data-k="f-log-new:host-d">
+<summary>
+<span class="tag info">· INFO</span> <strong class="ft">New log messages</strong> <span class="fx">4 log messages appeared for the first time in the last 24 hours, most often from kernel (412 times).</span>
+</summary>
+<dl class="pane lv-info">
+<dt>what</dt>
+<dd>4 log messages appeared for the first time in the last 24 hours, most often from kernel (412 times).</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">new_templates</span> <b>4</b>
+</li>
+<li>
+<span class="k">top_unit</span> <b>kernel</b>
+</li>
+<li>
+<span class="k">top_n</span> <b>412</b>
+</li>
+<li>
+<span class="k">top_template</span> <b>nvme nvme&lt;n&gt;: I/O &lt;n&gt; QID &lt;n&gt; timeout, aborting</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>journalctl -p warning --since &#x27;24 hours ago&#x27; | tail -50; new messages after an update or a config change are normal, otherwise look at the unit that writes them</dd>
+</dl>
+</details>
+</div>
+<div class="fd lv-info" data-k="f-boot-regression:host">
+<details data-k="f-boot-regression:host-d">
+<summary>
+<span class="tag info">· INFO</span> <strong class="ft">Slower boot</strong> <span class="fx">The last boot took 58 s, 2.5x the median of the 7 boots before (23 s).</span>
+</summary>
+<dl class="pane lv-info">
+<dt>what</dt>
+<dd>The last boot took 58 s, 2.5x the median of the 7 boots before (23 s).</dd>
+<dt>facts</dt>
+<dd>
+<ul class="facts">
+<li>
+<span class="k">last_s</span> <b>58.4</b>
+</li>
+<li>
+<span class="k">median_s</span> <b>23</b>
+</li>
+<li>
+<span class="k">ratio</span> <b>2.54</b>
+</li>
+<li>
+<span class="k">boots</span> <b>7</b>
+</li>
+</ul>
+</dd>
+<dt>fix</dt>
+<dd>systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable &lt;unit&gt;)</dd>
+</dl>
+</details>
+</div>
+</section>
+<div class="cols">
+<div class="col">
+<section class="grp">
+<h3 class="sub">TOP CPU <span class="note">share of CPU time · per day</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-app">
+<col class="c-share">
+<col class="c-avg">
+<col class="c-trend">
+<col class="c-peak">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">App</th>
+<th scope="col">Share of CPU time</th>
+<th class="n" scope="col">Avg</th>
+<th scope="col">Per day</th>
+<th scope="col">Peak</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>chrome</td>
+<td>
+<svg class="bar st-err t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="100%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="100" height="8"/>
+</svg>
+<span class="n"> 31%</span>
+</td>
+<td class="n">62%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="8.9" width="3" height="7.1"/>
+<rect x="4" y="2.0" width="3" height="14.0"/>
+<rect x="8" y="3.9" width="3" height="12.1"/>
+<rect x="12" y="4.1" width="3" height="11.9"/>
+<rect x="16" y="5.6" width="3" height="10.4"/>
+<rect x="20" y="2.5" width="3" height="13.5"/>
+<rect x="24" y="8.7" width="3" height="7.3"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Sun 11:13</span>
+</td>
+</tr>
+<tr>
+<td>node</td>
+<td>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="45%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="45.2" height="8"/>
+</svg>
+<span class="n"> 14%</span>
+</td>
+<td class="n">28%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="7.4" width="3" height="8.6"/>
+<rect x="4" y="9.1" width="3" height="6.9"/>
+<rect x="8" y="8.1" width="3" height="7.9"/>
+<rect x="12" y="5.0" width="3" height="11.0"/>
+<rect x="16" y="2.0" width="3" height="14.0"/>
+<rect x="20" y="9.4" width="3" height="6.6"/>
+<rect x="24" y="3.9" width="3" height="12.1"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Sat 11:13</span>
+</td>
+</tr>
+<tr>
+<td>dockerd</td>
+<td>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="19%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="19.4" height="8"/>
+</svg>
+<span class="n">  6%</span>
+</td>
+<td class="n">12%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="7.8" width="3" height="8.2"/>
+<rect x="4" y="10.0" width="3" height="6.0"/>
+<rect x="8" y="3.9" width="3" height="12.1"/>
+<rect x="12" y="8.8" width="3" height="7.2"/>
+<rect x="16" y="2.0" width="3" height="14.0"/>
+<rect x="20" y="2.5" width="3" height="13.5"/>
+<rect x="24" y="8.6" width="3" height="7.4"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Mon 09:13</span>
+</td>
+</tr>
+<tr>
+<td>postgres</td>
+<td>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="16%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="16.1" height="8"/>
+</svg>
+<span class="n">  5%</span>
+</td>
+<td class="n">10%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="6.2" width="3" height="9.8"/>
+<rect x="4" y="2.7" width="3" height="13.3"/>
+<rect x="8" y="6.6" width="3" height="9.4"/>
+<rect x="12" y="7.3" width="3" height="8.7"/>
+<rect x="16" y="3.7" width="3" height="12.3"/>
+<rect x="20" y="2.0" width="3" height="14.0"/>
+<rect x="24" y="5.1" width="3" height="10.9"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Fri 09:13</span>
+</td>
+</tr>
+<tr>
+<td>python3</td>
+<td>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="13%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="12.9" height="8"/>
+</svg>
+<span class="n">  4%</span>
+</td>
+<td class="n">7%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="2.0" width="3" height="14.0"/>
+<rect x="4" y="6.0" width="3" height="10.0"/>
+<rect x="8" y="2.8" width="3" height="13.2"/>
+<rect x="12" y="6.0" width="3" height="10.0"/>
+<rect x="16" y="2.2" width="3" height="13.8"/>
+<rect x="20" y="6.1" width="3" height="9.9"/>
+<rect x="24" y="5.3" width="3" height="10.7"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Sun 05:13</span>
+</td>
+</tr>
+<tr>
+<td>shop-worker-1</td>
+<td>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="10%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="9.7" height="8"/>
+</svg>
+<span class="n">  3%</span>
+</td>
+<td class="n">6%</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="2.0" width="3" height="14.0"/>
+<rect x="4" y="9.6" width="3" height="6.4"/>
+<rect x="8" y="4.9" width="3" height="11.1"/>
+<rect x="12" y="9.6" width="3" height="6.4"/>
+<rect x="16" y="6.4" width="3" height="9.6"/>
+<rect x="20" y="6.4" width="3" height="9.6"/>
+<rect x="24" y="4.5" width="3" height="11.5"/>
+</svg>
+</td>
+<td>
+<span class="t-muted">Mon 12:13</span>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 class="sub">TOP MEMORY <span class="note">RSS · per day</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-app">
+<col class="c-avg">
+<col class="c-max">
+<col class="c-trend">
+<col class="c-series">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">App</th>
+<th class="n" scope="col">Avg</th>
+<th class="n" scope="col">Max</th>
+<th scope="col">Trend</th>
+<th scope="col">Per day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>chrome</td>
+<td class="n">2.4G</td>
+<td class="n">3.9G</td>
+<td>
+<span class="t-muted">→ steady</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="2.5" width="3" height="13.5"/>
+<rect x="4" y="2.3" width="3" height="13.7"/>
+<rect x="8" y="2.3" width="3" height="13.7"/>
+<rect x="12" y="2.2" width="3" height="13.8"/>
+<rect x="16" y="2.1" width="3" height="13.9"/>
+<rect x="20" y="2.0" width="3" height="14.0"/>
+<rect x="24" y="2.0" width="3" height="14.0"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>node</td>
+<td class="n">1.3G</td>
+<td class="n">1.9G</td>
+<td>
+<span class="t-warn">↗ +180M/day</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="10.5" width="3" height="5.5"/>
+<rect x="4" y="9.0" width="3" height="7.0"/>
+<rect x="8" y="7.5" width="3" height="8.5"/>
+<rect x="12" y="6.1" width="3" height="9.9"/>
+<rect x="16" y="4.8" width="3" height="11.2"/>
+<rect x="20" y="3.3" width="3" height="12.7"/>
+<rect x="24" y="2.0" width="3" height="14.0"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>postgres</td>
+<td class="n">922M</td>
+<td class="n">1.1G</td>
+<td>
+<span class="t-muted">→ steady</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="2.3" width="3" height="13.7"/>
+<rect x="4" y="2.2" width="3" height="13.8"/>
+<rect x="8" y="2.2" width="3" height="13.8"/>
+<rect x="12" y="2.0" width="3" height="14.0"/>
+<rect x="16" y="2.0" width="3" height="14.0"/>
+<rect x="20" y="2.1" width="3" height="13.9"/>
+<rect x="24" y="2.0" width="3" height="14.0"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>shop-worker-1</td>
+<td class="n">717M</td>
+<td class="n">2.0G</td>
+<td>
+<span class="t-muted">no trend</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="4.8" width="3" height="11.2"/>
+<rect x="4" y="2.6" width="3" height="13.4"/>
+<rect x="8" y="2.0" width="3" height="14.0"/>
+<rect x="12" y="2.7" width="3" height="13.3"/>
+<rect x="16" y="2.2" width="3" height="13.8"/>
+<rect x="20" y="2.3" width="3" height="13.7"/>
+<rect x="24" y="2.0" width="3" height="14.0"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>dockerd</td>
+<td class="n">307M</td>
+<td class="n">410M</td>
+<td>
+<span class="t-muted">no trend</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="4.0" width="3" height="12.0"/>
+<rect x="4" y="3.8" width="3" height="12.2"/>
+<rect x="8" y="2.5" width="3" height="13.5"/>
+<rect x="12" y="2.0" width="3" height="14.0"/>
+<rect x="16" y="3.3" width="3" height="12.7"/>
+<rect x="20" y="2.6" width="3" height="13.4"/>
+<rect x="24" y="3.8" width="3" height="12.2"/>
+</svg>
+</td>
+</tr>
+<tr>
+<td>python3</td>
+<td class="n">205M</td>
+<td class="n">512M</td>
+<td>
+<span class="t-muted">no trend</span>
+</td>
+<td>
+<svg class="series t-accent" viewBox="0 0 27 16" width="27" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="2.2" width="3" height="13.8"/>
+<rect x="4" y="3.6" width="3" height="12.4"/>
+<rect x="8" y="2.4" width="3" height="13.6"/>
+<rect x="12" y="3.4" width="3" height="12.6"/>
+<rect x="16" y="2.4" width="3" height="13.6"/>
+<rect x="20" y="2.2" width="3" height="13.8"/>
+<rect x="24" y="2.0" width="3" height="14.0"/>
+</svg>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+</div>
+<div class="col">
+<section class="grp">
+<h3 class="sub">EVENTS <span class="note">by kind · subject ×times, last</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-kind">
+<col class="c-what">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Kind</th>
+<th scope="col">Subject ×times, last</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-err">out of memory</span>
+</td>
+<td>shop-worker-1 ×3 <span class="t-muted">2 h ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-warn">crash</span>
+</td>
+<td>chrome ×4 <span class="t-muted">30 h ago</span>  ·  snapd ×1 <span class="t-muted">4 d ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-warn">service failed</span>
+</td>
+<td>snapd.service ×2 <span class="t-muted">4 d ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-warn">restart</span>
+</td>
+<td>shop-worker-1 ×31 <span class="t-muted">2 h ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-warn">exit error</span>
+</td>
+<td>shop-worker-1 ×3 <span class="t-muted">2 h ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-muted">throttle</span>
+</td>
+<td>host ×6 <span class="t-muted">27 h ago</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-muted">login failed</span>
+</td>
+<td>sshd ×1.2k <span class="t-muted">72 min ago</span>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 class="sub">NOISY / NEW LOGS <span class="note">messages in the period</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-n">
+<col class="c-new">
+<col class="c-unit">
+<col class="c-msg">
+</colgroup>
+<thead>
+<tr>
+<th class="r n" scope="col">Messages</th>
+<th scope="col">New</th>
+<th scope="col">Unit</th>
+<th scope="col">Message</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="r n">18k</td>
+<td>
+</td>
+<td>dockerd</td>
+<td>
+<span class="t-muted">level=&lt;v&gt; msg=&lt;str&gt; error=&lt;str&gt;</span>
+</td>
+</tr>
+<tr>
+<td class="r n">2.0k</td>
+<td>
+</td>
+<td>cron</td>
+<td>
+<span class="t-muted">(&lt;str&gt;) CMD (&lt;path&gt;)</span>
+</td>
+</tr>
+<tr>
+<td class="r n">1.2k</td>
+<td>
+</td>
+<td>sshd</td>
+<td>
+<span class="t-muted">Failed password for &lt;str&gt; from &lt;ip&gt; port &lt;n&gt; ssh2</span>
+</td>
+</tr>
+<tr>
+<td class="r n">412</td>
+<td>
+<span class="t-warn">NEW</span>
+</td>
+<td>kernel</td>
+<td>
+<span class="t-muted">nvme nvme&lt;n&gt;: I/O &lt;n&gt; QID &lt;n&gt; timeout, aborting</span>
+</td>
+</tr>
+<tr>
+<td class="r n">260</td>
+<td>
+</td>
+<td>systemd-resolved</td>
+<td>
+<span class="t-muted">Using degraded feature set UDP instead of UDP+EDNS0 for DNS server &lt;ip&gt;.</span>
+</td>
+</tr>
+<tr>
+<td class="r n">38</td>
+<td>
+<span class="t-warn">NEW</span>
+</td>
+<td>snapd</td>
+<td>
+<span class="t-muted">cannot refresh snap &lt;str&gt;: &lt;str&gt;</span>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+</div>
+<div class="col">
+<section class="grp">
+<h3 class="sub">DISKS <span class="note">used · days to full at the current growth</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-mount">
+<col class="c-used">
+<col class="c-pct">
+<col class="c-full">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Mount</th>
+<th scope="col">Used</th>
+<th class="n" scope="col">
+</th>
+<th scope="col">Full in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/data</td>
+<td>
+<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="83" height="8"/>
+</svg>
+</td>
+<td class="n"> 83%</td>
+<td>
+<span class="t-warn">full in 12 d</span>
+</td>
+</tr>
+<tr>
+<td>/</td>
+<td>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+</td>
+<td class="n"> 38%</td>
+<td>
+<span class="t-muted">no trend</span>
+</td>
+</tr>
+<tr>
+<td>/boot/efi</td>
+<td>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+</td>
+<td class="n">  6%</td>
+<td>
+<span class="t-muted">no trend</span>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 class="sub">THERMAL <span class="note">hours at or above the temperature limit</span>
+</h3>
+<p class="ln"> <span class="t-warn">14 h hot</span>
+<span class="t-muted">  ·  max 91 °C</span>
+</p>
+<p class="ln"> <span class="t-muted">when hot: </span>chrome 38%  ·  node 17%  ·  shop-worker-1 8%</p>
+<h3 class="sub">BOOTS <span class="note">boot time</span>
+</h3>
+<p class="ln"> <svg class="series t-accent" viewBox="0 0 31 16" width="31" height="16" role="img" aria-label="trend" preserveAspectRatio="none">
+<rect x="0" y="10.8" width="3" height="5.2"/>
+<rect x="4" y="10.6" width="3" height="5.4"/>
+<rect x="8" y="10.5" width="3" height="5.5"/>
+<rect x="12" y="10.8" width="3" height="5.2"/>
+<rect x="16" y="10.1" width="3" height="5.9"/>
+<rect x="20" y="10.5" width="3" height="5.5"/>
+<rect x="24" y="10.4" width="3" height="5.6"/>
+<rect x="28" y="2.0" width="3" height="14.0"/>
+</svg>  <span class="t-muted">last 58 s · median 23 s · 8 boots</span>
+</p>
+</section>
+</div>
+</div>
+</div>
+</div>
+</main>
+<footer class="foot">refresh every <a href="/?view=health&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=health&amp;refresh=3&amp;app=1">+</a>
+<span class="dot">·</span>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=health&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>text <a href="/?view=health&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=health&amp;zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dhealth%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dhealth%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dhealth%26app%3D1">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dhealth%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dhealth%26app%3D1">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Health</h3>
+<dl>
+<dt>
+<kbd>d/w/m</kbd>
+</dt>
+<dd>24h/7d/30d</dd>
+</dl>
+</section>
+<section>
+<h3>Lists</h3>
+<dl>
+<dt>
+<kbd>↑↓</kbd>
+</dt>
+<dd>move</dd>
+<dt>
+<kbd>PgUp/PgDn/Home/End</kbd>
+</dt>
+<dd>page</dd>
+<dt>
+<kbd>Enter</kbd>
+</dt>
+<dd>details</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS). It polls main[data-frag] for the page's cards as an HTML
+// fragment and replaces the cards whose data-rev changed. The fragment is parsed inertly and every node and attribute is checked
+// against two allowlists before anything is taken over; a fragment that fails the check reloads the page. It waits while the tab is
+// hidden, while paused and while you type or select; a failed poll backs off (2 s to 60 s) and says so: numbers never look fresh.
+// Classes it sets on <html>, for the server's CSS:
+//   stale    the numbers on the page are old (the #stale banner says since when)
+//   paused   the refresh is paused with the [data-pause] toggle
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const FRAG_TAGS = new Set("a abbr article aside b br button caption circle code col colgroup dd details div dl dt em figure footer form g h2 h3 h4 header hr i input kbd label li line meter nav ol option p path polyline pre progress rect section select small span strong sub summary sup svg table tbody td text textarea tfoot th thead time title tr u ul".split(" ")), FRAG_ATTRS = new Set("action aria-controls aria-disabled aria-current aria-describedby aria-expanded aria-hidden aria-label aria-labelledby aria-live aria-pressed aria-sort aria-valuemax aria-valuemin aria-valuenow autocomplete checked class colspan cx cy d data-card data-copy data-density data-depth data-done data-fail data-k data-key data-kpi data-max-lines data-pause data-problem data-rev data-row data-set data-state data-theme datetime disabled fill for height high href id lang low max maxlength method min name open optimum placeholder points preserveAspectRatio r readonly required role rowspan rx ry scope selected size stroke stroke-linecap stroke-linejoin stroke-width tabindex title transform type value viewBox width x x1 x2 y y1 y2".split(" "));
+  const root = document.documentElement, page = document.querySelector("main"), banner = document.getElementById("stale");
+  if (!page || page.hasAttribute("data-edit")) return;
+  const url = page.getAttribute("data-frag") || "", secs = Number(page.getAttribute("data-refresh"));
+  const period = url && secs >= 1 ? Math.min(secs, 3600) * 1000 : 0, spin = Number(page.getAttribute("data-rotate")) * 1000;
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const opened = new Map();  // <details> the reader opened or closed by hand: data-k -> open
+  let etag = "", fails = 0, lastOk = Date.now(), touched = 0, timer = 0, busy = false, dead = false, policy = null;
+  let paused = page.getAttribute("data-paused") === "1";
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  try { policy = window.trustedTypes ? window.trustedTypes.createPolicy("nuc-frag", {createHTML: s => s}) : null; } catch (err) { policy = null; }
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+  const kiosk = () => root.getAttribute("data-density") === "wall" && root.hasAttribute("data-kiosk");
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+
+  function show(text) {  // the banner under the top bar; "" takes it down
+    root.classList.toggle("stale", !!text);
+    if (banner) { banner.textContent = text; banner.hidden = !text; }
+  }
+  const late = () => show("stale since " + clock(lastOk));
+  function plan(ms) { clearTimeout(timer); if (!dead && period) timer = setTimeout(tick, ms); }
+  function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
+    dead = true;
+    show("updating the page");
+    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+  }
+  function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
+    const a = document.activeElement, sel = window.getSelection();
+    if (a && (a.closest("form") || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+    if (sel && !sel.isCollapsed && !kiosk()) return true;
+    for (const f of document.querySelectorAll("input, textarea")) {
+      if (!/^(hidden|submit|button|reset|image|checkbox|radio)$/.test(f.type) && f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
+
+  function clean(n) {  // true when the node and everything below it is on the allowlists
+    if (n.nodeType === 3) return true;
+    if (n.nodeType !== 1 || !FRAG_TAGS.has(n.localName) || !(n instanceof HTMLElement || n instanceof SVGElement)) return false;
+    for (const a of n.attributes) {
+      const v = a.value;
+      if (!FRAG_ATTRS.has(a.name) || /^(on|style$)/.test(a.name)) return false;
+      if (a.name === "href" && !(v.startsWith("/?") || v.startsWith("#"))) return false;
+      if (a.name === "action" && !/^\/[^\/\\]/.test(v)) return false;
+      if (a.name === "method" && !/^(get|post)$/i.test(v)) return false;
+      if (a.name === "name" && !/^(input|select|textarea|button)$/.test(n.localName)) return false;
+    }
+    for (const c of n.childNodes) if (!clean(c)) return false;
+    return true;
+  }
+  function parse(text) {  // the fragment's blocks, or null when anything in it is off the allowlists
+    const doc = new DOMParser().parseFromString(policy ? policy.createHTML(text) : text, "text/html"), out = [];
+    if (doc.head.childNodes.length || doc.documentElement.attributes.length || doc.body.attributes.length) return null;
+    for (const n of doc.body.childNodes) {
+      if (n.nodeType === 3 && !n.data.trim()) continue;
+      if (n.nodeType !== 1 || !n.hasAttribute("data-card") || !clean(n)) return null;
+      out.push(n);
+    }
+    return out.length && out.length <= 200 ? out : null;
+  }
+  function put(old, node) {  // old gives way to a copy of node; the focus and the open <details> stay as the reader had them
+    const a = document.activeElement, f = a && old.contains(a) ? a.closest("[data-k]") : null, key = f && f.getAttribute("data-k");
+    const fresh = document.importNode(node, true);
+    for (const d of fresh.querySelectorAll("details[data-k]")) {
+      const k = d.getAttribute("data-k");
+      if (opened.has(k)) d.open = opened.get(k);
+    }
+    old.replaceWith(fresh);
+    if (key) for (const el of fresh.querySelectorAll("[data-k]")) if (el.getAttribute("data-k") === key) { el.focus({preventScroll: true}); break; }
+  }
+  function swap(blocks) {  // false when the page has other cards than the fragment: that is a new page, not an update
+    const live = Array.from(document.querySelectorAll("[data-card]")), ids = list => list.map(el => el.getAttribute("data-card")).join(" ");
+    if (ids(live) !== ids(blocks)) return false;
+    const x = window.scrollX, y = window.scrollY;
+    blocks.forEach((b, i) => { if (b.getAttribute("data-rev") !== live[i].getAttribute("data-rev")) put(live[i], b); });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+    return true;
+  }
+
+  async function poll() {
+    const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
+    busy = true;
+    try {
+      const r = await load(url, etag, ctl.signal);
+      if (r.status === 401) { dead = true; show("session expired"); return; }
+      if (r.status !== 304) {
+        if (r.status !== 200 || r.headers.get("X-Nuc-Fragment") !== "1" || !/^text\/html\b/i.test(r.headers.get("Content-Type") || "")) throw new Error("not a fragment");
+        const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
+        if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
+        if (!blocks || !swap(blocks)) { reload(); return; }
+        etag = r.headers.get("ETag") || "";
+      }
+      fails = 0; lastOk = Date.now(); show("");
+      plan(period);
+    } catch (err) {
+      fails++; late();
+      plan(Math.min(60000, Math.max(period, 2000) * Math.pow(2, fails - 1)));
+    } finally { clearTimeout(kill); busy = false; }
+  }
+  function tick() {
+    if (document.hidden || dead || paused) return;  // visibilitychange and the toggle start it again
+    if (busy) { plan(period); return; }
+    if (editing()) {
+      if (Date.now() - lastOk > Math.max(30000, 5 * period)) late();  // a long pause for typing is still old data
+      plan(period);
+    } else poll();
+  }
+  function turn() {  // kiosk: one screen further down, back to the top at the end, unless someone is at the page
+    setTimeout(turn, spin);
+    const room = root.scrollHeight - window.innerHeight;
+    if (!kiosk() || document.hidden || paused || Date.now() - touched < 3 * spin || room < 8) return;
+    window.scrollTo({top: window.scrollY >= room - 8 ? 0 : Math.min(room, window.scrollY + window.innerHeight * 0.9), behavior: calm.matches ? "auto" : "smooth"});
+  }
+
+  document.addEventListener("click", e => {
+    const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
+    if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
+    const b = e.target.closest("[data-pause]");
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
+    e.preventDefault();
+    paused = !paused;
+    root.classList.toggle("paused", paused);
+    page.setAttribute("data-paused", paused ? "1" : "0");
+    for (const t of document.querySelectorAll("[data-pause]")) t.setAttribute("aria-pressed", String(paused));
+    if (!paused) plan(0);
+  }, true);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) plan(0); });
+  window.addEventListener("online", () => plan(0));
+  window.addEventListener("pointerdown", () => { touched = Date.now(); }, true);
+  window.addEventListener("keydown", () => { touched = Date.now(); }, true);
+  window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
+  root.classList.toggle("paused", paused);
+  if (!paused) plan(period);
+  if (spin >= 3000) setTimeout(turn, spin);
+})();
+</script>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
+// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
