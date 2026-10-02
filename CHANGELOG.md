@@ -3,10 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-02
 
 A new web interface, the default from this release, built from the same model as the console; the console gets a tab bar, key figures and
-`[ui]`. Still Python 3.8+, standard library only.
+`[ui]`. A major version because the web view and some keys change (see the upgrade notes and the keymap below). Still Python 3.8+,
+standard library only.
 
 ### Upgrade notes
 
