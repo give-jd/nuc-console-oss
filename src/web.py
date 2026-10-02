@@ -127,6 +127,33 @@ THEMES = tuple((name, name.replace("-", " "), prefs.THEME_CODES[name]) for name 
 DENSITIES = tuple((name, name, prefs.DENSITY_CODES[name]) for name in prefs.DENSITIES)
 DETAIL_K = {"wall": 1, "desk": -2, "compact": 0}  # the detail level a card is drawn at (render.page_overview's k: -2 is the richest)
 CARD_COLS = {1: 42, 2: 90, 3: 138, 4: 186}  # the width in columns the console's text of a card is laid out for, by the card's width in the grid
+WALL_ROWS = 3  # the wall density (a screen seen from afar) shows this many rows of a list; the rest is a "+N more"
+
+
+def wall_trim(body):
+    """The body of a native card for the wall: a table or a list of more than WALL_ROWS rows is cut there and says how many it left out (a
+    More that follows it is added to, so a card never says it twice). The same list when nothing is cut."""
+    out, i = [], 0
+    while i < len(body):
+        part, left = body[i], 0
+        if isinstance(part, ui.Table) and len(part.rows) > WALL_ROWS:
+            left = len(part.rows) - WALL_ROWS
+            part = ui.Table(part.cols, part.rows[:WALL_ROWS], None if part.groups is None else [g for g in part.groups if g[1] < WALL_ROWS], part.head)
+        elif isinstance(part, ui.Wrap) and len(part.items) > WALL_ROWS:
+            left = len(part.items) - WALL_ROWS
+            part = ui.Wrap(part.items[:WALL_ROWS], part.sep, part.max_lines, part.indent)
+        out.append(part)
+        i += 1
+        if left:
+            nxt = body[i] if i < len(body) else None
+            if isinstance(nxt, ui.More):
+                out.append(ui.More(left + nxt.n, nxt.what, nxt.href))
+                i += 1
+            else:
+                out.append(ui.More(left, "more"))
+    return out if len(out) != len(body) or any(x is not y for x, y in zip(out, body)) else body
+
+
 STATE_RANK = {"err": 0, "down": 0, "warn": 1, "unknown": 2, "ok": 3, "info": 4}  # by severity: what needs you first
 KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", "beyond": "exposure", "db_lan": "exposure", "firewall": "firewall",
             "cpu": "system", "ram": "system", "temp": "system", "load": "system", "uptime": "system", "disk": "disks", "containers": "containers",
@@ -700,8 +727,12 @@ class Server(http.server.ThreadingHTTPServer):
         try:
             width = CARD_COLS.get(size, 104)
             card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
-            lines, cut = ansi.card_lines(card, width)  # the console's drawing of the card, built of components or not
-            note, inner = htmlview.ansi_card(lines)
+            if card.body and all(isinstance(x, ui.Raw) for x in card.body):  # not built of components yet: the console's text, colours as spans
+                lines, cut = ansi.card_lines(card, width)
+                note, inner = htmlview.ansi_card(lines)
+            else:  # built of components: the web draws them itself, whatever the card is
+                parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
+                note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
             more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full else ""
             return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more)
         except Exception as e:  # noqa: BLE001 - a broken card must not take the page down

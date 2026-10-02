@@ -409,7 +409,7 @@ def ansi_card(lines):
         lines.pop(0)
     while lines and not plain(lines[0]).strip():
         lines.pop(0)
-    return note, '<pre class="tty">' + to_html("\n".join(lines)) + "</pre>"
+    return note, '<pre class="tty" tabindex="0">' + to_html("\n".join(lines)) + "</pre>"
 
 
 def seg(label, options):
