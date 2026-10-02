@@ -288,6 +288,20 @@ class ConsoleOnlyFieldsTests(unittest.TestCase):
 class WebOnlyFieldsTests(unittest.TestCase):
     """What the web draws that the console does not: the problem's id and fix, the accepted ones, the whole name, the commands."""
 
+    def test_the_exposure_counters_and_legend_are_lists_on_the_web_and_text_on_the_console(self):
+        card = cards.build("exposure", ctx_of(), -2, cards.Caps(200))
+        web = htmlview.html(card)
+        self.assertEqual(web.count('<ul class="wrap flat">'), 2)
+        self.assertIn("filtered by source", web)
+        self.assertNotIn("   ● open", web)  # no padded text for the web to collapse
+        text = plain(ansi.card_lines(card, 200)[0])
+        self.assertTrue(any("● open   ◐ filtered by source" in x for x in text))
+        self.assertTrue(any(x.lstrip().startswith("Internet ") and "    LAN " in x for x in text))
+
+    def test_a_flat_wrap_is_marked_for_the_web(self):
+        self.assertIn('<ul class="wrap flat">', htmlview.html(Wrap(["a"], flat=True)))
+        self.assertIn('<ul class="wrap">', htmlview.html(Wrap(["a"])))
+
     def test_a_problem_has_its_id_why_fix_and_accept_command(self):
         p = ui.Problem("err", "1 DB open", "db-open-lan", "Title <b>", "data services stay home", "publish on 127.0.0.1", 'sudo x --problem db-open-lan --reason "..."')
         out = htmlview.html(p)

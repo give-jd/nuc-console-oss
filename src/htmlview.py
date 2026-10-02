@@ -374,7 +374,7 @@ def html(node):
     if isinstance(node, ui.Wrap):
         lm = f' data-max-lines="{int(node.max_lines)}"' if node.max_lines else ""
         lead = f'<li class="lead">{_inline(node.lead)}</li>' if node.lead is not None else ""
-        return f'<ul class="wrap"{lm}>' + lead + "".join(f"<li>{_inline(x)}</li>" for x in node.items) + "</ul>"
+        return f'<ul class="wrap{" flat" if node.flat else ""}"{lm}>' + lead + "".join(f"<li>{_inline(x)}</li>" for x in node.items) + "</ul>"
     if isinstance(node, ui.More):
         link = _href(node.href)
         return (f'<details class="more"><summary>{_e(node.text)}</summary>'

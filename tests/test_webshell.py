@@ -490,6 +490,13 @@ class Shell(unittest.TestCase):
             _, _, classic = get(self.srv, "/?app=0")
             self.assertNotIn("/s/app.", classic)
 
+    def test_the_shell_cpu_page_has_no_stray_hint_and_the_footer_leaves_room(self):
+        _, _, body = get(self.srv, "/?app=1&view=cpu")
+        self.assertNotIn("a process: its details", body)
+        self.assertNotIn('class="toolbar"', body)
+        self.assertRegex(webcss.CSS, r"\.view,main\.grid\{padding-bottom:calc\(var\(--pad\) \+ 2\.6em\)\}")
+        self.assertIn("scroll-padding-bottom", webcss.CSS)
+
     def test_the_token_redirect_keeps_the_shell(self):
         st, h, _ = get(self.locked, "/?token=" + "t" * 24 + "&app=1&view=health")
         self.assertEqual((st, h["Location"]), (302, "/?view=health&app=1"))

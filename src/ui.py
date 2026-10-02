@@ -472,12 +472,14 @@ class Notice(Msg):
 
 class Wrap(_Component):
     """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one; indent: the console's).
-    lead: a label (a Span) before the first item: the console puts it in the indent of the first line (one column in), the web before the list."""
-    __slots__ = ("items", "sep", "max_lines", "indent", "lead")
+    lead: a label (a Span) before the first item: the console puts it in the indent of the first line (one column in), the web before the list.
+    flat: the web draws the items as plain text side by side (counters, a legend) instead of as chips; the console ignores it."""
+    __slots__ = ("items", "sep", "max_lines", "indent", "lead", "flat")
 
-    def __init__(self, items=(), sep="  ·  ", max_lines=None, indent=1, lead=None):
+    def __init__(self, items=(), sep="  ·  ", max_lines=None, indent=1, lead=None, flat=False):
         self.items, self.sep, self.max_lines, self.indent = [_inline(x) for x in items], sep, max_lines, int(indent)
         self.lead = None if lead is None else _inline(lead)
+        self.flat = bool(flat)
 
 
 class Group(_Component):
