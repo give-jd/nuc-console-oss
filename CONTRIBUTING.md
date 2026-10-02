@@ -129,6 +129,8 @@ The repository is public: everything pushed to it, every pull request, comment a
 **Pull requests**
 - Small, focused, with tests. The title follows the commit format; the description says what changes, why, how it was tested and which docs
   changed. No signature or footer.
+- An agent does not open pull requests: it pushes its branch, the owner opens the pull request on GitHub, and the agent then writes the title
+  and the description by editing it (see `CLAUDE.md`).
 - The docs change in the same pull request as the code (README, `docs/`, `SECURITY.md`, this file, `config/config.ini`, `docs/CONFIGURATION.md`
   where it applies; screenshots regenerated, see below). A user-visible change gets a line in `CHANGELOG.md`.
 - Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
