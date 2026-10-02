@@ -20,6 +20,7 @@ import textwrap
 import threading
 import time
 
+import cards  # same directory: the card registry and the KPI model
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
@@ -115,7 +116,7 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
 
 
 THROTTLE_WINDOW_S = 60
-THERMAL_WARN, THERMAL_ERR = 0.8, 0.9  # fractions of the maximum declared by the sensor (sysfs temp*_max)
+THERMAL_WARN, THERMAL_ERR = ui.THERMAL_WARN, ui.THERMAL_ERR  # fractions of the maximum declared by the sensor (sysfs temp*_max)
 
 
 def read_file(path):
@@ -1034,8 +1035,11 @@ def fingerprint(sev, text, pid):
 
 
 class ProblemList(list):
-    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION)."""
+    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION) and .pids = the problem id
+    of each item, in the same order (None when the list was not built by problems(): cards.Ctx then cannot tell which card a problem is
+    about)."""
     accepted = 0
+    pids = None
 
 
 def load_accepted(path=None):
@@ -1099,11 +1103,13 @@ def problems(*a, **kw):
     """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
     acc = load_accepted()
     out = ProblemList()
+    out.pids = []
     for sev, text, pid in problems_raw(*a, **kw):
         if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
             out.accepted += 1
         else:
             out.append((sev, text))
+            out.pids.append(pid)
     return out
 
 
@@ -1737,6 +1743,51 @@ def ov_dischi(s, w, k):
     return lines
 
 
+def safe_block(fn, title, width, *a):
+    try:
+        return fn(*a)
+    except Exception as e:  # noqa: BLE001 - a broken block must not empty the screen
+        return [section(title, width), msg("err", safe(repr(e))[:60])]
+
+
+def ov_attention(pb, bw, k):
+    shown = lim(pb, max(3, 6 - k), "attention")
+    rows = [x for sev, t in shown for x in msg_wrap("err" if sev >= 2 else "warn", t, bw)]
+    extra = [c(90, f"   … +{len(pb) - len(shown)} more")] if len(pb) > len(shown) else []
+    acc = getattr(pb, "accepted", 0)
+    known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
+    return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
+
+
+# The overview's sections as cards (cards.py): each builder returns the card with the lines this file has always drawn for it (ui.Raw)
+# and the state its problems give it, so the console is what it was while a section is rebuilt out of components.
+# (id, title, feature, lines(ctx, k, caps)); the width a card is drawn in is caps.width
+OV_CARDS = (
+    ("attention", "ATTENTION", True, lambda x, k, cp: ov_attention(x.problems, cp.width, k)),
+    ("exposure", "EXPOSURE", "exposure", lambda x, k, cp: safe_block(ov_esposizione, "EXPOSURE", cp.width, x.net, x.cont, cp.width, k, x.new)),
+    ("webapps", "WEB APPS", "webapps", lambda x, k, cp: safe_block(ov_webapp, "WEB APPS", cp.width, x.net, x.cont, cp.width, k)),
+    ("firewall", "FIREWALL", "firewall", lambda x, k, cp: safe_block(ov_firewall, "FIREWALL", cp.width, x.net, cp.width, k)),
+    ("system", "SYSTEM", True, lambda x, k, cp: safe_block(ov_sistema, "SYSTEM", cp.width, x.s, cp.width, k, x.cont)),
+    ("containers", "CONTAINER", "containers", lambda x, k, cp: safe_block(ov_container, "CONTAINER", cp.width, x.cont, cp.width, k)),
+    ("databases", "DATABASE", "databases", lambda x, k, cp: safe_block(ov_database, "DATABASE", cp.width, x.net, x.cont, cp.width, k)),
+    ("boot", "BOOT", "boot", lambda x, k, cp: safe_block(ov_boot, "BOOT", cp.width, x.boot, cp.width, k)),
+    ("network_traffic", "NETWORK TRAFFIC", "network_traffic",
+     lambda x, k, cp: safe_block(ov_traffico, "NETWORK TRAFFIC", cp.width, x.s, cp.width, k)),
+    ("sessions", "SESSIONS", "sessions", lambda x, k, cp: safe_block(ov_sessioni, "SESSIONS", cp.width, x.s, cp.width, k)),
+    ("tailscale", "TAILSCALE", "tailscale", lambda x, k, cp: safe_block(ov_tailscale, "TAILSCALE", cp.width, x.net, cp.width, k)),
+    ("docker_disk", "DOCKER · DISK", "docker_disk", lambda x, k, cp: safe_block(ov_docker, "DOCKER · DISK", cp.width, x.boot, cp.width, k)),
+    ("disks", "DISKS", "disks", lambda x, k, cp: safe_block(ov_dischi, "DISKS", cp.width, x.s, cp.width, k)),
+)
+
+
+def _overview_builder(id, lines):
+    return lambda x, k, cp: cards.raw_card(id, x, lines(x, k, cp))
+
+
+for _id, _title, _feature, _lines in OV_CARDS:
+    cards.register(_id, _title, _feature, _overview_builder(_id, _lines))
+
+
 def pack(blocks, ncol, cw, w, body_h, gap):
     """Fills the columns in the given order, left to right, top to bottom: a block goes in the current column, or in the
     next one if it does not fit; earlier columns are never back-filled, so the order on screen is the order requested
@@ -1769,42 +1820,23 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
-    def block(fn, title, width, *a):
-        try:
-            return fn(*a)
-        except Exception as e:  # noqa: BLE001 - a broken block must not empty the screen
-            return [section(title, width), msg("err", safe(repr(e))[:60])]
-
-    def guardare(bw, k):
-        shown = lim(pb, max(3, 6 - k), "attention")
-        rows = [x for sev, t in shown for x in msg_wrap("err" if sev >= 2 else "warn", t, bw)]
-        extra = [c(90, f"   … +{len(pb) - len(shown)} more")] if len(pb) > len(shown) else []
-        acc = getattr(pb, "accepted", 0)
-        known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
-        return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
+    ctx = cards.Ctx(s=s, cont=cont, net=net, boot=boot, problems=pb, cfg=CFG, now=now, baseline=baseline, new=new)  # this frame's data and memo
+    caps_at = lambda width: cards.Caps(width, FULL, EXPAND, TRUNC)  # noqa: E731 - the globals, seen as the Caps the registry asks for
 
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
     cw = (w - 3 * (ncol - 1)) // ncol
 
     def make_cand(k):
-        """(feature, block) per section at detail level k: a section switched off in config.ini does not appear."""
-        cand = {"attention": (True, lambda c_: guardare(c_, k)),
-                "exposure": ("exposure", lambda c_: block(ov_esposizione, "EXPOSURE", c_, net, cont, c_, k, new)),
-                "firewall": ("firewall", lambda c_: block(ov_firewall, "FIREWALL", c_, net, c_, k)),
-                "system": (True, lambda c_: block(ov_sistema, "SYSTEM", c_, s, c_, k, cont)),
-                "containers": ("containers", lambda c_: block(ov_container, "CONTAINER", c_, cont, c_, k))}
+        """(card id, block) per section at detail level k: a section switched off in config.ini does not appear. The card comes from the
+        registry (cards.build), which remembers it for this frame: the levels and expand() ask for the same card again and again."""
+        have = {"attention", "exposure", "firewall", "system", "containers"}
         if k < 4:
-            cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
-            cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
-            cand["webapps"] = ("webapps", lambda c_: block(ov_webapp, "WEB APPS", c_, net, cont, c_, k))
+            have |= {"databases", "boot", "webapps"}
         if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
-            cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
-                        sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
-                        tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
-                        docker_disk=("docker_disk", lambda c_: block(ov_docker, "DOCKER · DISK", c_, boot, c_, k)),
-                        disks=("disks", lambda c_: block(ov_dischi, "DISKS", c_, s, c_, k)))
+            have |= {"network_traffic", "sessions", "tailscale", "docker_disk", "disks"}
         # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
-        return [(n, cand[n][1]) for n in CFG["sections"] if n in cand and (cand[n][0] is True or on(cand[n][0]))]
+        return [(n, lambda c_, n=n: list(cards.build(n, ctx, k, caps_at(c_)).lines)) for n in CFG["sections"]
+                if n in have and cards.enabled(n, CFG)]
 
     def detail_pages(trunc):
         """The sections that hid items ("… +N more"), built in full at the richest level and laid out page by page."""
