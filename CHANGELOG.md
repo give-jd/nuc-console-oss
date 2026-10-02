@@ -53,6 +53,7 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - `[ui] web = app` (or `?app=1` for one URL) serves a shell: a top bar (host, status pill, the five screens with badges, clock, help, settings),
   a row of key figures, the overview as a grid of cards ordered by severity, and the Map, CPU, Health and AI pages in the same frame, in a dark, light,
   high-contrast or automatic theme and three densities. It has no script yet. The classic pages stay the default and are unchanged.
+- The shell's pages have `style-src 'self'` and no `'unsafe-inline'`: no inline `<style>` or `style=` anywhere (the graph's size is a class); the classic pages are unchanged.
 - `/?view=settings`: appearance (theme, density, preset, order, start view, key figures, each a link), an Export of the `[ui]` block, and a read-only
   **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
 - The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.

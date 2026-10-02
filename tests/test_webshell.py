@@ -183,7 +183,7 @@ class Shell(unittest.TestCase):
         st, h, body = get(self.srv, "/?view=map&as=graph&app=1")
         self.assertIn("<script>", body)  # the graph's own fixed script, pinned by its hash
         self.assertRegex(h["Content-Security-Policy"], r"script-src 'sha256-[A-Za-z0-9+/=]+'")
-        self.assertIn("style-src 'self' 'unsafe-inline'", h["Content-Security-Policy"])
+        self.assertIn("style-src 'self'", h["Content-Security-Policy"])
 
     def test_a_card_in_full(self):
         st, h, body = get(self.srv, "/?card=exposure")
@@ -202,7 +202,7 @@ class Shell(unittest.TestCase):
     def test_csp_keeps_default_none_no_script_and_loads_only_its_own_style(self):
         csp = self.headers["Content-Security-Policy"]
         scripts = "'sha256-%s' 'sha256-%s' 'sha256-%s'" % tuple(webjs.sha256_b64(js) for js in (webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS))
-        self.assertEqual(csp, "default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; "
+        self.assertEqual(csp, "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; "
                               f"script-src {scripts}; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag")
         self.assertEqual(self.headers["Vary"], "Cookie")
         self.assertEqual(self.headers["Cache-Control"], "no-store")
@@ -210,7 +210,7 @@ class Shell(unittest.TestCase):
     def test_the_ai_page_keeps_its_forms_and_csrf(self):
         st, h, body = get(self.srv, "/?view=ai&app=1&sel=qwen3-4b")
         self.assertIn("form-action 'self'", h["Content-Security-Policy"])
-        self.assertIn("style-src 'self' 'unsafe-inline'", h["Content-Security-Policy"])
+        self.assertIn("style-src 'self'", h["Content-Security-Policy"])
         self.assertEqual(h["Content-Security-Policy"].count("sha256-"), 3)  # the shell's three scripts, and nothing of the form's
         self.assertEqual(h["Referrer-Policy"], "same-origin")
         forms = Tree(body).find("form", method="post")
@@ -591,7 +591,7 @@ class Scripts(unittest.TestCase):
             csp = h["Content-Security-Policy"]
             parts = [p.strip() for p in csp.split(";")]
             self.assertEqual(parts[0], "default-src 'none'", path)
-            for want in ("style-src 'self' 'unsafe-inline'", "base-uri 'none'", "frame-ancestors 'none'", "connect-src 'self'",
+            for want in ("style-src 'self'", "base-uri 'none'", "frame-ancestors 'none'", "connect-src 'self'",
                          "require-trusted-types-for 'script'", "trusted-types nuc-frag"):
                 self.assertIn(want, parts, path)  # refresh and preferences are on every shell page
             self.assertEqual(csp.count("connect-src"), 1)
@@ -611,7 +611,7 @@ class Scripts(unittest.TestCase):
             self.assertEqual("connect-src 'self'" in csp, connect)
             self.assertEqual("trusted-types nuc-frag" in csp, js is webjs.REFRESH_JS)
         self.assertNotIn("script-src", web.page_csp([""]))
-        self.assertIn("style-src 'self' 'unsafe-inline'", web.page_csp(shell=True))
+        self.assertIn("style-src 'self'", web.page_csp(shell=True))
 
     def test_the_classic_pages_have_no_script_src_except_the_graph(self):
         for path in ("/", "/?view=cpu", "/?view=map", "/?view=health", "/?view=ai", "/?app=0", "/?cols=100&full=1"):
@@ -1056,6 +1056,27 @@ class Builder(unittest.TestCase):
             self.assertNotIn("trusted-types nuc-frag", parts)
             self.assertNotIn(webjs.csp_source(webjs.REFRESH_JS), h["Content-Security-Policy"])
             self.assertEqual(h["Content-Security-Policy"], web.page_csp(want, shell=True))
+
+    def test_no_shell_page_has_an_inline_style(self):
+        """style-src is exactly 'self': no <style>, no style= attribute, on any page or fragment of the shell (the graph's size is a class of <html>)."""
+        pages = Scripts.PAGES + ("/?app=1&edit=1", "/?app=1&kiosk=1&wall=1", "/?app=1&view=map&as=graph&z=50", "/?app=1&view=map&as=graph&z=200",
+                              "/?app=1&view=map&as=graph&z=300", "/?app=1&frag=1", "/?app=1&view=cpu&frag=1", "/?app=1&view=ai&frag=1",
+                              "/?app=1&view=map&as=graph&frag=1")
+        for path in pages:
+            st, h, body = get(self.srv, path)
+            self.assertEqual(st, 200, path)
+            csp = h.get("Content-Security-Policy")
+            if csp and "frag=1" not in path:  # a fragment is not a document: fetched by the refresh script
+                self.assertIn("style-src 'self';", csp + ";", path)
+                self.assertNotIn("unsafe-inline", csp, path)
+            self.assertIsNone(re.search(r"<style\b", body, re.I), path)
+            self.assertIsNone(re.search(r"\sstyle\s*=", body, re.I), path)
+        _, _, body = get(self.srv, "/?app=1&view=map&as=graph&z=125")
+        self.assertRegex(body, r'<html [^>]*class="[^"]*\bgz125\b')
+        self.assertIn(".gz125 #gsvg{width:125%}", webcss.CSS)
+        self.assertRegex(get(self.srv, "/?app=1&view=map&as=graph")[2], r'<html [^>]*class="[^"]*\bgzfit\b')
+        self.assertNotIn("style", webjs.FRAG_ATTRS)
+        self.assertEqual(web.GZOOMS, webcss.GZOOMS)
 
     def test_the_builder_script_is_on_the_edit_page_only(self):
         for path in ("/?app=1", "/?app=1&view=settings", "/?card=exposure", "/?app=1&view=map", "/?app=1&view=ai", "/?app=1&view=cpu", "/?app=1&pause=1",

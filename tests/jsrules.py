@@ -90,7 +90,8 @@ GLOBAL_BANS = [
     # navigation
     ("history", r"\bhistory\b"), ("location = ...", r"\blocation\s*=[^=]"), (".href = ...", r"\.href\s*=[^=]"),
     # styling and the page's own strings through other doors
-    ("className", r"\bclassName\b"), ("dataset", r"\bdataset\b"), ("style.cssText", r"style\s*\.\s*cssText"), ("styleSheets", r"styleSheets"),
+    ("className", r"\bclassName\b"), ("dataset", r"\bdataset\b"), ("style.cssText", r"style\s*\.\s*cssText"),
+    ("setAttribute style (an inline style the CSP refuses)", r"setAttribute\(\s*[\"']style[\"']"), ("styleSheets", r"styleSheets"),
     ("getElementsBy", r"getElementsBy"),
     # globals and window properties
     ("globalThis", r"\bglobalThis\b"), ("bracket access on a global", r"\b(?:window|self|top|parent)\s*\["),

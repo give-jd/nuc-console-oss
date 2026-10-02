@@ -97,6 +97,7 @@ GLOBAL_SAMPLES = {
     "a property that loads or sends (src, srcset, action, data, formAction, cookie, domain, name = ...)": "img.src = x;",
     "an event handler property (.onclick = ...)": "el.onclick = f;", "history": "history.pushState(1, 2);", "location = ...": "location = x;",
     ".href = ...": "a.href = x;", "className": "el.className = x;", "dataset": "el.dataset.x = 1;", "style.cssText": "el.style.cssText = x;",
+    "setAttribute style (an inline style the CSP refuses)": "el.setAttribute(\"style\", x);",
     "styleSheets": "const s = document.styleSheets;", "getElementsBy": 'document.getElementsByTagName("a");',
     "globalThis": "globalThis.x = 1;", "bracket access on a global": 'window["x"] = 1;',
     "assignment to a global (window.x = ...)": "window.x = 1;", "assignment to this.x": "this.x = 1;", "var": "var x = 1;",

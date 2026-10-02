@@ -746,12 +746,12 @@ def foot(groups, updated):
 
 
 def shell_doc(title, css_href, body, theme="auto", density="desk", zoom=100, shift=0, kiosk=False, prefs_src="config", prefs="", refresh=0,
-              extra_style="", script=(), paused=False):
+              extra_class="", script=(), paused=False):
     """The whole page. <html> carries what the style sheet and the scripts read: data-theme, data-density, the classes zNNN and shift-N (paused when
     the redraw is paused), data-prefs-src and data-prefs. refresh: the meta refresh of the page (0 = none); script: the inline scripts, in order
     (one text, or a list; none: the page has no script and its meta refresh is plain)."""
     scripts = [script] if isinstance(script, str) else list(script)
-    cls = f"z{int(zoom)} shift-{int(shift)}" + (" paused" if paused else "")
+    cls = f"z{int(zoom)} shift-{int(shift)}" + (" paused" if paused else "") + (f" {esc(extra_class)}" if extra_class else "")
     meta = f'<meta http-equiv="refresh" content="{int(refresh)}">' if refresh else ""
     if meta and any(scripts):
         meta = f"<noscript>{meta}</noscript>"  # a page with scripts refreshes itself: the meta is for browsers without them
@@ -760,5 +760,5 @@ def shell_doc(title, css_href, body, theme="auto", density="desk", zoom=100, shi
             + (f' data-prefs="{esc(prefs)}"' if prefs else "") + (" data-kiosk" if kiosk else "") + ">"
             f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">'
             f'{meta}<title>{esc(title)}</title><link rel="stylesheet" href="{esc(css_href)}">'
-            + (f"<style>{extra_style}</style>" if extra_style else "") + f"</head><body>{body}" + "".join(f"<script>{x}</script>" for x in scripts if x)
+            + f"</head><body>{body}" + "".join(f"<script>{x}</script>" for x in scripts if x)
             + "</body></html>")

@@ -18,6 +18,7 @@ import re
 
 import htmlview
 
+GZOOMS = (50, 67, 80, 100, 125, 150, 200, 250, 300)  # the graph view's sizes (web.GZOOMS is this)
 SANS = 'system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif'
 MONO = 'ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace'
 
@@ -731,10 +732,15 @@ progress::-moz-progress-bar{background:var(--accent)}
 """
 
 
+def graph_zoom_css():
+    """The graph's size per zoom step: a class of <html> (gzNNN; gzfit, the default, is the window's width) instead of an inline style."""
+    return ".gzfit #gsvg{width:100%;max-height:calc(100vh - 150px)}" + "".join(".gz%d #gsvg{width:%d%%}" % (z, z) for z in GZOOMS if z != 100)
+
+
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, AI_VIEW, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()
