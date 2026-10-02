@@ -13,6 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+import ansi  # noqa: E402
 import cards  # noqa: E402
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
@@ -241,14 +242,16 @@ class RegistryTests(unittest.TestCase):
             self.assertIsInstance(card, ui.Card)
             self.assertEqual(card.id, id)
             self.assertIn(card.state, ui.STATES)
-            self.assertTrue(card.lines and all(isinstance(x, str) for x in card.lines))
-            self.assertIsInstance(card.body[0], ui.Raw)
+            lines, _hid = ansi.card_lines(card, 80)
+            self.assertTrue(lines and all(isinstance(x, str) for x in lines))
+            # the cards built of components are not Raw; the others still draw the lines render.py has always drawn
+            self.assertEqual(isinstance(card.body[0], ui.Raw), id not in ("disks", "docker_disk", "sessions", "tailscale", "network_traffic"))
 
     def test_the_card_is_what_the_section_draws(self):
         ctx = demo_ctx()
         caps = cards.Caps(100)
         self.assertEqual(cards.build("firewall", ctx, 0, caps).lines, render.ov_firewall(ctx.net, 100, 0))
-        self.assertEqual(cards.build("disks", ctx, 0, caps).lines, render.ov_dischi(ctx.s, 100, 0))
+        self.assertEqual(ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0], render.ov_dischi(ctx.s, 100, 0))
         self.assertEqual(cards.build("attention", ctx, 0, caps).lines, render.ov_attention(ctx.problems, 100, 0))
 
     def test_a_broken_section_becomes_a_message_not_an_exception(self):

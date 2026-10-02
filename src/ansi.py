@@ -102,10 +102,10 @@ def bar(frac, w, warn=0.7, err=0.9):
     return c(ui.sgr(level), "█" * n) + c(ui.sgr("muted"), "░" * (w - n))
 
 
-def sparkline(values, width):
+def sparkline(values, width, floor=1024):
     """Last `width` values as small bars; scaled to the series maximum (with a floor, so noise is not blown up)."""
     vals = list(values)[-width:]
-    top = max(max(vals, default=0), 1024)
+    top = max(max(vals, default=0), floor)
     return c(ui.sgr("muted"), "▁" * (width - len(vals))) + "".join(SPARK[min(7, int(v / top * 8))] for v in vals)
 
 
@@ -168,3 +168,151 @@ def overlay(lines, box, w=None, top=None, left=None):
         tail, _ = _cut(line, left + bw, None)
         lines[i] = head + "\x1b[0m" + row + "\x1b[0m" + tail
     return lines
+
+
+# ---- the components, drawn --------------------------------------------------------------------------------------------------------
+# render(node, w) -> (lines, truncated): the console's text for a ui component, in the format the sections have always had (a block
+# is indented one column, a Msg three, a Line is as it is, as before). truncated is True when the drawing itself left items out ('... +N' of a Wrap), which
+# the caller (render.page_overview) tells the Details pages. A value that has no state is drawn '?'; a node that is not a component is
+# drawn '?' too, never fine and never an exception.
+
+_STATE_TONE = {"ok": "ok", "warn": "warn", "err": "err", "down": "err", "unknown": "unknown", "info": "info"}
+
+
+def style(text, tone=None, bold=False):
+    """text in the colour of a tone (a token of ui.TOKENS) and bold; plain when the theme gives it no code."""
+    if not text:
+        return ""
+    code = ui.sgr(tone) if tone else ""
+    if bold:
+        code = "1;" + code if code and code != "1" else "1"
+    return cc(code, text)
+
+
+def _bar(b):
+    if b.frac is None:
+        return pad(style("?", "unknown"), b.w)
+    return bar(b.frac, b.w, b.warn, b.err) + (" " + b.value_text if b.value_text else "")
+
+
+def inline(x, tone=None):
+    """A Span, a Line, a Bar or a Spark as the text of one line (tone: the colour of a Span that has none)."""
+    if isinstance(x, ui.Span):
+        return style(x.text, x.tone or tone, x.bold)
+    if isinstance(x, ui.Line):
+        return "".join(inline(p, tone) for p in x.spans)
+    if isinstance(x, ui.Bar):
+        return _bar(x)
+    if isinstance(x, ui.Spark):
+        return sparkline(x.values, x.w, x.floor)
+    return style("?", "unknown")
+
+
+def _wrap(items, w, indent, sep, max_lines):
+    """The items over several lines without splitting one; beyond max_lines the last line ends with '… +N' (render.wrap_items)."""
+    rows, cur = [], []
+    for it in items:
+        if cur and indent + vlen(sep.join(cur)) + len(sep) + vlen(it) > w:
+            rows.append(cur)
+            cur = []
+        cur.append(it)
+    rows.append(cur)
+    rows = [r for r in rows if r]
+    if not max_lines or len(rows) <= max_lines:
+        return [" " * indent + sep.join(r) for r in rows], False
+    rows, hidden = rows[:max_lines], sum(len(r) for r in rows[max_lines:])
+    while len(rows[-1]) > 1 and indent + vlen(sep.join(rows[-1])) + 8 > w:  # 8 = "  … +NNN"
+        rows[-1].pop()
+        hidden += 1
+    return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + style(f"  … +{hidden}", "muted")], True
+
+
+def _table_lines(t, w):
+    """A Table as lines: a column with a w is padded to it (right-aligned: on the left), the others are the text as it is; gap spaces
+    follow every column but the last. When a line is wider than w the columns with a prio go, the biggest prio first (the one on the
+    right first among equals), until it fits or only the columns that are never dropped are left."""
+    cols = list(range(len(t.cols)))
+    while True:
+        grid = []
+        if t.head:
+            grid.append([style(t.cols[j].label, "muted") for j in cols])
+        grid += [[inline(r.cells[j], r.tone) for j in cols] for r in t.rows]
+        lines = []
+        for row in grid:
+            parts = []
+            for n, (j, text) in enumerate(zip(cols, row)):
+                col, last = t.cols[j], n == len(cols) - 1
+                if col.w is not None and col.align == "r":
+                    text = " " * (col.w - vlen(text)) + text
+                elif col.w is not None and not last:
+                    text = pad(text, col.w)
+                parts.append(text + ("" if last else " " * col.gap))
+            lines.append(" " + "".join(parts))
+        droppable = [j for j in cols if t.cols[j].prio > 0]
+        if droppable and max([vlen(x) for x in lines] + [0]) > w:
+            cols.remove(max(droppable, key=lambda j: (t.cols[j].prio, j)))
+            continue
+        break
+    if not t.groups:
+        return lines
+    first, marks, out = (1 if t.head else 0), {i: label for label, i in t.groups}, []
+    for i, line in enumerate(lines):
+        if i >= first and (i - first) in marks:
+            out.append(" " + style(marks[i - first], "muted"))
+        out.append(line)
+    return out
+
+
+def render(node, w):
+    """(lines, truncated) of a component for a console w columns wide."""
+    if isinstance(node, ui.Raw):
+        return list(node.lines), False
+    if isinstance(node, ui.Card):
+        return card_lines(node, w)
+    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
+        return [inline(node)], False  # as it is: a line carries its own indent (a coloured line starts with its space)
+    if isinstance(node, ui.Msg):  # a Notice too
+        return [msg(node.level, node.text)], False
+    if isinstance(node, ui.KV):
+        return [kv(k, inline(v), node.lw) for k, v in node.pairs], False
+    if isinstance(node, ui.Table):
+        return _table_lines(node, w), False
+    if isinstance(node, ui.Wrap):
+        return _wrap([inline(x) for x in node.items], w, node.indent, node.sep, node.max_lines)
+    if isinstance(node, ui.More):
+        return [" " + style(node.text, "muted")], False
+    if isinstance(node, ui.Group):
+        lines, hid = ([" " + style(node.title, "accent_strong")] if node.title else []), False
+        for child in node.children:
+            part, h = render(child, w)
+            lines += part
+            hid = hid or h
+        return lines, hid
+    if isinstance(node, ui.Pill):
+        return [" " + style(f"{ui.SYMBOLS[node.state]} {node.text}", _STATE_TONE[node.state], True)], False
+    if isinstance(node, ui.Kpi):
+        return [" " + style(node.symbol, _STATE_TONE[node.state]) + f" {node.label} {node.value}{node.unit}"], False
+    if isinstance(node, ui.Tree):
+        return [" " + "  " * d + style(ui.SYMBOLS[st], _STATE_TONE[st]) + " " + inline(x) for d, x, st in node.rows], False
+    if isinstance(node, ui.Details):
+        lines, hid = [" " + style("▾" if node.open else "▸", "muted") + " " + inline(node.summary)], False
+        for child in node.body if node.open else ():
+            part, h = render(child, w)
+            lines += ["  " + x for x in part]
+            hid = hid or h
+        return lines, hid
+    return [" " + style("?", "unknown")], False
+
+
+def card_lines(card, w):
+    """(lines, truncated) of a card: the section's title line (the note in it), then its body. A card whose body starts with Raw
+    carries its own title (the lines of a section not yet built of components)."""
+    if card.body and isinstance(card.body[0], ui.Raw):
+        lines, hid = [], False
+    else:
+        lines, hid = [section(card.title, w, card.note)], False
+    for part in card.body:
+        got, h = render(part, w)
+        lines += got
+        hid = hid or h
+    return lines, hid or card.truncated

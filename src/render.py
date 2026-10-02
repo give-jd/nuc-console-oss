@@ -418,27 +418,13 @@ def disk_figures(d):
         return None
 
 
-def is_absent(d, key):
-    """True if the collector recorded that the tool for that section is not installed (not an error)."""
-    return isinstance(d, dict) and key in (d.get("absent") or [])
-
-
-def is_disabled(d, key):
-    """True if the section was switched off in config.ini (the collector skipped it on purpose)."""
-    return isinstance(d, dict) and key in (d.get("disabled") or [])
+is_absent, is_disabled = cards.is_absent, cards.is_disabled  # the collectors' notes about a section (cards.py reads them too)
 
 
 def unavail_msg(d, key, prefix="unavailable"):
     """Line for a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
-    if is_disabled(d, key):
-        return msg("info", "disabled in config.ini")
-    if isinstance(d, dict) and key in (d.get("unsupported") or []):
-        return msg("info", "not available on this OS")
-    if isinstance(d, dict) and key in (d.get("notes") or {}):
-        return msg("info", safe(d["notes"][key])[:70])
-    if is_absent(d, key):
-        return msg("info", "not installed on this machine")
-    return msg("warn", f"{prefix}: " + safe(((d or {}).get("errors") or {}).get(key, "collector needs updating"))[:60])
+    m = cards.unavail(d, key, prefix)
+    return msg(m.level, m.text)
 
 
 def thermal_lines(th, bw, maxw=None):
@@ -553,9 +539,8 @@ def containers_block(data, w, now=None):
 page_container = containers_block  # historical name used by the tests
 
 
-NET_STALE_S = 120
+NET_STALE_S, BOOT_STALE_S = cards.NET_STALE_S, cards.BOOT_STALE_S  # the collectors' data older than this is stale (seconds)
 NAMEW = 36
-BOOT_STALE_S = 900
 NCOL3 = 225  # from this width the single screen uses three columns
 NET_SKIP = ("lo", "veth", "br-")  # container virtual interfaces: noise
 NET_HIST = 30  # history samples for the traffic sparklines
@@ -1611,68 +1596,26 @@ def ov_boot(b, w, k, now=None):
     return lines
 
 
-def ov_traffico(s, w, k):
-    lines = [section("NETWORK TRAFFIC", w, "↓ received · ↑ sent")]
-    nets = s.get("net")
-    if not nets:
-        return lines + [msg("info", "no interfaces")]
-    sw = 12 if w >= 100 else 8  # shorter sparkline in narrow columns: the line must not be cut
-    for name, v in lim(sorted(nets.items(), key=lambda kv: -(kv[1]["rx_tot"] + kv[1]["tx_tot"])), 5, "network_traffic"):
-        lines.append(f" {pad(safe(name)[:11], 12)}{c(32, '↓')} {pad(fmt_rate(v['rx']), 10)}{sparkline(v['hist_rx'], sw)} "
-                     f"{c(36, '↑')} {pad(fmt_rate(v['tx']), 10)}{sparkline(v['hist_tx'], sw)}"
-                     + c(90, f" ↓{human(v['rx_tot'])} ↑{human(v['tx_tot'])}"))
-    if len(nets) > 5 and not FULL:
-        lines.append(c(90, f" … +{len(nets) - 5} more"))
+def _native_lines(builder, ctx, w, k):
+    """The console lines of a card built of components (cards.py), for the callers that want the section as it was drawn: the card is
+    built within the FULL / EXPAND / TRUNC globals and drawn by ansi.card_lines; an error is the caller's (safe_block's)."""
+    card = builder(ctx, k, cards.Caps(w, FULL, EXPAND, TRUNC))
+    lines, hid = ansi.card_lines(card, w)
+    if hid:
+        TRUNC.add(card.id)
     return lines
+
+
+def ov_traffico(s, w, k):
+    return _native_lines(cards.network_traffic_card, cards.Ctx(s=s, cfg=CFG), w, k)
 
 
 def ov_sessioni(s, w, k):
-    lines = [section("SESSIONS", w)]
-    sess = s.get("sessions")
-    if sess is None:
-        return lines + [msg("warn", "unavailable")]
-    remote = [ip for ip in sess["ssh"] if not is_private_addr(ip)]
-    lines.append(f" {plural(len(sess['local']), 'user session')}   ssh: " + (
-        c(31 if remote else 32, f"{len(sess['ssh'])} connected") if sess["ssh"]
-        else c(90, "none")))
-    for ip in lim(sess["ssh"], 4, "sessions"):
-        lines.append(f" {c(31, '✖') if ip in remote else c(32, '●')} ssh from {safe(ip)}  "
-                     + (c(31, "address NOT local or Tailscale") if ip in remote else c(90, "LAN or Tailscale")))
-    if len(sess["ssh"]) > 4 and not FULL:
-        lines.append(c(90, f" … +{len(sess['ssh']) - 4} more ssh clients"))
-    for key, label in (("rdp", "remote desktop"), ("vnc", "screen sharing")):  # Windows RDP, macOS Screen Sharing
-        peers = sess.get(key) or []
-        if peers:
-            far = [ip for ip in peers if not is_private_addr(ip)]
-            lines.append(f" {c(31, '✖') if far else c(32, '●')} {label} from {safe(', '.join(peers[:3]))}"
-                         + (c(31, "  address NOT local or Tailscale") if far else c(90, "  LAN or Tailscale")))
-    ttys = sorted({x["tty"] for x in sess["local"] if x["tty"]})
-    if ttys:
-        lines += wrap_items([safe(t) for t in ttys], w, indent=1, sep=" ", max_lines=1, section="sessions")
-    return lines
+    return _native_lines(cards.sessions_card, cards.Ctx(s=s, cfg=CFG), w, k)
 
 
 def ov_tailscale(net, w, k):
-    lines = [section("TAILSCALE", w)]
-    ts = (net or {}).get("ts_peers")
-    if ts is None:
-        return lines + [unavail_msg(net, "ts_peers")]
-    peers, me = ts["peers"], ts["self"]
-    on = sum(p["online"] for p in peers)
-    now = time.time()
-    stale = now - net.get("ts", now) > NET_STALE_S
-    lines[0] = section("TAILSCALE", w, f"{safe(me['name'])} · {on}/{len(peers)} nodes online" + (" · exit node" if me["exit_option"] else "")
-                       + (f" · stale data ({fmt_ago(now - net['ts'])} old)" if stale else ""))
-    for p in lim(peers, 8, "tailscale"):
-        if p["online"]:
-            state = c(32, "online ") + c(90, "direct" if p["direct"] else f"via relay {safe(p['relay'])}")
-        else:
-            state = c(90, "offline · " + (f"seen {fmt_ago(now - p['last_seen'])} ago" if p["last_seen"] else "never seen"))
-        lines.append(f" {c(32, '●') if p['online'] else c(90, '○')} {pad(safe(p['name'])[:18], 19)}{pad(safe(p['os'])[:8], 9)}{state}"
-                     + (c(33, "  exit node in use") if p["exit"] else ""))
-    if len(peers) > 8 and not FULL:
-        lines.append(c(90, f" … +{len(peers) - 8} nodes"))
-    return lines
+    return _native_lines(cards.tailscale_card, cards.Ctx(net=net, cfg=CFG), w, k)
 
 
 REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
@@ -1712,36 +1655,11 @@ def ov_webapp(net, cont, w, k):
 
 
 def ov_docker(boot, w, k):
-    lines = [section("DOCKER · DISK", w)]
-    if boot and time.time() - boot.get("ts", time.time()) > BOOT_STALE_S:
-        lines[0] = section("DOCKER · DISK", w, f"stale data ({fmt_ago(time.time() - boot['ts'])} old)")
-    df = (boot or {}).get("docker_df")
-    if df is None:
-        return lines + [unavail_msg(boot, "docker_df")]
-    for r in df["rows"]:
-        recl = safe(r["reclaimable"])
-        lines.append(f" {pad(safe(r['type']), 14)}{safe(r['count']):>4} ({safe(r['active'])} in use)  {pad(safe(r['size']), 9)} unused {recl}")
-    dang = df.get("dangling_images")
-    if dang is not None:
-        lines.append(c(90 if not dang["bytes"] else 33, f" dangling images: {dang['count']} ({human(dang['bytes']) if dang['bytes'] else '0B'}): safe to prune"))
-    if df.get("volumes_unused"):
-        anon = df.get("volumes_unused_anonymous") or 0
-        lines.append(c(33, f" {df['volumes_unused']} unused volumes ({anon} anonymous): may hold data, check before pruning"))
-    lines.append(c(90, " unused = no container uses it; tagged images can be re-pulled"))
-    return lines
+    return _native_lines(cards.docker_disk_card, cards.Ctx(boot=boot, cfg=CFG), w, k)
 
 
 def ov_dischi(s, w, k):
-    lines = [section("DISKS", w)]
-    fs = s.get("fs")
-    if not fs:
-        return lines + [msg("info" if fs == [] else "warn", "no filesystems" if fs == [] else "unavailable")]
-    bw = max(8, min(30, w - 42))
-    for f in lim(fs, 5, "disks"):
-        lines.append(f" {pad(safe(f['mount'])[:14], 15)}{bar(f['used'] / f['total'], bw)} {human(f['used'])}/{human(f['total'])}")
-    if len(fs) > 5 and not FULL:
-        lines.append(c(90, f" … +{len(fs) - 5} more"))
-    return lines
+    return _native_lines(cards.disks_card, cards.Ctx(s=s, cfg=CFG), w, k)
 
 
 def safe_block(fn, title, width, *a):
@@ -1772,12 +1690,11 @@ OV_CARDS = (
     ("containers", "CONTAINER", "containers", lambda x, k, cp: safe_block(ov_container, "CONTAINER", cp.width, x.cont, cp.width, k)),
     ("databases", "DATABASE", "databases", lambda x, k, cp: safe_block(ov_database, "DATABASE", cp.width, x.net, x.cont, cp.width, k)),
     ("boot", "BOOT", "boot", lambda x, k, cp: safe_block(ov_boot, "BOOT", cp.width, x.boot, cp.width, k)),
-    ("network_traffic", "NETWORK TRAFFIC", "network_traffic",
-     lambda x, k, cp: safe_block(ov_traffico, "NETWORK TRAFFIC", cp.width, x.s, cp.width, k)),
-    ("sessions", "SESSIONS", "sessions", lambda x, k, cp: safe_block(ov_sessioni, "SESSIONS", cp.width, x.s, cp.width, k)),
-    ("tailscale", "TAILSCALE", "tailscale", lambda x, k, cp: safe_block(ov_tailscale, "TAILSCALE", cp.width, x.net, cp.width, k)),
-    ("docker_disk", "DOCKER · DISK", "docker_disk", lambda x, k, cp: safe_block(ov_docker, "DOCKER · DISK", cp.width, x.boot, cp.width, k)),
-    ("disks", "DISKS", "disks", lambda x, k, cp: safe_block(ov_dischi, "DISKS", cp.width, x.s, cp.width, k)),
+    ("network_traffic", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
+    ("sessions", None, None, None),
+    ("tailscale", None, None, None),
+    ("docker_disk", None, None, None),
+    ("disks", None, None, None),
 )
 
 
@@ -1786,7 +1703,10 @@ def _overview_builder(id, lines):
 
 
 for _id, _title, _feature, _lines in OV_CARDS:
-    cards.register(_id, _title, _feature, _overview_builder(_id, _lines))
+    if _id in cards.NATIVE:
+        cards.register(_id, *cards.NATIVE[_id][:2], cards.NATIVE[_id][2])
+    else:
+        cards.register(_id, _title, _feature, _overview_builder(_id, _lines))
 
 
 def pack(blocks, ncol, cw, w, body_h, gap):
@@ -1827,6 +1747,16 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
     cw = (w - 3 * (ncol - 1)) // ncol
 
+    def card_block(n, k, c_):
+        """The lines of card n at level k in a column c_ wide: its title and body drawn by ansi.card_lines (a Raw card's lines as they are),
+        remembered for the frame by what changes them; a card that hid items tells the Details pages."""
+        caps = caps_at(c_)
+        card = cards.build(n, ctx, k, caps)
+        lines, hid = ctx.once(("lines", n, k) + caps.key(n), lambda: ansi.card_lines(card, c_))
+        if hid:
+            TRUNC.add(n)
+        return list(lines)
+
     def make_cand(k):
         """(card id, block) per section at detail level k: a section switched off in config.ini does not appear. The card comes from the
         registry (cards.build), which remembers it for this frame: the levels and expand() ask for the same card again and again."""
@@ -1836,7 +1766,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
             have |= {"network_traffic", "sessions", "tailscale", "docker_disk", "disks"}
         # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
-        return [(n, lambda c_, n=n: list(cards.build(n, ctx, k, caps_at(c_)).lines)) for n in CFG["sections"]
+        return [(n, lambda c_, n=n: card_block(n, k, c_)) for n in CFG["sections"]
                 if n in have and cards.enabled(n, CFG)]
 
     def detail_pages(trunc):
