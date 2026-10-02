@@ -28,9 +28,11 @@ import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
 import procs
 import ui
+import screens  # same directory: the full screens' view-models (HEALTH: HealthView, the components of the screen)
 # the console primitives (ansi.py) and the text helpers (ui.py) moved out of this file; render.py draws with them, and tests,
 # tools and the other modules (notify.py, htmlview.py) still reach them as render.X, so the names stay here until the cleanup PR
-from ansi import ANSI, SPARK, bar, c, cc, cell, clip, columns, fit_join, kv, msg, msg_wrap, pad, section, sparkline, vlen  # noqa: F401
+from ansi import ANSI, SPARK, bar, c, cc, cell, clip, columns, fit_join, hbucket, hspark, kv, msg, msg_wrap, pad, section, sparkline, vlen  # noqa: F401
+from ansi import scroll as map_scroll  # noqa: F401 - the lists' scroll position (ansi.scroll)
 from ui import (CTRL, fmt_ago, fmt_cputime, fmt_dur, fmt_k, fmt_min, fmt_rate, fmt_size, hclean, hcount, hnum, human, num,  # noqa: F401
                 plural, qf, safe)
 # the exposure model (exposure.py) moved out of this file; render.py draws it and works out the problems from it. Moved; kept for tests
@@ -2759,21 +2761,16 @@ def once(argv):
 
 # ---- HEALTH screen: health.py's report (the history over days and weeks) on the console, moved through with the keyboard ------
 
-HEALTH_DAYS = (1, 7, 30)                                    # the periods: keys 1/d, 7/w, 3/m (the web: period=1|7|30)
-HEALTH_KEYS = {"d": 1, "w": 7, "m": 30}  # the digits are the screens
+# Moved to screens.py (the HEALTH view-model); kept for tests and tools
+from screens import (HEALTH_DAYS, HEALTH_KEYS, HEALTH_NONE, HEALTH_PANE_W, KIND_LABEL, KIND_ORDER, LEVEL_PILL, HealthView, hfact,  # noqa: E402,F401
+                     health_details, health_findings, health_key, health_level, health_nothing, health_select, health_sync, hrows, hwhen)
 HEALTH_TTL = 60          # the report is computed at most this often per period, whatever the number of keys or requests
 HEALTH_IDLE_S = 600      # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
-HEALTH_PANE_W = 140      # from this width up the details pane sits beside the findings, below them otherwise
-HEALTH_NONE = "no history yet: the collector starts recording when [features] health is on; data appears after the first hour"
+def hago(ts):
+    return screens.hago(ts, time.time())
+
+
 DEMO_HEALTH = ""         # --demo-health little|none: the demo with 5 hours of history, or none (demo.HEALTH_VARIANTS)
-LEVEL_PILL = {"err": ("✖ ERR ", "1;41;37"), "warn": ("! WARN", "1;43;30"), "info": ("· INFO", "90")}  # a symbol besides the colour
-KIND_ORDER = ("oom", "crash", "hang", "unexpected_shutdown", "hw_error", "service_failed", "restart", "exit_error", "throttle", "disk_low",
-              "login_fail")
-KIND_LABEL = {"oom": "out of memory", "crash": "crash", "hang": "hang", "unexpected_shutdown": "unexpected off", "hw_error": "hardware",
-              "service_failed": "service failed", "restart": "restart", "exit_error": "exit error", "throttle": "throttle",
-              "disk_low": "disk low", "login_fail": "login failed"}
-KIND_COL = {"oom": "31", "unexpected_shutdown": "31", "hw_error": "31", "crash": "33", "hang": "33", "service_failed": "33", "restart": "33",
-            "exit_error": "33"}
 _HEALTH, _HEALTH_LOCK = {}, threading.Lock()
 
 
@@ -2889,19 +2886,6 @@ def hansi(line):
     return "".join(x if re.fullmatch(r"\x1b\[[0-9;]*m", x) else hclean(x) for x in re.split(r"(\x1b\[[0-9;]*m)", str(line)))
 
 
-def hwhen(ts, fmt="%Y-%m-%d %H:%M"):
-    """An epoch as UTC (the report's own texts say UTC), '?' when it is not one."""
-    try:
-        return time.strftime(fmt, time.gmtime(float(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return "?"
-
-
-def hago(ts):
-    sec = time.time() - hnum(ts, time.time())
-    return "now" if sec < 90 else f"{sec / 60:.0f} min ago" if sec < 5400 else f"{sec / 3600:.0f} h ago" if sec < 129600 else f"{sec / 86400:.0f} d ago"
-
-
 def hmsg(level, text, w):
     """msg() as one or more lines: it wraps at w instead of running off the screen (the no-history message is long)."""
     rows = textwrap.wrap(hclean(text), max(10, w - 5)) or [""]
@@ -2918,26 +2902,6 @@ def hbar(frac, w):
     return c(36, "█" * n) + c(90, "░" * (w - n))
 
 
-def hbucket(vals, n):
-    """vals as at most n values: the mean of each group (None when a group has no value)."""
-    if len(vals) <= n:
-        return list(vals)
-    step = len(vals) / float(n)
-    out = []
-    for i in range(n):
-        g = [v for v in vals[int(i * step):int((i + 1) * step) or 1] if v is not None]
-        out.append(sum(g) / len(g) if g else None)
-    return out
-
-
-def hspark(vals, width):
-    """vals (None = not recorded) as small bars scaled to their own maximum, `width` columns; none recorded: blank."""
-    vals = hbucket([hnum(v, None) if v is not None else None for v in vals], width)
-    top = max([v for v in vals if v is not None] or [0])
-    bars = "".join(" " if v is None else SPARK[0] if top <= 0 else SPARK[min(7, int(v / top * 7.999))] for v in vals)
-    return pad(bars, width)
-
-
 def hjoin(items, w, lead="", sep="  ·  "):
     """lead + items (ANSI strings) joined by sep; the ones that do not fit are counted: '… +N'. At least one is always kept (clipped)."""
     keep = list(items)
@@ -2947,356 +2911,33 @@ def hjoin(items, w, lead="", sep="  ·  "):
     return clip(lead + sep.join(keep) + (c(90, f"  … +{more}") if more else ""), w)
 
 
-def hcut(lines, n, w):
-    """lines as exactly at most n lines: the last one says how many were left out."""
-    if len(lines) <= n:
-        return lines
-    return lines[:max(0, n - 1)] + ([c(90, clip(f" … +{len(lines) - n + 1} more lines", w))] if n else [])
-
-
-def hrows(rows, n):
-    """(the rows to draw, how many are left out) for a list of room n: one row more than n is drawn rather than a '… +1' line."""
-    return (rows, 0) if len(rows) <= n + 1 else (rows[:n - 1], len(rows) - n + 1)
-
-
-def health_findings(R):
-    """The findings of the report that can be drawn (a dict with an id), in the report's order (err, warn, info)."""
-    return [f for f in (R or {}).get("findings") or [] if isinstance(f, dict) and isinstance(f.get("id"), str)]
-
-
-def health_nothing(R):
-    """Why the list of findings is empty: with less than a day of data no conclusion is not 'all fine'."""
-    return ("too little data to conclude anything yet" if hnum((R.get("coverage") or {}).get("hours")) < 24
-            else "nothing to report in this period")
-
-
-def health_level(f):
-    return f.get("level") if f.get("level") in LEVEL_PILL else "info"
-
-
-def hfact(k, v):
-    if isinstance(v, bool):
-        return "yes" if v else "no"
-    if isinstance(v, (int, float)):
-        if v > 1e9 and (k == "last" or k.endswith("_hour")):  # an epoch
-            return hwhen(v) + " UTC"
-        v = hnum(v)
-        return "%d" % v if v == int(v) else ("%.2f" % v).rstrip("0").rstrip(".")
-    return hclean(v, 80)
-
-
-def health_details(f):
-    """What the details of a finding say, as plain cleaned values: (level, title, text, [(fact, value)], fix). Console and web share it."""
-    facts = f.get("facts") if isinstance(f.get("facts"), dict) else {}
-    return (health_level(f), hclean(f.get("title"), 100), hclean(f.get("text"), 400), [(hclean(k, 40), hfact(str(k), v)) for k, v in facts.items()],
-            hclean(f.get("fix"), 600))
+hcut = ansi.cut_lines  # lines as at most n lines: the last one says how many were left out
 
 
 def health_find_row(f, w):
-    """A finding on one line: level pill, title, the text as far as it fits."""
-    label, code = LEVEL_PILL[health_level(f)]
-    title, text = hclean(f.get("title"), max(10, w - 12)), hclean(f.get("text"))
-    room = w - 11 - len(title)
-    return f" {c(code, ' ' + label + ' ')} " + c(1, title) + ("  " + c(90, text if len(text) <= room - 2 else text[:room - 3] + "…") if room >= 14 else "")
-
-
-def health_counts(fl):
-    n = {lv: sum(1 for f in fl if health_level(f) == lv) for lv in LEVEL_PILL}
-    bits = [c(col, f"{sym} {n[lv]} {word}") for lv, sym, word, col in (("err", "✖", "err", 31), ("warn", "!", "warn", 33), ("info", "·", "info", 90)) if n[lv]]
-    return "  ".join(bits) if bits else c(90, "no findings")
+    """A finding on one line (not cut to w): level pill, title, the text as far as it fits."""
+    return ansi.finding_text(screens.health_finding(f, False, False, False), w)
 
 
 def health_title(R, w, days, fl, selector=True):
-    """'── HEALTH  last 7 days · since 2026-09-24 14:00 UTC · 168 h of data · ✖ 1 err ───── d:24h w:7d m:30d': the period, how much history
-    the report rests on, the findings per level; the least needed go first when narrow."""
-    cov = (R or {}).get("coverage") or {}
-    hours = hnum(cov.get("hours"))
-    bits = [c(90, "last 24 hours" if days == 1 else f"last {days} days"),
-            c(90, (f"since {hwhen(cov.get('since'))} UTC · " if cov.get("since") else "") + f"{hours:.0f} h of data")]
-    if R is not None and hours:
-        bits.append(health_counts(fl))
-    left = c(36, "──") + c("1;36", " HEALTH ") + " "
-    right = " ".join(c(7 if d == days else 90, f" {k}:{lab} ") for d, k, lab in ((1, "d", "24h"), (7, "w", "7d"), (30, "m", "30d"))) if selector else ""
-    while len(bits) > 1 and vlen(left + c(90, " · ").join(bits)) + vlen(right) + 3 > w:
-        bits.pop(1)
-    text = left + c(90, " · ").join(bits) + " "
-    return clip(text + c(36, "─" * max(0, w - vlen(text) - vlen(right) - (1 if right else 0))) + (" " + right if right else ""), w)
-
-
-def hb_cpu(R, w, k, days):
-    rows, n = [x for x in R.get("top_cpu") or [] if isinstance(x, dict)], (10, 5, 4, 3, 2)[k + 1]
-    lines = [hsec("TOP CPU", w, "share of CPU time · per " + ("hour" if days <= 1 else "day"))]
-    if not rows:
-        return lines + [c(90, " no CPU data")]
-    if k == 3:  # one line: the biggest users
-        return lines + [hjoin([hclean(x.get("app"), 20) + f" {hnum(x.get('share')) * 100:.0f}%" for x in rows], w, " ", "  ·  ")]
-    nm, sw = max(8, min(18, w // 4)), 14 if w < 70 else 24 if w < 100 else 30
-    top = max(hnum(x.get("share")) for x in rows) or 1.0  # the bar compares the apps, the number is the share of all CPU time
-    rows, hidden = hrows(rows, n)
-    for x in rows:
-        sh, ser = hnum(x.get("share")), x.get("series")
-        items = [pad(hclean(x.get("app"), nm), nm), hbar(sh / top, 8) + f" {sh * 100:3.0f}%", pad(f"avg {hnum(x.get('avg_pct')):.0f}%", 8)]
-        if isinstance(ser, list) and ser:
-            items.append(c(36, hspark(ser, min(len(ser), sw))))
-        if x.get("peak_hour"):
-            items.append(c(90, "peak " + hwhen(x["peak_hour"], "%a %H:%M")))
-        lines.append(fit_join(items, "  ", w, " "))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_mem(R, w, k, days):
-    rows, n = [x for x in R.get("top_mem") or [] if isinstance(x, dict)], (10, 5, 4, 3, 2)[k + 1]
-    lines = [hsec("TOP MEMORY", w, "RSS · per " + ("hour" if days <= 1 else "day"))]
-    if not rows:
-        return lines + [c(90, " no memory data")]
-    rising = lambda x: x.get("trend_mb_day") is not None and hnum(x.get("trend_mb_day")) >= 50  # noqa: E731
-    if k == 3:  # one line: the biggest, with an arrow on the ones that keep growing
-        return lines + [hjoin([hclean(x.get("app"), 20) + f" {human(hnum(x.get('rss_avg')))}" + (c(33, " ↗") if rising(x) else "") for x in rows], w, " ", "  ·  ")]
-    nm, sw = max(8, min(18, w // 4)), 14 if w < 70 else 24 if w < 100 else 30
-    trend = any(x.get("trend_mb_day") is not None for x in rows)
-    rows, hidden = hrows(rows, n)
-    for x in rows:
-        t, ser = x.get("trend_mb_day"), x.get("series")
-        items = [pad(hclean(x.get("app"), nm), nm), pad(f"avg {human(hnum(x.get('rss_avg')))}", 9), pad(f"max {human(hnum(x.get('rss_max')))}", 9)]
-        if trend:
-            t = None if t is None else hnum(t)
-            items.append(pad(c(90, "no trend") if t is None else c(33, f"↗ {t:+.0f}M/day") if rising(x) else c(90, f"↘ {t:+.0f}M/day") if t <= -50
-                             else c(90, "→ steady"), 11))
-        if isinstance(ser, list) and ser:
-            items.append(c(36, hspark(ser, min(len(ser), sw))))
-        lines.append(fit_join(items, "  ", w, " "))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_events(R, w, k, days):
-    ev = R.get("events") if isinstance(R.get("events"), dict) else {}
-    kinds = [x for x in KIND_ORDER if ev.get(x)] + sorted(x for x in ev if x not in KIND_ORDER and ev[x])
-    lines = [hsec("EVENTS", w, "by kind · subject ×times, last")]
-    if not kinds:
-        return lines + [c(90, " none recorded in this period")]
-    rows = {x: [r for r in ev[x] if isinstance(r, dict)] for x in kinds}
-    if k == 3:  # one line: the totals
-        return lines + [hjoin([c(KIND_COL.get(x, "90"), hclean(KIND_LABEL.get(x, x), 14)) + f" {hcount(sum(hnum(r.get('n')) for r in rows[x]))}" for x in kinds],
-                              w, " ", "  ")]
-    nk, ns = (12, 8, 6, 4)[k + 1], (6, 4, 3, 2)[k + 1]
-    shown, hidden = hrows(kinds, nk)
-    for x in shown:
-        items = [hclean(r.get("subject"), 40) + f" ×{hcount(r.get('n'))} " + c(90, hago(r.get("last"))) for r in rows[x]]
-        lines.append(hjoin(items[:ns] if len(items) <= ns + 1 else items[:ns - 1], w, " " + c(KIND_COL.get(x, "90"), pad(hclean(KIND_LABEL.get(x, x), 14), 14)) + " ")
-                     + (c(90, f"  … +{len(items) - ns + 1}") if len(items) > ns + 1 else ""))
-    return lines + ([c(90, f" … +{hidden} more kinds")] if hidden else [])
-
-
-def hb_logs(R, w, k, days):
-    rows, n = [x for x in R.get("logs") or [] if isinstance(x, dict)], (10, 6, 4, 3, 2)[k + 1]
-    lines = [hsec("NOISY / NEW LOGS", w, "messages in the period")]
-    if not rows:
-        return lines + [c(90, " none recorded in this period")]
-    rows, hidden = hrows(rows, n)
-    ww = max(8, max(len(hclean(x.get("unit") or x.get("source"), 16)) for x in rows))
-    for x in rows:
-        head = f" {hcount(x.get('n')):>6}  " + (c(33, "NEW") if x.get("new") else "   ") + " " + pad(hclean(x.get("unit") or x.get("source"), 16), ww) + " "
-        room = w - vlen(head)
-        tpl = hclean(x.get("template"))
-        lines.append(head + c(90, tpl if len(tpl) <= room else tpl[:max(room - 1, 0)] + "…"))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_disks(R, w, k, days):
-    rows, n = [x for x in R.get("disks") or [] if isinstance(x, dict)], (10, 6, 4, 3, 2)[k + 1]
-    lines = [hsec("DISKS", w, "used · days to full at the current growth")]
-    if not rows:
-        return lines + [c(90, " no disk data")]
-    full = lambda x: x.get("days_to_full")  # noqa: E731
-
-    def when(x):
-        d = full(x)
-        if d is None:
-            return c(90, "no trend")
-        d = hnum(d)
-        return c(31 if d < 7 else 33 if d < 30 else 90, "full now" if d < 1 / 24.0 else f"full in {d * 24:.0f} h" if d < 1 else f"full in {d:.0f} d" if d < 365 else "full in > 1 y")
-    if k == 3:
-        return lines + [hjoin([hclean(x.get("mount"), 14) + f" {hnum(x.get('used_pct')):.0f}%" + ("" if full(x) is None else " " + when(x)) for x in rows],
-                              w, " ", "  ·  ")]
-    rows, hidden = hrows(rows, n)
-    mw = min(14, max(6, max(len(hclean(x.get("mount"))) for x in rows)))
-    bw = max(6, min(24, w - mw - 26))
-    for x in rows:
-        pct = hnum(x.get("used_pct"))
-        lines.append(f" {pad(hclean(x.get('mount'), mw), mw)} {bar(pct / 100.0, bw)} {pct:3.0f}%  {when(x)}")
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_thermal(R, w, k, days):
-    th = R.get("thermal") if isinstance(R.get("thermal"), dict) else {}
-    hot, top = hnum(th.get("hours_hot")), th.get("max")
-    lines = [hsec("THERMAL", w, "hours at or above the temperature limit")]
-    if top is None:  # no sensor: unknown is not "cool"
-        return lines + [" " + c(33, "?") + c(90, " no temperature data in this period")]
-    apps = [f"{hclean(a.get('app'), 20)} {hnum(a.get('share')) * 100:.0f}%" for a in th.get("apps_when_hot") or [] if isinstance(a, dict)]
-    head = (c(31 if hot >= 24 else 33, f"{hot:.0f} h hot") if hot else c(90, "never hot")) + c(90, f"  ·  max {hnum(top):.0f} °C")
-    if k == 3 or not apps:
-        return lines + [hjoin([head] + ([c(90, "when hot: " + ", ".join(apps[:3]))] if apps else []), w, " ", "  ·  ")]
-    return lines + [" " + head, hjoin(apps, w, " " + c(90, "when hot: "), "  ·  ")]
-
-
-def hb_boots(R, w, k, days):
-    rows = [x for x in R.get("boots") or [] if isinstance(x, dict)]
-    lines = [hsec("BOOTS", w, "boot time")]
-    vals = [hnum(x.get("total_s"), None) if x.get("total_s") is not None else None for x in rows]
-    known = sorted(v for v in vals if v)
-    if not known:
-        return lines + [c(90, " no boot times recorded" if not rows else " ? boot times unknown")]
-    last = vals[-1]
-    med = known[len(known) // 2] if len(known) % 2 else (known[len(known) // 2 - 1] + known[len(known) // 2]) / 2.0
-    return lines + [" " + c(36, hspark(vals, min(len(vals), 21))) + "  " + c(90, "last " + ("?" if not last else f"{last:.0f} s") + f" · median {med:.0f} s · {plural(len(vals), 'boot')}")]
-
-
-HEALTH_BLOCKS = {"cpu": hb_cpu, "mem": hb_mem, "events": hb_events, "logs": hb_logs, "disks": hb_disks, "thermal": hb_thermal, "boots": hb_boots}
-HEALTH_GROUPS = {3: (("cpu", "mem"), ("events", "logs"), ("disks", "thermal", "boots")),
-                 2: (("cpu", "mem", "thermal", "boots"), ("events", "logs", "disks")),
-                 1: (("cpu", "mem", "events", "logs", "disks", "thermal", "boots"),)}
-
-
-def health_columns(R, w, k):
-    """The sections under the findings at level k (-1 everything, 0 the usual, 3 one or two lines each), one list of lines per column:
-    1 column up to 109 wide, 2 up to 189, 3 from 190."""
-    ncol = 3 if w >= 190 else 2 if w >= 110 else 1
-    cw, days = (w - 3 * (ncol - 1)) // ncol, int(hnum((R.get("period") or {}).get("days"), 7))
-    cols = []
-    for names in HEALTH_GROUPS[ncol]:
-        col = []
-        for name in names:
-            try:
-                blk = HEALTH_BLOCKS[name](R, cw, k, days)
-            except Exception as e:  # noqa: BLE001 - one odd row must not blank the other sections
-                blk = [c(33, f" {name}: could not be shown: " + safe(repr(e))[:cw - 40])]
-            col += ([""] if col and k <= 1 else []) + [clip(x, cw) for x in blk]
-        cols.append(col)
-    return cols, ncol, cw
+    """The title line of the screen at w columns (screens.health_title drawn by ansi): kept for the classic web page and the rotation."""
+    return ansi.render(screens.health_title(R, days, fl, selector), w)[0][0]
 
 
 def health_tables(R, w, h=None):
     """The sections under the findings as lines: the fullest level that fits h lines (None: everything, the web page scrolls)."""
-    for k in ((-1,) if h is None else (0, 1, 2, 3)):
-        cols, ncol, cw = health_columns(R, w, k)
-        if h is None or max(len(x) for x in cols) <= h:
-            break
-    cols = [hcut(x, h, cw) for x in cols] if h is not None else cols
-    return columns([(x, cw) for x in cols], w, gap=3) if ncol > 1 else cols[0]
+    return screens.health_tables_lines(R, w, h, time.time())
 
 
-def health_pane(f, w, h):
-    """Everything known about a finding, w columns, h lines at most: the text and the fix wrap, what does not fit is counted."""
-    level, title, text, facts, fix = health_details(f)
-    lw = 7
-    out = [section("DETAILS", w), " " + cc("1;" + LV_COL.get(level, ""), title)]
-    for label, body in (("what", text), ("facts", ""), ("fix", fix)):
-        if label == "facts":
-            rows = wrap_items([f"{k} {c(1, v)}" for k, v in facts], w, lw + 1, "  ·  ") if facts else []
-            out += [" " + c(90, pad(label, lw)) + r[lw + 1:] if i == 0 else r for i, r in enumerate(rows)]
-            continue
-        chunks = textwrap.wrap(body, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
-        out += [(" " + c(90, pad(label, lw)) if i == 0 else " " * (lw + 1)) + x for i, x in enumerate(chunks)]
-    return [clip(x, w) for x in hcut(out, h, w)]
-
-
-class HealthView(object):
-    """The interactive Health screen: the period, the selected finding (its id survives refreshes and period changes; its index is where the
-    cursor stays when that finding vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, days=7, now=None):
-        self.days, self.cur, self.idx, self.top, self.details, self.rows = days, None, 0, 0, False, 10
-        self.opened = self.touched = now or time.time()
-
-
-def health_sync(hv, fl):
-    """The cursor back on its finding: by id, else the same index (clamped). Returns the index."""
-    i = next((j for j, f in enumerate(fl) if f["id"] == hv.cur), None) if hv.cur else None
-    hv.idx = i if i is not None else max(0, min(hv.idx, len(fl) - 1))
-    hv.cur = fl[hv.idx]["id"] if fl else None
-    return hv.idx
-
-
-def health_key(hv, key, fl):
-    """One key on the Health screen (what each key does: ui.KEYMAP, scope health). Returns 'back' (leave it: Esc or q when no details pane
-    is open), 'period' (another period: the report is asked for again, from its cache) or '' (only the cursor or the details pane changed)."""
-    act = ui.action("health", key)
-    if act == "back":
-        if hv.details:
-            hv.details = False
-            return ""
-        return "back"
-    if act == "period":
-        days, hv.days = hv.days, HEALTH_KEYS[key]
-        return "period" if days != hv.days else ""
-    if act == "details":
-        hv.details = not hv.details
-        return ""
-    if not fl or act not in ("move", "page"):
-        return ""
-    i, page = health_sync(hv, fl), max(1, hv.rows - 1)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(fl) - 1}.get(key, i)
-    hv.idx = max(0, min(i, len(fl) - 1))
-    hv.cur = fl[hv.idx]["id"]
-    return ""
+def health_advice_node(R, w):
+    """The ADVICE block for the console: the advisor's lines (health_extra_lines, cut and cleaned) in a ui.Advice, None when there are none."""
+    lines = [clip(hansi(x), w) for x in health_extra_lines(R, w)[:6]]
+    return ui.Advice(lines=lines) if lines else None
 
 
 def health_body(data, hv, fl, w, h):
-    """The Health screen's body: at most h lines, none wider than w. Title, notes, findings (the cursor's row in reverse), the advisor's
-    ADVICE block, then the details pane (below the findings, beside them from HEALTH_PANE_W) or the sections of tables."""
-    R = data["report"]
-    if R is None:  # no history, or it could not be read
-        return [health_title(None, w, hv.days, [])] + hmsg("err" if data.get("err") else "info", data["msg"], w)
-    out = [health_title(R, w, hv.days, fl)]
-    notes = [hclean(x) for x in R.get("notes") or [] if isinstance(x, str)]
-    if not (R.get("coverage") or {}).get("since"):  # nothing recorded yet: the message below says it
-        notes = [x for x in notes if x != "no history yet"]
-    nn = 2 if h >= 30 else 1
-    shown = notes if len(notes) <= nn else notes[:nn - 1] + [f"… +{len(notes) - nn + 1} more notes"]
-    out += [clip(c(90, "  · " + x), w) for x in shown]
-    if not hnum((R.get("coverage") or {}).get("hours")):
-        return (out + hmsg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w))[:h]
-    adv = [clip(hansi(x), w) for x in health_extra_lines(R, w)[:6]]
-    avail = h - len(out) - (len(adv) + 1 if adv else 0)
-    nf, pane = len(fl), bool(hv.details and fl)
-    side = pane and w >= HEALTH_PANE_W
-    tmin = max(len(x) for x in health_columns(R, w, 3)[0])  # the sections at their shortest
-    nothing = hmsg("info", health_nothing(R), w) if not nf else []  # never a green: what is not recorded is not fine
-    if not nf:
-        area = 1 + len(nothing)
-    elif side:  # as tall as the details need (at least the list), leaving the sections their shortest form
-        health_sync(hv, fl)
-        area = max(6, min(avail - tmin, max(1 + nf, len(health_pane(fl[hv.idx], w - int(w * 0.45) - 3, 99)))))
-    elif pane:
-        area = 1 + max(1, min(nf, avail // 3, 8))
-    else:
-        area = 1 + max(min(nf, 3), min(nf, avail - 1 - tmin))
-    rows = area - 1
-    fw = int(w * 0.45) if side else w
-    hv.rows = max(1, rows)
-    head = [section("FINDINGS", fw, "")]
-    if not nf:
-        head += nothing
-        lst = []
-    else:
-        health_sync(hv, fl)
-        hv.top = map_scroll(hv.top, hv.idx, nf, rows)
-        lst = [c(7, pad(ANSI.sub("", clip(health_find_row(f, fw), fw)), fw)) if j == hv.idx else clip(health_find_row(f, fw), fw)
-               for j, f in enumerate(fl) if hv.top <= j < hv.top + rows]
-    block = head + lst
-    if side:
-        pw = w - fw - 3
-        pn = health_pane(fl[hv.idx], pw, area)
-        block = [pad(x, fw) + c(90, " │ ") + (pn[i] if i < len(pn) else "") for i, x in enumerate(block + [""] * (area - len(block)))]
-    out += block
-    if adv:
-        out += [section("ADVICE", w)] + adv
-    if pane and not side:
-        out += health_pane(fl[hv.idx], w, avail - area)
-    else:
-        out += health_tables(R, w, max(0, avail - area))
-    return [clip(x, w) for x in out[:h]]
+    """The Health screen's body: at most h lines, none wider than w (screens.health_lines draws the components the screen is made of)."""
+    return screens.health_lines(data, hv, fl, w, h, health_advice_node, time.time())
 
 
 def health_footer(hv, n, w):
@@ -3320,19 +2961,20 @@ def health_slide(w, body_h):
     data = health_data(7)
     R = data["report"]
     if R is None:
-        return ([section("HEALTH", w)] + hmsg("err" if data.get("err") else "info", data["msg"], w))[:body_h]
+        return ([section("HEALTH", w)] + ansi.render(ui.Group(screens._msg("err" if data.get("err") else "info", data["msg"], w)), w)[0])[:body_h]
     fl = health_findings(R)
+    now = time.time()
     out = [health_title(R, w, 7, fl, selector=False)]
     notes = [hclean(x) for x in R.get("notes") or [] if isinstance(x, str) and (R.get("coverage") or {}).get("since")]
     if notes and body_h >= 10:  # "collecting: 5 hours so far": a monitor nobody types on must not look conclusive
         out.append(clip(c(90, "  · " + notes[0]), w))
     avail = body_h - len(out)
     if not hnum((R.get("coverage") or {}).get("hours")):
-        return (out + hmsg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w))[:body_h]
+        return (out + ansi.render(ui.Group(screens._msg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w)), w)[0])[:body_h]
     ncol, apps = (2 if w >= 110 else 1), []
     cw, days = ((w - 3) // 2 if ncol == 2 else w), int(hnum((R.get("period") or {}).get("days"), 7))
     for k in (0, 1, 2, 3):
-        cols = [hb_cpu(R, cw, k, days), hb_mem(R, cw, k, days)]
+        cols = [ansi.render(ui.Group(f(R, cw, k, days, now)), cw)[0] for f in (screens.hb_cpu, screens.hb_mem)]
         cand = columns([(x, cw) for x in cols], w, gap=3) if ncol == 2 else cols[0] + cols[1]
         if len(cand) <= avail - 3:  # the findings keep at least a title and two rows
             apps = cand
@@ -3340,22 +2982,12 @@ def health_slide(w, body_h):
     rows = max(0, avail - len(apps) - 1)
     out.append(section("FINDINGS", w))
     if not fl:
-        out += hmsg("info", health_nothing(R), w)
+        out += ansi.render(ui.Group(screens._msg("info", health_nothing(R), w)), w)[0]
     elif rows:
         out += [clip(health_find_row(f, w), w) for f in fl[:rows if len(fl) <= rows else rows - 1]]
         if len(fl) > rows:
             out.append(c(90, f"   … +{len(fl) - rows + 1} more findings"))
     return [clip(x, w) for x in (out + apps)[:body_h]]
-
-
-def health_select(fl, hv, text):
-    """The cursor on the first finding whose id or title contains text (any case). False: none does."""
-    t = text.lower()
-    i = next((j for j, f in enumerate(fl) if t in (f["id"] + " " + str(f.get("title", ""))).lower()), None)
-    if i is None:
-        return False
-    hv.idx, hv.cur = i, fl[i]["id"]
-    return True
 
 
 def health_state(smp, days):
