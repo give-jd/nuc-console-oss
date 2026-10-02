@@ -633,6 +633,9 @@ class Service(Base):
         self.assertEqual(notify.main(["notify.py", "--enabled"]), 1)
         self.config()
         self.assertEqual(notify.main(["notify.py", "--enabled"]), 1)
+        self.assertEqual(notify.main(["notify.py", "--needed"]), 1)  # off, and no web page to wait for (Base: not listening)
+        self.config(enabled="yes")
+        self.assertEqual(notify.main(["notify.py", "--needed"]), 0)
 
     def test_the_throttling_history_is_kept_here_without_render_sampler(self):
         reads, mono = iter([{"throttle": 10}, {"throttle": 10}, {"throttle": 14}, {"throttle": 14}]), iter([0, 30, 60, 90])
@@ -1060,7 +1063,7 @@ class Commands(Base):
     def test_help(self):
         rc, out, _ = self.run_main("--help")
         self.assertEqual(rc, 0)
-        for flag in ("--setup", "--test", "--status", "--on", "--off", "--forget", "--preview", "--enabled"):
+        for flag in ("--setup", "--test", "--status", "--on", "--off", "--forget", "--preview", "--enabled", "--needed"):
             self.assertIn(flag, out)
         self.assertIn("never reads your messages", out)
 
@@ -1526,7 +1529,8 @@ class WebPage(Base):
             notify.service_control.assert_called_with("restart")
             notify.main(["notify.py", "--forget"])
             notify.service_control.assert_called_with("restart")
-            self.assertEqual(notify.main(["notify.py", "--enabled"]), 0)  # off, but the installers start it: it waits for the page
+            self.assertEqual(notify.main(["notify.py", "--needed"]), 0)  # off, but the installers start it: it waits for the page
+            self.assertEqual(notify.main(["notify.py", "--enabled"]), 1)  # and it says it is off
 
 
 class SecretsFolder(unittest.TestCase):

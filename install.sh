@@ -127,7 +127,7 @@ else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
 # optional Telegram notifier (outbound HTTPS only): always installed; it exits 0 while it has nothing to do (off, and no web view whose
 # Telegram page may set it up), otherwise it runs: it sends when it is on and paired, and takes the web page's requests
 systemctl enable nuc-console-notify.service
-if "$PY" "$DEST/notify.py" --enabled; then systemctl restart nuc-console-notify.service
+if "$PY" "$DEST/notify.py" --needed; then systemctl restart nuc-console-notify.service
 else systemctl stop nuc-console-notify.service 2>/dev/null || true; fi
 systemctl restart nuc-console.service
 echo "ok: dashboard on tty$VT${TZ_VAL:+ (time zone $TZ_VAL)}. Logs: journalctl -u nuc-console -u nuc-console-collector"

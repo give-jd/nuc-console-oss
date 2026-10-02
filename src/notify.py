@@ -90,7 +90,8 @@ The machine only sends. It never reads your messages and listens on no port.
   nuc-console-telegram --off        turn it off (stops the service; the pairing stays) *
   nuc-console-telegram --forget     delete the token and the pairing, turn it off *
   nuc-console-telegram --preview    print the message the current problems would send (nothing is sent; --demo: invented data)
-  nuc-console-telegram --enabled    exit code 0 when the service has something to do: on, or the web page may set it up (installers)
+  nuc-console-telegram --enabled    exit code 0 when the notifications are on (config.ini, or the web page)
+  nuc-console-telegram --needed     exit code 0 when the service has something to do: on, or the web page may set it up (installers)
   notify.py [--log FILE]            the service itself (no argument), with its output in a file (Windows, macOS)
 * needs root (Windows: an administrator prompt)
 The web view's Telegram page (settings > Telegram) does the same without a terminal, unless [telegram] web_actions = no.
@@ -1259,7 +1260,7 @@ def preview(opts):
     return 0
 
 
-FLAGS = ("--setup", "--test", "--status", "--on", "--off", "--forget", "--preview", "--enabled")
+FLAGS = ("--setup", "--test", "--status", "--on", "--off", "--forget", "--preview", "--enabled", "--needed")
 
 
 def parse(args):
@@ -1298,9 +1299,9 @@ def main(argv):
         return 2
     cmd, opts = parsed
     term = Terminal()
-    if cmd == "--enabled":  # for the installers: start the service, or leave it stopped
+    if cmd in ("--enabled", "--needed"):  # --needed, for the installers: start the service, or leave it stopped
         cfg = nuc_config.load()
-        return 0 if nuc_config.telegram(cfg)["enabled"] or listening(cfg) else 1
+        return 0 if nuc_config.telegram(cfg)["enabled"] or (cmd == "--needed" and listening(cfg)) else 1
     if cmd == "--status":
         return print_status(NOTIFY_DIR, opts["json"])
     if cmd == "--preview":

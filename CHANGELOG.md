@@ -17,8 +17,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ### Changed
 
 - With a web view on this machine and `[telegram] web_actions = yes`, the notifier service keeps running while it is off or not paired, to take the web
-  page's requests (it looks at its inbox every 2 s and writes its status every 30 s); on Linux the web view's unit starts it (`Wants=`). Run the installer
-  again to get the inbox folder and the web unit's group.
+  page's requests (it looks at its inbox every 2 s and writes its status every 30 s); on Linux the web view's unit starts it (`Wants=`), and
+  `install.sh` asks `notify.py --needed` (new; `--enabled` still says only whether the notifications are on). Run the installer again to get the
+  inbox folder and the web unit's group.
 - `nuc-console-telegram --status` says whether the alerts were switched on from the web page and whether the page may change them.
 
 ## [2.0.0] - 2026-10-02
