@@ -13,38 +13,38 @@
  [90msensors[0m Core (Tctl/Tdie) 74°C  ·  CCD1 (Tdie) 69°C  ·  Core #1 66°C  ·  Core #2 68°C  ·  Core #3 90°C  ·  Core #4 70°C  ·  Core #5 65°C  ·  Core #6 67°C  ·  Core #7 72°C  ·  Core #8 65°C[0m[0m[K
 [36m──[0m[1;36m PROCESSES [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  38 total · 955 threads · 4 unreadable · by CPU%[0m[0m[0m[K
  [1;36m  PID[0m [1;36mUSER     [0m [1;36mTHR[0m [1;33mCPU%▼[0m [1;36m MEM%[0m [1;36m   RSS[0m [1;36m    TIME[0m [1;36mNAME[0m[0m[0m[K
-[7m  8888 alice      16 243.7   1.6   520M  1:40:20 ffmpeg.exe                                                                                                                                            [0m[0m[0m[K
-  3990 SYSTEM     16 [31m110.3[0m  11.6   3.7G 11:40:10 vmmem[0m[0m[K
-  4188 alice      19  44.5   1.6   520M  51:45.5 chrome.exe[0m[0m[K
-  2011 SYSTEM     41  35.2   0.9   288M  55:10.0 MsMpEng.exe[0m[0m[K
-  7004 SYSTEM     17  18.4   0.3   110M  41:41.0 SearchIndexer.exe[0m[0m[K
-  6020 alice      52   9.6   1.9   620M  1:30:02 Teams.exe[0m[0m[K
-  4120 alice      44   6.6   1.2   380M  46:40.0 chrome.exe[0m[0m[K
-  4412 alice      36   3.7   1.3   410M  25:20.0 Code.exe[0m[0m[K
-  6111 alice      33   2.7   0.7   240M  30:02.0 Spotify.exe[0m[0m[K
-  4230 alice      15   2.2   0.6   210M   6:41.0 chrome.exe[0m[0m[K
-  3801 SYSTEM     26   2.1   0.4   120M  13:21.0 com.docker.backend.exe[0m[0m[K
-  5240 SYSTEM      4   1.8   0.1    41M  28:10.0 pythonw.exe[0m[0m[K
+[7m  8888 alice      16 243.7   3.2   520M  1:40:20 ffmpeg.exe                                                                                                                                            [0m[0m[0m[K
+  3990 SYSTEM     16 [31m110.3[0m  23.5   3.7G 11:40:10 vmmem[0m[0m[K
+  4188 alice      19  44.5   3.2   520M  51:45.5 chrome.exe[0m[0m[K
+  2011 SYSTEM     41  35.2   1.8   288M  55:10.0 MsMpEng.exe[0m[0m[K
+  7004 SYSTEM     17  18.4   0.7   110M  41:41.0 SearchIndexer.exe[0m[0m[K
+  6020 alice      52   9.6   3.8   620M  1:30:02 Teams.exe[0m[0m[K
+  4120 alice      44   6.6   2.3   380M  46:40.0 chrome.exe[0m[0m[K
+  4412 alice      36   3.7   2.5   410M  25:20.0 Code.exe[0m[0m[K
+  6111 alice      33   2.7   1.5   240M  30:02.0 Spotify.exe[0m[0m[K
+  4230 alice      15   2.2   1.3   210M   6:41.0 chrome.exe[0m[0m[K
+  3801 SYSTEM     26   2.1   0.7   120M  13:21.0 com.docker.backend.exe[0m[0m[K
+  5240 SYSTEM      4   1.8   0.3    41M  28:10.0 pythonw.exe[0m[0m[K
      4 ?         214   1.6     ?      ?        ? System[0m[0m[K
-  1188 SYSTEM     22   1.4   0.2    61M  23:24.0 svchost.exe[0m[0m[K
-  3104 alice      78   1.2   0.5   160M  16:20.6 explorer.exe[0m[0m[K
-  4460 alice      22   1.1   0.8   260M  10:10.3 Code.exe[0m[0m[K
-  2318 SYSTEM     19   0.9   0.2    51M  11:42.0 tailscaled.exe[0m[0m[K
-  3720 alice      40   0.8   0.6   210M   5:00.2 Docker Desktop.exe[0m[0m[K
-  5300 LOCAL SE+   6   0.6   0.1    37M   8:40.4 pythonw.exe[0m[0m[K
-  4201 alice      12   0.4   0.4   140M   1:38.0 chrome.exe[0m[0m[K
-   912 SYSTEM     18   0.3   0.1    29M   3:30.5 svchost.exe[0m[0m[K
-  5012 alice      21   0.3   0.3    95M   0:41.2 WindowsTerminal.exe[0m[0m[K
-   760 SYSTEM      9   0.2   0.0    11M   1:32.1 services.exe[0m[0m[K
-  2402 SYSTEM     14   0.2   0.1    38M   2:20.4 com.docker.service[0m[0m[K
+  1188 SYSTEM     22   1.4   0.4    61M  23:24.0 svchost.exe[0m[0m[K
+  3104 alice      78   1.2   1.0   160M  16:20.6 explorer.exe[0m[0m[K
+  4460 alice      22   1.1   1.6   260M  10:10.3 Code.exe[0m[0m[K
+  2318 SYSTEM     19   0.9   0.3    51M  11:42.0 tailscaled.exe[0m[0m[K
+  3720 alice      40   0.8   1.3   210M   5:00.2 Docker Desktop.exe[0m[0m[K
+  5300 LOCAL SE+   6   0.6   0.2    37M   8:40.4 pythonw.exe[0m[0m[K
+  4201 alice      12   0.4   0.9   140M   1:38.0 chrome.exe[0m[0m[K
+   912 SYSTEM     18   0.3   0.2    29M   3:30.5 svchost.exe[0m[0m[K
+  5012 alice      21   0.3   0.6    95M   0:41.2 WindowsTerminal.exe[0m[0m[K
+   760 SYSTEM      9   0.2   0.1    11M   1:32.1 services.exe[0m[0m[K
+  2402 SYSTEM     14   0.2   0.2    38M   2:20.4 com.docker.service[0m[0m[K
    784 SYSTEM     10   0.1   0.1    21M   1:01.0 lsass.exe[0m[0m[K
-   980 NETWORK +  12   0.1   0.0    14M   1:20.2 svchost.exe[0m[0m[K
-  3360 alice      31   0.1   0.3    90M   1:17.0 OneDrive.exe[0m[0m[K
+   980 NETWORK +  12   0.1   0.1    14M   1:20.2 svchost.exe[0m[0m[K
+  3360 alice      31   0.1   0.6    90M   1:17.0 OneDrive.exe[0m[0m[K
    680 SYSTEM      1   0.0   0.0     6M   0:00.3 wininit.exe[0m[0m[K
-  1044 LOCAL SE+   7   0.0   0.0     9M   0:12.4 svchost.exe[0m[0m[K
+  1044 LOCAL SE+   7   0.0   0.1     9M   0:12.4 svchost.exe[0m[0m[K
   1342 LOCAL SE+   5   0.0   0.0     7M   0:03.1 svchost.exe[0m[0m[K
-  1560 SYSTEM     11   0.0   0.0    13M   0:08.8 spoolsv.exe[0m[0m[K
+  1560 SYSTEM     11   0.0   0.1    13M   0:08.8 spoolsv.exe[0m[0m[K
   2240 SYSTEM      3   0.0   0.0     8M   0:01.2 sshd.exe[0m[0m[K
-  5100 alice      18   0.0   0.3    88M   0:12.0 pwsh.exe[0m[0m[K
+  5100 alice      18   0.0   0.5    88M   0:12.0 pwsh.exe[0m[0m[K
   7280 alice       8   0.0   0.1    24M   0:02.2 RuntimeBroker.exe[0m[0m[K
 [90m row 1/37   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   sort: [0m[1;7mP cpu[0m[90m  M mem  T time  N pid  U user   c/Esc: back[0m[0m[0m

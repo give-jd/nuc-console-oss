@@ -3,10 +3,10 @@
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
 [7m  ✖ ERR   Out of memory: shop-worker-1  shop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (l… [0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an…[0m[0m[0m[0m[K
- [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 27.4 GB/day: full in about 12 days.[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mMemory keeps growing: node[0m  [90mnode grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak…[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 31 hours in the last 7 days (peak 143%, bu…[0m[0m[0m[0m[K
- [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m14 hours at or above the temperature limit in the last 7 days (about 2.0 h/day, max 91 C); bus…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m14 hours at or above the temperature limit (90 C) in the last 7 days (about 2.0 h/day, max 91 …[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mFailed logins: sshd[0m  [90m412 failed logins on 2026-09-28 against a median of 18 a day; 1204 in the last 7 days.[0m[0m[0m[0m[K
  [90m · INFO [0m [1mNoisy log: dockerd[0m  [90mdockerd logged one message 18420 times in the last 7 days (about 2631 a day): "level=<v…[0m[0m[0m[0m[K
  [90m · INFO [0m [1mNew log messages[0m  [90m4 log messages appeared for the first time in the last 24 hours, most often from kernel (…[0m[0m[0m[0m[K

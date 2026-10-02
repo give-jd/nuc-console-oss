@@ -4,9 +4,9 @@
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
 [7m  ✖ ERR   Out of memory: shop-worker-1  shop-worker-1 was hit by an out-of-memory event 1 time in the last 24 hours (… [0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (9 in total) and exited with an …[0m[0m[0m[0m[K
- [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 27.4 GB/day: full in about 12 days.[0m[0m[0m[0m[K
  [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 6 hours in the last 24 hours (peak 143%, b…[0m[0m[0m[0m[K
- [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m2 hours at or above the temperature limit in the last 24 hours (about 2.0 h/day, max 91 C); bu…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m2 hours at or above the temperature limit (90 C) in the last 24 hours (about 2.0 h/day, max 91…[0m[0m[0m[0m[K
  [90m · INFO [0m [1mNoisy log: dockerd[0m  [90mdockerd logged one message 2631 times in the last 24 hours (about 2631 a day): "level=<…[0m[0m[0m[0m[K
 [36m──[0m[1;36m TOP CPU [0m[36m───────────────[0m[90m  share of CPU time · per hour[0m[0m[0m     [36m──[0m[1;36m EVENTS [0m[36m──────────────[0m[90m  by kind · subject ×times, last[0m[0m[0m  [0m[0m[K
  chrome          [36m████████[0m[90m[0m  31%  avg 62%   [36m▄█▆█▄█▆█▅▅▇▇▅█[0m[0m[0m      [31mout of memory [0m shop-worker-1 ×1 [90m2 h ago[0m[0m[0m[0m                  [0m[0m[K
