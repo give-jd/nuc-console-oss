@@ -234,7 +234,7 @@ class HealthPage(unittest.TestCase):
         render.DEMO_OS = "windows"
         win = self.page("/?view=health")
         txt = plain(win)
-        for word in ("Unexpected shutdown", "Crashing: contoso-sync.exe", "Crashing: Spooler", "MsMpEng.exe", "C:", "no temperature data", "Application Error 1000"):
+        for word in ("Unexpected shutdown", "Crashing: contoso-sync.exe", "Crashing: Spooler", "MsMpEng.exe", "C:", "never hot", "max 91", "Application Error 1000"):
             self.assertIn(word, txt)
         self.assertNotIn("WHEA", txt)                                        # none reported: no finding, no event kind
         self.assertNotIn("hardware", txt)

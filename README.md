@@ -61,7 +61,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <details>
 <summary><b>The CPU screen, like htop</b> (per-core load, frequency and temperature; processes; details of one)</summary>
 <br>
-<img src="docs/img/cpu.png" alt="nuc-console CPU screen in a browser: model and caches, per-core bars with frequency and temperature and P/E tags, package temperature and throttling, the process list sorted by CPU with the details of one process, demo data" width="100%">
+<img src="docs/img/cpu.png" alt="nuc-console CPU screen in a browser: model and caches, per-core bars (16 threads) with frequency, package temperature with its limits, the process list sorted by CPU with the details of one process, demo data" width="100%">
 </details>
 
 <details>
@@ -73,7 +73,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <details>
 <summary><b>The AI page</b> (choose a model and it is downloaded, started and turned on; AI on/off; chat; which models this machine can run)</summary>
 <br>
-<img src="docs/img/ai.png" alt="nuc-console AI page in a browser: the AI switch (ON, the model that answers), the folder the models are downloaded to with its size and free space, a chat with a question and an answer, then the hardware and the list of local models with a verdict for each (fits GPU, GPU+CPU, slow, too big), a use this model button, estimated speed and the recommended model, demo data" width="100%">
+<img src="docs/img/ai.png" alt="nuc-console AI page in a browser: the AI switch (ON, the model that answers), the folder the models are downloaded to with its size and free space, a chat with a question and an answer, then the hardware and the list of local models with a verdict for each (fits GPU, GPU+CPU), a use this model button, estimated speed and the recommended model, demo data" width="100%">
 <br>
 Caption: the AI page of the web view, from `python3 src/web.py --demo` (nothing is downloaded or started in the demo). The console AI screen (key `a`) has the same switch (`e`), the same **use this model** (`u`) and the same folder line; the chat is on the web page.
 </details>

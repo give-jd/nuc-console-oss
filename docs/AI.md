@@ -55,9 +55,9 @@ chooses a model from a monitor). It shows even with `[ai] enabled = no`: it is w
 | STATUS | the advisor (on, and who turned it on), the endpoint, whether it answers (checked at most once a minute, one second at most, never while a page is drawn), the active model |
 
 Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter` (details), and the ones that act, see [below](#from-the-browser-and-the-console). `render.py --once --view ai` takes `--select TEXT`, `--details`,
-`--demo` and `--demo-os windows|darwin`: the demo has three invented machines, a Linux box with a 12 GB NVIDIA card
-(`--demo`), a Windows laptop with 4 GB of GPU memory and 16 GB of RAM (`--demo-os windows`) and an M2 with 16 GB of unified
-memory (`--demo-os darwin`).
+`--demo` and `--demo-os windows|darwin`: the demo has three invented machines, the same on every screen (a Linux desktop with 31 GB of
+RAM and a 12 GB NVIDIA card (`--demo`), a Windows desktop with 16 GB of RAM and an 8 GB card (`--demo-os windows`) and an M2 with 16 GB of
+unified memory (`--demo-os darwin`)).
 
 `nuc-console-ai models` prints the same table in a terminal, and needs no root. A trimmed example, as printed on a machine
 with 16 GB of RAM and no GPU:

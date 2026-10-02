@@ -281,7 +281,7 @@ class AiPage(unittest.TestCase):
         render.DEMO_OS = "windows"
         win = self.page("/?view=ai&sel=qwen3-8b")
         txt = plain(win)
-        for word in ("Intel Core i7-10750H", "NVIDIA GeForce GTX 1650", "4.0 GB (free: ?)", "Intel(R) UHD Graphics · Vulkan", "unified memory: it shares the RAM",
+        for word in ("AMD Ryzen 7 5800X", "NVIDIA GeForce RTX 3060 Ti", "8.0 GB (free: ?)", "7.2 GB free of 15.8 GB",
                      "nvidia-smi not found", "· off  (off: the AI switch turns it on)", "! not installed", "run the commands in an administrator prompt",
                      "nuc-console-ai setup qwen3-8b"):
             self.assertIn(word, txt)

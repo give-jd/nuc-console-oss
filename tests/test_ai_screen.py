@@ -419,11 +419,11 @@ class Once(AiCase):
         self.assertRegex(lines[1], r"^── AI  what this machine can run · 12 models · ✔ 10 fit  ◐ 2 gpu\+cpu ─+$")
         render.DEMO_OS = "windows"
         s, lines = self.screen([], 120, 33)
-        self.assertIn("what this machine can run · 12 models · ✔ 4 fit  ◐ 4 gpu+cpu  ! 3 slow  ✖ 1 too big", lines[1])
+        self.assertIn("what this machine can run · 12 models · ✔ 8 fit  ◐ 2 gpu+cpu  ! 1 slow  ✖ 1 too big", lines[1])
         s, lines = self.screen([], 79, 24)
-        self.assertRegex(lines[1], r"^── AI  12 models · ✔ 4 fit  ◐ 4 gpu\+cpu  ! 3 slow  ✖ 1 too big ─+$")   # the tagline goes first
+        self.assertRegex(lines[1], r"^── AI  12 models · ✔ 8 fit  ◐ 2 gpu\+cpu  ! 1 slow  ✖ 1 too big ─+$")   # the tagline goes first
         s, lines = self.screen([], 60, 24)
-        self.assertRegex(lines[1], r"^── AI  ✔ 4 fit  ◐ 4 gpu\+cpu  ! 3 slow  ✖ 1 too big ─+$")          # then the models' count
+        self.assertRegex(lines[1], r"^── AI  ✔ 8 fit  ◐ 2 gpu\+cpu  ! 1 slow  ✖ 1 too big ─+$")          # then the models' count
         s, lines = self.screen([], 40, 24)
         self.assertRegex(lines[1], r"^── AI  12 models ─+$")                                              # and the counts: what is left
         self.assertIn("PROBLEMS", lines[0])                                                              # the header's status is the dashboard's
@@ -440,11 +440,10 @@ class Once(AiCase):
         render.DEMO_OS = "windows"
         s, lines = self.screen([], 200, 50)
         txt = "\n".join(lines)
-        self.assertIn("Intel Core i7-10750H · 6 cores / 12 threads · AVX2", txt)
-        self.assertIn("NVIDIA GeForce GTX 1650 · CUDA", txt)
-        self.assertIn("4.0 GB (free: ?)", txt)                                                           # unknown is not "all free"
-        self.assertIn("Intel(R) UHD Graphics · Vulkan", txt)
-        self.assertIn("unified memory: it shares the RAM", txt)
+        self.assertIn("AMD Ryzen 7 5800X · 8 cores / 16 threads · AVX2", txt)
+        self.assertIn("NVIDIA GeForce RTX 3060 Ti · CUDA", txt)
+        self.assertIn("8.0 GB (free: ?)", txt)                                                           # unknown is not "all free"
+        self.assertRegex(txt, r"RAM +█+░+ +7\.2 GB free of 15\.8 GB")
         self.assertIn("· nvidia-smi not found: the free video memory could not be read", txt)           # what could not be read, said
         render.DEMO_OS = "darwin"
         s, lines = self.screen([], 120, 33)
@@ -621,16 +620,16 @@ class Once(AiCase):
 
     def test_the_why_the_speed_and_the_size_are_in_the_details(self):
         render.DEMO_OS = "windows"
-        s, lines = self.screen(["--select", "qwen3-8b", "--details"], 226, 50)
+        s, lines = self.screen(["--select", "qwen3-14b", "--details"], 226, 50)
         txt = "\n".join(lines)
-        self.assertIn("needs 5.8 GB, the NVIDIA GeForce GTX 1650 has 3.4 GB free: 19 of 36 layers", txt)   # (the pane wraps it)
-        self.assertIn("rest (2.7 GB) in RAM", txt)
-        why = next(v for k, v, _ in render.ai_details(next(r for r in render.ai_rows(render.ai_data()["cat"]) if r["id"] == "qwen3-8b"))[1] if k == "why")
-        self.assertEqual(why, "needs 5.8 GB, the NVIDIA GeForce GTX 1650 has 3.4 GB free: 19 of 36 layers on the GPU, the rest (2.7 GB) in RAM")
-        self.assertIn("about 8-15 tokens/s (a rough estimate, not a promise)", txt)
-        self.assertIn("5.8 GB of memory: the file (4.9 GB), the context and the runtime", txt)
-        self.assertIn("8.2B parameters · Q4_K_M · context up to 40960 tokens", txt)
-        self.assertIn("19 of 36 layers on the GPU, the rest in RAM", txt)
+        self.assertIn("needs 9.7 GB, the NVIDIA GeForce RTX 3060 Ti has 6.8 GB free: 26 of 40 layers", txt)   # (the pane wraps it)
+        self.assertIn("rest (3.4 GB) in RAM", txt)
+        why = next(v for k, v, _ in render.ai_details(next(r for r in render.ai_rows(render.ai_data()["cat"]) if r["id"] == "qwen3-14b"))[1] if k == "why")
+        self.assertEqual(why, "needs 9.7 GB, the NVIDIA GeForce RTX 3060 Ti has 6.8 GB free: 26 of 40 layers on the GPU, the rest (3.4 GB) in RAM")
+        self.assertIn("about 5-10 tokens/s (a rough estimate, not a promise)", txt)
+        self.assertIn("9.7 GB of memory: the file (8.8 GB), the context and the runtime", txt)
+        self.assertIn("14.8B parameters · Q4_K_M · context up to 40960 tokens", txt)
+        self.assertIn("26 of 40 layers on the GPU, the rest in RAM", txt)
         self.assertIn("thinking mode: /no_think turns it off", txt)
         s, lines = self.screen(["--select", "30b", "--details"], 200, 50)
         txt = "\n".join(lines)
@@ -647,7 +646,7 @@ class Once(AiCase):
             self.assertEqual(len(lines), 33)
             self.assertTrue(all(len(x) <= 119 for x in lines), os_name)
             self.assertNotIn(ESC, out.getvalue())                                                        # without --color: no escape codes at all
-            self.assertIn({None: "AMD Ryzen 7 5800X", "windows": "Intel Core i7-10750H", "darwin": "Apple M2 (10-core GPU)"}[os_name], out.getvalue())
+            self.assertIn({None: "AMD Ryzen 7 5800X", "windows": "NVIDIA GeForce RTX 3060 Ti", "darwin": "Apple M2 (10-core GPU)"}[os_name], out.getvalue())
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             render.once(["render.py", "--once", "--demo", "--view", "ai", "--color", "--cols", "120", "--rows", "33"])

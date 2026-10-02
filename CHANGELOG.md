@@ -242,6 +242,7 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
   whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
 - A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
+- The `--demo` screens described one machine each (4 cores on the overview, 16 threads on the CPU screen, 32 GB on the AI screen, a 22 s boot in BOOT and a 58 s one in HEALTH). Each demo OS is now a single machine (cores, memory, uptime, load, temperatures, boot, disks) that every screen reads.
 - The web view drew its pages one column narrower than asked: at the default 200 columns that is 199, below the 2-column layout, and
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
