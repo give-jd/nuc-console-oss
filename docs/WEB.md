@@ -98,6 +98,10 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 - **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The AI page keeps its forms and CSRF.
   The **CPU** page is built of components, not text: key figures, a meter per logical CPU, the temperatures, and the process table, whose column heads are
   links (`p m t n u` do the same by keyboard) and whose rows are links to `sel=`; with a process selected its details sit beside the table (below it in a narrow window).
+  The **Map** (tree view) is built of components too: the figures and the arrows' legend, a segmented control of links (`e` expand all, `c` collapse all, `p` problems
+  only, and the graph view), the tree as a list whose rows are links (a row selects it, the selected one deselects it; its ▸ ▾ mark opens or closes the branch; the state
+  is a symbol and a class, the depth an indent), and the selected node's details beside the tree (below it in a narrow window) with a link that closes them. j / k and the
+  arrows move over the rows, Enter follows. The graph view (`as=graph`) and the classic pages are as before.
 - **Footer**: refresh − / +, pause, Edit layout, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
 - **Blocks**: the top bar (`__top`), the key figures (`__kpis`) and every card are elements with `data-card` and a `data-rev` that changes when,
   and only when, their HTML does. The Map, CPU, Health and AI pages are one block (`__view`, the bar above them and their body). The refresh

@@ -1056,6 +1056,9 @@ class Server(http.server.ThreadingHTTPServer):
             G, pb = self.map_graph(r)
             prune(G, st)
             mhere = map_here(here, st, sel, pause)
+            if shell:  # the shell draws the screen itself: the components of screens.py, as HTML (the classic page below is unchanged)
+                body = map_native(G, st, sel, mhere, here, pause, found)
+                return View(body, [], mhere, not pause, legacy=False)
             body = map_body(G, pb, st, sel, mhere, socket.gethostname(), found)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: map render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
@@ -1626,6 +1629,41 @@ def map_body(G, pb, st, sel, here, host, found=None):
             found.update(node=row["node"], kind=G["nodes"].get(row["node"], {}).get("kind"))
     out.append(f'<main class="mp{" two" if panel else ""}"><div class="tree">{"".join(tree)}</div>{panel}</main>')
     return "".join(out)
+
+
+def map_native(G, st, sel, here, base, pause, found=None):
+    """The Map screen of the shell, drawn from components (screens.map_web, the model the console draws too): the title with its choices (expand
+    all, collapse all, problems only: links with their keys, and the graph view), the tree as a list whose rows are links (a row selects it, its
+    mark opens or closes the branch) and the details of the selected row beside it. here: the map's URL parameters, base: the page's own (the
+    graph view keeps those). found: gets the selected row's node, as map_body does."""
+    rs = graph.rows(G, st, limit=MAP_ROWS)
+    row = None
+    if sel:
+        i = graph.find(rs, sel)
+        row = rs[i] if i is not None else None
+        if row is None:  # its branch is closed: still the same row of the fully open map
+            every = universe(G)
+            j = graph.find(every, sel)
+            row = every[j] if j is not None else None
+    nid = row["node"] if row else None
+    mine = {} if found is None else found
+    if row:
+        mine.update(node=nid, kind=G["nodes"].get(nid, {}).get("kind"))
+    state = lambda **kw: page_url(here, **kw)  # noqa: E731
+    links = screens.MapLinks(
+        lambda r: map_url(here, st, "" if r["key"] == sel else r["key"], ""),
+        lambda r: map_url(here, st.toggled(r), sel, ""),
+        map_url(here, st, "", ""),
+        state(**state_params(graph.State(all=True, only=st.only))),
+        state(**state_params(graph.State(only=st.only))),
+        lambda only: state(only=only),
+        graph_url(mine, st.only, pause, base))
+    try:
+        nodes = screens.map_web(G, rs, st, sel, nid, links, MAP_ROWS, rs.truncated)
+        return '<div class="scr mapv">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+    except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+        print("nuc-console web: map render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+        return '<p class="sm">the map could not be drawn (see the service log)</p>'
 
 
 def map_url(here, st, sel, anchor):

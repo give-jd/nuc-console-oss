@@ -438,9 +438,10 @@ def _cases():
         add("web-" + name, query=query)
     add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # a locked page has no forms and the stricter CSP
     add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
-    # the new shell (?app=1): the overview, the settings (appearance, export, about), the Health screen (native) and the AI page inside it (forms and CSRF as on the classic page)
+    # the new shell (?app=1): the overview, the settings (appearance, export, about), the CPU, Map and Health screens (native) and the AI page inside it (forms and CSRF as on the classic page)
     for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b"),
                         ("cpu", "app=1&view=cpu"), ("cpu-details", f"app=1&view=cpu&sort=mem&sel={SELECTED['pid']}"),
+                        ("map", "app=1&view=map"), ("map-details", f"app=1&view=map&all=1&sel={SELECTED['row']}"),
                         ("health", "app=1&view=health"), ("health-details", f"app=1&view=health&period=30&sel={SELECTED['finding']}"),
                         ("overview-wall-light", "app=1&ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
                         ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy

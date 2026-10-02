@@ -76,6 +76,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
   (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
   events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
+- In the shell the **Map** (`?app=1&view=map`) is drawn natively too: the tree as a list whose rows are links (a symbol and a class for the state, an indent for
+  the depth, a mark that opens or closes a branch), the details of the selected row beside it (below it in a narrow window), and expand all, collapse all and
+  problems only as a segmented control of links with their keys (`e`, `c`, `p`), next to a link to the graph view. The console draws the same model and
+  looks exactly as before.
 
 **Windows and macOS**
 

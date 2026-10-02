@@ -1,21 +1,24 @@
-<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; script-src 'sha256-9ru6eneHa6/+nFJPaD+wQAEgR+CX8BPgT/9vEGGI83g=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-9ru6eneHa6/+nFJPaD+wQAEgR+CX8BPgT/9vEGGI83g=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
 <html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>demo-host · ai · nuc-console</title>
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · map · nuc-console</title>
 <link rel="stylesheet" href="/s/app.d314fca0.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="78a50561ef">
+<header class="topbar" data-card="__top" data-rev="15e8ce0716">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?app=1" data-key="1">
 <kbd>1</kbd>Overview</a>
-<a href="/?app=1&amp;view=map" data-key="2">
+<a href="/?app=1&amp;view=map" data-key="2" aria-current="page">
 <kbd>2</kbd>Map <span class="badge">7</span>
 </a>
 <a href="/?app=1&amp;view=cpu" data-key="3">
@@ -25,7 +28,7 @@
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5" aria-current="page">
+<a href="/?app=1&amp;view=ai" data-key="5">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -93,463 +96,232 @@
 </div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
-<main class="view legacy">
-<div class="vb" data-card="__view" data-rev="e2a1693fcb">
-<div class="toolbar">
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=100&amp;app=1#m-7">compact</a>
+<main class="view" data-refresh="2" data-frag="/?view=map&amp;app=1&amp;frag=1">
+<div class="vb" data-card="__view" data-rev="b9290b815f">
+<div class="scr mapv">
+<header class="st">
+<h2>MAP</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">27 nodes</span>
 </span>
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=200&amp;app=1#m-7">wide</a>
+<span class="bit">
+<span class="t-muted">14 links</span>
 </span>
-<span class="tl">
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1#m-7">reload</a>
+<span class="bit">
+<span class="t-err">✖ 7 need attention</span>
 </span>
+</p>
+<ul class="legend lgd">
+<li>
+<span class="t-strong">━━►</span> seen</li>
+<li>
+<span>╌╌►</span> declared</li>
+<li>
+<span class="t-muted">┄┄►</span> same network</li>
+<li>
+<span class="t-strong">◄━━</span> connected to it</li>
+</ul>
+<div class="seg" role="group" aria-label="expand">
+<a href="/?view=map&amp;all=1&amp;app=1" data-key="e" title="key e">expand all</a>
+<span aria-current="true">collapse all</span>
 </div>
-<div class="hd w bR B">
-<span> demo-host │ AI │ 14:13:20</span>
-<span>✖ 6 PROBLEMS </span>
+<div class="seg" role="group" aria-label="paths">
+<span aria-current="true">all paths</span>
+<a href="/?view=map&amp;only=1&amp;app=1" data-key="p" title="key p">problems only</a>
 </div>
-<pre class="ht"><span class="c">──</span><span class="c B"> AI </span> <span class="d">what this machine can run</span><span class="d"> · </span><span class="d">12 models</span><span class="d"> · </span><span class="g">✔ 10 fit</span>  <span class="c">◐ 2 gpu+cpu</span> <span class="c">───────────────────────────────────────────────────────────────────────</span></pre>
-<section class="ctl" id="ctl">
-<div class="row">
-<span class="pl g big">ON</span>
-<span class="st">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
-<form class="f" method="post" action="/ai/off">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<button class="bt off" type="submit" title="stop the model server and turn the advisor off">Turn AI off</button>
-</form>
+<div class="seg" role="group" aria-label="view">
+<span aria-current="true">tree</span>
+<a href="/?view=map&amp;as=graph&amp;app=1">graph</a>
 </div>
-<div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+</header>
+<p class="ln">
+<span class="t-muted">  · connections sampled every 30 s, remembered 24 h (watching since 1h)</span>
+</p>
+<section class="grp">
+<ul class="ol">
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=9b8010b9d8&amp;app=1" title="close" data-k="t-9b8010b9d8">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=9b8010b9d8&amp;app=1" data-row data-k="o-9b8010b9d8">
+<span class="sym">✖</span> <span class="t-err b">INTERNET</span>  <span class="t-muted">reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=3dab9c429f&amp;app=1" title="open: 1 below" data-k="t-3dab9c429f">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=3dab9c429f&amp;app=1" data-row data-k="o-3dab9c429f">
+<span class="sym">✖</span> <span class="t-err">:8444/tcp</span>  <span class="t-strong">node</span>  <span class="t-muted">FUNNEL: public</span>  <span class="t-err">declared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=f22f98b733&amp;app=1" title="close" data-k="t-f22f98b733">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=f22f98b733&amp;app=1" data-row data-k="o-f22f98b733">
+<span class="sym">✖</span> <span class="t-err b">LAN</span>  <span class="t-muted">open on the LAN (and on the tailnet)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=5c58dcd8b6&amp;app=1" title="open: 1 below" data-k="t-5c58dcd8b6">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=5c58dcd8b6&amp;app=1" data-row data-k="o-5c58dcd8b6">
+<span class="sym">✖</span> <span class="t-err">:5432/tcp</span>  <span class="t-strong">shop-db-1</span>  <span class="t-muted">docker: bypasses ufw</span>  <span class="t-err">declared local in config.ini, reachable from the LAN and the tailnet</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=4cc5ea0e7a&amp;app=1" title="open: 4 below" data-k="t-4cc5ea0e7a">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=4cc5ea0e7a&amp;app=1" data-row data-k="o-4cc5ea0e7a">
+<span class="sym">!</span> <span class="t-warn">:8080/tcp</span>  <span class="t-strong">shop-web-1</span>  <span class="t-warn">docker: bypasses ufw</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=d6a7fd958b&amp;app=1" title="open: 1 below" data-k="t-d6a7fd958b">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=d6a7fd958b&amp;app=1" data-row data-k="o-d6a7fd958b">
+<span class="sym">·</span> :22/tcp  <span class="t-strong">sshd</span>  <span class="t-muted">LAN only 192.168.0.0/24</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=93ed95f8e5&amp;app=1" title="close" data-k="t-93ed95f8e5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=93ed95f8e5&amp;app=1" data-row data-k="o-93ed95f8e5">
+<span class="sym">·</span> <span class="t-accent b">LOCAL</span>  <span class="t-muted">this machine only</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;sel=b96bcd7a28&amp;app=1" data-row data-k="o-b96bcd7a28">
+<span class="sym">·</span> :5433/tcp  <span class="t-strong">blog-db-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=59b5097c06&amp;app=1" title="open: 1 below" data-k="t-59b5097c06">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=59b5097c06&amp;app=1" data-row data-k="o-59b5097c06">
+<span class="sym">·</span> :5678/tcp  <span class="t-strong">node</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;sel=60dc00592e&amp;app=1" data-row data-k="o-60dc00592e">
+<span class="sym">·</span> :6379/tcp  <span class="t-strong">cache-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=c242c96ccd&amp;app=1" title="open: 1 below" data-k="t-c242c96ccd">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=c242c96ccd&amp;app=1" data-row data-k="o-c242c96ccd">
+<span class="sym">·</span> :8081/tcp  <span class="t-strong">blog-app-1</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=575ffc23c4&amp;app=1" title="close" data-k="t-575ffc23c4">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=575ffc23c4&amp;app=1" data-row data-k="o-575ffc23c4">
+<span class="sym">✖</span> <span class="t-err b">IMPACT</span>  <span class="t-muted">what is down or failing, and what depends on it</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;sel=d51eee07ec&amp;app=1" data-row data-k="o-d51eee07ec">
+<span class="sym">✖</span> <span class="t-err">admin-console</span>  <span class="t-muted">web app · expected on :9443</span>  <span class="t-warn">declared in [webapps] but nothing listens on :9443</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;sel=575b2e7f06&amp;app=1" data-row data-k="o-575b2e7f06">
+<span class="sym">✖</span> <span class="t-err">worker-1</span>  <span class="t-muted">container · shop</span>  <span class="t-err">exited with code 137</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=b13e1bbec0&amp;app=1" title="close" data-k="t-b13e1bbec0">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=b13e1bbec0&amp;app=1" data-row data-k="o-b13e1bbec0">
+<span class="sym">·</span> <span class="t-accent b">STACKS</span>  <span class="t-muted">compose projects and their containers</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=46c79ece35&amp;app=1" title="open: 2 below" data-k="t-46c79ece35">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=46c79ece35&amp;app=1" data-row data-k="o-46c79ece35">
+<span class="sym">✔</span> <span class="t-ok">blog</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=a9b5a9adec&amp;app=1" title="open: 4 below" data-k="t-a9b5a9adec">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=a9b5a9adec&amp;app=1" data-row data-k="o-a9b5a9adec">
+<span class="sym">✖</span> <span class="t-err">shop</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=04d7137448&amp;app=1" title="open: 1 below" data-k="t-04d7137448">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=04d7137448&amp;app=1" data-row data-k="o-04d7137448">
+<span class="sym">✔</span> <span class="t-ok">standalone</span>  <span class="t-muted">containers without a project</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=98180ef894&amp;app=1" title="close" data-k="t-98180ef894">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=98180ef894&amp;app=1" data-row data-k="o-98180ef894">
+<span class="sym">·</span> <span class="t-accent b">OUTBOUND</span>  <span class="t-muted">connections this machine opens to other hosts</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=2f98a6d30e&amp;app=1" title="open: 1 below" data-k="t-2f98a6d30e">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=2f98a6d30e&amp;app=1" data-row data-k="o-2f98a6d30e">
+<span class="sym">✔</span> <span class="t-ok">node</span>  <span class="t-muted">n8n.service</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;open=b9314fbc23&amp;app=1" title="open: 1 below" data-k="t-b9314fbc23">
+<span class="t-accent">▸</span>
+</a>
+<a class="oa" href="/?view=map&amp;sel=b9314fbc23&amp;app=1" data-row data-k="o-b9314fbc23">
+<span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+</ul>
 </section>
-<section class="chat" id="chat">
-<div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>
-<form class="f ask" id="ask" method="post" action="/ai/ask">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input class="q" type="text" name="q" maxlength="500" size="60" placeholder="ask: why is the disk filling up?" autocomplete="off"> <button class="bt on" type="submit">Ask</button>
-</form>
-<div class="adv">advice now: <form class="f" method="post" action="/ai/advise">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="days" value="1">
-<button class="bt " type="submit">last 24 h</button>
-</form> <form class="f" method="post" action="/ai/advise">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="days" value="7">
-<button class="bt " type="submit">last 7 days</button>
-</form> <form class="f" method="post" action="/ai/advise">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="days" value="30">
-<button class="bt " type="submit">last 30 days</button>
-</form>
 </div>
-</section>
-<pre class="ht"><span class="c">──</span><span class="c B"> HARDWARE </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span><span class="d">  linux x86_64</span>
- <span class="d">CPU  </span> <span class="B">AMD Ryzen 7 5800X</span><span class="d"> · 8 cores / 16 threads</span><span class="d"> · AVX2</span>
- <span class="d">RAM  </span> <span class="g">████████</span><span class="d">░░░░░░░░░░░░░░░░</span>  21.0 GB free of 31.2 GB
- <span class="d">GPU  </span> <span class="B">NVIDIA GeForce RTX 3060</span><span class="d"> · CUDA</span>  <span class="g">██</span><span class="d">░░░░░░░░░░░░░░░░░░░░░░</span>  11.0 GB free of 12.0 GB</pre>
-<div class="hs">MODELS · best first</div>
-<div class="mp two">
-<div class="tree">
-<div class="mw" id="models">
-<table class="mt">
-<thead>
-<tr>
-<th>
-</th>
-<th>model</th>
-<th class="pm">params</th>
-<th class="r sz">size</th>
-<th class="r">needs</th>
-<th>verdict</th>
-<th>est tok/s</th>
-<th class="nn">notes</th>
-<th>
-</th>
-</tr>
-</thead>
-<tbody>
-<tr id="m-0">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1#m-0">OpenAI gpt-oss 20B</a>
-</td>
-<td class="pm">21B-A3.6B</td>
-<td class="r sz">11.8 GB</td>
-<td class="r">12.5 GB</td>
-<td>
-<span class="pl c">◐ GPU+CPU</span>
-</td>
-<td>36-66</td>
-<td class="nn">
-<div>fast for its size (MoE, 3.6B active); reasoning effort is a setting</div>
-</td>
-<td class="ac">
-<span class="d">not pinned yet</span>
-</td>
-</tr>
-<tr id="m-1">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1#m-1">Qwen3 30B-A3B</a>
-</td>
-<td class="pm">30.5B-A3.3B</td>
-<td class="r sz">18.2 GB</td>
-<td class="r">19.3 GB</td>
-<td>
-<span class="pl c">◐ GPU+CPU</span>
-</td>
-<td>19-37</td>
-<td class="nn">
-<div>fast on CPU (MoE: only 3.3B parameters work per token)</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-30b-a3b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-2">
-<td class="mk">
-<span class="y" title="recommended">★</span>  </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=phi-4&amp;app=1#m-2">Phi-4 14B</a>
-</td>
-<td class="pm">14.7B</td>
-<td class="r sz">8.9 GB</td>
-<td class="r">9.8 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>17-28</td>
-<td class="nn">
-<div>strong at reasoning and code; short context (16k)</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="phi-4">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-3">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-14b&amp;app=1#m-3">Qwen3 14B</a>
-</td>
-<td class="pm">14.8B</td>
-<td class="r sz">8.8 GB</td>
-<td class="r">9.7 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>17-28</td>
-<td class="nn">
-<div>thinking mode: /no_think turns it off</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-14b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-4">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-8b&amp;app=1#m-4">Qwen3 8B</a>
-</td>
-<td class="pm">8.2B</td>
-<td class="r sz">4.9 GB</td>
-<td class="r">5.8 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>31-51</td>
-<td class="nn">
-<div>thinking mode: /no_think turns it off</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-8b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-5">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1#m-5">IBM Granite 3.3 8B</a>
-</td>
-<td class="pm">8.2B</td>
-<td class="r sz">4.9 GB</td>
-<td class="r">5.8 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>31-51</td>
-<td class="nn">
-<div>long context (128k); tuned for business tasks</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="granite-3.3-8b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-6">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=phi-4-mini&amp;app=1#m-6">Phi-4-mini 3.8B</a>
-</td>
-<td class="pm">3.8B</td>
-<td class="r sz">2.4 GB</td>
-<td class="r">3.3 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>61-102</td>
-<td class="nn">
-<div>small and good at reasoning; long context</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="phi-4-mini">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr class="sel" id="m-7">
-<td class="mk"> <span class="g" title="installed">✓</span>
-<span class="c" title="active">●</span>
-</td>
-<td>
-<a class="lb" href="/?view=ai&amp;app=1#m-7">Qwen3 4B</a>
-</td>
-<td class="pm">4B</td>
-<td class="r sz">2.4 GB</td>
-<td class="r">3.3 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>61-102</td>
-<td class="nn">
-<div>the default of nuc-console-ai: good advice in about 4 GB</div>
-</td>
-<td class="ac">
-<span class="g">● in use</span>
-</td>
-</tr>
-<tr id="m-8">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=smollm3-3b&amp;app=1#m-8">SmolLM3 3B</a>
-</td>
-<td class="pm">3.1B</td>
-<td class="r sz">1.9 GB</td>
-<td class="r">2.7 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>81-135</td>
-<td class="nn">
-<div>small, multilingual, long context</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="smollm3-3b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-9">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1#m-9">IBM Granite 3.3 2B</a>
-</td>
-<td class="pm">2.5B</td>
-<td class="r sz">1.6 GB</td>
-<td class="r">2.5 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>96-160</td>
-<td class="nn">
-<div>very small; fine for short advice</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="granite-3.3-2b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-10">
-<td class="mk"> <span class="g" title="installed">✓</span> </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1#m-10">Qwen3 1.7B</a>
-</td>
-<td class="pm">1.7B</td>
-<td class="r sz">1.1 GB</td>
-<td class="r">1.8 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>140-233</td>
-<td class="nn">
-<div>runs anywhere; thinking mode: /no_think</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-1.7b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-<tr id="m-11">
-<td class="mk">   </td>
-<td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1#m-11">Qwen3 0.6B</a>
-</td>
-<td class="pm">0.6B</td>
-<td class="r sz">400 MB</td>
-<td class="r">1.1 GB</td>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-<td>384-640</td>
-<td class="nn">
-<div>a toy: too small to give reliable advice</div>
-</td>
-<td class="ac">
-<form class="f" method="post" action="/ai/use">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-0.6b">
-<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
-</form>
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-<pre class="ht"> <span class="y">★</span><span class="d"> recommended</span>  ·  <span class="g">✓</span><span class="d"> installed</span>  ·  <span class="c">●</span><span class="d"> active</span>  ·  <span class="d">tok/s: rough estimate</span></pre>
-</div>
-<aside class="dp" id="details">
-<div class="dh">
-<span>DETAILS</span>
-<a href="/?view=ai&amp;app=1#m-7">close ✕</a>
-</div>
-<table>
-<tr class="top">
-<th>model</th>
-<td>Qwen3 4B</td>
-</tr>
-<tr>
-<th>verdict</th>
-<td>
-<span class="pl g">✔ FITS GPU</span>
-</td>
-</tr>
-<tr>
-<th>why</th>
-<td>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</td>
-</tr>
-<tr>
-<th>speed</th>
-<td>about 61-102 tokens/s (a rough estimate, not a promise)</td>
-</tr>
-<tr>
-<th>state</th>
-<td>✓ installed · ● active: [ai] model</td>
-</tr>
-<tr>
-<th>remove</th>
-<td>
-<code class="cmd">sudo nuc-console-ai remove qwen3-4b</code>
-</td>
-</tr>
-<tr>
-<th>needs</th>
-<td>3.3 GB of memory: the file (2.4 GB), the context and the runtime</td>
-</tr>
-<tr>
-<th>where</th>
-<td>all 36 layers on the GPU</td>
-</tr>
-<tr>
-<th>model</th>
-<td>4B parameters · Q4_K_M · context up to 40960 tokens</td>
-</tr>
-<tr>
-<th>licence</th>
-<td>Apache-2.0</td>
-</tr>
-<tr>
-<th>notes</th>
-<td>the default of nuc-console-ai: good advice in about 4 GB</td>
-</tr>
-<tr>
-<th>do</th>
-<td>
-<span class="g">● in use</span> <form class="f" method="post" action="/ai/delete">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-4b">
-<button class="bt del" type="submit" title="asks first">delete its files</button>
-</form>
-</td>
-</tr>
-</table>
-</aside>
-</div>
-<pre class="ht"><span class="c">──</span><span class="c B"> STATUS </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
- <span class="d">advisor  </span> <span class="g">✔ on</span><span class="d">  (turned on from the AI page or screen)</span>
- <span class="d">endpoint </span> http://127.0.0.1:8080/v1
- <span class="d">server   </span> <span class="g">✔ answering</span><span class="d"> · 1 model: qwen3-4b</span>
- <span class="d">model    </span> <span class="c">●</span> <span class="B">qwen3-4b</span><span class="d">  in the catalog</span>
- <span class="d">runtime  </span> <span class="g">✔ installed</span><span class="d"> (0.10.6)</span>
- <span class="d">files    </span> <span class="d">/var/lib/nuc-console/ai</span></pre>
-<div class="mg">manage: <form class="f" method="post" action="/ai/delete-all">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<button class="bt del" type="submit" title="asks first">delete everything</button>
-</form> the runtime and every model (4.0 GB)</div>
 </div>
 </main>
-<footer class="foot">refresh every <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=3&amp;app=1">+</a>
+<footer class="foot">refresh every <a href="/?view=map&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=map&amp;refresh=3&amp;app=1">+</a>
 <span class="dot">·</span>
-<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;sel=qwen3-4b&amp;pause=1&amp;app=1">pause</a>
-<span class="dot">·</span>text <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=110&amp;app=1">A+</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=map&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>text <a href="/?view=map&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=map&amp;zoom=110&amp;app=1">A+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">high contrast</a>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dmap%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dmap%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dmap%26app%3D1">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dmap%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dmap%26app%3D1">compact</a>
 </span>
 <span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>
@@ -563,28 +335,20 @@
 </header>
 <div class="keys">
 <section>
-<h3>AI</h3>
+<h3>Map</h3>
 <dl>
 <dt>
-<kbd>e</kbd>
+<kbd>←→</kbd> <kbd>h</kbd> <kbd>l</kbd>
 </dt>
-<dd>AI on/off</dd>
+<dd>close (or the parent)/open</dd>
 <dt>
-<kbd>u</kbd>
+<kbd>e</kbd> <kbd>c</kbd>
 </dt>
-<dd>use model</dd>
+<dd>expand/collapse all</dd>
 <dt>
-<kbd>x</kbd> <kbd>X</kbd>
+<kbd>p</kbd>
 </dt>
-<dd>delete/delete all</dd>
-<dt>
-<kbd>c</kbd>
-</dt>
-<dd>cancel</dd>
-<dt>
-<kbd>y/n</kbd>
-</dt>
-<dd>answer a question</dd>
+<dd>problems only</dd>
 </dl>
 </section>
 <section>
