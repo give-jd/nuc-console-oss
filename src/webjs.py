@@ -49,6 +49,7 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     <details data-k>    its open state is kept as the reader left it
     data-kpi="<id>" data-depth="<n>" data-max-lines="<n>"   what the components (htmlview.html) say of a KPI, a tree row and a list; for the
                         server's CSS only (the scripts never read them, a fragment may carry them)
+    data-problem="<id>" the stable id of a problem in ATTENTION (a problem, or one accepted as known); for the server's CSS only
     data-state="ok|warn|err|unknown"   for the server's CSS only (the scripts never read it, a fragment may carry it)
     Ids in a fragment must not reuse the ids of this contract (stale, live, help, export). `name` is only allowed on form controls.
 
@@ -107,7 +108,7 @@ import hashlib
 # object, embed, template, base, canvas, math, foreignObject, use, image: nothing that loads, runs or restyles.
 FRAG_TAGS = (
     "a", "abbr", "article", "aside", "b", "br", "button", "caption", "circle", "code", "col", "colgroup", "dd", "details", "div", "dl", "dt", "em",
-    "footer", "form", "g", "h2", "h3", "h4", "header", "hr", "i", "input", "kbd", "label", "li", "line", "meter", "nav", "ol",
+    "figure", "footer", "form", "g", "h2", "h3", "h4", "header", "hr", "i", "input", "kbd", "label", "li", "line", "meter", "nav", "ol",
     "option", "p", "path", "polyline", "pre", "progress", "rect", "section", "select", "small", "span", "strong", "sub", "summary",
     "sup", "svg", "table", "tbody", "td", "text", "textarea", "tfoot", "th", "thead", "time", "title", "tr", "u", "ul",
 )
@@ -117,7 +118,7 @@ FRAG_ATTRS = (
     "action", "aria-controls", "aria-disabled", "aria-current", "aria-describedby", "aria-expanded", "aria-hidden", "aria-label", "aria-labelledby",
     "aria-live", "aria-pressed", "aria-sort", "aria-valuemax", "aria-valuemin", "aria-valuenow", "autocomplete", "checked", "class",
     "colspan", "cx", "cy", "d", "data-card", "data-copy", "data-density", "data-depth", "data-done", "data-fail", "data-k", "data-key", "data-kpi",
-    "data-max-lines", "data-pause", "data-rev", "data-row", "data-set", "data-state", "data-theme", "datetime", "disabled", "fill", "for", "height", "high", "href",
+    "data-max-lines", "data-pause", "data-problem", "data-rev", "data-row", "data-set", "data-state", "data-theme", "datetime", "disabled", "fill", "for", "height", "high", "href",
     "id", "lang", "low", "max", "maxlength", "method", "min", "name", "open", "optimum", "placeholder", "points",
     "preserveAspectRatio", "r", "readonly", "required", "role", "rowspan", "rx", "ry", "scope", "selected", "size", "stroke",
     "stroke-linecap", "stroke-linejoin", "stroke-width", "tabindex", "title", "transform", "type", "value", "viewBox", "width",
