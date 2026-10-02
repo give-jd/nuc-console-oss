@@ -3,50 +3,15 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [1.5.0] - unreleased
+## [Unreleased]
 
-nuc-console now runs on Linux, macOS and Windows, has three new screens (MAP, CPU, HEALTH) and an optional local AI advisor, and
-is released as archives built by CI. Still Python 3.8+, standard library only.
+A new web interface, the default from this release, built from the same model as the console; the console gets a tab bar, key figures and
+`[ui]`. Still Python 3.8+, standard library only.
 
 ### Upgrade notes
 
-- 1.4.0 and older have no updater: upgrade once by hand (extract the new release or `git pull`, then `sudo ./install.sh`; Windows:
-  `install-windows.cmd`). `config.ini` and the port baseline are kept. From 1.5.0 on, `nuc-console-update` does it.
-- New keys are not written into your `config.ini`. Each install refreshes `config.ini.dist` next to it:
-  `diff /etc/nuc-console/config.ini{,.dist}` lists them (Windows: in `%ProgramData%\nuc-console`).
-- The new screens are on by default: `[features] map`, `cpu`, `health` and `ai` default to `yes`. The advisor is off (`[ai] enabled = no`).
-  What that means for the root collector, each part off with its key (a disabled feature runs none of it):
-  - `map`: `ss` inside the network namespace of **every** running container (1.4.0: the database containers only) and
-    `systemctl show` for what depends on a failed unit.
-  - `health`: it keeps a history database, see below.
-  - `cpu`, macOS and Windows only: it reads the CPU temperature sensors (every 10 s on macOS, every 30 s on Windows).
-  - `ai`: the unprivileged screen reads the RAM and the GPU. Nothing is downloaded or started until *you* choose a model on the AI page or
-    the AI screen (or run `nuc-console-ai setup`).
-- **The AI page of the web view and the AI screen can act** (choose a model, AI on / off, delete, chat), unless `[ai] web_actions = no`
-  (default `yes`): see the AI folder below, Security, and [docs/AI.md](docs/AI.md#from-the-browser-and-the-console). The Linux units change:
-  `/var/lib/nuc-console/ai` is `nuc-console`'s and both units may write there (`ReadWritePaths=-`); the web unit's limits go from
-  256M / 64 tasks to `MemoryMax=85%` / `TasksMax=512`, because the model server it starts is a child in its cgroup (the rest of its
-  sandbox is unchanged). Re-run the installer; an AI folder that `sudo nuc-console-ai setup` filled earlier stays root's and usable
-  (`sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` lets the page delete it too).
-- New files and permissions:
-  - `history.db` (SQLite, with `-wal` and `-shm` beside it while the collector runs) in `/var/lib/nuc-console` (Windows:
-    `%ProgramData%\nuc-console\lib`). Written only by the collector; **mode 0644, readable by every local user, like the other state
-    files**. Names and counts only. A few MB (about 9 MB for 30 days of 200 apps an hour). Uninstalling leaves it; to start over, stop
-    the collector, delete it, start the collector.
-  - `sensors.json` in the runtime folder (macOS and Windows only). `net.json` gains the container links of the MAP and every state
-    file an `os` field.
-  - Downloads are kept for the next time: the installers' Python (Windows `%ProgramData%\nuc-console\cache`, macOS
-    `/Library/Caches/nuc-console`) and the updater's archive. The AI runtime and models, if you download any, are large and are kept when
-    you uninstall (`nuc-console-ai remove` deletes them).
-  - The AI folder (the runtime and the models, 0.4 to 19 GB) is the one the page shows: Linux `/var/lib/nuc-console/ai` (owner `nuc-console`),
-    macOS `/Library/Application Support/nuc-console/ai` (`_nuc-console`), Windows `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it,
-    nothing else of the data), a portable run `data/ai`. It holds `web.json` (the page's choices: on/off, model, endpoint; 0644) and
-    `job.lock`. It stays when you uninstall.
-  - A portable run writes only to the `data/` folder next to `run.sh` / `run.cmd`.
 - The web view is the new shell by default (`[ui] web = app`). To keep the classic pages for this release put `web = classic` under `[ui]` in `config.ini`;
   they will be removed in the next one. The display opens the shell too.
-- `[web] refresh_seconds` is still read while `[dashboard] refresh_seconds` is absent; use the latter.
-- `install.sh` now clears `/opt/nuc-console/*.py` before it copies every module: do not keep files of your own there.
 
 ### Added
 
@@ -98,6 +63,98 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   labelled values, the models as a table with the verdict as a pill and a button per row, the selected model's details, and the delete confirmations. The buttons are the
   same forms as on the classic page (same endpoints and CSRF token) and have keys (`e`, `c`, `u`, `x`, `X`, `y`, `n`); a locked page shows a notice and no form. The console
   draws the same model and looks exactly as before.
+
+### Changed
+
+- **The console has a tab bar, a KPI row, states on the sections and honours `[ui]`.** The first line of every console screen is now
+  ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ N PROBLEMS` (the current screen in reverse video and brackets, a screen
+  switched off left out, `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI` at 79 columns) instead of ` host │ <page> │ time`; from 30 rows up the second line is the KPI row (`[ui] kpis`
+  or the preset's), and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`). The body has one row less for it, so some screens show a line
+  less or move a block. `[ui]` is used by the console now: `theme` (`light`, `high-contrast`; `NO_COLOR` turns the colours off), `density` (`compact`, `wall`),
+  `layout` / `hidden` / `preset` / `order` for the overview's cards (without them the order is `[dashboard] sections`, as before; `order = severity` puts the worst
+  state first and a card moves only when a state changes) and `start_view` (a console with a keyboard opens at that screen; an idle screen goes back to it).
+- **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
+  README lists the keys). Breaking, compared with 1.5.0:
+  - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;
+  - `1`-`5` open the Overview, Map, CPU, Health and AI screens from anywhere (a disabled feature has no digit); `Tab` / `Shift+Tab` go round
+    the screens (`Tab` no longer opens the Map);
+  - the page jumps `1`-`3` of `mode = rotate` are now `←` `→` (and `PgUp` `PgDn`) on the Overview, held for a minute as before; `m` `c` `h` `a`
+    still open the Map, CPU, Health and AI screens, from the Overview only;
+  - `Esc` closes the details pane, then goes back to the Overview; `q` does the same on a screen and, on the Overview, quits a portable console
+    only; `m` / `c` / `h` / `a` no longer leave the screen they opened (they are that screen's letters: `c` collapses on the Map);
+  - new: `?` (the keys of this screen), `r` (redraw now), `Z` (pause or resume the redraw; the header says *paused*);
+  - the overview footer no longer says "keys 1-3: jump to page", and a monitor with no keyboard shows no keys at all.
+
+### Security
+
+- **The default web pages carry scripts.** Now that the shell is the default, `/` has three first-party inline scripts (partial refresh, keys,
+  preferences; a fourth on the layout editor), each pinned by its SHA-256 in that page's Content-Security-Policy (`script-src` lists exactly those
+  hashes, `connect-src 'self'`, Trusted Types for the fragment parser, `default-src 'none'`); the classic pages (`web = classic`, `app=0`) stay
+  script-free except their MAP graph. See [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
+- Every answer of the web view now carries `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`: no
+  other site can load a page as a resource, and a page opened from another site gets a window of its own.
+
+### Fixed
+
+- `--demo` no longer shows the real machine's memory, disk, uptime and load. Neither does it show its CPU cores, temperatures or network
+  traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
+  whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
+- A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
+- The `--demo` screens described one machine each (4 cores on the overview, 16 threads on the CPU screen, 32 GB on the AI screen, a 22 s boot in BOOT and a 58 s one in HEALTH). Each demo OS is now a single machine (cores, memory, uptime, load, temperatures, boot, disks) that every screen reads.
+- The web view answers `HEAD` like `GET` (same status and headers, no body) instead of `405`: link checkers and monitors that probe
+  with `HEAD` work. The token and `Host` checks are the same.
+- `/?token=…&view=map` (any view) kept the token in the cookie but landed on the dashboard. The redirect now keeps the view, rebuilt from
+  the parameters the page understands, checked; anything else is dropped and the token is never in the new address.
+- `render.py --open` (`[display] mode = browser`) ignored `[web] token_file`: the browser got `401`. It now puts the token in the address when
+  the logged-in user can read the file; when not (the usual case on macOS) it shows the dashboard from a page written to a file, as the
+  full-screen window does, and `display.log` says why.
+- Windows, `[display] mode = fullscreen` with neither Edge nor Chrome: nothing opened. Firefox is now found (it opens a window: **F11** for
+  full screen), and with no supported browser at all the default one opens (**F11** again), with a line in `display.log`.
+
+## [1.5.0] - 2026-10-02
+
+nuc-console now runs on Linux, macOS and Windows, has three new screens (MAP, CPU, HEALTH) and an optional local AI advisor, and
+is released as archives built by CI. Still Python 3.8+, standard library only.
+
+### Upgrade notes
+
+- 1.4.0 and older have no updater: upgrade once by hand (extract the new release or `git pull`, then `sudo ./install.sh`; Windows:
+  `install-windows.cmd`). `config.ini` and the port baseline are kept. From 1.5.0 on, `nuc-console-update` does it.
+- New keys are not written into your `config.ini`. Each install refreshes `config.ini.dist` next to it:
+  `diff /etc/nuc-console/config.ini{,.dist}` lists them (Windows: in `%ProgramData%\nuc-console`).
+- The new screens are on by default: `[features] map`, `cpu`, `health` and `ai` default to `yes`. The advisor is off (`[ai] enabled = no`).
+  What that means for the root collector, each part off with its key (a disabled feature runs none of it):
+  - `map`: `ss` inside the network namespace of **every** running container (1.4.0: the database containers only) and
+    `systemctl show` for what depends on a failed unit.
+  - `health`: it keeps a history database, see below.
+  - `cpu`, macOS and Windows only: it reads the CPU temperature sensors (every 10 s on macOS, every 30 s on Windows).
+  - `ai`: the unprivileged screen reads the RAM and the GPU. Nothing is downloaded or started until *you* choose a model on the AI page or
+    the AI screen (or run `nuc-console-ai setup`).
+- **The AI page of the web view and the AI screen can act** (choose a model, AI on / off, delete, chat), unless `[ai] web_actions = no`
+  (default `yes`): see the AI folder below, Security, and [docs/AI.md](docs/AI.md#from-the-browser-and-the-console). The Linux units change:
+  `/var/lib/nuc-console/ai` is `nuc-console`'s and both units may write there (`ReadWritePaths=-`); the web unit's limits go from
+  256M / 64 tasks to `MemoryMax=85%` / `TasksMax=512`, because the model server it starts is a child in its cgroup (the rest of its
+  sandbox is unchanged). Re-run the installer; an AI folder that `sudo nuc-console-ai setup` filled earlier stays root's and usable
+  (`sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` lets the page delete it too).
+- New files and permissions:
+  - `history.db` (SQLite, with `-wal` and `-shm` beside it while the collector runs) in `/var/lib/nuc-console` (Windows:
+    `%ProgramData%\nuc-console\lib`). Written only by the collector; **mode 0644, readable by every local user, like the other state
+    files**. Names and counts only. A few MB (about 9 MB for 30 days of 200 apps an hour). Uninstalling leaves it; to start over, stop
+    the collector, delete it, start the collector.
+  - `sensors.json` in the runtime folder (macOS and Windows only). `net.json` gains the container links of the MAP and every state
+    file an `os` field.
+  - Downloads are kept for the next time: the installers' Python (Windows `%ProgramData%\nuc-console\cache`, macOS
+    `/Library/Caches/nuc-console`) and the updater's archive. The AI runtime and models, if you download any, are large and are kept when
+    you uninstall (`nuc-console-ai remove` deletes them).
+  - The AI folder (the runtime and the models, 0.4 to 19 GB) is the one the page shows: Linux `/var/lib/nuc-console/ai` (owner `nuc-console`),
+    macOS `/Library/Application Support/nuc-console/ai` (`_nuc-console`), Windows `%ProgramData%\nuc-console\ai` (LOCAL SERVICE may modify it,
+    nothing else of the data), a portable run `data/ai`. It holds `web.json` (the page's choices: on/off, model, endpoint; 0644) and
+    `job.lock`. It stays when you uninstall.
+  - A portable run writes only to the `data/` folder next to `run.sh` / `run.cmd`.
+- `[web] refresh_seconds` is still read while `[dashboard] refresh_seconds` is absent; use the latter.
+- `install.sh` now clears `/opt/nuc-console/*.py` before it copies every module: do not keep files of your own there.
+
+### Added
 
 **Windows and macOS**
 
@@ -228,25 +285,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
-- **The console has a tab bar, a KPI row, states on the sections and honours `[ui]`.** The first line of every console screen is now
-  ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ N PROBLEMS` (the current screen in reverse video and brackets, a screen
-  switched off left out, `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI` at 79 columns) instead of ` host │ <page> │ time`; from 30 rows up the second line is the KPI row (`[ui] kpis`
-  or the preset's), and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`). The body has one row less for it, so some screens show a line
-  less or move a block. `[ui]` is used by the console now: `theme` (`light`, `high-contrast`; `NO_COLOR` turns the colours off), `density` (`compact`, `wall`),
-  `layout` / `hidden` / `preset` / `order` for the overview's cards (without them the order is `[dashboard] sections`, as before; `order = severity` puts the worst
-  state first and a card moves only when a state changes) and `start_view` (a console with a keyboard opens at that screen; an idle screen goes back to it).
-  The web view does not read `[ui]` yet.
-- **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
-  README lists the keys). Breaking, compared with the keys of the screens as they were in development:
-  - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;
-  - `1`-`5` open the Overview, Map, CPU, Health and AI screens from anywhere (a disabled feature has no digit); `Tab` / `Shift+Tab` go round
-    the screens (`Tab` no longer opens the Map);
-  - the page jumps `1`-`3` of `mode = rotate` are now `←` `→` (and `PgUp` `PgDn`) on the Overview, held for a minute as before; `m` `c` `h` `a`
-    still open the Map, CPU, Health and AI screens, from the Overview only;
-  - `Esc` closes the details pane, then goes back to the Overview; `q` does the same on a screen and, on the Overview, quits a portable console
-    only; `m` / `c` / `h` / `a` no longer leave the screen they opened (they are that screen's letters: `c` collapses on the Map);
-  - new: `?` (the keys of this screen), `r` (redraw now), `Z` (pause or resume the redraw; the header says *paused*);
-  - the overview footer no longer says "keys 1-3: jump to page", and a monitor with no keyboard shows no keys at all.
 - A `config.ini` that cannot be read at all (for example a key starting with `:`) raises `config-unreadable` in ATTENTION instead of
   falling back to the defaults in silence; a key written twice no longer makes the whole file unreadable (the last one wins).
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
@@ -263,10 +301,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Security
 
-- **The default web pages carry scripts.** Now that the shell is the default, `/` has three first-party inline scripts (partial refresh, keys,
-  preferences; a fourth on the layout editor), each pinned by its SHA-256 in that page's Content-Security-Policy (`script-src` lists exactly those
-  hashes, `connect-src 'self'`, Trusted Types for the fragment parser, `default-src 'none'`); the classic pages (`web = classic`, `app=0`) stay
-  script-free except their MAP graph. See [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
 - **The web view has one script now.** Every page is still GET only, with no JavaScript and `default-src 'none'`, except the MAP's graph
   view: one inline script whose SHA-256 is in that page's Content-Security-Policy. It builds no markup, opens no connection and loads
   nothing; `tests/test_graphjs.py` rejects changes that would let it. The MAP pages are bounded (unknown keys dropped, a capped page cache).
@@ -278,8 +312,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   the catalog (nothing from a request reaches a path, a command line or a shell), Post/Redirect/Get, `form-action 'self'` in the CSP of
   that one page and `'none'` everywhere else, still no JavaScript there. The web account can replace what is in the AI folder, which is why
   `serve --install-service` hashes it again. Details: [SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md#the-ai-pages-buttons).
-- Every answer of the web view now carries `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`: no
-  other site can load a page as a resource, and a page opened from another site gets a window of its own.
 - macOS and Windows run the web view by default, bound to `127.0.0.1` with no token: not reachable from the network, but readable by any
   local user or program, like the state files. `[display] mode = none` with `[web] enabled = no` runs none.
 - macOS and Windows collector: Apple's tools run as root only from protected system folders; third-party tools (`docker`, `tailscale`,
@@ -312,26 +344,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Fixed
 
-- `--demo` no longer shows the real machine's memory, disk, uptime and load. Neither does it show its CPU cores, temperatures or network
-  traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
-  whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
-- A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
-- The `--demo` screens described one machine each (4 cores on the overview, 16 threads on the CPU screen, 32 GB on the AI screen, a 22 s boot in BOOT and a 58 s one in HEALTH). Each demo OS is now a single machine (cores, memory, uptime, load, temperatures, boot, disks) that every screen reads.
 - The web view drew its pages one column narrower than asked: at the default 200 columns that is 199, below the 2-column layout, and
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
 - A long host name no longer pushes the problem status off the header (`✖ 4 PROBLEMS` was cut to `✖ 4 PROBLE`).
 - Docker installed but not running (Docker Desktop closed, the daemon stopped) is shown as such in DATABASE, not as a collector
   error on every cycle.
-- The web view answers `HEAD` like `GET` (same status and headers, no body) instead of `405`: link checkers and monitors that probe
-  with `HEAD` work. The token and `Host` checks are the same.
-- `/?token=…&view=map` (any view) kept the token in the cookie but landed on the dashboard. The redirect now keeps the view, rebuilt from
-  the parameters the page understands, checked; anything else is dropped and the token is never in the new address.
-- `render.py --open` (`[display] mode = browser`) ignored `[web] token_file`: the browser got `401`. It now puts the token in the address when
-  the logged-in user can read the file; when not (the usual case on macOS) it shows the dashboard from a page written to a file, as the
-  full-screen window does, and `display.log` says why.
-- Windows, `[display] mode = fullscreen` with neither Edge nor Chrome: nothing opened. Firefox is now found (it opens a window: **F11** for
-  full screen), and with no supported browser at all the default one opens (**F11** again), with a line in `display.log`.
 
 ## [1.4.0] - 2026-10-01
 
