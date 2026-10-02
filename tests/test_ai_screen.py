@@ -284,13 +284,16 @@ class Navigation(AiCase):
         self.press(av, rows, ["space"])
         self.assertFalse(av.details)
 
-    def test_a_esc_q_leave_the_screen_and_change_nothing(self):
+    def test_esc_q_leave_the_screen_and_change_nothing(self):
         av, rows = self.view()
         self.press(av, rows, ["down", "down"])
         before = (av.idx, av.details)
-        for key in ("a", "esc", "q"):
+        for key in ("esc", "q"):
             self.assertEqual(render.ai_key(av, key, rows), "back")
+        self.assertEqual(render.ai_key(av, "a", rows), "")  # a is the overview's letter now
         self.assertEqual((av.idx, av.details), before)
+        render.ai_key(av, "enter", rows)
+        self.assertEqual([render.ai_key(av, "esc", rows), av.details, render.ai_key(av, "esc", rows)], ["", False, "back"])  # details first
 
     def test_the_keys_that_act_are_named_for_ai_do_and_move_nothing(self):
         av, rows = self.view()
@@ -298,7 +301,8 @@ class Navigation(AiCase):
         before = (av.idx, av.cur, av.details)
         self.assertEqual(self.press(av, rows, ["e", "u", "x", "X", "c"]), ["toggle", "use", "delete", "delete-all", "cancel"])
         self.assertEqual((av.idx, av.cur, av.details), before)
-        self.assertEqual(render.AI_ACTION_KEYS, {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"})
+        self.assertEqual({k: r.action for r in render.ui.KEYMAP if r.scope == "ai" and r.action in render.AI_ACTIONS for k in r.keys},
+                         {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"})
 
     def test_a_question_that_waits_takes_y_and_any_other_key_is_no(self):
         av, rows = self.view()
@@ -950,39 +954,39 @@ class Footer(AiCase):
     def test_the_overview_offers_the_ai_screen_when_there_is_a_keyboard_and_the_feature_is_on(self):
         slide = ("Overview", 1, 1, ["x"])
         on = render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
-        self.assertIn("m: map   c: cpu   h: health   a: ai   console", on)                                # after the others
-        self.assertNotIn("a: ai", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
-        self.assertNotIn("a: ai", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, aikey=False)))
-        self.assertIn("a: ai", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, aikey=True)))
+        self.assertIn("1-5: screens   ?: help   console", on)                                              # 5 is the AI screen
+        self.assertNotIn("screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
+        self.assertIn("1-4: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, aikey=False)))
+        self.assertIn("1 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, aikey=True)))
         render.CFG["features"]["ai"] = False
-        self.assertNotIn("a: ai", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1-4: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         render.CFG["features"]["ai"] = True
         render.CFG["features"]["health"] = False
-        self.assertIn("a: ai", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1-3 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         two = render.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
         self.assertLessEqual(len(two), 79)
         one = render.ANSI.sub("", render.frame(slide, 0, 1, 79, 24, [], keys=True)).split("\r\n")[-1]
-        self.assertIn("a: ai   console 80x24", one)                                                      # and it fits the narrowest footer
+        self.assertIn("console 80x24", one)                                                              # and it fits the narrowest footer
 
     def test_the_ai_footer_gives_up_keys_from_the_least_needed_when_narrow(self):
         av = render.AiView(now=NOW)
         seen = []
-        for w in (140, 100, 78, 60, 40, 24, 12):
+        for w in (200, 100, 78, 60, 40, 24, 12):
             text = render.ANSI.sub("", render.ai_footer(av, 12, w))
             seen.append(text)
             self.assertLessEqual(len(text), w)
         self.assertIn("PgUp/PgDn/Home/End: page", seen[0])
         self.assertNotIn("PgUp", seen[2])
-        self.assertIn("a/Esc: back", seen[0])
-        self.assertIn("a: back", seen[4])
+        self.assertIn("Esc: back", seen[0])
+        self.assertIn("Esc: back", seen[4])
         self.assertIn("model 1/12", seen[0])
         av.details = True
-        self.assertIn("Enter: hide details", render.ANSI.sub("", render.ai_footer(av, 12, 140)))
+        self.assertIn("Enter: hide details", render.ANSI.sub("", render.ai_footer(av, 12, 200)))
         self.assertIn("no models", render.ANSI.sub("", render.ai_footer(av, 0, 140)))
 
 
 class MainLoop(AiCase):
-    """render.main() on a fake terminal: `a` opens the AI screen, its keys move it, a/Esc/q go back, an idle one gives the monitor back.
+    """render.main() on a fake terminal: `a` opens the AI screen, its keys move it, Esc/q/1 go back, an idle one gives the monitor back.
     KEY_CHAR & co. decode the raw reads, as on a real console."""
 
     def run_main(self, script, keyboard=True, cols=80, rows=24):
@@ -1034,9 +1038,9 @@ class MainLoop(AiCase):
         return (int(m.group(1)), int(m.group(2))) if m else None
 
     def test_a_opens_the_screen_keys_move_it_and_a_esc_q_go_back(self):
-        frames, restored = self.run_main([b"a", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"a", b"a", b"\x1b", b"a", b"q"])
+        frames, restored = self.run_main([b"a", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"1", b"5", b"\x1b", b"a", b"q"])
         self.assertEqual([self.is_ai(f) for f in frames], [False, True, True, True, True, True, True, False, True, False, True, False])
-        self.assertIn("a: ai", frames[0][-1])                                            # a keyboard: the footer offers it
+        self.assertIn("1-5: screens", frames[0][-1])                                     # a keyboard: the footer offers the screens (5 is this one)
         self.assertIn("overview page (stub)", "\n".join(frames[0]))
         self.assertEqual(self.at(frames[1]), (3, 12))                                    # opened on the recommended model (Phi-4 14B)
         self.assertEqual(self.at(frames[2]), (5, 12))                                    # ↓ (CSI) ↓ (SS3)
@@ -1061,7 +1065,7 @@ class MainLoop(AiCase):
         text = lambda f: "\n".join(f)  # noqa: E731
         self.assertIn("● ON", text(ai[0]))
         self.assertIn("on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1", text(ai[0]))
-        self.assertIn("e: on/off  u: use  x: del", ai[0][-1])                         # the keys are in the footer (in short words: it is 80 columns wide)
+        self.assertIn("e: on/off  u: use", ai[0][-1])                         # the keys are in the footer (in short words: it is 80 columns wide)
         self.assertIn("○ OFF", text(ai[1]), "e: off")
         self.assertIn("AI is off", text(ai[1]))
         self.assertTrue("◐ WORKING" in text(ai[2]) or "● ON" in text(ai[2]), "e again: it is on its way (or there already)")
@@ -1186,7 +1190,7 @@ class MainLoop(AiCase):
         error = lambda f: " │ AI │ " in f[0] and "error on the AI screen" in f[1]  # noqa: E731
         self.assertEqual([error(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
-        self.assertEqual(frames[1][-1].strip(), "a/Esc back")
+        self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
         self.assertNotIn("ALL OK", frames[1][0])                                         # nothing could be read: never a reassuring status
 
     def test_a_broken_screen_does_not_say_all_ok(self):
@@ -1200,9 +1204,9 @@ class MainLoop(AiCase):
 
     def test_no_catalog_and_a_narrow_console(self):
         render.ai_build = lambda now: {"cat": None, "msg": "the model catalog could not be read: x", "err": True, "at": now}
-        frames, _ = self.run_main([b"a", b"\x1b[B", b"\r", b"\x1b"], cols=80, rows=24)
+        frames, _ = self.run_main([b"a", b"\x1b[B", b"\r", b"\x1b", b"\x1b"], cols=80, rows=24)  # Esc: the details, then back
         ai = [f for f in frames if " │ AI │ " in f[0]]
-        self.assertEqual(len(ai), 3)
+        self.assertEqual(len(ai), 4)
         for f in ai:
             self.assertIn("the model catalog could not be read: x", "\n".join(f))
             self.assertIn("no models", f[-1])

@@ -202,7 +202,7 @@ or `setfont Lat15-TerminusBold32x16` for a one-off test. To let the monitor slee
 
 ## 7. Optional: a local AI model
 
-The AI screen (console key `a`) and the **AI** page of the web view (`http://127.0.0.1:8787/?view=ai`, the **ai** link at the bottom) already tell
+The AI screen (console key `5`) and the **AI** page of the web view (`http://127.0.0.1:8787/?view=ai`, the **ai** link at the bottom) already tell
 you which local models this machine can run: RAM, GPU and GPU memory, one verdict per model. They are also where you set one up and let it
 explain the HEALTH findings and answer questions ([AI.md](AI.md) has the choice, the GPU notes and the security rules). **You only choose a model**:
 press **use this model** on the page (or `Enter` then `u` on the screen); the runtime and the model are downloaded (with a progress bar, SHA-256 checked),

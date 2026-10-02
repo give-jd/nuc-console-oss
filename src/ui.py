@@ -433,3 +433,225 @@ class Details(_Component):
 
     def __init__(self, summary, body=(), open=False):
         self.summary, self.body, self.open = _inline(summary), list(body), bool(open)
+
+
+# ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------
+#
+# Key names are the ones render.decode_keys / render.win_key produce: up down left right pgup pgdn home end tab btab enter esc space,
+# or the character typed. Letters are local to a screen; digits and symbols are global.
+#
+# A row is (keys, scope, action, label, prio) plus how it is shown: `show` (the keys as the footer and the help print them), `short`
+# (the label when the footer is narrow: None = the same, "" = none, the row is dropped first), `feat` (the [features] switch that has
+# to be on, or "portable" for a portable console). prio: 0 = the last footer item to go when the width is short, a larger number goes
+# before; None = not in the footers, only in the help.
+
+class Key(object):
+    """One row of KEYMAP (read only by convention)."""
+    __slots__ = ("keys", "scope", "action", "label", "prio", "show", "short", "feat")
+
+    def __init__(self, keys, scope, action, label, prio, show="", short=None, feat=""):
+        self.keys, self.scope, self.action, self.label, self.prio, self.show, self.short, self.feat = keys, scope, action, label, prio, show, short, feat
+
+    def __repr__(self):
+        return f"Key({self.keys!r}, {self.scope!r}, {self.action!r})"
+
+
+def _k(keys, scope, action, label, prio, show="", short=None, feat=""):
+    return Key(tuple(keys.split()) if isinstance(keys, str) else tuple(keys), scope, action, label, prio, show, short, feat)
+
+
+# scopes: global (every screen), overview, list (map cpu health ai), then one per screen; editor is the web layout editor (documented
+# only: the console never dispatches it)
+SCOPES = ("global", "overview", "list", "map", "cpu", "health", "ai", "editor")
+LIST_SCREENS = ("map", "cpu", "health", "ai")
+# the screens 1-5 open: (name, [features] switch that has to be on or "", the title in the help)
+SCREENS = (("overview", "", "Overview"), ("map", "map", "Map"), ("cpu", "cpu", "CPU"), ("health", "health", "Health"), ("ai", "ai", "AI"))
+HOLD_ALIAS = {"m": "map", "c": "cpu", "h": "health", "a": "ai"}  # the overview's old letters: they still open the screen
+
+KEYMAP = (
+    # -- every screen
+    _k("1 2 3 4 5", "global", "screen", "screens", 6, "1-5"),
+    _k("esc", "global", "back", "back", 0, "Esc"),
+    _k("q", "global", "back", "back", None, "q"),
+    _k("?", "global", "help", "help", 1, "?"),
+    _k("r", "global", "redraw", "redraw now", None, "r"),
+    _k("Z", "global", "pause", "pause/resume the redraw", None, "Z"),
+    _k("tab", "global", "next", "next screen", None, "Tab"),
+    _k("btab", "global", "prev", "previous screen", None, "Shift+Tab"),
+    # -- the overview
+    _k("left pgup", "overview", "slide-prev", "slide", 2, "←→", short="←→: slide"),
+    _k("right pgdn", "overview", "slide-next", "next slide", None, "→"),
+    _k("m", "overview", "open-map", "open the Map", None, "m", feat="map"),
+    _k("c", "overview", "open-cpu", "open the CPU screen", None, "c", feat="cpu"),
+    _k("h", "overview", "open-health", "open the Health screen", None, "h", feat="health"),
+    _k("a", "overview", "open-ai", "open the AI screen", None, "a", feat="ai"),
+    # -- every list (map, cpu, health, ai)
+    _k("up down j k", "list", "move", "move", 2, "↑↓"),
+    _k("pgup pgdn home end", "list", "page", "page", 9, "PgUp/PgDn/Home/End", short=""),
+    _k("enter space", "list", "details", "details", 4, "Enter", short="details"),
+    # -- map
+    _k("left h", "map", "close", "close/open", 3, "←→", short="open"),
+    _k("right l", "map", "open", "open", None, "→ l"),
+    _k("e", "map", "expand", "expand/collapse all", 7, "e/c", short="all"),
+    _k("c", "map", "collapse", "collapse all", None, "c"),
+    _k("p", "map", "problems", "problems only", 5, "p", short="problems"),
+    # -- cpu (upper case too: P and p are the same key)
+    _k("p m t n u P M T N U", "cpu", "sort", "sort", 3, "p m t n u"),
+    # -- health
+    _k("d w m", "health", "period", "24h/7d/30d", 3, "d/w/m", short="period"),
+    # -- ai (the keys that act are there unless [ai] web_actions = no locked them)
+    _k("e", "ai", "toggle", "AI on/off", 3, "e", short="on/off"),
+    _k("u", "ai", "use", "use model", 3.1, "u", short="use"),
+    _k("x", "ai", "delete", "delete", 5, "x", short="del"),
+    _k("X", "ai", "delete-all", "delete all", 6, "X", short="all"),
+    _k("c", "ai", "cancel", "cancel", 5.1, "c"),
+    _k("y n", "ai", "answer", "answer a question", None, "y/n"),
+    # -- the web layout editor (?edit=1): documented here, drawn by the page
+    _k("space", "editor", "grab", "grab or drop a card", None, "Space"),
+    _k("up down left right", "editor", "nudge", "move it", None, "←↑↓→"),
+    _k("+ -", "editor", "size", "bigger/smaller", None, "+ -"),
+    _k("x", "editor", "hide", "hide the card", None, "x"),
+    _k("esc", "editor", "cancel", "let go", None, "Esc"),
+)
+
+PRIO_LAST = 99  # the footer's own items (the console size, a note): they go before any key
+
+
+def chain(scope):
+    """The scopes a screen's keys come from, most specific first."""
+    if scope in ("global", "editor"):  # the editor is a modal state of the web page: its Esc is its own
+        return [scope]
+    return [scope] + (["list"] if scope in LIST_SCREENS else []) + ["global"]
+
+
+def rows(scope, enabled=None):
+    """The rows in force on a screen, in the order a footer shows them (its list's, its own, the global ones; table order within each). enabled: a function
+    (feature name) -> bool that gates the rows with a `feat` (default: all on)."""
+    ok = enabled or (lambda f: True)
+    order = (["list"] if scope in LIST_SCREENS else []) + chain(scope)[:1] + (["global"] if scope not in ("global", "editor") else [])
+    return [r for s in order for r in KEYMAP if r.scope == s and (not r.feat or r.feat == "portable" or ok(r.feat))]
+
+
+def lookup(scope, key):
+    """The row a key does on a screen, or None: the screen's own row first, then its list's, then the global one."""
+    for s in chain(scope):
+        for r in KEYMAP:
+            if r.scope == s and key in r.keys:
+                return r
+    return None
+
+
+def action(scope, key, enabled=None):
+    """The action a key does on a screen ('' = none). A row whose feature is off does nothing, as if it was not there."""
+    r = lookup(scope, key)
+    if r is None or (r.feat and r.feat != "portable" and enabled and not enabled(r.feat)):
+        return ""
+    return r.action
+
+
+def screen_keys(enabled=None):
+    """[(digit, screen name)] of the screens a digit opens now: a disabled feature has no digit's action and is not shown."""
+    ok = enabled or (lambda f: True)
+    return [(str(i + 1), name) for i, (name, feat, _t) in enumerate(SCREENS) if not feat or ok(feat)]
+
+
+def screens_show(enabled=None):
+    """'1-5', or '1 3-5' when a screen is off: the digits that do something."""
+    nums, runs, i = [int(d) for d, _n in screen_keys(enabled)], [], 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        runs.append(str(nums[i]) if i == j else " ".join(map(str, nums[i:j + 1])) if j == i + 1 else f"{nums[i]}-{nums[j]}")
+        i = j + 1
+    return " ".join(runs)
+
+
+def fit(lead, items, w):
+    """The footer's plain text: lead + the items, each (prio, long, short), in their order. When it does not fit w columns the short
+    forms are used (an item without one goes), then the items with the largest prio go one by one (the last of equals first).
+    The footer's own items (the console size...) come with a large prio (PRIO_LAST): they are the first to go. Returns the text; one
+    item is always kept."""
+    items = list(items)
+    text = lead + "   ".join(a for _p, a, _b in items)
+    keys = [(p, i, a, b if b is not None else a) for i, (p, a, b) in enumerate(items)]
+    if len(text) <= w:
+        return text
+    keys = [k for k in keys if k[3]]
+    while keys:
+        text = lead.rstrip() + "  " + "  ".join(k[3] for k in keys)
+        if len(text) <= w or len(keys) == 1:
+            return text
+        keys.remove(max(keys, key=lambda k: (k[0], k[1])))
+    return lead.rstrip()
+
+
+def footer_items(scope, enabled=None, dyn=None, skip=()):
+    """[(prio, long, short)] of a screen's keys for fit(): the rows with a prio, as 'show: label'. dyn: {action: (long, short) | None}
+    replaces a row's whole text (the label that changes, e.g. 'hide details') or hides it (None); skip: actions left out."""
+    dyn = dyn or {}
+    out = []
+    for r in rows(scope, enabled):
+        if r.prio is None or r.action in skip:
+            continue
+        if r.action == "screen":
+            show, long_, short = screens_show(enabled), r.label, None
+        else:
+            show, long_, short = r.show, r.label, r.short
+        if r.action in dyn:
+            if dyn[r.action] is None:
+                continue
+            text = dyn[r.action]
+            out.append((r.prio, text[0], text[1] if len(text) > 1 else None))
+            continue
+        out.append((r.prio, f"{show}: {long_}", None if short is None else (f"{show}: {short}" if short else "")))
+    return out
+
+
+def footer(scope, lead, w, enabled=None, dyn=None, skip=(), extra=()):
+    """A screen's footer, plain text of at most w columns (the caller colours it). extra: more (prio, long, short) items."""
+    return fit(lead, footer_items(scope, enabled, dyn, skip) + list(extra), w)
+
+
+HELP_PAIR = {"next": ("Tab/Shift+Tab", "next/previous screen"), "slide-prev": ("←→ PgUp/PgDn", "previous/next slide"),
+             "close": ("←→ h l", "close (or the parent)/open"), "expand": ("e c", "expand/collapse all"), "delete": ("x X", "delete/delete all")}
+HELP_MERGED = ("prev", "slide-next", "open", "collapse", "delete-all")  # said by the line of their pair
+GROUP_TITLE = {"global": "Everywhere", "list": "Lists", "ai": "AI", "cpu": "CPU"}
+
+
+def help_rows(scope, enabled=None, portable=False, paused=False):
+    """[(group title, [(keys shown, what it does)])] for the `?` overlay: the screen's own keys first, then the global ones."""
+    ok = enabled or (lambda f: True)
+    names = {n: t for n, _f, t in SCREENS}
+    groups = []
+    for s in chain(scope):
+        items = []
+        for r in KEYMAP:
+            if r.scope != s or (r.feat and r.feat != "portable" and not ok(r.feat)):
+                continue
+            show, what = r.show, r.label
+            if r.action in HELP_MERGED:  # one line for a pair of keys that do the opposite
+                continue
+            if r.action in HELP_PAIR:
+                show, what = HELP_PAIR[r.action]
+            elif r.action == "screen":
+                show, what = screens_show(ok), ", ".join(names[n] for _d, n in screen_keys(ok))
+            elif r.action == "back" and r.keys == ("esc",):
+                what = "close details or help, else back" if scope != "overview" else "close the help"
+            elif r.action == "back":  # q
+                if scope == "overview":
+                    if not portable:
+                        continue
+                    what = "quit"
+                else:
+                    what = "like Esc"
+            elif r.action == "pause":
+                what = "resume the redraw" if paused else "pause the redraw"
+            elif r.action == "help":
+                what = "this help"
+            elif r.action.startswith("open-"):
+                what += " (as " + {"m": "2", "c": "3", "h": "4", "a": "5"}[r.keys[0]] + ")"
+            items.append((show, what))
+        if items:
+            groups.append((GROUP_TITLE.get(s, s.capitalize()), items))
+    return groups

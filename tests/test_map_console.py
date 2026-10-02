@@ -292,14 +292,26 @@ class Navigation(MapCase):
             seen.append(mv.idx)
         self.assertEqual(seen, [5, 10, 5, n - 1, n - 1, n - 6, 0, 0])
 
-    def test_m_tab_esc_q_leave_the_map_and_change_nothing(self):
+    def test_esc_q_leave_the_map_and_change_nothing(self):
         G, mv = demo_graph(), render.MapView(now=NOW)
-        self.press(G, mv, ["down", "right", "enter"])
+        self.press(G, mv, ["down", "right"])
         before = (mv.idx, mv.cur, mv.details, set(mv.st.open), mv.st.all, mv.st.only)
-        for k in ("m", "tab", "btab", "esc", "q"):
+        for k in ("esc", "q"):
             rs, acts = self.press(G, mv, [k])
             self.assertEqual(acts, ["back"], k)
             self.assertEqual((mv.idx, mv.cur, mv.details, mv.st.open, mv.st.all, mv.st.only), before, k)
+        for k in ("m", "tab", "btab", "1", "2", "?", "r", "Z"):  # the keys of every screen are the dispatcher's: the Map does nothing
+            rs, acts = self.press(G, mv, [k])
+            self.assertEqual(acts, [""], k)
+            self.assertEqual((mv.idx, mv.cur, mv.details, mv.st.open, mv.st.all, mv.st.only), before, k)
+
+    def test_esc_closes_the_details_pane_before_it_goes_back(self):
+        G, mv = demo_graph(), render.MapView(now=NOW)
+        self.press(G, mv, ["down", "enter"])
+        self.assertTrue(mv.details)
+        self.assertEqual(self.press(G, mv, ["esc", "esc"])[1], ["", "back"])
+        self.press(G, mv, ["enter"])
+        self.assertEqual(self.press(G, mv, ["q", "q"])[1], ["", "back"])
 
     def test_other_keys_do_nothing_and_no_rows_is_not_an_error(self):
         G, mv = demo_graph(), render.MapView(now=NOW)
@@ -312,7 +324,7 @@ class Navigation(MapCase):
         keys = ["up", "down", "left", "right", "h", "l", "pgup", "pgdn", "home", "end", "c", "x"]
         rs, acts = self.press(empty, mv, keys)                                         # press() checks: no cursor, index 0
         self.assertEqual((rs, acts), ([], [""] * len(keys)))
-        self.assertEqual(self.press(empty, mv, ["e", "p", "enter", "esc"])[1], ["rows", "rows", "", "back"])
+        self.assertEqual(self.press(empty, mv, ["e", "p", "enter", "esc", "esc"])[1], ["rows", "rows", "", "", "back"])
 
     def test_the_cursor_follows_its_row_through_a_refresh(self):
         G, mv = demo_graph(), render.MapView(now=NOW)
@@ -536,10 +548,10 @@ class Once(MapCase):
                     self.assertIn("5/21" + ("+" if truncated else ""), f, w)
         wide = render.ANSI.sub("", render.map_footer(mv, 21, 200))
         self.assertIn("row 5/21", wide)
-        for k in ("PgUp/PgDn/Home/End: page", "e/c: expand/collapse all", "m/Esc: back", "Enter: hide details"):
+        for k in ("PgUp/PgDn/Home/End: page", "e/c: expand/collapse all", "Esc: back", "?: help", "1-5: screens", "Enter: hide details"):
             self.assertIn(k, wide)
         narrow = render.ANSI.sub("", render.map_footer(mv, 21, 78))
-        self.assertIn("m: back", narrow)                                                # the way out is the last key to go
+        self.assertIn("Esc: back", narrow)                                                # the way out is the last key to go
         self.assertNotIn("PgUp", narrow)
         self.assertIn("━━► seen", render.ANSI.sub("", render.map_title(G, 200)))       # the legend when there is room
         self.assertIn("row 0/0", render.ANSI.sub("", render.map_footer(mv, 0, 200)))  # no rows at all
@@ -593,7 +605,8 @@ class Rotation(MapCase):
         render.CFG["features"]["map"] = False
         self.assertNotIn("Map", [x[0] for x in self.slides(199, 48)])
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=True)
-        self.assertNotIn("m: map", render.ANSI.sub("", frame))                         # and the footer does not offer it
+        self.assertNotIn("1-5: screens", render.ANSI.sub("", frame))                   # and the footer does not offer 2
+        self.assertIn("1 3-5: screens", render.ANSI.sub("", frame))
 
     def test_a_broken_map_slide_is_an_error_line_not_a_crash(self):
         render.CFG["map_in_rotation"] = True
@@ -627,7 +640,7 @@ class Rotation(MapCase):
 
 
 class MainLoop(MapCase):
-    """render.main() on a fake terminal: `m` opens the Map, its keys move it, m/Tab/Esc go back, an idle Map gives the
+    """render.main() on a fake terminal: `m` opens the Map, its keys move it, 1/Esc go back, an idle Map gives the
     monitor back. KEY_CHAR & co. decode the raw reads, as on a real console."""
 
     def run_main(self, script, keyboard=True, cols=80, rows=24):
@@ -674,10 +687,10 @@ class MainLoop(MapCase):
         G = render.map_graph()[0]
         n0 = len(graph.rows(G))
         page = max(1, render.map_layout(G, 79, 22, True)[1] - 1)                        # PgDn: a tree page minus one, details open
-        frames, restored = self.run_main([b"m", b"\x1b[B\x1bOB", b"\x1b[C\x1b[C\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"\t",
-                                          b"\t", b"\x1b"])
+        frames, restored = self.run_main([b"m", b"\x1b[B\x1bOB", b"\x1b[C\x1b[C\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"1",
+                                          b"2", b"\x1b"])
         self.assertEqual([self.is_map(f) for f in frames], [False, True, True, True, True, True, True, False, True, False])
-        self.assertIn("m: map", frames[0][-1])                                         # a keyboard: the footer offers the Map
+        self.assertIn("1-5: screens", frames[0][-1])                                   # a keyboard: the footer offers the screens (2 is the Map)
         self.assertIn("overview page (stub)", "\n".join(frames[0]))
         self.assertEqual(pos(frames[1]), (1, n0))                                      # opened like `--expand none`
         self.assertEqual(pos(frames[2]), (3, n0))                                      # ↓ (CSI) ↓ (SS3): LAN
@@ -686,7 +699,7 @@ class MainLoop(MapCase):
         self.assertIn("── DETAILS", "\n".join(frames[4]))                              # Enter
         self.assertEqual(pos(frames[5]), (5 + page, n0 + 1))                           # PgDn
         self.assertEqual(pos(frames[6]), (1, n0 + 1))                                  # Home
-        self.assertEqual(pos(frames[8]), (1, n0))                                      # Tab back, Tab again: a new Map
+        self.assertEqual(pos(frames[8]), (1, n0))                                      # 1 back, 2 again: a new Map
         self.assertNotIn("DETAILS", "\n".join(frames[8]))
         self.assertEqual(restored, [["attrs", 5]])                                     # the terminal's settings are put back
 
@@ -699,14 +712,14 @@ class MainLoop(MapCase):
     def test_without_a_keyboard_the_map_is_not_offered(self):
         frames, restored = self.run_main([2, 2], keyboard=False)
         self.assertEqual(len(frames), 3)
-        self.assertFalse([f for f in frames if self.is_map(f) or "m: map" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_map(f) or "screens" in f[-1]])
         self.assertEqual(restored, [])                                                 # no terminal settings were changed
 
-    def test_feature_off_m_and_tab_do_nothing(self):
+    def test_feature_off_m_and_2_do_nothing(self):
         render.CFG["features"]["map"] = False
-        frames, restored = self.run_main([b"m", b"\t", b"m", b"\x1b[B"])
+        frames, restored = self.run_main([b"m", b"2", b"m", b"\x1b[B"])
         self.assertEqual(len(frames), 5)
-        self.assertFalse([f for f in frames if self.is_map(f) or "m: map" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_map(f) or "1-5: screens" in f[-1]])
         self.assertEqual(restored, [["attrs", 5]])
 
     def failing_once(self):
@@ -730,7 +743,7 @@ class MainLoop(MapCase):
         frames, _ = self.run_main([b"m", render.REFRESH_S, b"\x1b", b"m", b"\x1b"])   # check_frame: no raw escape on screen
         self.assertEqual([self.error_frame(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
-        self.assertEqual(frames[1][-1].strip(), "m/Esc back")
+        self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
         self.assertEqual([self.is_map(f) for f in frames], [False, False, True, False, True, False])  # the next refresh draws it
         self.assertEqual(calls, [0, render.REFRESH_S, render.REFRESH_S])
 

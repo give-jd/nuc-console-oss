@@ -21,6 +21,7 @@ import threading
 import time
 
 import cards  # same directory: the card registry and the KPI model
+import ansi  # same directory: the overlay of the help
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
@@ -1989,14 +1990,17 @@ def pick_slide(sl, t):
     return 0
 
 
+PAUSED = False  # Z: the redraw is paused, the header says so
+
+
 def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None, healthkey=None, aikey=None):
     """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1).
-    mapkey / cpukey / healthkey / aikey: say that `m` opens the Map, `c` the CPU screen, `h` the Health screen, `a` the AI screen
-    (default: when keys are); foot: a footer of its own."""
+    mapkey / cpukey / healthkey / aikey: say that `2` opens the Map, `3` the CPU screen, `4` the Health screen, `5` the AI screen
+    (default: when keys are); foot: a footer of its own, else the overview's, made from ui.KEYMAP."""
     name, part, parts, body = slide
     text, code = status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
-    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}"
+    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "")
     host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
     if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
         host = host[:max(room - 1, 1)] + "…"
@@ -2004,20 +2008,30 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=N
     head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
     head = clip(head, w)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
-    mk = ("   m: map" if (keys if mapkey is None else mapkey) and on("map") else "") \
-        + ("   c: cpu" if (keys if cpukey is None else cpukey) and on("cpu") else "") \
-        + ("   h: health" if (keys if healthkey is None else healthkey) and on("health") else "") \
-        + ("   a: ai" if (keys if aikey is None else aikey) and on("ai") else "")
-    if keys and nuc_config.PORTABLE:  # run.sh in a terminal
-        mk += "   q: quit"
     if foot is None:
-        foot = c(90, (f" single screen{mk}   console {size}" if n == 1 else
-                      f" screen {idx + 1}/{n}{mk}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                      + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
+        flags = {"map": mapkey, "cpu": cpukey, "health": healthkey, "ai": aikey}
+        shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
+        foot = c(90, overview_footer(name, idx, n, w, size, keys, hint, shown))
     foot = clip(foot, w)
     rows = [head] + [clip(x, w) for x in body]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
+
+
+def overview_footer(name, idx, n, w, size, keys, hint, shown):
+    """The footer of the rotating pages, plain text: where we are, the keys of the overview (ui.KEYMAP), then the console size and the
+    hint, which go first when it is narrow. keys=False (a browser page): no keys. shown(feature): is that screen's digit offered?"""
+    lead = " single screen   " if n == 1 else f" screen {idx + 1}/{n}   "
+    items = []
+    if keys or any(shown(f) for f in ("map", "cpu", "health", "ai")):
+        items = ui.footer_items("overview", shown, dyn={"back": ("q: quit", None) if nuc_config.PORTABLE else None,  # Esc does nothing here
+                                                        "slide-prev": None if n == 1 else ("←→: slide", None)})
+    if n > 1 and name == "Details":
+        items.append((97, "details: everything the overview cut ('… +N more')", ""))
+    items.append((99, f"console {size}", None))
+    if hint:
+        items.append((98, hint, ""))
+    return ui.fit(lead, items, w)
 
 
 def first_slide_of(sl, page_idx):
@@ -2098,29 +2112,34 @@ def map_parent(rs, i):
 
 
 def map_key(mv, key, rs, page=10):
-    """One key in the Map, on the rows rs drawn from mv.st. Returns 'back' (leave the Map), 'rows' (branches opened or
-    closed: rebuild the rows, then map_sync) or '' (only the cursor or the details pane changed)."""
-    if key in ("tab", "btab", "m", "esc", "q"):
+    """One key in the Map, on the rows rs drawn from mv.st (what each key does: ui.KEYMAP, scope map). Returns 'back' (leave the Map: Esc or q
+    when no details pane is open), 'rows' (branches opened or closed: rebuild the rows, then map_sync) or '' (only the cursor or the
+    details pane changed). The keys of every screen (digits, Tab, ?) are the dispatcher's."""
+    act = ui.action("map", key)
+    if act == "back":
+        if mv.details:  # Esc closes the details pane first
+            mv.details = False
+            return ""
         return "back"
-    if key in ("enter", "space"):
+    if act == "details":
         mv.details = not mv.details
         return ""
-    if key in ("e", "p"):
-        if key == "e":
+    if act in ("expand", "problems"):
+        if act == "expand":
             mv.st.expand_all()
         else:
             mv.st.only = not mv.st.only
         return "rows"
-    if not rs:
+    if not rs or act not in ("move", "page", "open", "close", "collapse"):
         return ""
     i = map_sync(mv, rs)
     row = rs[i]
-    if key == "c":  # every branch closes: the cursor goes up to its root, which stays
+    if act == "collapse":  # every branch closes: the cursor goes up to its root, which stays
         i = next((j for j in range(i, -1, -1) if rs[j]["depth"] == 0), i)
         mv.idx, mv.cur = i, rs[i]["key"]
         mv.st.collapse_all()
         return "rows"
-    if key in ("right", "l", "left", "h") and (row["open"] if key in ("left", "h") else row["kids"] and not row["open"]):
+    if act in ("open", "close") and (row["open"] if act == "close" else row["kids"] and not row["open"]):
         mv.st.toggle(row)
         return "rows"
     i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rs) - 1,
@@ -2243,19 +2262,12 @@ def map_lines(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
 
 
 def map_footer(mv, n, w, truncated=False):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     hide, only = mv.details, mv.st.only
-    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (2, "←→: close/open", "←→: open"),
-            (3, "Enter: " + ("hide details" if hide else "details"), "Enter: " + ("hide" if hide else "details")),
-            (5, "e/c: expand/collapse all", "e/c: all"), (4, "p: " + ("all paths" if only else "problems only"), "p: " + ("all" if only else "problems")),
-            (0, "m/Esc: back", "m: back")]
     pos = f"{mv.idx + 1}/{n}{'+' if truncated else ''}" if n else "0/0"
-    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
+    dyn = {"details": ("Enter: " + ("hide details" if hide else "details"), "Enter: " + ("hide" if hide else "details")),
+           "problems": ("p: " + ("all paths" if only else "problems only"), "p: " + ("all" if only else "problems"))}
+    return clip(c(90, ui.footer("map", f" row {pos}   ", w, on, dyn)), w)
 
 
 def map_screen(G, pb, mv, w, h):
@@ -2485,17 +2497,22 @@ def cpu_sync(cv, rows):
 
 
 def cpu_key(cv, key, rows, page=10):
-    """One key on the CPU screen. Returns 'back' (leave it), 'rows' (the sort changed: sort again, then cpu_sync) or ''."""
+    """One key on the CPU screen (what each key does: ui.KEYMAP, scope cpu). Returns 'back' (leave it: Esc or q when no details pane is
+    open), 'rows' (the sort changed: sort again, then cpu_sync) or ''."""
     k = key.lower() if len(key) == 1 else key  # P and p are the same key
-    if k in ("c", "q", "esc"):
+    act = ui.action("cpu", key)
+    if act == "back":
+        if cv.details:
+            cv.details = False
+            return ""
         return "back"
-    if k in CPU_SORT_KEYS:
+    if act == "sort":
         cv.sort = CPU_SORT_KEYS[k]
         return "rows"
-    if k in ("enter", "space"):
+    if act == "details":
         cv.details = not cv.details
         return ""
-    if not rows:
+    if not rows or act not in ("move", "page"):
         return ""
     i = cpu_sync(cv, rows)
     i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(k, i)
@@ -2951,16 +2968,10 @@ def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
 
 
 def cpu_footer(cv, n, w):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     sorts = "  ".join(f"{k.upper()} {CPU_SORT_SHORT[v]}" for k, v in CPU_SORT_KEYS.items())
-    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (3, "Enter: " + ("hide details" if cv.details else "details"), "Enter: details"),
-            (2, "sort: " + sorts, sorts), (0, "c/Esc: back", "c: back")]
-    pos = f"{cv.idx + 1}/{n}" if n else "0/0"
-    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
+    dyn = {"sort": ("sort: " + sorts, sorts), "details": ("Enter: " + ("hide details" if cv.details else "details"), "Enter: details")}
+    text = ui.footer("cpu", f" row {cv.idx + 1}/{n}   " if n else " row 0/0   ", w, on, dyn)
     here = f"{next(k for k, v in CPU_SORT_KEYS.items() if v == cv.sort).upper()} {CPU_SORT_SHORT[cv.sort]}"
     return clip(c(90, text.replace(here, "\x1b[0m" + c("1;7", here) + "\x1b[90m", 1)), w)  # the sort in use, reversed
 
@@ -3095,7 +3106,7 @@ def once(argv):
 # ---- HEALTH screen: health.py's report (the history over days and weeks) on the console, moved through with the keyboard ------
 
 HEALTH_DAYS = (1, 7, 30)                                    # the periods: keys 1/d, 7/w, 3/m (the web: period=1|7|30)
-HEALTH_KEYS = {"1": 1, "d": 1, "7": 7, "w": 7, "3": 30, "m": 30}
+HEALTH_KEYS = {"d": 1, "w": 7, "m": 30}  # the digits are the screens
 HEALTH_TTL = 60          # the report is computed at most this often per period, whatever the number of keys or requests
 HEALTH_IDLE_S = 600      # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
 HEALTH_PANE_W = 140      # from this width up the details pane sits beside the findings, below them otherwise
@@ -3342,7 +3353,7 @@ def health_counts(fl):
 
 
 def health_title(R, w, days, fl, selector=True):
-    """'── HEALTH  last 7 days · since 2026-09-24 14:00 UTC · 168 h of data · ✖ 1 err ───── 1:24h 7:7d 3:30d': the period, how much history
+    """'── HEALTH  last 7 days · since 2026-09-24 14:00 UTC · 168 h of data · ✖ 1 err ───── d:24h w:7d m:30d': the period, how much history
     the report rests on, the findings per level; the least needed go first when narrow."""
     cov = (R or {}).get("coverage") or {}
     hours = hnum(cov.get("hours"))
@@ -3351,7 +3362,7 @@ def health_title(R, w, days, fl, selector=True):
     if R is not None and hours:
         bits.append(health_counts(fl))
     left = c(36, "──") + c("1;36", " HEALTH ") + " "
-    right = " ".join(c(7 if d == days else 90, f" {k}:{lab} ") for d, k, lab in ((1, "1", "24h"), (7, "7", "7d"), (30, "3", "30d"))) if selector else ""
+    right = " ".join(c(7 if d == days else 90, f" {k}:{lab} ") for d, k, lab in ((1, "d", "24h"), (7, "w", "7d"), (30, "m", "30d"))) if selector else ""
     while len(bits) > 1 and vlen(left + c(90, " · ").join(bits)) + vlen(right) + 3 > w:
         bits.pop(1)
     text = left + c(90, " · ").join(bits) + " "
@@ -3554,17 +3565,21 @@ def health_sync(hv, fl):
 
 
 def health_key(hv, key, fl):
-    """One key on the Health screen. Returns 'back' (leave it), 'period' (another period: the report is asked for again, from its
-    cache) or '' (only the cursor or the details pane changed)."""
-    if key in ("h", "esc", "q"):
+    """One key on the Health screen (what each key does: ui.KEYMAP, scope health). Returns 'back' (leave it: Esc or q when no details pane
+    is open), 'period' (another period: the report is asked for again, from its cache) or '' (only the cursor or the details pane changed)."""
+    act = ui.action("health", key)
+    if act == "back":
+        if hv.details:
+            hv.details = False
+            return ""
         return "back"
-    if key in HEALTH_KEYS:
+    if act == "period":
         days, hv.days = hv.days, HEALTH_KEYS[key]
         return "period" if days != hv.days else ""
-    if key in ("enter", "space"):
+    if act == "details":
         hv.details = not hv.details
         return ""
-    if not fl:
+    if not fl or act not in ("move", "page"):
         return ""
     i, page = health_sync(hv, fl), max(1, hv.rows - 1)
     i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(fl) - 1}.get(key, i)
@@ -3631,17 +3646,10 @@ def health_body(data, hv, fl, w, h):
 
 
 def health_footer(hv, n, w):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
-    keys = [(1, "↑↓: move", "↑↓: move"), (5, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if hv.details else "details"),
-                                                                                "Enter: " + ("hide" if hv.details else "details")),
-            (3, "1/7/3: 24h/7d/30d", "1/7/3: period"), (0, "h/Esc: back", "h: back")]
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     pos = f"finding {hv.idx + 1}/{n}" if n else "no findings"
-    text = f" {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
+    dyn = {"details": ("Enter: " + ("hide details" if hv.details else "details"), "Enter: " + ("hide" if hv.details else "details"))}
+    return clip(c(90, ui.footer("health", f" {pos}   ", w, on, dyn)), w)
 
 
 def health_screen(data, pb, hv, w, h):
@@ -3951,25 +3959,29 @@ def ai_sync(av, rows):
     return av.idx
 
 
-AI_ACTION_KEYS = {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"}  # AI on/off, use the model, delete it, delete all, cancel
+AI_ACTIONS = ("toggle", "use", "delete", "delete-all", "cancel")  # AI on/off, use the model, delete it, delete all, cancel (ui.KEYMAP, scope ai)
 
 
 def ai_key(av, key, rows):
     """One key on the AI screen. Returns 'back' (leave it), an action for ai_do() ('toggle', 'use', 'delete', 'delete-all', 'cancel', and 'yes' for the
-    question that is waiting) or '' (only the cursor or the details pane changed)."""
+    question that is waiting) or '' (only the cursor or the details pane changed). What each key does: ui.KEYMAP, scope ai."""
     if av.confirm:  # a question is waiting: y does it, any other key says no
         yes = key in ("y", "Y")
         if not yes:
             av.confirm = None
         return "yes" if yes else ""
-    if key in ("a", "esc", "q"):
+    act = ui.action("ai", key)
+    if act == "back":
+        if av.details:  # Esc closes the details pane first
+            av.details = False
+            return ""
         return "back"
-    if key in AI_ACTION_KEYS:
-        return AI_ACTION_KEYS[key]
-    if key in ("enter", "space"):
+    if act in AI_ACTIONS:
+        return act
+    if act == "details":
         av.details = not av.details
         return ""
-    if not rows:
+    if not rows or act not in ("move", "page"):
         return ""
     i, page = ai_sync(av, rows), max(1, av.rows - 1)
     i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(key, i)
@@ -4402,19 +4414,10 @@ def ai_footer(av, n, w, snap=None):
         ask = " " + av.confirm[2]
         return clip(c("1;33", ask) + c(90, "  y: yes   any other key: no" if len(ask) + 27 <= w else "  [y/n]"), w)
     acts = isinstance(snap, dict) and not snap.get("locked")
-    keys = [(1, "↑↓: move", "↑↓: move"), (7, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))]
-    if acts:
-        keys += [(3, "e: AI on/off", "e: on/off"), (3, "u: use model", "u: use"), (4, "x: delete", "x: del"), (6, "X: delete all", "X: all"), (5, "c: cancel", "c: cancel")]
-    keys.append((0, "a/Esc: back", "a: back"))
-    if acts:
-        keys.append((8, "questions: web page or nuc-console-ask", ""))
     pos = f"model {av.idx + 1}/{n}" if n else "no models"
-    text = f" {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
+    dyn = {"details": ("Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))}
+    extra = [(8, "questions: web page or nuc-console-ask", "")] if acts else []
+    return clip(c(90, ui.footer("ai", f" {pos}   ", w, on, dyn, skip=() if acts else AI_ACTIONS, extra=extra)), w)
 
 
 def ai_screen(data, pb, av, w, h, wait=0.0):
@@ -4756,7 +4759,48 @@ def windows_key(timeout):
         time.sleep(0.05)
 
 
+HELP_W = 64  # the help box's widest size (columns), inside the frame
+
+
+def help_box(scope, w, h, enabled, portable=None, paused=False):
+    """The `?` overlay's box: the screen's own keys and the global ones from ui.KEYMAP, as many as fit in a frame w x h (the header and the
+    footer stay visible): the last ones of the table go first and the box says how many are left. Lines of equal width, ANSI allowed."""
+    groups = ui.help_rows(scope, enabled, nuc_config.PORTABLE if portable is None else portable, paused)
+    bw = max(20, min(HELP_W, w - 2))
+    lw = min(max(len(k) for _t, items in groups for k, _v in items) + 2, bw // 2)
+    inner = bw - 4
+    room = max(1, h - 5)  # the frame's header and footer, the box's two borders, the line that says how to close it
+    keep = [list(items) for _t, items in groups]
+    dropped = 0
+
+    def size(sep):
+        shown = [g for g in keep if g]
+        return sum(1 + len(g) for g in shown) + (len(shown) - 1 if sep and shown else 0) + (1 if dropped else 0)
+    sep = size(True) <= room  # a blank line between the groups when there is room
+    while size(sep) > room and any(keep):
+        next(g for g in reversed(keep) if g).pop()
+        dropped += 1
+    lines = []
+    for (title, _items), g in zip(groups, keep):
+        if g:
+            lines += ([""] if lines and sep else []) + [c(ui.sgr("accent_strong"), title)]
+            lines += [c(ui.sgr("strong"), pad(k[:lw - 2], lw)) + v[:inner - lw] for k, v in g]
+    if dropped:
+        lines.append(c(ui.sgr("muted"), f"+{dropped} more"))
+    lines.append(c(ui.sgr("muted"), "any key closes this help"))
+    top = c(ui.sgr("accent"), "┌─ ") + c(ui.sgr("accent_strong"), "Keys") + c(ui.sgr("accent"), " " + "─" * (bw - 9) + "┐")
+    box = [c(ui.sgr("accent"), "│") + " " + pad(clip(x, inner), inner) + " " + c(ui.sgr("accent"), "│") for x in lines]
+    return [top] + box + [c(ui.sgr("accent"), "└" + "─" * (bw - 2) + "┘")]
+
+
+def help_overlay(screen, scope, w, h, enabled, paused=False):
+    """The frame (as frame() returns it) with the help box over its middle."""
+    lines = screen.split("\x1b[K\r\n")
+    return "\x1b[K\r\n".join(ansi.overlay(lines, help_box(scope, w, h, enabled, paused=paused), w))
+
+
 def main(argv):
+    global PAUSED
     utf8_stdout()
     if "--problems" in argv:
         return print_problems(argv)
@@ -4798,6 +4842,19 @@ def main(argv):
         cv, cpu_d, cpu_fresh, cpu_rows_, rot_feed = None, None, 0.0, [], None  # the CPU screen, its data and rows; the rotation slide's feed
         hv, hd, hl = None, None, []  # the Health screen while it is shown, its report data and findings
         av, ad, al = None, None, []  # the AI screen while it is shown, its catalog data and model rows
+        avail = {"map": map_ok, "cpu": cpu_ok, "health": health_ok, "ai": ai_ok}  # the screens the digits (and Tab) can open
+        enabled = lambda f: avail.get(f, True)  # noqa: E731
+        sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
+        paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
+        dirty, help_open = True, False  # a frame is due even when paused; the `?` overlay is shown
+
+        def resume():
+            """Z again (or another screen): the redraw goes on; a paused overview carries on with the slide it was at."""
+            nonlocal paused, t0, hold_until
+            if paused and pause_ov:
+                gap = time.time() - pause_t
+                t0, hold_until = t0 + gap, pre_hold + gap
+            paused = False
         while True:
             w, h = shutil.get_terminal_size((120, 33))
             # config.ini [dashboard] columns/rows: layout size forced smaller than the real console (never larger: it would run off-screen)
@@ -4805,24 +4862,25 @@ def main(argv):
             if (w, h) != size:  # the real console size ends up in the journal: journalctl -u nuc-console
                 print(f"console {w}x{h} mode={MODE}", file=sys.stderr, flush=True)
                 out.write("\x1b[2J")
-                size = (w, h)
+                size, dirty = (w, h), True
             w -= 1  # the Linux VT keeps the cursor on the last column: \x1b[K there would erase the last character
             now = time.time()
             if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
-                t0, mv = t0 + now - mv.opened, None
+                t0, mv, paused, dirty = t0 + now - mv.opened, None, False, True
                 out.write("\x1b[2J")
             if cv is not None and now - cv.touched > CPU_IDLE_S:  # same for the CPU screen
-                t0, cv = t0 + now - cv.opened, None
+                t0, cv, paused, dirty = t0 + now - cv.opened, None, False, True
                 out.write("\x1b[2J")
             if hv is not None and now - hv.touched > HEALTH_IDLE_S:  # and the Health screen
-                t0, hv = t0 + now - hv.opened, None
+                t0, hv, paused, dirty = t0 + now - hv.opened, None, False, True
                 out.write("\x1b[2J")
             if av is not None and now - av.touched > AI_IDLE_S:  # and the AI screen
-                t0, av = t0 + now - av.opened, None
+                t0, av, paused, dirty = t0 + now - av.opened, None, False, True
                 out.write("\x1b[2J")
+            PAUSED = paused
             if mv is not None:  # the Map: new data every REFRESH_S, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + REFRESH_S, None  # set first: after a failure keys redraw the error, never postpone the retry
                         G, pb = map_graph(smp)
                     if err is None:
@@ -4832,11 +4890,11 @@ def main(argv):
                     pb = last_pb + [(2, "the map could not be built")]  # its problems are unknown: never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("Map", 1, 1, [c(31, f" error on the map: {safe(repr(err))[:w - 20]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " m/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             elif cv is not None:  # the CPU screen: new data every REFRESH_S (the first one after a second: a CPU% needs two readings)
                 try:
-                    if now >= cpu_fresh:
+                    if now >= cpu_fresh and not paused:
                         cpu_fresh = now + (min(1.0, REFRESH_S) if cpu_d is None else REFRESH_S)
                         st, sm = snapshot(w), smp.sample()  # the header's status pill stays true while the screen is open
                         last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
@@ -4845,11 +4903,11 @@ def main(argv):
                 except Exception as e:  # noqa: BLE001 - a broken screen must not take the console down; c/Esc still go back
                     cpu_rows_ = []
                     screen = frame(("CPU", 1, 1, [c(31, f" error on the CPU screen: {safe(repr(e))[:w - 26]}")]), 0, 1, w, h,
-                                   last_pb + [(2, "the CPU screen could not be drawn")], foot=c(90, " c/Esc back"))
+                                   last_pb + [(2, "the CPU screen could not be drawn")], foot=c(90, " Esc: back   1-5: screens"))
                 wait = cpu_fresh - time.time()
             elif hv is not None:  # the Health screen: the report comes from its one-minute cache, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + REFRESH_S, None
                         hd, pb = health_state(smp, hv.days)
                     if err is None:
@@ -4859,11 +4917,11 @@ def main(argv):
                     pb = last_pb + [(2, "the health screen could not be built")]  # never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("Health", 1, 1, [c(31, f" error on the health screen: {safe(repr(err))[:w - 30]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " h/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             elif av is not None:  # the AI screen: the catalog comes from its short cache, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + (1.0 if ai_busy() else REFRESH_S), None  # while something runs (a download) it looks again every second
                         ad, pb = ai_state(smp)
                     if err is None:
@@ -4873,22 +4931,35 @@ def main(argv):
                     pb = last_pb + [(2, "the AI screen could not be built")]  # never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("AI", 1, 1, [c(31, f" error on the AI screen: {safe(repr(err))[:w - 28]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " a/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             else:
-                st, sm = snapshot(w), smp.sample()
-                sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
-                idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
-                if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
-                    rot_feed = rot_feed or CpuFeed()
-                    fill_cpu(sl, idx, w, h - 2, rot_feed)
+                if paused and ov_cache is not None:  # the slide and the data it was paused on
+                    sl, last_pb = ov_cache
+                    idx = held % len(sl)
                 else:
-                    rot_feed = None
-                last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-                screen = frame(sl[idx], idx, len(sl), w, h, last_pb, mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok, aikey=ai_ok)
+                    st, sm = snapshot(w), smp.sample()
+                    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
+                    idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
+                    if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
+                        rot_feed = rot_feed or CpuFeed()
+                        fill_cpu(sl, idx, w, h - 2, rot_feed)
+                    else:
+                        rot_feed = None
+                    last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                    ov_cache = (sl, last_pb)
+                screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,
+                               aikey=ai_ok)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
-            out.write("\x1b[H" + screen)
-            out.flush()
+            scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
+            if help_open:
+                screen = help_overlay(screen, scope, w, h, enabled, paused)
+            if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
+                wait = REFRESH_S
+            if dirty or not paused:
+                out.write("\x1b[H" + screen)
+                out.flush()
+                dirty = False
             keys = []
             if old:
                 keys = read_keys(fd, wait)
@@ -4900,67 +4971,100 @@ def main(argv):
             else:
                 time.sleep(max(0.0, wait))
             for k in keys:
-                if cv is not None:
-                    cv.touched = time.time()
-                    act = cpu_key(cv, k, cpu_rows_, cv.page)
-                    if act == "back":
-                        t0, cv, cpu_d = t0 + time.time() - cv.opened, None, None  # the rotation was paused: it goes on where it was
+                dirty = True
+                if help_open:  # any key closes the help, and does nothing else
+                    help_open = False
+                    continue
+                view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                if view is not None:
+                    view.touched = time.time()
+                asking = av is not None and bool(av.confirm)  # a question waits: any key answers it (y: yes), as it always did
+                act = "" if asking else ui.action(scope, k, enabled)
+                tgt = None  # the screen to go to
+                if act == "screen":
+                    tgt = dict(ui.screen_keys(enabled)).get(k)  # a screen that is off: nothing happens
+                elif act in ("next", "prev"):
+                    order = [n for _d, n in ui.screen_keys(enabled)]
+                    tgt = order[(order.index(scope) + (1 if act == "next" else -1)) % len(order)] if scope in order else None
+                elif act.startswith("open-"):  # the overview's letters m c h a
+                    tgt = act[5:] if enabled(act[5:]) else None
+                elif act == "help":
+                    help_open = True
+                elif act == "redraw":
+                    out.write("\x1b[2J")
+                    if not paused:  # new data too
+                        fresh, cpu_fresh, ov_cache = 0.0, 0.0, None
+                elif act == "pause":
+                    if paused:
+                        resume()
+                        fresh, cpu_fresh, ov_cache = 0.0, 0.0, None
+                    else:
+                        paused, pause_t, pause_ov = True, time.time(), scope == "overview"
+                        if pause_ov:  # this slide stays until the redraw goes on
+                            pre_hold, held, hold_until = hold_until, idx, float("inf")
+                elif scope == "overview":
+                    if act == "back" and k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
+                        return 0
+                    if act in ("slide-prev", "slide-next") and sl:  # held like a digit used to: HOLD_S
+                        held = (idx + (1 if act == "slide-next" else -1)) % len(sl)
+                        idx = held
+                        hold_until = hold_until if paused else time.time() + HOLD_S
                         out.write("\x1b[2J")
-                        break
-                    if act == "rows" and cpu_d is not None:  # the next key of the same read moves on the new order
+                elif cv is not None:
+                    res = cpu_key(cv, k, cpu_rows_, cv.page)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "rows" and cpu_d is not None:  # the next key of the same read moves on the new order
                         cpu_rows_ = cpu_rows(cpu_d["procs"]["procs"], cv.sort)
                         cpu_sync(cv, cpu_rows_)
                 elif hv is not None:
-                    hv.touched = time.time()
-                    act = health_key(hv, k, hl)
-                    if act == "back":
-                        t0, hv = t0 + time.time() - hv.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act == "period":  # asked again (the report of that period may be cached)
+                    res = health_key(hv, k, hl)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "period":  # asked again (the report of that period may be cached)
                         fresh = 0.0
                 elif av is not None:
-                    av.touched = time.time()
-                    act = ai_key(av, k, al)
-                    if act == "back":
-                        t0, av = t0 + time.time() - av.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act:  # a key that acts: the engine does it in the background, the screen shows what it says
-                        ai_do(av, act, al)
+                    res = ai_key(av, k, al)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res:  # a key that acts: the engine does it in the background, the screen shows what it says
+                        ai_do(av, res, al)
                         fresh = 0.0
                 elif mv is not None:
-                    mv.touched = time.time()
-                    act = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
-                    if act == "back":
-                        t0, mv = t0 + time.time() - mv.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act == "rows" and G is not None:  # the next key of the same read moves on the new tree
+                    res = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "rows" and G is not None:  # the next key of the same read moves on the new tree
                         rs = graph.rows(G, mv.st)
                         map_sync(mv, rs)
-                elif k in ("m", "tab") and map_ok:
-                    mv, fresh = MapView(), 0.0
+                if tgt == "overview" and scope == "overview" and sl:  # 1 on the overview: its first slide
+                    held = next((i for i, x in enumerate(sl) if x[0] == "Overview"), 0)
+                    idx = held
+                    hold_until = hold_until if paused else time.time() + HOLD_S
+                    out.write("\x1b[2J")
+                elif tgt is not None and tgt != scope and (tgt == "overview" or avail.get(tgt)):
+                    opened = view.opened if view is not None else time.time()  # the rotation stays paused all the time on the screens
+                    resume()
+                    mv = cv = hv = av = None
+                    cpu_d = None
+                    if tgt == "overview":
+                        t0 += time.time() - opened  # the rotation was paused: it goes on where it was
+                        ov_cache = None
+                    elif tgt == "map":
+                        mv, fresh, err = MapView(), 0.0, None
+                    elif tgt == "cpu":
+                        cv, cpu_fresh, rot_feed = CpuView(), 0.0, None
+                    elif tgt == "health":
+                        hv, fresh, err = HealthView(), 0.0, None
+                    else:
+                        av, fresh, err = AiView(), 0.0, None
+                    nv = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                    if nv is not None:
+                        nv.opened = nv.touched = opened
                     out.write("\x1b[2J")
                     break
-                elif k == "c" and cpu_ok:
-                    cv, cpu_d, cpu_fresh, rot_feed = CpuView(), None, 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "h" and health_ok:
-                    hv, fresh, err = HealthView(), 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "a" and ai_ok:
-                    av, fresh, err = AiView(), 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
-                    return 0
-                elif len(k) == 1 and k in "123456789" and int(k) <= len(PAGES):
-                    held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
-                    out.write("\x1b[2J")
     finally:
+        PAUSED = False
         out.write("\x1b[?25h\x1b[0m")
         out.flush()
         if old:

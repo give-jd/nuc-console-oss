@@ -31,12 +31,12 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🕸️ **Web apps** | WEB APPS section: the apps you declared (active, or DOWN when expected but not listening) and the web listeners found on their own, with how far each is reachable |
 | 🚨 **Port alarms** | a baseline of exposed ports; any new, changed or vanished port turns the banner red |
 | 🎯 **Expected vs actual** | declare under `[expose]` how far each service may reach (`local`, `tailnet`, `lan`, `internet`): ATTENTION raises an error when it reaches further, and the matrix, overview and map mark it |
-| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `m`/`Tab`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
+| 🗺️ **Map** | who reaches what, and *what is behind it*: zone → open port → process or container → what that one uses (`LAN → :8080 → shop-web → shop-api → shop-db`), what breaks if something is down, compose stacks, outbound connections. Every link says how it is known (*seen* / *declared* / *same network*); navigable: open, close, expand all, details of any node, problems only (console `2`, web **map** link). In the browser also as a **graph** of circles and lines, like Obsidian: drag, zoom, the local graph of one node |
 | 🐳 **Containers & databases** | per-stack health, real published ports, *who actually connects* to each DB (seen inside its network namespace) |
-| 🧮 **CPU, like htop** | a screen of its own (console `c`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
+| 🧮 **CPU, like htop** | a screen of its own (console `3`, web **cpu** link): model, cores and P/E cores, caches, per-core load (user / system / iowait) with frequency and temperature, load average, context switches, throttling, and the processes sortable by CPU, memory, time, PID or user, with a details pane. Names only, never command lines (they can hold passwords) |
 | 🌡️ **Health now** | boot time and slowest units, failed units, journal errors, CPU/NVMe temperature, thermal throttling, disks, traffic |
-| 🩺 **HEALTH over time** | a small local history (SQLite) and a screen of its own (console `h`, web **health** link): over the last day, week or month, which apps use the CPU and memory, which crash, hang or get killed, which services and containers keep restarting, hot hours, disks filling up ("full in 12 days"), noisy or new log messages, each with how to fix it. Rules over numbers; names and counts only, never command lines or log lines as they are ([docs/HEALTH.md](docs/HEALTH.md)) |
-| 🤖 **AI advisor** *(optional, off by default)* | an **AI** page (web **ai** link) and screen (console `a`) read this machine's RAM, GPU and GPU memory and tell, model by model, whether it *fits entirely on the GPU*, runs on *GPU+CPU* or *in RAM*, *fits but slows the PC*, or is *too big*, with a rough speed; **choose a model and it does the rest**: downloads the open model (hash-pinned; 12 sizes, 0.4 to 19 GB) with a progress bar into a folder it names, starts it on 127.0.0.1 and turns the AI on (**AI on/off** is one button or key); a chat on the web page; `nuc-console-ai` / `nuc-console-ask` do the same from a terminal. It turns the HEALTH findings into plain advice and answers questions from the history. It analyses, **never acts**; Linux, macOS, Windows ([docs/AI.md](docs/AI.md)) |
+| 🩺 **HEALTH over time** | a small local history (SQLite) and a screen of its own (console `4`, web **health** link): over the last day, week or month, which apps use the CPU and memory, which crash, hang or get killed, which services and containers keep restarting, hot hours, disks filling up ("full in 12 days"), noisy or new log messages, each with how to fix it. Rules over numbers; names and counts only, never command lines or log lines as they are ([docs/HEALTH.md](docs/HEALTH.md)) |
+| 🤖 **AI advisor** *(optional, off by default)* | an **AI** page (web **ai** link) and screen (console `5`) read this machine's RAM, GPU and GPU memory and tell, model by model, whether it *fits entirely on the GPU*, runs on *GPU+CPU* or *in RAM*, *fits but slows the PC*, or is *too big*, with a rough speed; **choose a model and it does the rest**: downloads the open model (hash-pinned; 12 sizes, 0.4 to 19 GB) with a progress bar into a folder it names, starts it on 127.0.0.1 and turns the AI on (**AI on/off** is one button or key); a chat on the web page; `nuc-console-ai` / `nuc-console-ask` do the same from a terminal. It turns the HEALTH findings into plain advice and answers questions from the history. It analyses, **never acts**; Linux, macOS, Windows ([docs/AI.md](docs/AI.md)) |
 | 🔒 **Least privilege** | small root collector + unprivileged renderer, stdlib only, nothing reachable from the network (macOS/Windows: the page is on 127.0.0.1 only) |
 | 📦 **Download, run, update** | one archive per system on the [releases page](https://github.com/give-jd/nuc-console-oss/releases/latest), built and attested by CI, with `SHA256SUMS`; the Windows ZIP carries its Python, so it installs offline. `./run.sh` / `run.cmd` run it without installing (everything stays in `./data`); `nuc-console-update` updates only when *you* run it, hash and build provenance checked ([Download](#download)) |
 | 🖥️ **Linux, macOS, Windows** | one command each; on macOS and Windows the same screen in your browser or full screen at login (your choice, text size A− / A+), and the exposure is judged by the **Application Firewall** / **Windows Firewall** per program ([install guide](docs/INSTALL.md)) |
@@ -75,7 +75,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 <br>
 <img src="docs/img/ai.png" alt="nuc-console AI page in a browser: the AI switch (ON, the model that answers), the folder the models are downloaded to with its size and free space, a chat with a question and an answer, then the hardware and the list of local models with a verdict for each (fits GPU, GPU+CPU), a use this model button, estimated speed and the recommended model, demo data" width="100%">
 <br>
-Caption: the AI page of the web view, from `python3 src/web.py --demo` (nothing is downloaded or started in the demo). The console AI screen (key `a`) has the same switch (`e`), the same **use this model** (`u`) and the same folder line; the chat is on the web page.
+Caption: the AI page of the web view, from `python3 src/web.py --demo` (nothing is downloaded or started in the demo). The console AI screen (key `5`) has the same switch (`e`), the same **use this model** (`u`) and the same folder line; the chat is on the web page.
 </details>
 
 <details>
@@ -157,6 +157,25 @@ rights). Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `-
 
 Full guide (VT choice, time zone, font, update, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
+### Keys on the console
+
+One keymap for every screen; `?` shows the keys of the screen you are on, and the footer is made from the same table. Digits and symbols are the same
+everywhere, letters belong to one screen.
+
+| Keys | Where | Does |
+|---|---|---|
+| `1` `2` `3` `4` `5` | everywhere | Overview, Map, CPU, Health, AI (a screen that is off, or a console with no keyboard, has no digit) |
+| `Esc` | everywhere | closes the details pane or the help, else goes back to the Overview |
+| `q` | everywhere | like `Esc` on a screen; on the Overview it quits a portable console (`run.sh`) and does nothing on an installed monitor |
+| `?` · `r` · `Z` | everywhere | the help · redraw now · pause or resume the redraw (the header says *paused*) |
+| `Tab` / `Shift+Tab` | everywhere | next / previous screen |
+| `←` `→` (`PgUp` `PgDn`) | Overview | previous / next slide, held for a minute; `m` `c` `h` `a` still open the Map, CPU, Health and AI screens from here |
+| `↑` `↓` (`j` `k`), `PgUp` `PgDn`, `Home` `End`, `Enter` / `Space` | Map, CPU, Health, AI | move, page, show or hide the details |
+| `→` `l` · `←` `h` · `e` · `c` · `p` | Map | open · close or go to the parent · expand all · collapse all · problems only |
+| `p` `m` `t` `n` `u` | CPU | sort by CPU, memory, time, PID, user |
+| `d` `w` `m` | Health | the last 24 hours, 7 days, 30 days |
+| `e` `u` `x` `X` `c` · `y` `n` | AI | AI on or off · use the model · delete it · delete all · cancel · answer the question that waits |
+
 ## Configuration
 
 `/etc/nuc-console/config.ini` (created on first install, never overwritten; Windows: `%ProgramData%\nuc-console\config.ini`; a portable run: `data/config.ini`). Everything defaults to *on*:
@@ -167,11 +186,11 @@ containers = yes      databases = yes     exposure = yes      firewall = yes
 fail2ban   = yes      tailscale = yes     boot     = yes      docker_disk = yes
 network_traffic = yes sessions  = yes     disks    = yes      thermal  = yes
 cpu      = yes      health   = yes
-ai       = yes      # the AI screen and page (key a): choose a local model, AI on/off ([ai] web_actions = no: read-only)
+ai       = yes      # the AI screen and page (key 5): choose a local model, AI on/off ([ai] web_actions = no: read-only)
 webapps  = yes      map      = yes
 
 [dashboard]
-mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys 1-3)
+mode = overview       # overview (one screen, no keyboard) | rotate (3 pages, keys ← →)
 rotate_seconds = 15
 refresh_seconds = 2   # redraw every 1-10 s: console, full-screen window and browser pages (- / + on the page)
 # sections = attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
@@ -222,7 +241,7 @@ To say how far a service may reach, declare it under `[expose]` (`shop-db = loca
 
 ## AI advisor (optional)
 
-Which local language model can this machine run? The **AI** screen (console key `a`, web **ai** link,
+Which local language model can this machine run? The **AI** screen (console key `5`, web **ai** link,
 `python3 src/render.py --once --demo --view ai` to try it) reads the RAM, the GPU and its memory, and rates each model of a
 short list: *fits entirely on the GPU*, *GPU+CPU*, *fits in RAM*, *fits but will slow the PC*, *too big, will not work*, with a rough
 speed. And it is where you **set one up**: choose a model (the **use this model** button, console `u`) and it is downloaded (hash-pinned, with a progress bar, into the folder the page

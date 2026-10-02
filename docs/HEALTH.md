@@ -1,6 +1,6 @@
 # HEALTH: what keeps going wrong, and how to keep the machine healthy
 
-The dashboard shows *now*. The **HEALTH** screen (console key `h`, web **health** link) shows the last day, week or month:
+The dashboard shows *now*. The **HEALTH** screen (console key `4`, web **health** link) shows the last day, week or month:
 which apps use the CPU and the memory, which crash, hang or get killed for lack of memory, which services and containers
 keep restarting or failing, when the machine runs hot, which disks are filling up, which log messages are flooding or new.
 Each finding comes with how to fix or check it. It works the same on Linux, macOS and Windows.
@@ -67,8 +67,8 @@ boot times. On a narrow console the sections become one line each.
 
 | Console | Web | |
 |---|---|---|
-| `h` (from the dashboard) | the **health** link in the bottom bar | open it; `h`, `Esc` or `q` goes back (and so does 10 minutes without a key) |
-| `1` / `d`, `7` / `w`, `3` / `m` | `period=1`, `7`, `30` | the last 24 hours, 7 days (default), 30 days |
+| `4` (`h` from the dashboard) | the **health** link in the bottom bar | open it; `Esc` or `q` goes back (and so does 10 minutes without a key) |
+| `d`, `w`, `m` | `period=1`, `7`, `30` | the last 24 hours, 7 days (default), 30 days (the digits are the screens: `1` to `5`) |
 | `↑` `↓` (`k` `j`), `PgUp` `PgDn`, `Home` `End` | a click on a finding (`sel=<id>`) | move through the findings |
 | `Enter` or `Space` | the finding's link | its details: what, the numbers behind it, how to fix or check it |
 | | `pause=1` | no reload while you read |

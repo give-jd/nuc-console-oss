@@ -121,3 +121,50 @@ def cell(v, warn=False, net=False, loc=False):
     if v == 1:
         return c(ui.sgr("err" if warn else "warn"), "●")
     return c(ui.sgr("accent"), "◐") if v == 2 else c(ui.sgr("muted"), "·")
+
+
+def _cut(s, a, b):
+    """The part of s between visible columns a and b (b None: to the end) with its colours, as (text, columns taken). The colour in force
+    at column a is carried over, so a slice from the middle of a coloured run keeps it."""
+    out, n, i, sgr = [], 0, 0, ""
+    while i < len(s):
+        m = ANSI.match(s, i)
+        if m:
+            seq = m.group()
+            if n < a:
+                sgr = "" if seq in ("\x1b[0m", "\x1b[m") else sgr + seq if seq.endswith("m") else sgr
+            elif b is None or n < b:
+                out.append(seq)
+            i = m.end()
+            continue
+        if n >= a and (b is None or n < b):
+            if not out and sgr:
+                out.append(sgr)
+            out.append(s[i])
+        n += 1
+        i += 1
+    return "".join(out), max(0, min(n, b if b is not None else n) - a)
+
+
+def overlay(lines, box, w=None, top=None, left=None):
+    """The frame's lines with the box (lines, ANSI allowed) drawn over their middle: the rest of the frame stays around it. Each box line
+    replaces as many columns as it is wide; a frame line shorter than the box is padded. w: the frame's width (default: the widest
+    line). top/left: where the box goes (default: centred). The box is cut when it is taller or wider than the frame."""
+    lines = list(lines)
+    w = w or max([vlen(x) for x in lines] + [1])
+    box = [x for x in box][:len(lines)]
+    bw = min(w, max([vlen(x) for x in box] + [0]))
+    top = max(0, (len(lines) - len(box)) // 2) if top is None else top
+    left = max(0, (w - bw) // 2) if left is None else left
+    for j, row in enumerate(box):
+        i = top + j
+        if i >= len(lines):
+            break
+        line = lines[i]
+        head, took = _cut(line, 0, left)
+        head += " " * (left - took)
+        row, took = _cut(row, 0, bw)
+        row += " " * (bw - took)
+        tail, _ = _cut(line, left + bw, None)
+        lines[i] = head + "\x1b[0m" + row + "\x1b[0m" + tail
+    return lines
