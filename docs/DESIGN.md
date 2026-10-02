@@ -95,7 +95,7 @@ stays the default because it is the one that reads the same everywhere and state
 
 ## CPU
 
-The overview keeps one line of bars per core; the **CPU** screen (key `c`, web `cpu`) is the htop-like view for when
+The overview keeps one line of bars per core; the **CPU** screen (key `3`, web `cpu`) is the htop-like view for when
 something is busy: what the processor is, what each core does, how hot it is, and which processes cost what.
 
 | | Linux | macOS | Windows |

@@ -177,6 +177,17 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
+- **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
+  README lists the keys). Breaking, compared with the keys of the screens as they were in development:
+  - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;
+  - `1`-`5` open the Overview, Map, CPU, Health and AI screens from anywhere (a disabled feature has no digit); `Tab` / `Shift+Tab` go round
+    the screens (`Tab` no longer opens the Map);
+  - the page jumps `1`-`3` of `mode = rotate` are now `←` `→` (and `PgUp` `PgDn`) on the Overview, held for a minute as before; `m` `c` `h` `a`
+    still open the Map, CPU, Health and AI screens, from the Overview only;
+  - `Esc` closes the details pane, then goes back to the Overview; `q` does the same on a screen and, on the Overview, quits a portable console
+    only; `m` / `c` / `h` / `a` no longer leave the screen they opened (they are that screen's letters: `c` collapses on the Map);
+  - new: `?` (the keys of this screen), `r` (redraw now), `Z` (pause or resume the redraw; the header says *paused*);
+  - the overview footer no longer says "keys 1-3: jump to page", and a monitor with no keyboard shows no keys at all.
 - A `config.ini` that cannot be read at all (for example a key starting with `:`) raises `config-unreadable` in ATTENTION instead of
   falling back to the defaults in silence; a key written twice no longer makes the whole file unreadable (the last one wins).
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.

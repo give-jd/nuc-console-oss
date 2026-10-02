@@ -2,7 +2,7 @@
 
 Everything here is optional and off by default. There are two parts:
 
-- the **AI page** of the web view and the **AI screen** of the console (key `a`, web **ai** link): they read this machine's memory and GPU
+- the **AI page** of the web view and the **AI screen** of the console (key `5`, web **ai** link): they read this machine's memory and GPU
   and say, for each model in a short list, whether it fits and how fast it would be, and they are where you **set a model up**: choose one and it
   is downloaded, started and turned on, with its progress on the screen; **AI on / off** is one button (console: `e`); delete what you downloaded;
   and, on the web page, a **chat** with the model ([From the browser and the console](#from-the-browser-and-the-console)). The commands
@@ -22,11 +22,11 @@ It works the same on Linux, macOS and Windows. On Windows, run the commands that
 
 ## In short
 
-In the browser or on the console: open the **AI** page (`/?view=ai`) or press `a`, choose a model (**use this model**, or `u`): it is downloaded
+In the browser or on the console: open the **AI** page (`/?view=ai`) or press `5`, choose a model (**use this model**, or `u`): it is downloaded
 (SHA-256 checked), started on 127.0.0.1, and the AI is on. **Turn AI off** (or `e`) stops it. The same, from a terminal:
 
 ```bash
-nuc-console-ai models                         # what this machine can run, model by model; no root (or: key a on the console)
+nuc-console-ai models                         # what this machine can run, model by model; no root (or: key 5 on the console)
 sudo nuc-console-ai setup                     # downloads the recommended runtime and model once, SHA-256 checked
 sudo nuc-console-ai serve --install-service   # runs it as a service on 127.0.0.1 (or `nuc-console-ai serve`: foreground)
 # config.ini: [ai] enabled = yes              # (setup offers to write endpoint and model)
@@ -41,7 +41,7 @@ is not stops the download before it starts and names it. `models` and the screen
 
 ## The AI screen
 
-Console key `a` (back: `a`, `Esc` or `q`; also after 10 minutes without a key: a download goes on without the screen), the **ai** link in the web
+Console key `5` or `a` from the Overview (back: `Esc`, `q` or `1`; also after 10 minutes without a key: a download goes on without the screen), the **ai** link in the web
 view's bottom bar (`/?view=ai`), or once, for a look over SSH: `render.py --once --view ai`. It is not one of the rotating pages (nobody
 chooses a model from a monitor). It shows even with `[ai] enabled = no`: it is where you choose. `[features] ai = no` removes it
 (and the hardware is never probed).
@@ -54,7 +54,7 @@ chooses a model from a monitor). It shows even with `[ai] enabled = no`: it is w
 | Details | of the selected model (`Enter`, or a link): why this verdict, licence, notes, the exact commands to install, use and remove it, and "not pinned yet" when this build cannot download it |
 | STATUS | the advisor (on, and who turned it on), the endpoint, whether it answers (checked at most once a minute, one second at most, never while a page is drawn), the active model |
 
-Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter` (details), and the ones that act, see [below](#from-the-browser-and-the-console). `render.py --once --view ai` takes `--select TEXT`, `--details`,
+Keys: `↑` `↓`, `PgUp` `PgDn`, `Home` `End`, `Enter` (details; `Esc` closes them), `?` (every key of the screen), and the ones that act, see [below](#from-the-browser-and-the-console). `render.py --once --view ai` takes `--select TEXT`, `--details`,
 `--demo` and `--demo-os windows|darwin`: the demo has three invented machines, a Linux box with a 12 GB NVIDIA card
 (`--demo`), a Windows laptop with 4 GB of GPU memory and 16 GB of RAM (`--demo-os windows`) and an M2 with 16 GB of unified
 memory (`--demo-os darwin`).
