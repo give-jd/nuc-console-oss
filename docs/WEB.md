@@ -214,6 +214,8 @@ curl -sI 'http://127.0.0.1:8787/?app=1' | grep -i '^content-security-policy'
 
 The two lists are the same. `tests/test_webshell.py` checks that for every shell page, and `tests/jsrules.py` / `tests/test_webjs.py` what the scripts may do.
 
+The markup tests are static; `tools/browser_check.py` (the `browser` job of the `tests` workflow, `python3 tools/browser_check.py --out shots` locally) loads every page of the shell in a real headless Chrome and fails when the browser reports a CSP or Trusted Types violation or a script error, or when the page lacks its landmarks.
+
 ### The fragment endpoint
 
 `GET <shell page URL>&frag=1` (the page's own address, which `main[data-frag]` says) answers:
