@@ -240,7 +240,9 @@ FOOTER = """
 .foot a,.toolbar a{color:var(--accent);text-underline-offset:.15em}
 .foot .lnk[aria-current="true"],.foot .lnk[aria-pressed="true"]{color:var(--fg-strong)}
 .foot .upd{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums}
-@container app (max-width:45.7em){.foot{position:static}.foot .upd{margin-left:0}}
+html{scroll-padding-bottom:3em}
+.view,main.grid{padding-bottom:calc(var(--pad) + 2.6em)}
+@container app (max-width:45.7em){.foot{position:static}.foot .upd{margin-left:0}.view,main.grid{padding-bottom:var(--pad)}html{scroll-padding-bottom:0}}
 """
 
 HELP = """
@@ -347,6 +349,8 @@ table.tbl th:last-child,table.tbl td:last-child{padding-right:0}
 .cb th.r{color:var(--muted)}
 td.n,th.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
 td.n,td.r{white-space:nowrap}
+table.tbl td.n:has(>svg.bar){white-space:normal}
+table.tbl td.n>svg.bar+span.n{display:inline-block;white-space:nowrap}
 table.tbl td svg{vertical-align:middle}
 table.tbl tr.grp th{padding-top:.8em;font:600 .86em var(--sans);letter-spacing:0;text-transform:none;color:var(--fg-strong);border-bottom:1px solid var(--line-2)}
 table.tbl tr.t-err td{background:var(--err-bg)}
@@ -397,6 +401,8 @@ table.tbl th.n{font-family:var(--sans)}
 .cb>p.ln{font-size:.94em}
 .cb>*+p{margin-top:.55em}
 .cb>*+p.hint{margin-top:.2em}
+.cb>p.ln>span.b:first-child:not(:last-child){display:inline-block;margin-right:.6em}
+.cb>p.ln>span.b:first-child:not(:last-child)+span{font-size:.72em}
 .cb>p.ln>span.b:first-child{display:block;margin-top:.5em;font:650 .72em/1.4 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 table.tbl tbody tr:not(.grp):not(.sub):hover>td{background:color-mix(in srgb,var(--fg) 4%,transparent)}
 table.tbl tr.grp th .n{color:var(--muted);font-weight:400}
@@ -428,6 +434,9 @@ details.fix code.cmd{display:inline-block;max-width:100%;vertical-align:top;user
 .known .why code.cmd{font-size:.95em}
 ul.wrap{gap:.3em .4em}
 ul.wrap li{min-width:0;padding:.02em .55em;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);overflow-wrap:anywhere}
+ul.wrap.flat{gap:.2em 1.4em;font-variant-numeric:tabular-nums}
+ul.wrap.flat li{padding:0;border:0;border-radius:0;background:none}
+ul.wrap.flat+ul.wrap.flat{margin-top:.3em;color:var(--muted);font-size:.88em}
 section.grp>p.ln{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .6em}
 .bl{display:grid;grid-template-columns:3.4em minmax(3em,1fr) 7.6em;align-items:center;gap:.05em .6em;min-width:0}
 .bl+.bl{margin-top:.5em}
@@ -435,9 +444,10 @@ section.grp>p.ln{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .6em}
 .bl svg.bar{display:block;width:100%;height:.6em;margin:0}
 .bl .n{text-align:right;white-space:nowrap;line-height:1.2}
 .bl .bx{grid-column:2 / -1;color:var(--muted);font-size:.86em;overflow-wrap:anywhere}
-ul.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(6.2em,1fr));gap:.25em 1.1em}
+ul.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(4.8em,1fr));gap:.15em .8em}
 ul.grid li{min-width:0}
-ul.grid li.bl{grid-template-columns:1.5em minmax(1.2em,1fr) 2.3em;gap:0 .35em;font-size:.9em}
+ul.grid li.bl{grid-template-columns:1.4em minmax(.8em,1fr) 2.2em;gap:0 .3em;font-size:.82em}
+ul.grid li.bl+li.bl{margin-top:0}
 ul.grid li.bl .lb{font:600 .86em var(--mono);text-align:right;font-variant-numeric:tabular-nums}
 ul.grid li.bl svg.bar{height:.5em}
 figure.timeline{margin:0;min-width:0}
@@ -458,7 +468,6 @@ ul.legend .n{color:var(--fg)}
 html[data-density="compact"] .prob .why,html[data-density="compact"] .prob .fix,html[data-density="compact"] .hint,
 html[data-density="wall"] .prob .why,html[data-density="wall"] .prob .fix,html[data-density="wall"] .hint,html[data-density="wall"] code.pid{display:none}
 html[data-density="wall"] ul.grid{display:none}
-html[data-density="compact"] ul.grid{grid-template-columns:repeat(auto-fill,minmax(5.8em,1fr))}
 """
 
 # the full screens built of components (screens.py): a page of panels (ui.Group), key figures (ui.Tiles), meters, a list whose rows are links
@@ -515,7 +524,8 @@ HEALTH_VIEW = """
 .hv .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
 .hv .st h2{margin:0;font:650 .8em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
 .hv .bits{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2em 1.1em;margin:0;min-width:0;flex:1 1 18em;color:var(--muted)}
-.hv .bit{white-space:nowrap}
+.hv .bit{white-space:normal;overflow-wrap:anywhere}
+.hv section.grp{min-width:0;overflow-x:auto}
 .hv .st .seg{margin-left:auto}
 .hv>section.grp,.hv .col{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:var(--pad);min-width:0;overflow-x:auto}
 .hv section.grp>*+*{margin-top:0}

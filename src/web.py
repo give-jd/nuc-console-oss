@@ -151,9 +151,9 @@ def wall_trim(body):
         if isinstance(part, ui.Table) and len(part.rows) > WALL_ROWS:
             left = len(part.rows) - WALL_ROWS
             part = ui.Table(part.cols, part.rows[:WALL_ROWS], None if part.groups is None else [g for g in part.groups if g[1] < WALL_ROWS], part.head)
-        elif isinstance(part, ui.Wrap) and len(part.items) > WALL_ROWS:
+        elif isinstance(part, ui.Wrap) and len(part.items) > WALL_ROWS and not part.flat:
             left = len(part.items) - WALL_ROWS
-            part = ui.Wrap(part.items[:WALL_ROWS], part.sep, part.max_lines, part.indent)
+            part = ui.Wrap(part.items[:WALL_ROWS], part.sep, part.max_lines, part.indent, part.lead)
         out.append(part)
         i += 1
         if left:
@@ -985,7 +985,7 @@ class Server(http.server.ThreadingHTTPServer):
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: cpu render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
             body = '<p class="sm">render error (see the service log)</p>'
-        tools = [f'<a href="{esc(page_url(chere, sel=""))}">close details</a>' if sel else "a process: its details"]
+        tools = [f'<a href="{esc(page_url(chere, sel=""))}">close details</a>'] if sel else []  # no sel: the rows are links, nothing to say
         return View(body, tools, chere, True, legacy=False)
 
     def cpu_page(self, here, zoom, r, sort, sel, shell=False):

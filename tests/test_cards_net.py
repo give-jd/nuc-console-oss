@@ -441,7 +441,7 @@ class ExposureWebTests(Base):
         self.assertNotIn("   PORT  ", out)  # the console's header line is not drawn
         self.assertIn("This machine only", out)
         self.assertIn("5433 blog-db-1", out)
-        self.assertIn("? unknown (treated as open)", out)  # the legend
+        self.assertIn("</span> unknown (treated as open)</li>", out)  # the legend, a list of symbols the web lays out
 
     def test_the_note_is_whole_on_the_web_and_cut_on_the_console(self):
         def tweak(cont, net, base):

@@ -39,7 +39,7 @@ import prefs
 import ui
 from exposure import (GROUPS, SENSITIVE, bind_scope, expose_apply, expose_note, expose_over_items, exposure_rows, group_of, is_private_addr, os_of,
                       webapp_rows)
-from ui import Bar, Card, Col, Flow, Grid, Group, Head, Indent, Kpi, Line, More, Msg, NoteTable, Raw, Row, Span, Spark, Table, Timeline, Wrap
+from ui import Bar, Card, Col, Flow, Grid, Group, Head, Indent, Kpi, Line, More, Msg, NoteTable, Only, Raw, Row, Span, Spark, Table, Timeline, Wrap
 
 
 # ---- Caps: what a card may show -----------------------------------------------------------------------------------------------
@@ -832,7 +832,12 @@ def exposure_full(ctx, caps, rows):
         summary = [Line(count.spans + ["        "] + ([Span(alert, "err")] if warn else []))]
     else:
         summary = [count, Line(["   ", Span(alert, "err")])]
-    body = [Line()] + summary + [Line([Span(LEGEND, "muted")], clip=w), Line()]
+    # the console draws the counts and the legend as padded text; the web, where spaces collapse, as a row of counters and a list of symbols
+    sym = [("●", "err_strong", "open"), ("◐", "accent", "filtered by source"), ("?", "unknown", "unknown (treated as open)"), ("·", "muted", "no")]
+    counters = [Line(["Internet ", Span(str(ni), "err_strong", bold=True) if ni else "0"]), Line(["LAN ", Span(str(nl), "warn", bold=True) if nl else "0"]),
+                f"Tailscale {sum(r['ts'] == 1 for r in rows)}", f"Local {len(by['LOCALE'])}"] + ([Span(alert, "err")] if warn else [])
+    body = [Only("console", [Line()] + summary + [Line([Span(LEGEND, "muted")], clip=w), Line()]),
+            Only("web", [Wrap(counters, sep="    ", indent=3, flat=True), Wrap([Line([Span(a, b), " " + c]) for a, b, c in sym], sep="   ", indent=3, flat=True)])]
     nw = max(12, min(NAMEW, w - 57))  # narrow column (3 columns): the name gets shorter, notes and cells stay visible
     declared_ports = {p for ps in ctx.cfg["webapps"].values() for p in ps if p not in SENSITIVE}
     trows, groups = [], []
