@@ -94,7 +94,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view">
-<div class="vb" data-card="__view" data-rev="4fc83acd05">
+<div class="vb" data-card="__view" data-rev="c01751b6cb">
 <div class="scr av">
 <header class="st">
 <h2>AI</h2>
@@ -121,7 +121,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/off">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <button class="bt bt-err" type="submit" title="stop the model server and turn the advisor off" data-key="e">Turn AI off</button>
 </form>
 </div>
@@ -137,7 +137,7 @@
 </h3>
 <form class="f" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input class="q" type="text" name="q" maxlength="500" placeholder="ask: why is the disk filling up?" aria-label="ask: why is the disk filling up?" autocomplete="off"> <button class="bt bt-ok" type="submit">Ask</button>
 </form>
 <div class="controls">
@@ -147,7 +147,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="days" value="1">
 <button class="bt" type="submit">last 24 h</button>
 </form>
@@ -155,7 +155,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="days" value="7">
 <button class="bt" type="submit">last 7 days</button>
 </form>
@@ -163,7 +163,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="days" value="30">
 <button class="bt" type="submit">last 30 days</button>
 </form>
@@ -284,9 +284,9 @@
 <span class="t-muted">not pinned yet</span>
 </td>
 </tr>
-<tr data-row>
+<tr class="t-sel" data-row aria-current="true">
 <td>
-<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<a href="/?view=ai&amp;app=1">
 <span class="b">Qwen3 30B-A3B</span>
 </a>
 </td>
@@ -305,7 +305,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-30b-a3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -333,7 +333,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="phi-4">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -360,7 +360,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-14b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -387,7 +387,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -414,7 +414,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="granite-3.3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -441,15 +441,15 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="phi-4-mini">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr class="t-sel" data-row aria-current="true">
+<tr data-row>
 <td>
-<a href="/?view=ai&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1">
 <span class="b">Qwen3 4B</span>
 <span class="t-ok">  ✓ installed</span>
 <span class="t-accent">  ● active</span>
@@ -492,7 +492,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="smollm3-3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -519,7 +519,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="granite-3.3-2b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -547,7 +547,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-1.7b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -574,7 +574,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <input type="hidden" name="model" value="qwen3-0.6b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -593,39 +593,39 @@
 <section class="grp">
 <section class="spec">
 <h3 class="sub">DETAILS</h3>
-<p class="spec-t">Qwen3 4B</p>
+<p class="spec-t">Qwen3 30B-A3B</p>
 <dl class="spec-dl">
 <dt>verdict</dt>
 <dd>
-<span class="t-ok">✔ FITS GPU</span>
+<span class="t-accent">◐ GPU+CPU</span>
 </dd>
 <dt>why</dt>
-<dd>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</dd>
+<dd>needs 19.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: 26 of 48 layers on the GPU, the rest (8.8 GB) in RAM</dd>
 <dt>speed</dt>
-<dd>about 61-102 tokens/s (a rough estimate, not a promise)</dd>
+<dd>about 19-37 tokens/s (a rough estimate, not a promise)</dd>
 <dt>state</dt>
-<dd>✓ installed · ● active: [ai] model</dd>
-<dt>remove</dt>
+<dd>not installed</dd>
+<dt>install</dt>
 <dd>
-<code class="cmd">sudo nuc-console-ai remove qwen3-4b</code>
+<code class="cmd">sudo nuc-console-ai setup qwen3-30b-a3b</code>
 </dd>
 <dt>needs</dt>
-<dd>3.3 GB of memory: the file (2.4 GB), the context and the runtime</dd>
+<dd>19.3 GB of memory: the file (18.2 GB), the context and the runtime</dd>
 <dt>where</dt>
-<dd>all 36 layers on the GPU</dd>
+<dd>26 of 48 layers on the GPU, the rest in RAM</dd>
 <dt>model</dt>
-<dd>4B parameters · Q4_K_M · context up to 40960 tokens</dd>
+<dd>30.5B-A3.3B parameters · Q4_K_M · context up to 40960 tokens</dd>
 <dt>licence</dt>
 <dd>Apache-2.0</dd>
 <dt>notes</dt>
-<dd>the default of nuc-console-ai: good advice in about 4 GB</dd>
+<dd>fast on CPU (MoE: only 3.3B parameters work per token)</dd>
 <dt>do</dt>
 <dd class="do">
-<form class="f" method="post" action="/ai/delete">
+<form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
-<input type="hidden" name="model" value="qwen3-4b">
-<button class="bt bt-err" type="submit" title="asks first" data-key="x">delete its files</button>
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<input type="hidden" name="model" value="qwen3-30b-a3b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on" data-key="u">use this model</button>
 </form>
 </dd>
 </dl>
@@ -643,7 +643,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
 <button class="bt bt-err" type="submit" title="asks first" data-key="X">delete everything</button>
 </form>
 </div>
@@ -654,15 +654,15 @@
 </div>
 </div>
 </main>
-<footer class="foot">refresh every <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=3&amp;app=1">+</a>
+<footer class="foot">refresh every <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;refresh=3&amp;app=1">+</a>
 <span class="dot">·</span>
-<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;sel=qwen3-4b&amp;pause=1&amp;app=1">pause</a>
-<span class="dot">·</span>text <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=110&amp;app=1">A+</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>text <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;zoom=110&amp;app=1">A+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">high contrast</a>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26sel%3Dqwen3-30b-a3b%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26sel%3Dqwen3-30b-a3b%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26sel%3Dqwen3-30b-a3b%26app%3D1">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26sel%3Dqwen3-30b-a3b%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26sel%3Dqwen3-30b-a3b%26app%3D1">compact</a>
 </span>
 <span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>

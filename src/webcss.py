@@ -557,6 +557,61 @@ svg.series rect{fill:currentColor}
 @container app (max-width:45.7em){.hv .st .seg{margin-left:0}dl.pane{margin-left:.4em;grid-template-columns:minmax(0,1fr)}dl.pane dd{margin-bottom:.3em}}
 """
 
+# the AI screen drawn from components (screens.ai_model; htmlview: Badge, Action, Controls, Question, Spec, Qa, Title, Cols, Split, Table): everything under
+# .av, which is also .scr (the panels, the table rows, the split). The buttons are forms that post to /ai/*: their look is here, their rules are the server's.
+AI_VIEW = """
+.av{display:grid;gap:var(--gap);min-width:0}
+.av>*{min-width:0}
+.av .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
+.av .st h2{margin:0;font:650 .8em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.av .bits{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2em 1.1em;margin:0;min-width:0;flex:1 1 18em;color:var(--muted)}
+.av .bit{white-space:nowrap}
+.av h3.sub{margin:0 0 .6em;padding-bottom:.3em;border-bottom:1px solid var(--line);font:650 .72em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-strong)}
+.av h3.sub .note{margin-left:.8em;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.av .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,26em),1fr));gap:var(--gap);align-items:start}
+.av .col>section.grp{height:100%}
+.av .controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5em 1em}
+.av .controls .ci{min-width:0;overflow-wrap:anywhere}
+.av .controls .tag{font-size:.9em;padding:.14em .9em}
+.av .tag.accent{background:var(--accent-bg);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.av form.f{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.5em;margin:0}
+.av .bt{font:inherit;cursor:pointer;padding:.25em .9em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
+.av .bt:hover{border-color:var(--accent);color:var(--accent)}
+.av .bt.bt-ok{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok);font-weight:600}
+.av .bt.bt-ok:hover{border-color:var(--ok);color:var(--ok)}
+.av .bt.bt-err{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 45%,transparent);color:var(--err)}
+.av .bt.bt-err:hover{background:var(--err-solid);border-color:var(--err-solid);color:var(--on-solid)}
+.av .bt:disabled,.av .bt:disabled:hover{opacity:.55;cursor:not-allowed;border-color:var(--line);background:var(--surface-2);color:var(--muted)}
+.av table.tbl .bt{padding:.05em .7em;font-size:.92em}
+.av input.q{font:inherit;width:min(42em,100%);padding:.3em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
+.av input.q:disabled{opacity:.55}
+.av .qa{margin:.5em 0}
+.av .qa .q{margin:0 0 .35em}
+.av .pend{color:var(--muted)}
+.av .advice{padding:.75em 1em;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}
+.av .advice p{margin:.35em 0;overflow-wrap:anywhere}
+.av .advice-head{margin:0 0 .5em;color:var(--accent);font:600 .86em var(--mono)}
+.av .advice-error{border-left-color:var(--warn)}
+.av .advice-error .advice-head{color:var(--warn)}
+.av .advice-shared{border-left-style:dashed}
+.av .advice-cites,.av .advice-tools{color:var(--muted);font-size:.86em}
+.av .ask{display:flex;flex-wrap:wrap;align-items:center;gap:.5em 1em;padding:.6em .8em;border:1px solid var(--warn);border-left-width:3px;border-radius:6px;background:var(--warn-bg)}
+.av .ask p{flex:1 1 20em;min-width:0;margin:0;color:var(--fg-strong);overflow-wrap:anywhere}
+.av .ask-b{display:flex;align-items:center;gap:.5em}
+.av .spec-t{margin:0 0 .5em;font-weight:700;color:var(--fg-strong)}
+dl.spec-dl{display:grid;grid-template-columns:5.5em minmax(0,1fr);gap:.3em .9em;margin:0;font-size:.92em}
+dl.spec-dl dt{color:var(--muted)}
+dl.spec-dl dd{margin:0;min-width:0;overflow-wrap:anywhere}
+dl.spec-dl dd.do{display:flex;flex-wrap:wrap;gap:.4em}
+.av .spec+.seg{margin-top:.6em}
+.av table.tbl{table-layout:auto}
+.av table.tbl td,.av table.tbl td:last-child{width:auto;white-space:nowrap}
+.av table.tbl td.p3:not(.n){white-space:normal;min-width:14em}
+.av .bt{white-space:nowrap}
+.av section.grp{overflow-x:auto}
+@container app (max-width:45.7em){.av .st .seg{margin-left:0}dl.spec-dl{grid-template-columns:minmax(0,1fr)}dl.spec-dl dd{margin-bottom:.3em}}
+"""
+
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
 ANSI = """
 .r{color:var(--err)}.g{color:var(--ok)}.y{color:var(--warn)}.b{color:var(--accent)}.m{color:var(--magenta)}.c{color:var(--cyan)}
@@ -631,7 +686,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, AI_VIEW, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

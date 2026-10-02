@@ -5,18 +5,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>demo-host · settings · nuc-console</title>
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · ai · nuc-console</title>
 <link rel="stylesheet" href="/s/app.b7c63aa4.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
+<header class="topbar" data-card="__top" data-rev="78a50561ef">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?app=1" data-key="1">
 <kbd>1</kbd>Overview</a>
 <a href="/?app=1&amp;view=map" data-key="2">
-<kbd>2</kbd>Map</a>
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
 <a href="/?app=1&amp;view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
 <a href="/?app=1&amp;view=health" data-key="4">
@@ -24,7 +28,7 @@
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5">
+<a href="/?app=1&amp;view=ai" data-key="5" aria-current="page">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -32,227 +36,486 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings" aria-current="page">⚙︎</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
+<div class="kpiblock" data-card="__kpis" data-rev="fba522a530">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?app=1#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
-<main class="view">
-<div class="settings">
-<section class="sec" aria-labelledby="sec-app">
-<h3 class="sech" id="sec-app">Appearance</h3>
-<div class="fs">
-<span class="lab">Theme <span class="src sm">default</span>
+<main class="view" data-refresh="2" data-frag="/?view=ai&amp;sel=qwen3-4b&amp;app=1&amp;frag=1">
+<div class="vb" data-card="__view" data-rev="c9b85100c7">
+<div class="scr av">
+<header class="st">
+<h2>AI</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">what this machine can run</span>
 </span>
-<div class="seg" role="group" aria-label="Theme">
-<span aria-current="true">Auto</span>
-<a href="/?set=td&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="dark">Dark</a>
-<a href="/?set=tl&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="light">Light</a>
-<a href="/?set=th&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="high-contrast">High contrast</a>
-</div>
-</div>
-<div class="fs">
-<span class="lab">Density <span class="src sm">default</span>
+<span class="bit">
+<span class="t-muted">12 models</span>
 </span>
-<div class="seg" role="group" aria-label="Density">
-<a href="/?set=dw&amp;back=app%3D1%26view%3Dsettings" data-set data-density="wall">Wall</a>
-<span aria-current="true">Desk</span>
-<a href="/?set=dc&amp;back=app%3D1%26view%3Dsettings" data-set data-density="compact">Compact</a>
-</div>
-<p class="hintl">Wall hides the small print and cuts long lists to 3 lines; compact fits more.</p>
-</div>
-<div class="fs">
-<span class="lab">Preset <span class="src sm">default</span>
+<span class="bit">
+<span class="t-ok">✔ 10 fit</span>  <span class="t-accent">◐ 2 gpu+cpu</span>
 </span>
-<div class="seg" role="group" aria-label="Preset">
-<span aria-current="true">Default</span>
-<a href="/?set=ps&amp;back=app%3D1%26view%3Dsettings" data-set>Security</a>
-<a href="/?set=pv&amp;back=app%3D1%26view%3Dsettings" data-set>Server</a>
-<a href="/?set=pd&amp;back=app%3D1%26view%3Dsettings" data-set>Desktop</a>
+</p>
+</header>
+<section class="grp">
+<div class="controls">
+<div class="ci">
+<span class="tag ok">● ON</span>
 </div>
-<p class="hintl">A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.</p>
-</div>
-<div class="fs">
-<span class="lab">Layout <span class="src sm">default</span>
-</span>
-<div>
-<a class="lnk" href="/?app=1&amp;edit=1">Edit layout</a>
-</div>
-<p class="hintl">Move, resize and hide the cards of the overview. It is kept in this browser; a preset or Reset layout brings the preset's back.</p>
-</div>
-<div class="fs">
-<span class="lab">Order <span class="src sm">default</span>
-</span>
-<div class="seg" role="group" aria-label="Order">
-<span aria-current="true">By severity</span>
-<a href="/?set=of&amp;back=app%3D1%26view%3Dsettings" data-set>Fixed</a>
-</div>
-<p class="hintl">By severity: what needs you comes first. Fixed: the layout&#x27;s order, nothing moves.</p>
-</div>
-<div class="fs">
-<span class="lab">Start view <span class="src sm">default</span>
-</span>
-<div class="seg" role="group" aria-label="Start view">
-<span aria-current="true">Overview</span>
-<a href="/?set=vm&amp;back=app%3D1%26view%3Dsettings" data-set>Map</a>
-<a href="/?set=vc&amp;back=app%3D1%26view%3Dsettings" data-set>CPU</a>
-<a href="/?set=vh&amp;back=app%3D1%26view%3Dsettings" data-set>Health</a>
-<a href="/?set=va&amp;back=app%3D1%26view%3Dsettings" data-set>AI</a>
+<div class="ci">
+<span class="b">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
 </div>
 </div>
-<div class="fs">
-<span class="lab">Key figures (at most 8, shown in the order chosen) <span class="src sm">default</span>
-</span>
-<ul class="kchk">
-<li class="on">
-<a href="/?set=kin_la_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> Problems</a>
-<span class="o">1</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_la_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> Internet</a>
-<span class="o">2</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> LAN</a>
-<span class="o">3</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_la_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> Beyond</a>
-<span class="o">4</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> DB on LAN</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Firewall</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_la_be_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> CPU</a>
-<span class="o">5</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_la_be_cp_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> RAM</a>
-<span class="o">6</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_la_be_cp_rm_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> Disk</a>
-<span class="o">7</span>
-</li>
-<li class="on">
-<a href="/?set=kpb_in_la_be_cp_rm_dk&amp;back=app%3D1%26view%3Dsettings" data-set>
-<span class="box" aria-hidden="true">✔</span> Temp</a>
-<span class="o">8</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Load</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Containers</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Unhealthy</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Failed units</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> SSH</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Tailnet</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Rx</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Tx</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Uptime</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> Health</span>
-</li>
-<li class="off">
-<span aria-disabled="true">
-<span class="box" aria-hidden="true">+</span> AI</span>
-</li>
-</ul>
-</div>
-<div class="fs expo">
-<span class="lab" id="exp-lab">Export</span>
-<pre id="export" tabindex="0" aria-labelledby="exp-lab">[ui]
-web = app
-theme = auto
-density = desk
-start_view = overview
-preset = default
-order = severity
-kpis = problems, internet, lan, beyond, cpu, ram, disk, temp
-layout = attention:2, exposure:2, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
-hidden =
-</pre>
-<button type="button" class="lnk" data-copy="#export" data-done="Copied" data-fail="Selected: press Ctrl+C">Copy</button>
-<code class="ck-v" id="cookie-v">1</code>
-<p class="hintl">Saved in this browser (the cookie above). To make it everyone's default, paste the block into config.ini.</p>
-</div>
-<div class="fs">
-<a class="lnk" data-set href="/?set=reset&amp;back=app%3D1%26view%3Dsettings">Reset to the defaults</a>
-</div>
+<p class="msg notice lv-warn" role="status">
+<span class="sym">!</span> locked by config.ini ([ai] web_actions = no): this page only shows</p>
+<p class="ln">
+<span class="t-muted">models are downloaded to </span>
+<span class="mono">/var/lib/nuc-console/ai</span>
+<span class="t-muted"> · 4.0 GB downloaded · 412.0 GB free on that disk</span>
+</p>
 </section>
-<section class="sec" aria-labelledby="sec-about">
-<h3 class="sech" id="sec-about">About this machine</h3>
-<p class="sm">Read-only: this page changes nothing on the machine.</p>
-<dl class="about">
-<dt>version</dt>
+<section class="grp">
+<h3 class="sub">CHAT <span class="note">ask the model about this machine (it reads this machine&#x27;s history; AI, check before acting)</span>
+</h3>
+</section>
+<div class="cols">
+<div class="col">
+<section class="grp">
+<h3 class="sub">HARDWARE <span class="note">linux x86_64</span>
+</h3>
+<dl class="kv">
+<dt>CPU</dt>
 <dd>
-<b>nuc-console 1.5.0</b> <span class="sm">to update, run <code class="cmd">nuc-console-update</code> yourself: nothing here goes online</span>
+<span class="b">AMD Ryzen 7 5800X</span>
+<span class="t-muted"> · 8 cores / 16 threads</span>
+<span class="t-muted"> · AVX2</span>
 </dd>
-<dt>mode</dt>
-<dd>installed on this machine</dd>
-<dt>config</dt>
+<dt>RAM</dt>
 <dd>
-<code class="cmd">/nonexistent</code> <span class="sm">no file: the defaults are in use</span>
-</dd>
-<dt>web access</dt>
-<dd>loopback only (127.0.0.1), no token</dd>
-<dt>display</dt>
-<dd>mode browser · zoom 100%</dd>
-<dt>Telegram</dt>
-<dd>off ([telegram] enabled = no)</dd>
-<dt>AI buttons</dt>
-<dd>allowed ([ai] web_actions = yes): the AI page can switch the AI on and off, ask and delete models</dd>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>  21.0 GB free of 31.2 GB</dd>
+<dt>GPU</dt>
+<dd>
+<span class="b">NVIDIA GeForce RTX 3060</span>
+<span class="t-muted"> · CUDA</span>  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="8%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="8.3" height="8"/>
+</svg>  11.0 GB free of 12.0 GB</dd>
 </dl>
 </section>
 </div>
+<div class="col">
+<section class="grp">
+<h3 class="sub">STATUS</h3>
+<dl class="kv">
+<dt>advisor</dt>
+<dd>
+<span class="t-ok">✔ on</span>
+<span class="t-muted">  (turned on from the AI page or screen)</span>
+</dd>
+<dt>endpoint</dt>
+<dd>http://127.0.0.1:8080/v1</dd>
+<dt>server</dt>
+<dd>
+<span class="t-ok">✔ answering</span>
+<span class="t-muted"> · 1 model: qwen3-4b</span>
+</dd>
+<dt>model</dt>
+<dd>
+<span class="t-accent">●</span> <span class="b">qwen3-4b</span>
+<span class="t-muted">  in the catalog</span>
+</dd>
+<dt>runtime</dt>
+<dd>
+<span class="t-ok">✔ installed</span>
+<span class="t-muted"> (0.10.6)</span>
+</dd>
+<dt>files</dt>
+<dd>
+<span class="t-muted mono">/var/lib/nuc-console/ai</span>
+</dd>
+</dl>
+</section>
+</div>
+</div>
+<div class="split">
+<div class="sp-l">
+<section class="grp">
+<h3 class="sub">MODELS <span class="note">best first</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-name">
+<col class="c-params">
+<col class="c-size">
+<col class="c-need">
+<col class="c-verdict">
+<col class="c-tok">
+<col class="c-notes">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Model</th>
+<th class="p2" scope="col">Params</th>
+<th class="r n p1" scope="col">Size</th>
+<th class="r n" scope="col">Needs</th>
+<th scope="col">Verdict</th>
+<th class="r n p3" scope="col">Est tok/s</th>
+<th class="p3" scope="col">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1">
+<span class="b">OpenAI gpt-oss 20B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">21B-A3.6B</span>
+</td>
+<td class="r n p1">11.8 GB</td>
+<td class="r n">12.5 GB</td>
+<td>
+<span class="tag accent">◐ GPU+CPU</span>
+</td>
+<td class="r n p3">36-66</td>
+<td class="p3">
+<span class="t-muted">fast for its size (MoE, 3.6B active); reasoning effort is a setting</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<span class="b">Qwen3 30B-A3B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">30.5B-A3.3B</span>
+</td>
+<td class="r n p1">18.2 GB</td>
+<td class="r n">19.3 GB</td>
+<td>
+<span class="tag accent">◐ GPU+CPU</span>
+</td>
+<td class="r n p3">19-37</td>
+<td class="p3">
+<span class="t-muted">fast on CPU (MoE: only 3.3B parameters work per token)</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=phi-4&amp;app=1">
+<span class="b">Phi-4 14B</span>
+<span class="t-warn">  ★ recommended</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">14.7B</span>
+</td>
+<td class="r n p1">8.9 GB</td>
+<td class="r n">9.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">strong at reasoning and code; short context (16k)</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1">
+<span class="b">Qwen3 14B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">14.8B</span>
+</td>
+<td class="r n p1">8.8 GB</td>
+<td class="r n">9.7 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1">
+<span class="b">Qwen3 8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p1">4.9 GB</td>
+<td class="r n">5.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1">
+<span class="b">IBM Granite 3.3 8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p1">4.9 GB</td>
+<td class="r n">5.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">long context (128k); tuned for business tasks</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1">
+<span class="b">Phi-4-mini 3.8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">3.8B</span>
+</td>
+<td class="r n p1">2.4 GB</td>
+<td class="r n">3.3 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">small and good at reasoning; long context</span>
+</td>
+</tr>
+<tr class="t-sel" data-row aria-current="true">
+<td>
+<a href="/?view=ai&amp;app=1">
+<span class="b">Qwen3 4B</span>
+<span class="t-ok">  ✓ installed</span>
+<span class="t-accent">  ● active</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">4B</span>
+</td>
+<td class="r n p1">2.4 GB</td>
+<td class="r n">3.3 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">the default of nuc-console-ai: good advice in about 4 GB</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1">
+<span class="b">SmolLM3 3B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">3.1B</span>
+</td>
+<td class="r n p1">1.9 GB</td>
+<td class="r n">2.7 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">81-135</td>
+<td class="p3">
+<span class="t-muted">small, multilingual, long context</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1">
+<span class="b">IBM Granite 3.3 2B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">2.5B</span>
+</td>
+<td class="r n p1">1.6 GB</td>
+<td class="r n">2.5 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">96-160</td>
+<td class="p3">
+<span class="t-muted">very small; fine for short advice</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1">
+<span class="b">Qwen3 1.7B</span>
+<span class="t-ok">  ✓ installed</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">1.7B</span>
+</td>
+<td class="r n p1">1.1 GB</td>
+<td class="r n">1.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">140-233</td>
+<td class="p3">
+<span class="t-muted">runs anywhere; thinking mode: /no_think</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1">
+<span class="b">Qwen3 0.6B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">0.6B</span>
+</td>
+<td class="r n p1">400 MB</td>
+<td class="r n">1.1 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">384-640</td>
+<td class="p3">
+<span class="t-muted">a toy: too small to give reliable advice</span>
+</td>
+</tr>
+</tbody>
+</table>
+<p class="ln"> <span class="t-warn">★</span>
+<span class="t-muted"> recommended</span>  ·  <span class="t-ok">✓</span>
+<span class="t-muted"> installed</span>  ·  <span class="t-accent">●</span>
+<span class="t-muted"> active</span>  ·  <span class="t-muted">tok/s: rough estimate</span>
+</p>
+</section>
+</div>
+<div class="sp-r">
+<section class="grp">
+<section class="spec">
+<h3 class="sub">DETAILS</h3>
+<p class="spec-t">Qwen3 4B</p>
+<dl class="spec-dl">
+<dt>verdict</dt>
+<dd>
+<span class="t-ok">✔ FITS GPU</span>
+</dd>
+<dt>why</dt>
+<dd>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</dd>
+<dt>speed</dt>
+<dd>about 61-102 tokens/s (a rough estimate, not a promise)</dd>
+<dt>state</dt>
+<dd>✓ installed · ● active: [ai] model</dd>
+<dt>remove</dt>
+<dd>
+<code class="cmd">sudo nuc-console-ai remove qwen3-4b</code>
+</dd>
+<dt>needs</dt>
+<dd>3.3 GB of memory: the file (2.4 GB), the context and the runtime</dd>
+<dt>where</dt>
+<dd>all 36 layers on the GPU</dd>
+<dt>model</dt>
+<dd>4B parameters · Q4_K_M · context up to 40960 tokens</dd>
+<dt>licence</dt>
+<dd>Apache-2.0</dd>
+<dt>notes</dt>
+<dd>the default of nuc-console-ai: good advice in about 4 GB</dd>
+</dl>
+</section>
+<div class="seg" role="group" aria-label="details">
+<a href="/?view=ai&amp;app=1" data-key="Escape" title="key Escape">close details ✕</a>
+</div>
+</section>
+</div>
+</div>
+</div>
+</div>
 </main>
-<footer class="foot">text <a href="/?zoom=90&amp;app=1&amp;view=settings">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;view=settings">A+</a>
+<footer class="foot">refresh every <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;sel=qwen3-4b&amp;refresh=3&amp;app=1">+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26view%3Dsettings">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26view%3Dsettings">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26view%3Dsettings">high contrast</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;sel=qwen3-4b&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>text <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1%26view%3Dsettings">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26view%3Dsettings">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26sel%3Dqwen3-4b%26app%3D1">compact</a>
 </span>
-<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+<span class="dot">·</span>read-only<span class="upd">updated 14:13:20</span>
 </footer>
 <section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
 <a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
@@ -263,6 +526,48 @@ hidden =
 <a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
 </header>
 <div class="keys">
+<section>
+<h3>AI</h3>
+<dl>
+<dt>
+<kbd>e</kbd>
+</dt>
+<dd>AI on/off</dd>
+<dt>
+<kbd>u</kbd>
+</dt>
+<dd>use model</dd>
+<dt>
+<kbd>x</kbd> <kbd>X</kbd>
+</dt>
+<dd>delete/delete all</dd>
+<dt>
+<kbd>c</kbd>
+</dt>
+<dd>cancel</dd>
+<dt>
+<kbd>y/n</kbd>
+</dt>
+<dd>answer a question</dd>
+</dl>
+</section>
+<section>
+<h3>Lists</h3>
+<dl>
+<dt>
+<kbd>↑↓</kbd>
+</dt>
+<dd>move</dd>
+<dt>
+<kbd>PgUp/PgDn/Home/End</kbd>
+</dt>
+<dd>page</dd>
+<dt>
+<kbd>Enter</kbd>
+</dt>
+<dd>details</dd>
+</dl>
+</section>
 <section>
 <h3>Everywhere</h3>
 <dl>

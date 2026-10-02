@@ -1,24 +1,28 @@
 """The AI screen as components (src/screens.py): the model (rows, view, keys, the pieces of the screen), what the console draws from it at several
 sizes on the three demo machines, the components it added to ui.py (Badge, Spec, Question and the web's Action, Controls, Qa) drawn by ansi.py, and
-what the web shell draws from the same data.
+what the web shell draws from the same data (a real page, no <pre>, escaped, forms with their CSRF token, nothing to click when it is locked).
 
 Hermetic: the demo machines at a clock that stands still, the demo's engine in a temporary folder (tests/golden.py's FrozenWorld), nothing is
 downloaded or started.
 """
 import copy
+import html as stdhtml
 import os
 import re
 import sys
 import unittest
+from html.parser import HTMLParser
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import golden  # noqa: E402
 import ansi  # noqa: E402
+import htmlview  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import test_ai_screen as T  # noqa: E402
 import ui  # noqa: E402
+import webjs  # noqa: E402
 
 SGR = re.compile(r"\x1b\[[0-9;]*m")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f-\x9f]")
@@ -296,6 +300,127 @@ class Components(unittest.TestCase):
         self.assertEqual(SGR.sub("", lines[0]), " " + "x" * 9)
         self.assertTrue(lines[0].endswith("\x1b[0m"))
         self.assertEqual(lines[1], "\x1b[7m " + "x" * 9 + "\x1b[0m")
+
+
+class Frag(HTMLParser):
+    """Every tag and attribute of a page: the shell's fragment must keep inside webjs.FRAG_TAGS / FRAG_ATTRS."""
+
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.tags, self.attrs, self.forms = [], set(), []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append(tag)
+        self.attrs.update(k for k, _v in attrs)
+        if tag == "form":
+            self.forms.append(dict(attrs))
+
+
+def view_of(page_html):
+    start = page_html.index('data-card="__view"')
+    return page_html[page_html.rindex("<", 0, start):page_html.index("</main>", start)]
+
+
+class Web(unittest.TestCase):
+    def page(self, query, locked=False):
+        with golden.FrozenWorld(cfg=golden.LOCKED if locked else None) as world:
+            return world.page(query)
+
+    def test_the_shell_draws_the_screen_natively_in_the_view_block(self):
+        view = view_of(self.page("app=1&view=ai&sel=qwen3-4b"))
+        self.assertNotIn("<pre", view)
+        for needle in ('class="scr av"', '<table class="tbl">', '<svg class="bar', 'class="tag ok"', '<dl class="spec-dl">', '<form class="f" method="post" action="/ai/off">',
+                       'data-key="e"', 'data-key="x"', 'data-key="X"', "check before acting", 'name="q"'):
+            self.assertIn(needle, view)
+        self.assertEqual(view.count('data-card="__view"'), 1)
+        classic = self.page("app=0&view=ai&sel=qwen3-4b")
+        self.assertIn('<pre class="ht">', classic)
+        self.assertNotIn('class="scr av"', classic)
+
+    def test_every_form_keeps_the_token_the_back_page_and_the_endpoints_of_the_classic_page(self):
+        view = view_of(self.page("app=1&view=ai&sel=qwen3-30b-a3b"))
+        classic = self.page("app=0&view=ai&sel=qwen3-30b-a3b")
+        p = Frag()
+        p.feed(view)
+        self.assertTrue(p.forms)
+        self.assertTrue(all(f["method"] == "post" and re.match(r"^/ai/[a-z-]+$", f["action"]) for f in p.forms))
+        for form in re.findall(r"<form .*?</form>", view):
+            self.assertRegex(form, r'<input type="hidden" name="csrf" value="[^"]+">')
+            self.assertRegex(form, r'<input type="hidden" name="back" value="[^"]*view=ai')
+        actions = {f["action"] for f in p.forms}
+        self.assertLessEqual(actions, set(re.findall(r'action="(/ai/[a-z-]+)"', classic)))  # no endpoint the classic page has not
+        self.assertIn("/ai/use", actions)
+        self.assertEqual(set(re.findall(r'name="csrf" value="([^"]+)"', view)), set(re.findall(r'name="csrf" value="([^"]+)"', classic)))
+
+    def test_a_click_that_asks_a_question_shows_it_with_yes_and_no(self):
+        view = view_of(self.page("app=1&view=ai&sel=qwen3-1.7b&confirm=delete"))
+        self.assertIn('<div class="ask" role="group"', view)
+        self.assertIn("Delete the files of Qwen3 1.7B", view)
+        self.assertRegex(view, r'(?s)action="/ai/delete">.*?name="confirm" value="yes">.*?data-key="y"')
+        self.assertRegex(view, r'<a class="btn" href="[^"]*view=ai[^"]*" data-key="n">No</a>')
+        self.assertNotRegex(re.search(r'<a class="btn" href="([^"]*)" data-key="n"', view).group(1), "confirm=")
+        self.assertIn("Delete the runtime and every downloaded model", view_of(self.page("app=1&view=ai&confirm=delete-all")))
+        self.assertNotIn('class="ask"', view_of(self.page("app=1&view=ai&sel=qwen3-8b&confirm=delete")))  # not installed: nothing to ask
+
+    def test_locked_shows_the_notice_and_has_no_form_no_button_no_question(self):
+        for query in ("app=1&view=ai&sel=qwen3-4b", "app=1&view=ai&sel=qwen3-4b&confirm=delete"):
+            view = view_of(self.page(query, locked=True))
+            self.assertIn("locked by config.ini ([ai] web_actions = no): this page only shows", view)
+            for needle in ("<form", "<button", "<input", 'class="ask"', "use this model", "data-key=\"e\""):
+                self.assertNotIn(needle, view)
+            self.assertIn("MODELS", view)
+
+    def test_only_what_a_fragment_may_hold(self):
+        for locked in (False, True):
+            p = Frag()
+            p.feed(view_of(self.page("app=1&view=ai&sel=qwen3-4b&confirm=delete", locked)))
+            self.assertEqual(sorted(set(p.tags) - set(webjs.FRAG_TAGS)), [])
+            self.assertEqual(sorted(p.attrs - {a.lower() for a in webjs.FRAG_ATTRS}), [])
+
+    def nodes(self, cat, locked=False, chat=(), confirm="", sel="", snap_over=None):
+        with golden.FrozenWorld() as world:
+            render.DEMO, render.DEMO_OS = True, None
+            m = Machine(cat=cat)
+            snap = dict(m.st["snap"], locked=locked, **(snap_over or {}))
+            acts = None if locked else screens.AiActs("TOKEN", "view=ai")
+            links = screens.AiLinks(lambda i: "/?view=ai&sel=" + i, "/?view=ai", "/?view=ai")
+            return screens.ai_model(m.data, m.st, snap, None if locked else {"model": None, "by": "", "recommended": None, "target": None, "size": None, "installed": False},
+                                    m.rows, sel, confirm, acts, links, chat)
+
+    def test_nothing_the_machine_or_the_model_wrote_is_markup(self):
+        cat = hand()
+        cat["models"][0].update(name=EVIL, notes=EVIL)
+        cat["models"][0]["commands"]["install"] = EVIL
+        cat["dir"] = EVIL
+        cat["hw"] = dict(cat["hw"], notes=[EVIL], gpus=[{"name": EVIL, "backend": "cuda", "vram_mb": 8192, "vram_free_mb": 1.0, "unified": False}])
+        chat = [ui.Qa("you", EVIL, ui.Advice(EVIL, [[EVIL]], [("cites", EVIL)], "advice")), ui.Qa("advice", EVIL, None, True)]
+        out = "".join(htmlview.html(n) for n in self.nodes(cat, chat=chat, sel="m-gpu"))
+        self.assertNotIn("<script>", out)
+        self.assertGreaterEqual(out.count(stdhtml.escape(EVIL)), 6)
+        self.assertIn("the model is writing the answer", out)
+
+    def test_what_cannot_be_read_is_a_question_mark_on_the_web_too(self):
+        cat = hand()
+        cat["hw"] = {"os": "linux", "cpu": {}, "ram": {}, "gpus": [{"name": "g"}]}
+        cat["space"] = {}
+        out = "".join(htmlview.html(n) for n in self.nodes(cat))
+        self.assertIn("could not be read", out)
+        self.assertIn("free space unknown", out)
+        self.assertNotIn("free of", out)
+
+    def test_an_action_posts_only_to_a_path_of_this_server(self):
+        self.assertIn('action="/ai/use"', htmlview.html(ui.Action("/ai/use", "use")))
+        for bad in ("http://evil.example/x", "//evil.example/x", "/ai/../x", "javascript:x"):
+            self.assertEqual(htmlview.html(ui.Action(bad, "use")), "")
+        out = htmlview.html(ui.Action("/ai/use", "u", [("model", '"><script>')], "u", "ok", "t", True))
+        self.assertNotIn("<script>", out)
+        self.assertIn(" disabled", out)
+
+    def test_a_catalog_that_could_not_be_read_is_a_message(self):
+        with golden.FrozenWorld():
+            nodes = screens.ai_model({"cat": None, "msg": "boom", "err": True, "at": 0}, {}, {}, None, [], "", "", None, None)
+        self.assertEqual(nodes[1].level, "err")
+        self.assertNotIn("<form", "".join(htmlview.html(n) for n in nodes))
 
 
 if __name__ == "__main__":

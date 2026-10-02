@@ -76,6 +76,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 - In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
   (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
   events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
+- In the shell the **AI screen** (`?app=1&view=ai`) is drawn natively too: the switch and a download's progress bar, the chat, the hardware and the status as
+  labelled values, the models as a table with the verdict as a pill and a button per row, the selected model's details, and the delete confirmations. The buttons are the
+  same forms as on the classic page (same endpoints and CSRF token) and have keys (`e`, `c`, `u`, `x`, `X`, `y`, `n`); a locked page shows a notice and no form. The console
+  draws the same model and looks exactly as before.
 
 **Windows and macOS**
 

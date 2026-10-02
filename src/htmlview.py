@@ -254,7 +254,7 @@ def _series_svg(sr):
 
 
 def _inline(x):
-    """A Span, a Line, a Bar, a Meter, a Spark or a Series as markup that sits in a line or a cell."""
+    """A Span, a Line, a Bar, a Meter, a Spark, a Series, a Badge or an Action as markup that sits in a line or a cell."""
     if isinstance(x, ui.Span):
         return _span(x)
     if isinstance(x, ui.Line):
@@ -267,6 +267,10 @@ def _inline(x):
         return _meter_svg(x)
     if isinstance(x, ui.Series):
         return _series_svg(x)
+    if isinstance(x, ui.Badge):
+        return _badge_html(x)
+    if isinstance(x, ui.Action):
+        return _action_html(x)
     return '<span class="st-unknown">?</span>'
 
 
@@ -474,7 +478,69 @@ def _advice_html(a):
     return f'<div{_cls("advice", "advice-" + a.kind if a.kind != "advice" else "")}><p class="advice-head">{_e(a.head)}</p>{paras}{notes}</div>'
 
 
+# ---- the components of the AI screen (ui.py: Badge, Action, Controls, Question, Spec, Qa) ------------------------------------------------
+#   <span class="tag ok|warn|err|accent">     Badge (a verdict: its symbol is in the text)
+#   <form class="f" method="post" action="/ai/..">   Action: hidden inputs, an optional <input class="q" name>, <button class="bt bt-TONE" data-key>
+#   <div class="controls"><div class="ci">   Controls          <div class="ask" role="group">   Question: <p>, the yes form, <a class="btn" data-key="n">No
+#   <section class="spec"><dl class="spec-dl">   Spec: values in <code class="cmd"> when whole, in a tone class otherwise, a 'do' row of Actions
+#   <div class="qa"><p class="q">   Qa: the question, then the answer as an Advice block or the waiting line
+
+_BADGE_CLASS = {"ok": "ok", "warn": "warn", "err": "err", "accent": "accent", "muted": ""}
+_SAFE_PATH = re.compile(r"^/[a-z][a-z0-9/-]*$")  # an Action posts to a path of this server, never to another address
+
+
+def _badge_html(b):
+    return f'<span{_cls("tag", _BADGE_CLASS[b.tone])}>{_e(b.text)}</span>'
+
+
+def _action_html(a):
+    if not _SAFE_PATH.match(a.action):
+        return ""
+    hidden = "".join(f'<input type="hidden" name="{_e(k)}" value="{_e(v)}">' for k, v in a.fields)
+    off = " disabled" if a.disabled else ""
+    ask = ""
+    if a.ask is not None:
+        name, hint, most = a.ask
+        ask = f'<input class="q" type="text" name="{_e(name)}" maxlength="{int(most)}" placeholder="{_e(hint)}" aria-label="{_e(hint)}" autocomplete="off"{off}> '
+    attrs = ' type="submit"' + (f' title="{_e(a.title)}"' if a.title else "") + (f' data-key="{_e(a.key)}"' if a.key else "") + off
+    return (f'<form class="f" method="post" action="{_e(a.action)}">{hidden}{ask}<button{_cls("bt", "bt-" + a.tone if a.tone else "")}{attrs}>{_e(a.label)}</button></form>')
+
+
+def _controls_html(c):
+    return '<div class="controls">' + "".join(f'<div class="ci">{_inline(x)}</div>' for x in c.items) + "</div>"
+
+
+def _question_html(q):
+    yes = _action_html(q.yes) if q.yes is not None else ""
+    link = _href(q.no_href)
+    no = f'<a class="btn" href="{_e(link)}" data-key="n">No</a>' if link else ""
+    return f'<div class="ask" role="group" aria-label="question"><p>{_e(q.text)}</p><div class="ask-b">{yes}{no}</div></div>'
+
+
+def _spec_html(sp):
+    rows = []
+    for label, text, tone, whole in sp.items:
+        value = f'<code class="cmd">{_e(text)}</code>' if whole else f'<span{_cls("t-" + tone)}>{_e(text)}</span>' if tone else _e(text)
+        rows.append(f"<dt>{_e(label)}</dt><dd>{value}</dd>")
+    if sp.actions:
+        rows.append('<dt>do</dt><dd class="do">' + "".join(_action_html(a) for a in sp.actions) + "</dd>")
+    return f'<section class="spec"><h3 class="sub">DETAILS</h3><p class="spec-t">{_e(sp.title)}</p><dl class="spec-dl">{"".join(rows)}</dl></section>'
+
+
+def _qa_html(q):
+    wait = ('<p class="pend">the model is writing the answer (a small model on a slow CPU may need a minute; this page updates by itself)</p>'
+            if q.pending and q.answer is None else "")
+    return (f'<div class="qa"><p class="q"><strong>{"advice" if q.kind == "advice" else "you"}:</strong> {_e(q.q)}</p>'
+            + (html(q.answer) if q.answer is not None else "") + wait + "</div>")
+
+
 _HTML = {
+    ui.Badge: lambda n: f'<p class="ln">{_badge_html(n)}</p>',
+    ui.Action: _action_html,
+    ui.Controls: _controls_html,
+    ui.Question: _question_html,
+    ui.Spec: _spec_html,
+    ui.Qa: _qa_html,
     ui.Title: _title_html,
     ui.Seg: _seg_html,
     ui.Series: _series_svg,

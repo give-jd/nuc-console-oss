@@ -1182,6 +1182,9 @@ class Server(http.server.ThreadingHTTPServer):
         if not render.CFG["features"].get("ai", True):
             return doc("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", [dash, "read-only"], refresh=False)
         ahere = dict({"view": "ai", "sel": sel, "pause": pause}, **here)
+        if shell:  # the shell draws the screen itself: the components of screens.py, as HTML (the forms are the ones of the classic page)
+            return View(ai_native(self, ahere, sel, confirm, snap, eng), [], ahere, bool(not pause and live), forms=not snap["locked"], wait=2 if snap["busy"] else 0,
+                        legacy=False)
         cols, rows = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), []
         try:
             data, pb = render.ai_state(self.smp)
@@ -1306,6 +1309,35 @@ def health_native(smp, days, sel, here):
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the health screen could not be drawn (see the service log)</p>'
+
+
+def ai_chat_nodes(snap):
+    """The chat of the engine's snapshot as ui.Qa nodes, oldest first: the question, and the answer as a ui.Advice (advisor.parts: escaped by the renderer,
+    cleaned and capped by the advisor) or, while the model is still writing it, the waiting line. A question that failed shows why."""
+    out = []
+    for e in snap["chat"]["history"]:
+        p = advisor.parts(e["res"] if e["res"] else {"error": e["error"] or "no answer"})
+        out.append(ui.Qa(e["kind"], e["q"], ui.Advice(p["head"], p["paras"], p["notes"], p["kind"]) if p else None))
+    pend = snap["chat"]["pending"]
+    return out + ([ui.Qa(pend["kind"], pend["q"], None, True)] if pend else [])
+
+
+def ai_native(srv, ahere, sel, confirm, snap, eng):
+    """The AI screen of the shell, drawn from components (screens.ai_model, the model the console draws from too): the switch and its progress, the
+    chat, the hardware and the status, the models as a table with their buttons, the details, what can be deleted. Every button is a form that posts
+    to /ai/* with the CSRF token and the page to come back to, as on the classic page; a locked page has none. ahere: the page's parameters."""
+    try:
+        data, _pb = render.ai_state(srv.smp)
+        rows = render.ai_rows(data["cat"])
+        locked = snap["locked"]
+        acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(ahere)).query)
+        links = screens.AiLinks(lambda mid: page_url(ahere, sel="" if mid == sel else mid), page_url(ahere, sel=""), page_url(ahere))
+        nodes = screens.ai_model(data, render.ai_status(), snap, None if locked else eng.choice(), rows, sel, "" if locked else confirm, acts, links,
+                                 ai_chat_nodes(snap))
+        return '<div class="scr av">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+    except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+        print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+        return '<p class="sm">the AI screen could not be drawn (see the service log)</p>'
 
 
 class AiUi(object):

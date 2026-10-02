@@ -23,7 +23,7 @@ import time
 
 import ansi
 import ui
-from ui import (KV, THERMAL_ERR, THERMAL_WARN, Badge, Bar, Cap, Col, Finding, Grid, Group, Head, Kpi, Line, Meter, More, Msg, Only, Pane, Row, Series, Span,
+from ui import (KV, THERMAL_ERR, THERMAL_WARN, Action, Badge, Bar, Cap, Col, Controls, Finding, Grid, Group, Head, Kpi, Line, Meter, More, Msg, Only, Pane, Question, Row, Series, Span,
                 Spec, Split, Table, Tiles, Wrap, dd, dget, fmt_ago, fmt_cputime, fmt_dur, fmt_k, fmt_min, fmt_size, hclean, hcount, hnum, human, idict,
                 num, plural, qf, safe)
 
@@ -1674,3 +1674,215 @@ def ai_footer(av, n, w, snap=None, enabled=None):
     dyn = {"details": ("Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))}
     extra = [(8, "questions: web page or nuc-console-ask", "")] if acts else []
     return Line([_sp(ui.footer("ai", f" {pos}   ", w, enabled, dyn, skip=() if acts else AI_ACTIONS, extra=extra), "muted")], clip=w)
+
+
+# -- the web: the same pieces, nothing cut, and the buttons ------------------------------------------------------------------------------
+
+AI_POST = "/ai/"  # the engine's endpoints (web.py do_POST): /ai/on /ai/off /ai/cancel /ai/use /ai/delete /ai/delete-all /ai/ask /ai/advise
+AI_USE_TITLE = "download it if needed, start it, turn AI on"
+
+
+class AiActs(object):
+    """What the web's buttons need: the CSRF token and the query string of the page a form comes back to. Every Action of the screen carries both as
+    hidden fields, then its own (a model id, a number of days): the fields the handlers of /ai/* have always read. The page that only shows (the
+    admin locked it: [ai] web_actions = no) gets None instead and draws no form."""
+    __slots__ = ("csrf", "back")
+
+    def __init__(self, csrf, back):
+        self.csrf, self.back = csrf, back
+
+    def fields(self, *extra):
+        return [("csrf", self.csrf), ("back", self.back)] + list(extra)
+
+
+class AiLinks(object):
+    """Where the web's links go: row(id) the page that selects that model (or, when it is the selected one, closes its details), close the page with
+    no model selected, no the page without the question that waits."""
+    __slots__ = ("row", "close", "no")
+
+    def __init__(self, row, close, no):
+        self.row, self.close, self.no = row, close, no
+
+
+def _act(acts, action, label, extra=(), key="", tone=None, title="", disabled=False, ask=None):
+    """An Action of the screen, or None where the page only shows."""
+    return None if acts is None else Action(AI_POST + action, label, acts.fields(*extra), key, tone, title, disabled, ask)
+
+
+def ai_use_cell(r, snap, acts):
+    """The last cell of a model's row: the button that does everything for it (use this model: download it if needed, start it, turn AI on), or the
+    reason there is none."""
+    if not r["pinned"]:
+        return _sp("not pinned yet", "muted")
+    if r["verdict"] == "no":
+        return _sp("too big", "muted")
+    if r["active"] and snap["state"][0] in ("running", "on"):
+        return _sp("● in use", "ok")
+    working = bool(snap["job"] and snap["job"]["state"] == "running")
+    return _act(acts, "use", "use this model", [("model", r["id"])], "", "ok", AI_USE_TITLE, working) or _sp("")
+
+
+def ai_hw_kv(hw):
+    """The HARDWARE section for the web: (the heading, the labelled values): the CPU, the RAM, every GPU, then the notes."""
+    hw = dd(hw)
+    gpus = [g for g in hw.get("gpus") if isinstance(g, dict)] if isinstance(hw.get("gpus"), list) else []
+    notes = [hclean(x, 200) for x in hw.get("notes") if isinstance(x, str) and x.strip()] if isinstance(hw.get("notes"), list) else []
+    pairs = [("CPU", Line(ai_cpu_spans(hw))), ("RAM", Line(ai_ram_spans(hw, 10)))]
+    for g in gpus:
+        head, mem = ai_gpu_spans(g, 10)
+        pairs.append(("GPU", Line(head + [_sp("  ")] + mem)))
+    if not gpus:
+        pairs.append(("GPU", Line([_sp("none found", "warn"), _sp(": the models run on the CPU, from RAM", "muted")])))
+    return Head("HARDWARE", ai_hw_note(hw)), [KV(pairs)] + [Line([_sp("· " + x, "muted")]) for x in notes]
+
+
+def ai_status_kv(st, cat, ids):
+    """The STATUS section for the web: the heading and the labelled values (advisor, endpoint, server, model, runtime, files)."""
+    t = ai_status_parts(st, cat, ids)
+    pairs = [("advisor", Line([t["adv"], t["note"]])), ("endpoint", Line([_sp(t["ep"], None, False)])), ("server", Line(t["ans"])), ("model", Line(t["model"])),
+             ("runtime", Line(t["run"]))]
+    if t["files"]:
+        pairs.append(("files", Line([Span(t["files"], "muted", False, True)])))
+    return Head("STATUS"), [KV(pairs)]
+
+
+def ai_choice_line(ch, rows):
+    """What turning the AI on will use, as a line (the switch is off): the model chosen before, the recommended one the first time (it asks first), or
+    advice to choose. None when there is no choice to speak of."""
+    if not ch:
+        return None
+    t = next((r for r in rows if r["id"] == ch["target"]), None)
+    size = ch["size"]
+    todo = "installed here" if ch["installed"] else (f"{ai_mb((size or 0) / 2 ** 20)} to download" if size else "not downloadable yet")
+    if ch["model"] and t:
+        return Line([_sp("turning it on uses ", "muted"), _sp(t["name"], None, True), _sp(f" ({'chosen on this page' if ch['by'] == 'page' else '[ai] model in config.ini'}; {todo})", "muted")])
+    if t:
+        return Line([_sp("no model is chosen yet: turning it on asks about the recommended one, ", "muted"), _sp(t["name"], None, True), _sp(f" ({todo})", "muted")])
+    return Line([_sp("no model fits this machine comfortably: choose one from the list below", "muted")])
+
+
+def ai_question(confirm, sel, ch, cat, rows, acts, links):
+    """The question a click asked first (confirm: on, delete, delete-all), as a ui.Question, or None when there is none to ask (no such model, or the
+    page only shows)."""
+    t = next((r for r in rows if r["id"] == sel), None)
+    if confirm == "on" and t:
+        yes = _act(acts, "on", "Yes, turn it on", [("model", sel), ("confirm", "yes")], "y", "ok")
+        have = (ch or {}).get("installed")
+        text = f"Turn AI on with {t['name']}? " + ("It is installed here." if have else
+                                                     f"It is not here yet: {ai_mb(((ch or {}).get('size') or 0) / 2 ** 20)} to download (the SHA-256 is checked), then the "
+                                                     "model server starts on this machine and the advisor is turned on.")
+    elif confirm == "delete" and t:
+        yes = _act(acts, "delete", "Yes, delete", [("model", sel), ("confirm", "yes")], "y", "err")
+        text = f"Delete the files of {t['name']} ({ai_mb(t['size_mb'])})? You can download it again later."
+    elif confirm == "delete-all":
+        yes = _act(acts, "delete-all", "Yes, delete everything", [("confirm", "yes")], "y", "err")
+        text = f"Delete the runtime and every downloaded model ({ai_size(dd(dd(cat).get('space')).get('used'))})? You can download them again later."
+    else:
+        return None
+    return None if acts is None else Question(text, yes, links.no)
+
+
+def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
+    """The top of the web screen: is the AI on, what is it doing (a download with its progress, the model server loading), the button (turn it on, turn
+    it off, cancel), what turning it on will use, the folder the models go to, the answer to the last click, and the question a click asked first."""
+    state, text = snap["state"]
+    mark, tone = AI_MARK.get(state, ("?", "muted"))
+    items = [Badge(mark, tone), _sp(text, None, True)]
+    if snap["locked"]:
+        pass
+    elif state == "working":
+        items.append(_act(acts, "cancel", "Cancel", (), "c", "err", "stop it: what was fetched is kept"))
+    elif dd(snap.get("switch")).get("by") == "config":
+        items.append(_sp("on by config.ini ([ai] enabled = yes): turn it off there", "muted"))
+    elif dd(snap.get("switch")).get("on"):
+        items.append(_act(acts, "off", "Turn AI off", (), "e", "err", "stop the model server and turn the advisor off"))
+    else:
+        items.append(_act(acts, "on", "Turn AI on", (), "e", "ok", "set up the model and start it"))
+    out = [Controls([x for x in items if x is not None])]
+    if snap["locked"]:
+        out.append(ui.Notice("warn", "locked by config.ini ([ai] web_actions = no): this page only shows"))
+    job = snap.get("job")
+    if state == "working" and job and job.get("phase") == "downloading" and job.get("total"):
+        out.append(Line([Bar(job["done"] / job["total"], f"{job['pct']}%", w=AI_BAR, tone="accent")]))
+    if not snap["locked"] and state == "off":
+        said = ai_choice_line(ch, rows)
+        if said is not None:
+            out.append(said)
+    if dd(cat).get("dir"):
+        used, free = ai_space(cat)
+        out.append(Line([_sp("models are downloaded to ", "muted"), Span(hclean(cat["dir"], 200), None, False, True), _sp(f" · {used} downloaded · {free}", "muted")]))
+    notice = snap.get("notice")
+    if notice:
+        out.append(ui.Notice("ok" if notice.get("ok") else "err", hclean(notice.get("text"), 300)))
+    q = ai_question(confirm, sel, ch, cat, rows, acts, links) if not snap["locked"] else None
+    return out + ([q] if q is not None else [])
+
+
+def ai_chat_nodes(snap, chat, acts):
+    """The chat under the switch: what was asked and answered (chat: the Qa of the exchanges, oldest first, built by the page from the engine's
+    history), the question box, 'advice now', and why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
+    c = snap["chat"]
+    ready = dd(snap.get("switch")).get("on") and snap["state"][0] != "working"
+    asleep = not ready or bool(c["busy"])
+    out = [Head("CHAT", "ask the model about this machine (it reads this machine's history; AI, check before acting)")] + list(chat)
+    if acts is not None:
+        out.append(_act(acts, "ask", "Ask", (), "", "ok", "", asleep, ("q", "ask: why is the disk filling up?", 500)))
+        out.append(Controls([_sp("advice now:", "muted")] + [_act(acts, "advise", label, [("days", d)], "", None, "", asleep)
+                                                              for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))]))
+        if not ready:
+            out.append(Msg("info", "the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
+    return [Group(out)]
+
+
+def ai_models_web(rows, snap, sel, acts, links, windows):
+    """The MODELS section for the web: every model as a row of a Table (a link: its details beside the table), the marks in words, the verdict a
+    Badge, the button that uses it, the legend; and the details of the selected one (a Spec with its buttons, and the link that closes it)."""
+    if not rows:
+        return [Group([Head("MODELS", "best first"), Msg("info", "the catalog lists no model")])]
+    cols = [Col("name", "Model"), Col("params", "Params", prio=2), Col("size", "Size", "r", 1, True), Col("need", "Needs", "r", 0, True), Col("verdict", "Verdict"),
+            Col("tok", "Est tok/s", "r", 3, True), Col("notes", "Notes", prio=3)]
+    if acts is not None:
+        cols.append(Col("use", ""))
+    body = []
+    for r in rows:
+        name = [_sp(r["name"], "muted" if r["verdict"] == "no" else None, True)] + [_sp("  " + word, tone) for word, tone, on in
+                                                                                    (("★ recommended", "warn", r["rec"]), ("✓ installed", "ok", r["installed"]),
+                                                                                     ("● active", "accent", r["active"])) if on]
+        cells = [Line(name), _sp(r["params"], "muted"), _sp(ai_mb(r["size_mb"])), _sp(ai_mb(r["need_mb"])), ai_badge(r["verdict"]), _sp(ai_tok(r["tok"])),
+                 _sp(r["notes"], "muted")]
+        if acts is not None:
+            cells.append(ai_use_cell(r, snap, acts))
+        body.append(Row(cells, "sel" if r["id"] == sel else None, None, links.row(r["id"])))
+    table = [Head("MODELS", "best first"), Table(cols, body, head=True), ai_legend(None)]
+    chosen = next((r for r in rows if r["id"] == sel), None)
+    if chosen is None:
+        return [Group(table)]
+    do = []
+    if acts is not None:
+        if chosen["pinned"] and chosen["verdict"] != "no" and not (chosen["active"] and snap["state"][0] in ("running", "on")):
+            do.append(_act(acts, "use", "use this model", [("model", chosen["id"])], "u", "ok", AI_USE_TITLE, bool(snap["job"] and snap["job"]["state"] == "running")))
+        if chosen["installed"]:
+            do.append(_act(acts, "delete", "delete its files", [("model", chosen["id"])], "x", "err", "asks first", bool(snap["job"] and snap["job"]["state"] == "running")))
+    close = ui.Seg("details", [("close details ✕", "Escape", False, links.close)])
+    return [ui.Split([Group(table)], [Group([ai_spec(chosen, windows, None, [a for a in do if a is not None]), close])], 0, 0)]
+
+
+def ai_model(data, st, snap, ch, rows, sel="", confirm="", acts=None, links=None, chat=()):
+    """The AI screen for the web, nothing cut: the title, the switch with what it is doing and the question that waits, the chat, the hardware and
+    the status side by side, the models with the details of the selected one, and what can be deleted. snap: the engine's snapshot, ch: its choice
+    (None: locked), acts: the AiActs of the forms (None: the page only shows: no form, no button), links: the AiLinks, chat: [ui.Qa]."""
+    cat = data["cat"]
+    if cat is None:
+        return [ai_title(None, None)] + _msg("err" if data.get("err") else "info", data["msg"], None)
+    hwd, ids = dd(cat.get("hw")), {r["id"] for r in rows}
+    out = [ai_title(rows, None), Group(ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links))] + ai_chat_nodes(snap, chat, acts)
+    hh, hb = ai_hw_kv(hwd)
+    sh, sb = ai_status_kv(st, cat, ids)
+    out.append(ui.Cols([(Group([hh] + hb), None), (Group([sh] + sb), None)]))
+    out += ai_models_web(rows, snap, sel, acts, links, hwd.get("os") == "windows")
+    used = dd(cat.get("space")).get("used")
+    if acts is not None and (used or any(r["installed"] for r in rows)):
+        out.append(Controls([_sp("manage:", "muted"), _act(acts, "delete-all", "delete everything", (), "X", "err", "asks first",
+                                                           bool(snap["job"] and snap["job"]["state"] == "running")),
+                             _sp(f"the runtime and every model ({ai_size(used)})", "muted")]))
+    return out
