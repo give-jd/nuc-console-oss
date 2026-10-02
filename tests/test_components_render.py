@@ -218,6 +218,119 @@ class HtmlRenderTests(unittest.TestCase):
         self.assertIn("&lt;", htmlview.to_html("<b>"))
 
 
+class ConsoleOnlyFieldsTests(unittest.TestCase):
+    """What a component carries for the console alone (the layout of the old blocks, byte for byte); the web ignores it."""
+
+    def test_a_blank_line_and_a_clipped_line(self):
+        self.assertEqual(ansi.render(Line(), 40), ([""], False))
+        self.assertEqual(ansi.render(Line([Span("x" * 30, "muted")], clip=10), 40)[0], [ansi.clip(ansi.c(90, "x" * 30), 10)])
+        self.assertEqual(ansi.render(Line([Span("x" * 5, "muted")], clip=10), 40)[0], [ansi.clip(ansi.c(90, "x" * 5), 10)])  # clip() ends with a reset
+
+    def test_an_empty_text_with_a_tone_is_still_coloured(self):
+        self.assertEqual(ansi.style("", "muted"), ansi.c(90, ""))
+        self.assertEqual(ansi.style("", None), "")
+        self.assertEqual(ansi.render(Span(""), 10)[0], [""])
+
+    def test_more_indent_is_inside_the_colour_and_none_is_the_old_one(self):
+        self.assertEqual(ansi.render(More(2, "rules", indent=3), 40)[0], [ansi.c(90, "   … +2 rules")])
+        self.assertEqual(ansi.render(More(2, "rules"), 40)[0], [" " + ansi.c(90, "… +2 rules")])
+
+    def test_table_indent_header_line_titled_groups_and_centred_cells(self):
+        t = Table([Col("a", "A", w=4, gap=0), Col("b", "B", "c", w=5, gap=1), Col("c", "C")],
+                  [Row(["x", Span("o", "ok"), "n1"]), Row(["yy", "pp", "n2"]), Row(["z", "ab", "n3"])],
+                  groups=[("one", 0), ("two", 2)], indent=3, head_line="   AAAA BBBB C", titled=True)
+        lines, _ = ansi.render(t, 80)
+        self.assertEqual(lines[0], ansi.c(1, "   AAAA BBBB C"))
+        self.assertEqual(plain(lines[1:]), ["", "   one  (2)", "   x     o   n1", "   yy    pp  n2", "", "   two  (1)", "   z     ab  n3"])
+        self.assertEqual(lines[2], ansi.c(1, "   one") + ansi.c(90, "  (2)"))
+        for word in ("a", "ab", "abc", "abcd", "abcde"):  # the arithmetic of str.center, which the old matrix used
+            self.assertEqual(plain(ansi.render(Table([Col("b", "B", "c", w=6)], [Row([word])]), 40)[0]), [" " + word.center(6)])
+        self.assertTrue(t.head)  # a header line is a header
+
+    def test_table_fill_colours_the_row_from_end_to_end_and_clip_cuts_a_cell(self):
+        t = Table([Col("a", "A", w=4, gap=0), Col("b", "B", clip=5)], [Row(["x", "abcdefgh"], tone="warn"), Row(["y", "abc"])], indent=3, fill=True)
+        lines, _ = ansi.render(t, 40)
+        self.assertEqual(lines[0], ansi.c(33, "   x   abcde" + "\x1b[0m"))  # the clip's own reset sits inside the colour
+        self.assertEqual(lines[1], "   y   abc\x1b[0m")
+        loose = Table([Col("a", "A", w=4, gap=0), Col("b", "B")], [Row(["x", "ab"], tone="warn")], indent=3)
+        self.assertEqual(ansi.render(loose, 40)[0], ["   " + ansi.c(33, "x") + "   " + ansi.c(33, "ab")])  # not filled: per cell, as before
+
+    def test_details_brief_replaces_the_fold(self):
+        d = ui.Details("2 accepted", [Msg("info", "inside")], brief=Line([Span("   · 2 accepted as known (cmd)", "muted")]))
+        self.assertEqual(ansi.render(d, 60)[0], [ansi.c(90, "   · 2 accepted as known (cmd)")])
+        d.open = True
+        self.assertEqual(len(ansi.render(d, 60)[0]), 1)  # open or not: the console has the one line
+
+    def test_a_problem_wraps_at_its_commas_and_the_rest_is_not_drawn(self):
+        text = "a, b, " * 12 + "end"
+        p = ui.Problem("err", text, "over-exposed", "Title", "why", "fix it", "accept it")
+        self.assertEqual(ansi.render(p, 40)[0], ansi.msg_wrap("err", text, 40))
+        self.assertEqual(ansi.render(ui.Problem("warn", "short"), 40)[0], [ansi.msg("warn", "short")])
+        for node in (ui.Hint("label", "cmd"), ):
+            self.assertEqual(ansi.render(node, 40), ([], False))
+        acc = ui.Accepted("text", "id", "reason", "3 h ago", "undo")
+        self.assertEqual(ansi.render(acc, 40)[0], [ansi.msg("info", "text")])
+
+    def test_a_rich_msg_is_a_msg_with_its_own_emphasis(self):
+        m = ui.RichMsg("err", [Span("ufw OFF", "err_strong"), ": no filtering"])
+        self.assertEqual(m.text, "ufw OFF: no filtering")
+        self.assertEqual(ansi.render(m, 40)[0], [ansi.msg("err", ansi.c("1;31", "ufw OFF") + ": no filtering")])
+
+    def test_the_new_components_are_equal_by_their_fields(self):
+        self.assertEqual(ui.Problem("err", "t", "a", "b", "c", "d", "e"), ui.Problem("err", "t", "a", "b", "c", "d", "e"))
+        self.assertNotEqual(ui.Problem("err", "t", "a"), ui.Problem("err", "t", "b"))
+        self.assertNotEqual(ui.RichMsg("ok", ["a"]), ui.RichMsg("ok", [Span("a", "ok")]))
+        self.assertNotEqual(ui.Accepted("t", "a"), ui.Accepted("t", "b"))
+        self.assertEqual(ui.Span("a", full="b"), ui.Span("a", full="b"))
+        self.assertNotEqual(ui.Span("a", full="b"), ui.Span("a"))
+
+
+class WebOnlyFieldsTests(unittest.TestCase):
+    """What the web draws that the console does not: the problem's id and fix, the accepted ones, the whole name, the commands."""
+
+    def test_a_problem_has_its_id_why_fix_and_accept_command(self):
+        p = ui.Problem("err", "1 DB open", "db-open-lan", "Title <b>", "data services stay home", "publish on 127.0.0.1", 'sudo x --problem db-open-lan --reason "..."')
+        out = htmlview.html(p)
+        self.assertIn('class="msg prob lv-err"', out)
+        self.assertIn('data-problem="db-open-lan"', out)
+        self.assertIn('<code class="pid" title="Title &lt;b&gt;">db-open-lan</code> · data services stay home', out)
+        self.assertIn('fix: <code class="cmd">publish on 127.0.0.1</code>', out)
+        self.assertIn('accept if known: <code class="cmd">sudo x --problem db-open-lan --reason &quot;...&quot;</code>', out)
+        bare = htmlview.html(ui.Problem("warn", "no id"))
+        self.assertNotIn("<code", bare)
+        self.assertNotIn("fix:", bare)
+
+    def test_accepted_hint_rich_msg_and_full_names(self):
+        out = htmlview.html(ui.Accepted("text", "docker-bypass", "known <i>", "3 h ago", "sudo x --forget docker-bypass"))
+        self.assertIn('<code class="pid">docker-bypass</code> text', out)
+        self.assertIn("reason: “known &lt;i&gt;” · accepted 3 h ago · undo: <code class=\"cmd\">sudo x --forget docker-bypass</code>", out)
+        self.assertEqual(htmlview.html(ui.Hint("list", "nuc-console-problems")), '<p class="hint d">list: <code class="cmd">nuc-console-problems</code></p>')
+        rich = htmlview.html(ui.RichMsg("err", [Span("ufw OFF", "err_strong"), ": no"]))
+        self.assertIn('<span class="t-err-strong">ufw OFF</span>: no', rich)
+        self.assertIn("a-very-long-name", htmlview.html(Span("a-very-lo…", full="a-very-long-name")))
+        self.assertNotIn("…", htmlview.html(Span("a-very-lo…", full="a-very-long-name")))
+
+    def test_blank_lines_are_for_the_console_and_titled_groups_count_their_rows(self):
+        self.assertEqual(htmlview.html(Line()), "")
+        t = Table([Col("a", "A", "c")], [Row(["1"]), Row(["2"]), Row(["3"])], groups=[("g1", 0), ("g2", 2)], titled=True, indent=3, head_line="   A")
+        out = htmlview.html(t)
+        self.assertIn('scope="rowgroup">g1 <span class="n">(2)</span></th>', out)
+        self.assertIn('scope="rowgroup">g2 <span class="n">(1)</span></th>', out)
+        self.assertIn('<th class="c" scope="col">A</th>', out)
+        self.assertIn('<td class="c">1</td>', out)
+        self.assertNotIn("   A", out)  # the console's header line is not the web's
+
+    def test_hostile_text_in_the_new_nodes(self):
+        for node in (ui.Problem("err", HOSTILE, HOSTILE, HOSTILE, HOSTILE, HOSTILE, HOSTILE), ui.Accepted(HOSTILE, HOSTILE, HOSTILE, HOSTILE, HOSTILE),
+                     ui.Hint(HOSTILE, HOSTILE), ui.RichMsg("warn", [Span(HOSTILE, "err")]), Span(HOSTILE, full=HOSTILE),
+                     ui.Details(HOSTILE, [ui.Accepted(HOSTILE)], brief=Line([HOSTILE]))):
+            out = htmlview.html(node)
+            self.assertNotIn("<script", out, node)
+            self.assertNotIn("\x1b", out, node)
+            self.assertEqual(out.count('"') % 2, 0, node)
+            self.assertNotIn(" onerror", out)
+
+
 # ---- the cards built of components -------------------------------------------------------------------------------------------------
 
 NATIVE = ("disks", "docker_disk", "sessions", "tailscale", "network_traffic")

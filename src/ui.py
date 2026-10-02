@@ -249,20 +249,24 @@ def _inline(x):
 
 
 class Span(_Component):
-    """A piece of text: its tone (a token of TOKENS, or None for the surface's own colour), bold, mono (a number or a path)."""
-    __slots__ = ("text", "tone", "bold", "mono")
+    """A piece of text: its tone (a token of TOKENS, or None for the surface's own colour), bold, mono (a number or a path). full: the
+    whole text when `text` is what fits a console column (cut with '…'): the web has room and draws full, the console draws text."""
+    __slots__ = ("text", "tone", "bold", "mono", "full")
 
-    def __init__(self, text, tone=None, bold=False, mono=False):
+    def __init__(self, text, tone=None, bold=False, mono=False, full=None):
         self.text, self.tone, self.bold, self.mono = _text(text), _tone(tone), bool(bold), bool(mono)
+        self.full = None if full is None else _text(full)
 
 
 class Line(_Component):
-    """One line of Spans (strings are made Spans); a Bar or a Spark may sit in it between the text."""
-    __slots__ = ("spans",)
+    """One line of Spans (strings are made Spans); a Bar or a Spark may sit in it between the text. No spans at all is a blank line on
+    the console and nothing on the web. clip: the console cuts the line to that many columns (None: as it is); the web ignores it."""
+    __slots__ = ("spans", "clip")
 
-    def __init__(self, spans=()):
+    def __init__(self, spans=(), clip=None):
         self.spans = [x if isinstance(x, (Span, Bar, Spark)) else Span(x)
                       for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark)) else spans)]
+        self.clip = None if clip is None else int(clip)
 
     @property
     def text(self):
@@ -279,11 +283,13 @@ class Raw(_Component):
 
 
 class More(_Component):
-    """'... +N more': what a card left out, and where all of it is (href: a web page, None on the console, which has its Details pages)."""
-    __slots__ = ("n", "what", "href")
+    """'... +N more': what a card left out, and where all of it is (href: a web page, None on the console, which has its Details pages).
+    indent: the columns the console puts before it, inside its colour (None: one, outside it); the web ignores it."""
+    __slots__ = ("n", "what", "href", "indent")
 
-    def __init__(self, n, what="more", href=None):
+    def __init__(self, n, what="more", href=None, indent=None):
         self.n, self.what, self.href = max(0, int(n)), _text(what), href
+        self.indent = None if indent is None else int(indent)
 
     @property
     def text(self):
@@ -320,14 +326,16 @@ class Kpi(_Component):
 
 
 class Col(_Component):
-    """A column of a Table: key, label, align ('l' | 'r'), prio (0 = never dropped; a bigger number is dropped sooner when the room is
-    short), num (the cells are numbers: mono, aligned). w and gap are the console's: w is the columns the cell is padded to (None: the
-    text as it is, no padding), gap the spaces after the column. The web ignores both."""
-    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap")
+    """A column of a Table: key, label, align ('l' | 'r' | 'c' centred), prio (0 = never dropped; a bigger number is dropped sooner when
+    the room is short), num (the cells are numbers: mono, aligned). w, gap and clip are the console's: w is the columns the cell is
+    padded to (None: the text as it is, no padding), gap the spaces after the column, clip the columns the cell is cut to (None: not
+    cut). The web ignores all three."""
+    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap", "clip")
 
-    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1):
-        self.key, self.label, self.align, self.prio, self.num = key, _text(label), "r" if align == "r" else "l", int(prio), bool(num)
+    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1, clip=None):
+        self.key, self.label, self.align, self.prio, self.num = key, _text(label), align if align in ("r", "c") else "l", int(prio), bool(num)
         self.w, self.gap = None if w is None else int(w), int(gap)
+        self.clip = None if clip is None else int(clip)
 
 
 class Row(_Component):
@@ -341,11 +349,15 @@ class Row(_Component):
 
 class Table(_Component):
     """cols [Col], rows [Row] (one cell per column), groups: None or [(label, first row index)]: the rows from there on belong to it.
-    head: the console draws the labels as a first row (the web always has them in <thead>)."""
-    __slots__ = ("cols", "rows", "groups", "head")
+    head: the console draws the labels as a first row (the web always has them in <thead>).
+    The rest is the console's own (the web ignores it): indent (the columns before the first one), head_line (the header drawn bold, as this
+    text, in place of the labels), titled (each group is a bold title with its row count after a blank line; the web adds the count),
+    fill (a row with a tone is drawn in that colour from end to end, the spaces between the cells too)."""
+    __slots__ = ("cols", "rows", "groups", "head", "indent", "head_line", "titled", "fill")
 
-    def __init__(self, cols, rows=(), groups=None, head=False):
-        self.head = bool(head)
+    def __init__(self, cols, rows=(), groups=None, head=False, indent=1, head_line=None, titled=False, fill=False):
+        self.head = bool(head) or head_line is not None
+        self.indent, self.head_line, self.titled, self.fill = int(indent), None if head_line is None else _text(head_line), bool(titled), bool(fill)
         self.cols, self.rows = list(cols), list(rows)
         for r in self.rows:
             if len(r.cells) != len(self.cols):
@@ -438,11 +450,64 @@ class Tree(_Component):
 
 
 class Details(_Component):
-    """A part that is folded until asked for: summary (Line / Span / str) and body (components)."""
-    __slots__ = ("summary", "body", "open")
+    """A part that is folded until asked for: summary (Line / Span / str) and body (components). brief: what the console draws in its
+    place (a Line / Span / str, as it is) when it has one line to say it in (None: the usual '▸ summary', and the body when open)."""
+    __slots__ = ("summary", "body", "open", "brief")
 
-    def __init__(self, summary, body=(), open=False):
+    def __init__(self, summary, body=(), open=False, brief=None):
         self.summary, self.body, self.open = _inline(summary), list(body), bool(open)
+        self.brief = None if brief is None else _inline(brief)
+
+
+class RichMsg(Msg):
+    """A Msg whose text has its own emphasis: rich (a Line of Spans), the same words as text. Both surfaces draw rich; text is its plain
+    form, for whoever has no use for the emphasis."""
+    __slots__ = ("rich",)
+
+    def __init__(self, level, rich):
+        rich = rich if isinstance(rich, Line) else Line(rich)
+        Msg.__init__(self, level, rich.text)
+        self.rich = rich
+
+    def _fields(self):
+        return (self.level, self.text, self.rich)
+
+
+class Problem(Msg):
+    """One problem of ATTENTION, drawn as a Msg (the console wraps a long text at its commas under it). The rest is for the web, which has the
+    room: id (its stable name, 'db-open-lan'), title (what it is), why (why it matters), fix (how to handle it: the command in the words of
+    this OS and of this install) and accept (the command that accepts it as known, '' when it cannot be: a port change is accepted with the
+    baseline, and that command is in fix)."""
+    __slots__ = ("id", "title", "why", "fix", "accept")
+
+    def __init__(self, level, text, id="", title="", why="", fix="", accept=""):
+        Msg.__init__(self, level, text)
+        self.id, self.title, self.why, self.fix, self.accept = _text(id), _text(title), _text(why), _text(fix), _text(accept)
+
+    def _fields(self):
+        return (self.level, self.text, self.id, self.title, self.why, self.fix, self.accept)
+
+
+class Accepted(Msg):
+    """A problem that was accepted as known (level 'info'): id, the reason it was given, when (text: '3 h ago', '' when it is not known) and
+    undo (the command that forgets it). The console never draws one (it says how many there are, ATTENTION's Details has the line)."""
+    __slots__ = ("id", "reason", "when", "undo")
+
+    def __init__(self, text, id="", reason="", when="", undo=""):
+        Msg.__init__(self, "info", text)
+        self.id, self.reason, self.when, self.undo = _text(id), _text(reason), _text(when), _text(undo)
+
+    def _fields(self):
+        return (self.level, self.text, self.id, self.reason, self.when, self.undo)
+
+
+class Hint(_Component):
+    """A command the reader may run, and what it does: the web draws 'label: <command>'; the console draws nothing (it has its own keys
+    and its footer)."""
+    __slots__ = ("label", "cmd")
+
+    def __init__(self, label, cmd):
+        self.label, self.cmd = _text(label), _text(cmd)
 
 
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------
