@@ -562,6 +562,9 @@ ul.facts .k{color:var(--muted)}
 .hv table.tbl{table-layout:auto}
 .hv td.n,.hv td.r{text-align:right}
 svg.bar.t-accent .fg{fill:var(--accent)}
+svg.bar.busy .fg{fill:var(--accent);animation:barbusy 1.4s ease-in-out infinite alternate}
+@keyframes barbusy{from{transform:translateX(0)}to{transform:translateX(65px)}}
+@media (prefers-reduced-motion:reduce){svg.bar.busy .fg{animation:none}}
 svg.series{display:inline-block;width:min(100%,9em);height:1.1em;vertical-align:middle;color:var(--accent)}
 svg.series rect{fill:currentColor}
 .hv .bit .t-banner-err{font-size:.9em}
@@ -631,7 +634,7 @@ AI_VIEW = """
 .av .bt.bt-err{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 45%,transparent);color:var(--err)}
 .av .bt.bt-err:hover{background:var(--err-solid);border-color:var(--err-solid);color:var(--on-solid)}
 .av .bt:disabled,.av .bt:disabled:hover{opacity:.55;cursor:not-allowed;border-color:var(--line);background:var(--surface-2);color:var(--muted)}
-.av table.tbl .bt{padding:.05em .7em;font-size:.92em}
+.av table.tbl .bt{padding:.05em .7em;font-size:.92em;position:relative;z-index:1}
 .av input.q{font:inherit;width:min(42em,100%);padding:.3em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
 .av input.q:disabled{opacity:.55}
 .av .qa{margin:.5em 0}
@@ -656,6 +659,7 @@ dl.spec-dl dd.do{display:flex;flex-wrap:wrap;gap:.4em}
 .av table.tbl{table-layout:auto}
 .av table.tbl td,.av table.tbl td:last-child{width:auto;white-space:nowrap}
 .av table.tbl td.p3:not(.n){white-space:normal;min-width:14em}
+.av table.tbl td:first-child{white-space:normal;min-width:9em}
 .av .bt{white-space:nowrap}
 .av section.grp{overflow-x:auto}
 @container app (max-width:45.7em){.av .st .seg{margin-left:0}dl.spec-dl{grid-template-columns:minmax(0,1fr)}dl.spec-dl dd{margin-bottom:.3em}}

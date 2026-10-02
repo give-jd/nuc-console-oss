@@ -203,6 +203,10 @@ _BAR_W, _BAR_H = 100, 8
 
 
 def _bar_svg(b, value=True):
+    if b.busy:  # work without a known total: a bar that moves (CSS only), with what is known
+        return (f'<svg{_cls("bar", "busy", "t-" + b.tone if b.tone else "")} viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="progressbar" '
+                f'aria-label="in progress" preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>'
+                f'<rect class="fg" x="0" y="0" width="35" height="{_BAR_H}"/></svg>' + (f'<span class="n">{_e(b.value_text)}</span>' if b.value_text and value else ""))
     if b.frac is None:
         return '<span class="st-unknown" role="img" aria-label="unknown">?</span>'
     pct = round(b.frac * 100)
