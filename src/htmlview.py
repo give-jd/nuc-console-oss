@@ -194,7 +194,8 @@ def _href(url):
 
 def _span(span):
     names = [("t-" + span.tone) if span.tone else "", "b" if span.bold else "", "mono" if span.mono else ""]
-    return f"<span{_cls(*names)}>{_e(span.text)}</span>" if any(names) else _e(span.text)
+    text = span.text if span.full is None else span.full  # the web has the room the console had not
+    return f"<span{_cls(*names)}>{_e(text)}</span>" if any(names) else _e(text)
 
 
 _SPARK_W, _SPARK_H = 80, 16
@@ -236,20 +237,22 @@ def _inline(x):
 
 
 def _table(t, notes=None):
-    heads = "".join(f'<th{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")} scope="col">'
+    heads = "".join(f'<th{_cls(c.align if c.align != "l" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")} scope="col">'
                     f"{_e(c.label)}</th>" for c in t.cols)
     marks = {i: label for label, i in (t.groups or ())}
+    ends = sorted(marks) + [len(t.rows)]
     body = []
     for i, r in enumerate(t.rows):
         if i in marks:
-            body.append(f'<tr class="grp"><th colspan="{len(t.cols)}" scope="rowgroup">{_e(marks[i])}</th></tr>')
+            count = f' <span class="n">({ends[ends.index(i) + 1] - i})</span>' if t.titled else ""
+            body.append(f'<tr class="grp"><th colspan="{len(t.cols)}" scope="rowgroup">{_e(marks[i])}{count}</th></tr>')
         link = _href(r.href)
         cells = []
         for j, (c, cell) in enumerate(zip(t.cols, r.cells)):
             inner = _inline(cell)
             if j == 0 and link:
                 inner = f'<a href="{_e(link)}">{inner}</a>'
-            cells.append(f'<td{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")}>{inner}</td>')
+            cells.append(f'<td{_cls(c.align if c.align != "l" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")}>{inner}</td>')
         key = f' data-key="{_e(r.key)}"' if r.key is not None else ""
         body.append(f'<tr{_cls("t-" + r.tone if r.tone else "")}{key}>{"".join(cells)}</tr>')
         if notes and notes[i]:  # NoteTable: what belongs to the row, in a row of its own under it
@@ -267,13 +270,32 @@ def html(node):
                 + f'<span{_cls("state", "st-" + node.state)}>{_e(ui.SYMBOLS[node.state])} {_e(node.state)}</span></header>')
         attrs = f' data-card="{_e(node.id)}"' + (" data-truncated" if node.truncated else "")
         return f'<article{_cls("card", "st-" + node.state, "s%d" % node.size)} id="card-{_e(node.id)}"{attrs}>{head}{"".join(html(p) for p in node.body)}</article>'
+    if isinstance(node, ui.Line) and not node.spans:
+        return ""  # a blank line is for the console
     if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
         return f'<p class="ln">{_inline(node)}</p>'
+    if isinstance(node, ui.Problem):
+        # what the console has no room for: the id, why it matters, the fix and how to accept it, each in its own span (the page styles them)
+        extra = "".join(x for x in (
+            f'<span class="d why"><code class="pid" title="{_e(node.title)}">{_e(node.id)}</code>' + (f" · {_e(node.why)}" if node.why else "") + "</span>" if node.id else "",
+            f'<span class="d fix">fix: <code class="cmd">{_e(node.fix)}</code></span>' if node.fix else "",
+            f'<span class="d accept">accept if known: <code class="cmd">{_e(node.accept)}</code></span>' if node.accept else ""))
+        return (f'<p{_cls("msg", "prob", "lv-" + node.level)} data-problem="{_e(node.id)}">'
+                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span> {_e(node.text)}{extra}</p>')
+    if isinstance(node, ui.Accepted):
+        when = f" · accepted {_e(node.when)}" if node.when else ""
+        undo = f' · undo: <code class="cmd">{_e(node.undo)}</code>' if node.undo else ""
+        return (f'<p{_cls("msg", "known", "lv-info")} data-problem="{_e(node.id)}"><span class="sym">{_e(ui.SYMBOLS["info"])}</span> '
+                f'<code class="pid">{_e(node.id)}</code> {_e(node.text)}'
+                f'<span class="d">reason: “{_e(node.reason)}”{when}{undo}</span></p>')
     if isinstance(node, ui.Msg):  # a Notice too
         notice = isinstance(node, ui.Notice)
         role = ' role="status"' if notice else ""
+        text = _inline(node.rich) if isinstance(node, ui.RichMsg) else _e(node.text)
         return (f'<p{_cls("msg", "notice" if notice else "", "lv-" + node.level)}{role}>'
-                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span> {_e(node.text)}</p>')
+                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span> {text}</p>')
+    if isinstance(node, ui.Hint):
+        return f'<p class="hint d">{_e(node.label)}: <code class="cmd">{_e(node.cmd)}</code></p>'
     if isinstance(node, ui.KV):
         return '<dl class="kv">' + "".join(f"<dt>{_e(k)}</dt><dd>{_inline(v)}</dd>" for k, v in node.pairs) + "</dl>"
     if isinstance(node, ui.Table):

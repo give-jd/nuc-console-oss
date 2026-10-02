@@ -97,34 +97,84 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?app=1&amp;ui=1.tl.dw&amp;frag=1">
-<article class="card s2 st-err" data-card="attention" data-rev="1a1365cec5" id="c-attention" data-state="err">
+<article class="card s2 st-err" data-card="attention" data-rev="f4e6d9ad89" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0">   <span class="r">✖</span> 1 DB/broker open on LAN
-   <span class="r">✖</span> 2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet,
-     shop-db :5432 LAN &gt; local
-   <span class="y">!</span> 1 container exited with an error
-   <span class="y">!</span> 2 errors in this boot&#x27;s journal
-   <span class="y">!</span> 1 Docker port bypassing ufw (DOCKER-USER empty)
-<span class="d">   … +1 more</span></pre>
+<p class="msg prob lv-err" data-problem="db-open-lan">
+<span class="sym">✖</span> 1 DB/broker open on LAN<span class="d why">
+<code class="pid" title="Database/broker open on the LAN">db-open-lan</code> · data services should not be reachable from the network</span>
+<span class="d fix">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>
+</span>
+</p>
+<p class="msg prob lv-err" data-problem="over-exposed">
+<span class="sym">✖</span> 2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet, shop-db :5432 LAN &gt; local<span class="d why">
+<code class="pid" title="Service reaches further than config.ini says">over-exposed</code> · you declared under [expose] how far it should be reachable, and it is reachable from more places</span>
+<span class="d fix">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem over-exposed --reason &quot;...&quot;</code>
+</span>
+</p>
+<p class="msg prob lv-warn" data-problem="container-exited">
+<span class="sym">!</span> 1 container exited with an error<span class="d why">
+<code class="pid" title="Container exited with an error">container-exited</code> · a service that should run is down</span>
+<span class="d fix">fix: <code class="cmd">docker ps -a; docker logs &lt;name&gt;; docker start &lt;name&gt; or remove it if obsolete</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem container-exited --reason &quot;...&quot;</code>
+</span>
+</p>
+<p class="msg prob lv-warn" data-problem="journal-errors">
+<span class="sym">!</span> 2 errors in this boot&#x27;s journal<span class="d why">
+<code class="pid" title="Errors in this boot&#x27;s journal">journal-errors</code> · usually noise (docker veth races, firmware ACPI), sometimes a real fault</span>
+<span class="d fix">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem journal-errors --reason &quot;...&quot;</code>
+</span>
+</p>
+<p class="msg prob lv-warn" data-problem="docker-bypass">
+<span class="sym">!</span> 1 Docker port bypassing ufw (DOCKER-USER empty)<span class="d why">
+<code class="pid" title="Docker ports bypass ufw">docker-bypass</code> · a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
+<span class="d fix">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
+</span>
+</p>
+<details class="more">
+<summary>… +1 more</summary>
+</details>
+<p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
+</p>
+<p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
+</p>
 <p class="more">
 <a href="/?app=1&amp;ui=1.tl.dw&amp;card=attention">… the whole card</a>
 </p>
 </div>
 </article>
-<article class="card s2 st-err" data-card="exposure" data-rev="341350bb66" id="c-exposure" data-state="err">
+<article class="card s2 st-err" data-card="exposure" data-rev="aa642ef78e" id="c-exposure" data-state="err">
 <div class="ch">
 <h3>EXPOSURE</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> Internet <span class="r B">1</span>   LAN 3   tailnet only 0   local only 4   <span class="r">⚠ 1 DB/broker on LAN</span>
- <span class="r B">●</span> 8444/t funnel /webhook → 127.0.0.1:5678/webhook  <span class="r">public on the Internet</span>
-   <span class="r">beyond config.ini: tailnet</span>
- <span class="r">⚠5432 shop-db-1</span> <span class="r">beyond config.ini: local</span>  ·  8080 shop-web-1 <span class="d">expected: LAN</span>  ·  22 sshd</pre>
+<p class="ln"> Internet <span class="t-err-strong">1</span>   LAN 3   tailnet only 0   local only 4   <span class="t-err">⚠ 1 DB/broker on LAN</span>
+</p>
+<p class="ln"> <span class="t-err-strong">●</span> 8444/tcp funnel /webhook → 127.0.0.1:5678/webhook  <span class="t-err">public on the Internet</span>
+</p>
+<p class="ln">   <span class="t-err">beyond config.ini: tailnet</span>
+</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-err">⚠5432 shop-db-1</span> <span class="t-err">beyond config.ini: local</span>
+</li>
+<li>8080 shop-web-1 <span class="t-muted">expected: LAN</span>
+</li>
+<li>22 sshd</li>
+</ul>
 </div>
 </article>
 <article class="card s1 st-err" data-card="databases" data-rev="382f8d600a" id="c-databases" data-state="err">
@@ -237,16 +287,29 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="firewall" data-rev="4748540381" id="c-firewall" data-state="warn">
+<article class="card s1 st-warn" data-card="firewall" data-rev="9a9fbc5a07" id="c-firewall" data-state="warn">
 <div class="ch">
 <h3>FIREWALL</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0">   <span class="g">✔</span> ufw active
-   <span class="y">!</span> DOCKER-USER empty: ports published by containers bypass ufw
-   INPUT DROP · FORWARD DROP   <span class="g">ts-input ✔</span>
-   fail2ban sshd:2   drop 1h 41</pre>
+<p class="msg lv-ok">
+<span class="sym">✔</span> ufw active</p>
+<p class="msg lv-warn">
+<span class="sym">!</span> DOCKER-USER empty: ports published by containers bypass ufw</p>
+<ul class="wrap">
+<li>INPUT DROP · FORWARD DROP</li>
+<li>
+<span class="t-ok">ts-input ✔</span>
+</li>
+<li>fail2ban sshd:2</li>
+</ul>
+<details class="more">
+<summary>… +1 more</summary>
+</details>
+<p class="more">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;card=firewall">… the whole card</a>
+</p>
 </div>
 </article>
 <article class="card s1 st-warn" data-card="containers" data-rev="10a71ecb86" id="c-containers" data-state="warn">
@@ -350,18 +413,79 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="webapps" data-rev="d379dca40c" id="c-webapps" data-state="ok">
+<article class="card s1 st-ok" data-card="webapps" data-rev="63449bf4e9" id="c-webapps" data-state="ok">
 <div class="ch">
 <h3>WEB APPS</h3>
 <span class="note">4 active · 1 down (expected)</span>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0"> <span class="g">●</span> shop-web 8080         <span class="y">LAN+tailnet</span>   
- <span class="y">○</span> admin-co 9443         <span class="d">not listening</span> <span class="y">DOWN (expected)</span>
- <span class="y">●</span> funnel / 8444         <span class="r">Internet</span>      <span class="d">not declared</span>
- <span class="y">●</span> blog-app 8081         <span class="d">local only</span>    <span class="d">not declared</span>
- <span class="y">●</span> node     5678         <span class="d">local only</span>    <span class="d">not declared</span></pre>
+<table class="tbl">
+<colgroup>
+<col class="c-mark">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+<col class="c-flag">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Web app</th>
+<th scope="col">Ports</th>
+<th scope="col">Reach</th>
+<th scope="col">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr data-key="shop-web">
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>shop-web</td>
+<td>8080</td>
+<td>
+<span class="t-warn">LAN+tailnet</span>
+</td>
+<td>
+</td>
+</tr>
+<tr data-key="admin-console">
+<td>
+<span class="t-warn">○</span>
+</td>
+<td>admin-console</td>
+<td>9443</td>
+<td>
+<span class="t-muted">not listening</span>
+</td>
+<td>
+<span class="t-warn">DOWN (expected)</span>
+</td>
+</tr>
+<tr data-key="funnel /webhook">
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>funnel /webhook</td>
+<td>8444</td>
+<td>
+<span class="t-err">Internet</span>
+</td>
+<td>
+<span class="t-muted">not declared</span>
+</td>
+</tr>
+</tbody>
+</table>
+<details class="more">
+<summary>… +2 more</summary>
+</details>
+<p class="more">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;card=webapps">… the whole card</a>
+</p>
 </div>
 </article>
 <article class="card s1 st-ok" data-card="system" data-rev="62877485f2" id="c-system" data-state="ok">

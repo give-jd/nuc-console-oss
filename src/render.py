@@ -942,9 +942,17 @@ def fingerprint(sev, text, pid):
 class ProblemList(list):
     """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION) and .pids = the problem id
     of each item, in the same order (None when the list was not built by problems(): cards.Ctx then cannot tell which card a problem is
-    about)."""
+    about). What only the web has room for, None in a list that problems() did not build: .info = (title, why, fix, accept command) of each
+    item, in the same order (the catalog's words for this OS and this install); .known = what was accepted, [{id, text, reason, ts}] (as
+    many as .accepted); .cmds = the commands the advice refers to: {problems, accept, forget}."""
     accepted = 0
     pids = None
+    info = None
+    known = None
+
+    @property
+    def cmds(self):
+        return {"problems": PROBLEMS_CMD, "accept": ACCEPT_CMD, "forget": ACCEPT_CMD + " --forget"}
 
 
 def load_accepted(path=None):
@@ -1008,13 +1016,16 @@ def problems(*a, **kw):
     """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
     acc = load_accepted()
     out = ProblemList()
-    out.pids = []
+    out.pids, out.info, out.known = [], [], []
     for sev, text, pid in problems_raw(*a, **kw):
         if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
             out.accepted += 1
+            out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
+            title, why, fix = CATALOG.get(pid, (pid, "", ""))
             out.append((sev, text))
             out.pids.append(pid)
+            out.info.append((title, why, fix, "" if pid in NOT_ACCEPTABLE else f'{ACCEPT_CMD} --problem {pid} --reason "..."'))
     return out
 
 
@@ -1073,196 +1084,39 @@ def status_pill(pb):
     return (f"✖ {len(pb)} PROBLEMS", ui.sgr("banner_err")) if n_err else (f"! {len(pb)} WARNINGS", ui.sgr("banner_warn"))
 
 
+def _block(card_id, title, body, w):
+    """The console lines of a card's body (components), drawn under its title."""
+    return ansi.card_lines(ui.Card(card_id, title, "", "ok", body), w)[0]
+
+
 def exposure_block(net, cont, w, new=None):
-    new = new or {}
+    """The whole exposure matrix (the Network page, and the overview when there is room), within the FULL / EXPAND / TRUNC globals."""
+    ctx = cards.Ctx(net=net, cont=cont, new=new, cfg=CFG)
     rows = expose_apply(exposure_rows(net, cont), net, cont)
-    by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
-    warn = sum(r["warn"] for r in rows)
-    count = (f"   Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}    "
-             f"LAN {c(33, len(by['LAN'])) if by['LAN'] else 0}    Tailscale {sum(r['ts'] == 1 for r in rows)}    "
-             f"Local {len(by['LOCALE'])}")
-    alert = c(31, f"⚠ {warn} DB/broker open on LAN") if warn else ""
-    summary = [count + "        " + alert] if not warn or vlen(count) + 8 + vlen(alert) <= w else [count, "   " + alert]
-    lines = [section("EXPOSURE", w), ""] + summary + [
-             clip(c(90, "   ● open   ◐ filtered by source   ? unknown (treated as open)   · no"), w), ""]
-    nw = max(12, min(NAMEW, w - 57))  # narrow column (3 columns): the name gets shorter, notes and cells stay visible
-    lines.append(c(1, "   " + pad("PORT", 9) + pad("SERVICE", nw + 1)
-                   + "".join(x.center(6) for x in ("LOC", "LAN", "TS", "NET")) + "  NOTE"))
-    for g, title in GROUPS:
-        if not by[g]:
-            continue
-        lines += ["", c(1, f"   {title}") + c(90, f"  ({len(by[g])})")]
-        if g == "LOCALE":  # exception-based: local is not a risk, compact list
-            lines += wrap_items([f"{r['port']} {r['name']}" for r in by[g]], w, indent=5)
-            continue
-        for r in by[g]:
-            mark = c(31, "⚠") if r["warn"] else " "
-            tag = new.get(f"{r['port']}/{r['proto'][0]}:{g}")
-            declared = r["proto"] == "tcp" and r["port"] in {p for ps in CFG["webapps"].values() for p in ps if p not in SENSITIVE}
-            cells = [cell(r["loc"], loc=True), cell(r["lan"], r["warn"]), cell(r["ts"], r["warn"]), cell(r["net"], net=True)]
-            head = (f"   {r['port']:>5}/{r['proto'][0]} {mark}{pad(r['name'][:nw - 1], nw)}"
-                    + "".join(f"  {x}   " for x in cells) + " ")
-            room = w - vlen(head) - (len(tag) + 1 if tag else 0)  # never clip mid-word: end with an ellipsis
-            base = ("declared: " + r["note"].replace("docker: bypasses ufw", "docker")) if declared and r["bad_note"] else r["note"]
-            xn = expose_note(r)  # [expose]: beyond what config.ini says (red, instead of the note) or within it (grey, before the note)
-            if xn:
-                base = xn[0] if xn[1] else xn[0] + (" · " + base if base else "")
-            text = base if vlen(base) <= room else base[:max(room - 1, 0)] + "…"
-            note = c(31, text) if (xn and xn[1]) or (r["bad_note"] and not declared) else c(90, text)
-            if tag:
-                note = c("1;31", tag + " ") + note
-            lines.append(head + note)
-    return lines
+    return _block("exposure", "EXPOSURE", cards.exposure_full(ctx, cards.Caps(w, FULL, EXPAND, TRUNC), rows), w)
 
 
 def native_fw_lines(net):
     """macOS/Windows: the status line of the OS firewall (Windows Firewall per network profile, macOS Application Firewall)."""
-    fw, err = net.get("firewall"), net.get("errors") or {}
-    if fw is None and is_disabled(net, "firewall"):
-        return [msg("info", "firewall check disabled in config.ini")]
-    if fw is None:
-        return [msg("err", "firewall unreadable: " + safe(err.get("firewall", "?"))[:70])]
-    name = safe(fw.get("name") or "firewall")
-    if fw.get("kind") == "windows":
-        active = [n for n, p in (fw.get("profiles") or {}).items() if p.get("active")]
-        line = (msg("err", c("1;31", f"{name} OFF") + f" on {safe(', '.join(fw['off']))}: no filtering there") if fw.get("off")
-                else msg("ok", f"{name} on" + (f" (active: {safe(', '.join(active))})" if active else "")))
-        return [line] + ([msg("warn", "rules from Group Policy are not read: those ports show ?")] if fw.get("policy") else [])
-    if fw.get("state") == 0:
-        return [msg("err", c("1;31", f"{name} OFF") + ": every listening program is reachable from the LAN")]
-    return [msg("ok", f"{name} " + ("blocking all incoming" if fw.get("block_all") else "on") + (" · stealth" if fw.get("stealth") else ""))]
+    return [x for n in cards._fw_native_status(net) for x in ansi.render(n, 80)[0]]
 
 
 def native_fw_details(net, w, max_rules=None):
     """macOS/Windows FIREWALL body: the configuration in a few lines, then which rule or setting opens each listening port."""
-    fw, lines = net.get("firewall"), []
-    if fw and fw.get("kind") == "windows":
-        for name, p in (fw.get("profiles") or {}).items():
-            state = "on" if p.get("enabled", True) else c(31, "OFF")
-            lines.append(kv(name, f"{state}   inbound {'allow' if p.get('inbound') == 1 else 'block'}"
-                            + ("   block all" if p.get("block_all") else "") + (c(36, "   ← active") if p.get("active") else "")))
-        if fw.get("networks"):
-            lines.append(kv("networks", "  ".join(f"{safe(n['alias'])}: {safe(n['category'])}" for n in fw["networks"])))
-        lines.append(kv("rules", f"{fw.get('allow_rules', 0)} allow · {fw.get('block_rules', 0)} block (enabled, inbound)"))
-    elif fw:
-        pf = fw.get("pf")
-        lines.append(kv("signed apps", f"built-in {'allowed' if fw.get('builtin') else 'asked'} · downloaded "
-                        f"{'allowed' if fw.get('downloaded') else 'asked'}"))
-        lines.append(kv("app rules", f"{fw.get('apps_allowed', 0)} allowed · {fw.get('apps_blocked', 0)} blocked"))
-        lines.append(kv("pf", "unreadable" if pf is None else
-                        (f"on, {plural(pf.get('rules', 0), 'rule')} of its own (not interpreted)" if pf.get("enabled") else "off")))
-    opened = {}
-    for lst in net.get("listeners") or []:
-        st, note = (lst.get("fw") or ["", ""])[:2]
-        if st in ("open", "nofw") and bind_scope(lst["addr"]) != "lo":
-            opened.setdefault(note, set()).add((lst["port"], lst["proto"][0]))
-    if opened:
-        rows = sorted(opened.items(), key=lambda kv_: min(kv_[1]))
-        shown = rows if (max_rules is None or FULL or "firewall" in EXPAND) else rows[:max_rules]
-        if len(shown) < len(rows):
-            TRUNC.add("firewall")
-        lines += ["", c(1, f"   WHAT LETS PORTS IN ({len(rows)})"), c(1, "   " + pad("RULE / SETTING", 44) + "PORTS")]
-        for note, ports in shown:
-            plist = ", ".join(f"{p}/{x}" for p, x in sorted(ports))
-            lines.append(f"   {pad(safe(note)[:42], 44)}{clip(plist, max(10, w - 48))}")
-        if len(shown) < len(rows):
-            lines.append(c(90, f"   … +{len(rows) - len(shown)} more"))
-    return lines
+    return [x for n in cards.fw_native_details(net, cards.Caps(w, FULL, EXPAND, TRUNC), max_rules) for x in ansi.render(n, w)[0]]
 
 
 def fw_status_lines(net):
     """The two most important status lines: ufw and DOCKER-USER (macOS/Windows: the OS firewall)."""
-    if os_of(net) != "linux":
-        return native_fw_lines(net)
-    err = net.get("errors") or {}
-    ufw, du = net.get("ufw"), net.get("docker_user")
-    lines = []
-    if ufw is None and is_absent(net, "ufw"):
-        lines.append(msg("info", "ufw not installed: LAN filtering cannot be verified from here (nft/firewalld?)"))
-    elif ufw is None:
-        lines.append(msg("err", "ufw unreadable: " + safe(err.get("ufw", "?"))[:80]))
-    elif not ufw["active"]:
-        lines.append(msg("err", c("1;31", "ufw OFF") + ": no LAN filtering for non-Docker services"))
-    else:
-        lines.append(msg("ok", "ufw active"))
-    if du is None and (is_absent(net, "docker_user") or is_absent(net, "iptables")):
-        pass  # no iptables/Docker: the DOCKER-USER chain does not exist, no line to show
-    elif du is None:
-        lines.append(msg("err", "DOCKER-USER unreadable: " + safe(err.get("docker_user", "?"))[:70]))
-    elif not du:
-        lines.append(msg("warn", "DOCKER-USER empty: ports published by containers bypass ufw"))
-    else:
-        lines.append(msg("ok", f"DOCKER-USER: {plural(len(du), 'rule')}"))
-    return lines
+    return [x for n in cards.fw_status(net) for x in ansi.render(n, 80)[0]]
 
 
-def short_default(text):
-    """'deny (incoming), allow (outgoing), deny (routed)' -> 'in deny · out allow · fwd deny' (fits a 3-column layout)."""
-    names = {"incoming": "in", "outgoing": "out", "routed": "fwd"}
-    found = re.findall(r"(\w+) \((incoming|outgoing|routed)\)", str(text))
-    return safe("  ·  ".join(f"{names[d]} {a}" for a, d in found)) if found else safe(text)
+short_default = cards.short_default
 
 
 def firewall_block(net, w, max_rules=None):
-    err = net.get("errors") or {}
-    ufw, du, ipt = net.get("ufw"), net.get("docker_user"), net.get("iptables")
-    lines = [section("FIREWALL", w), ""] + fw_status_lines(net) + [""]  # the status before any detail
-    if os_of(net) != "linux":
-        return lines + native_fw_details(net, w, max_rules)
-    if ufw is not None:
-        lines.append(kv("ufw", f"{short_default(ufw['default'])}   log: {safe(ufw['logging'])}" if ufw["active"]
-                        else c(31, "off (no rules in force)")))
-    if ipt:
-        pol, cnt = ipt["policy"], ipt["count"]
-        lines.append(kv("iptables", "   ".join(f"{k} {pol.get(k, '?')} ({plural(cnt.get(k, 0), 'rule')})"
-                                                for k in ("INPUT", "FORWARD"))))
-        lines.append(kv("tailscale", c(32, "ts-input accepts tailscale0") if ipt["ts_input"]
-                        else c(33, "ts-input rule not found: TS may not be open")))
-    elif is_absent(net, "iptables"):
-        lines.append(kv("iptables", c(90, "not installed")))
-    elif "iptables" in err:
-        lines.append(kv("iptables", c(31, "n/a: " + safe(err["iptables"])[:70])))
-    f2b = net.get("f2b")
-    if f2b is None and is_absent(net, "f2b"):
-        pass  # fail2ban not installed: no line
-    elif f2b is None or f2b.get("error"):
-        lines.append(kv("fail2ban", c(31, "n/a: " + safe((f2b or {}).get("error") or err.get("f2b", "?"))[:70])))
-    else:
-        for j in f2b["jails"]:
-            lines.append(kv("fail2ban", f"{safe(j['name'])}: {j['banned']} ban  {safe(' '.join(j['ips']))}"))
-    dr = net.get("drops")
-    if ufw is not None and ufw.get("logging", "").startswith("off"):
-        lines.append(kv("drop 1h", c(33, "ufw logging off: blocks not logged")))
-    elif dr is None and is_absent(net, "drops"):
-        pass  # no journalctl: no drop count
-    elif dr is None:
-        lines.append(kv("drop 1h", c(33, "n/a " + safe(err.get("drops", "")))))
-    else:
-        lines.append(kv("drop 1h", str(dr["n"])))
-        if dr["dpt"]:
-            lines.append(kv("  ports", "  ".join(f"{safe(k)}×{v}" for k, v in dr["dpt"])))
-            lines.append(kv("  sources", "  ".join(f"{safe(k)}×{v}" for k, v in dr["src"])))
-    if ufw and ufw["rules"]:
-        # IPv4 inbound only: IPv6 rules mirror them and outbound ones do not filter (default allow): keeping
-        # them all would take the table to dozens of lines and drop the single screen to the compact level
-        v6 = lambda r: "(v6)" in r["to"] + r["from"]
-        rules_in = [r for r in ufw["rules"] if "OUT" not in r["action"] and "FWD" not in r["action"] and not v6(r)]
-        n_out = sum("OUT" in r["action"] for r in ufw["rules"])
-        n_v6 = sum(v6(r) and "OUT" not in r["action"] and "FWD" not in r["action"] for r in ufw["rules"])
-        hidden = ", ".join(x for x in (f"{n_out} outbound" if n_out else "", f"{n_v6} mirrored IPv6" if n_v6 else "") if x)
-        lines += ["", c(1, f"   UFW INBOUND RULES ({len(rules_in)})") + (c(90, f"   + hidden: {hidden}") if hidden else ""),
-                  c(1, "   " + pad("TO", 28) + pad("ACTION", 14) + "FROM")]
-        open_all = lambda r: (r["action"].startswith(("ALLOW", "LIMIT")) and r["from"].startswith("Anywhere")
-                              and not r["to"].startswith("Anywhere"))  # exposes the port to the world: must be seen first
-        shown = rules_in if (max_rules is None or FULL or "firewall" in EXPAND) else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
-        if len(shown) < len(rules_in):
-            TRUNC.add("firewall")
-        for r in shown:  # no cap: all of them, and the page splits by itself if they do not fit
-            row = f"   {pad(safe(r['to'])[:26], 28)}{pad(safe(r['action'])[:12], 14)}{safe(r['from'])}"
-            lines.append(c(33, row) if open_all(r) else row)
-        if len(shown) < len(rules_in):
-            lines.append(c(90, f"   … +{plural(len(rules_in) - len(shown), 'rule')}"))
-    return lines
+    """The whole firewall block: status, configuration, rules (max_rules: how many, None for all of them)."""
+    return _block("firewall", "FIREWALL", cards.firewall_full(net, cards.Caps(w, FULL, EXPAND, TRUNC), max_rules), w)
 
 
 def page_rete(net, cont, w, now=None, baseline=False):
@@ -1315,61 +1169,11 @@ def ov_database(net, cont, w, k):
 
 
 def ov_esposizione(net, cont, w, k, new=None):
-    new = new or {}
-    if k < 0 and net is not None and net.get("listeners") is not None:
-        return exposure_block(net, cont, w, new)  # enough room: the full table
-    lines = [section("EXPOSURE", w)]
-    if net is None or net.get("listeners") is None:
-        return lines + [msg("err", "unavailable")]
-    rows = expose_apply(exposure_rows(net, cont), net, cont)
-    by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
-    warn = sum(r["warn"] for r in rows)
-    lines.append(f" Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}   LAN {len(by['LAN'])}   "
-                 f"tailnet only {len(by['TAILNET'])}   local only {len(by['LOCALE'])}"
-                 + (f"   {c(31, f'⚠ {warn} DB/broker on LAN')}" if warn else ""))
-    for r in lim(by["INTERNET"], 2, "exposure"):
-        tag = new.get(f"{r['port']}/{r['proto'][0]}:INTERNET")
-        xn = expose_note(r)
-        lines.append(f" {c('1;31', '●')} {c('1;31', tag + ' ') if tag else ''}{r['port']}/{r['proto'][0]} "
-                     f"{r['name'][:40]}  {c(31, 'public on the Internet')}")
-        if xn:  # [expose]: after the line when it fits, else below it
-            mark = c(31 if xn[1] else 90, xn[0])
-            lines[-1:] = [lines[-1] + "  " + mark] if vlen(lines[-1]) + 2 + vlen(mark) <= w else [lines[-1], "   " + mark]
-    items = []
-    for r in by["LAN"]:
-        tag = new.get(f"{r['port']}/{r['proto'][0]}:LAN")
-        label = f"{r['port']} {r['name'][:22]}"
-        xn = expose_note(r)
-        items.append((0 if tag or (xn and xn[1]) else 1, (c("1;31", tag + " ") if tag else "") + (c(31, "⚠" + label) if r["warn"] else label)
-                      + (" " + c(31 if xn[1] else 90, xn[0]) if xn else "")))
-    # new/changed items first: they must not end up behind the '… +N'
-    lines += wrap_items([t for _, t in sorted(items, key=lambda x: x[0])], w, indent=1, max_lines=max(1, 3 - min(k, 2)), section="exposure")
-    return lines
+    return _native_lines(cards.exposure_card, cards.Ctx(net=net, cont=cont, new=new, cfg=CFG), w, k)
 
 
 def ov_firewall(net, w, k):
-    if k < 0 and net is not None:
-        # enough room: with the rule list (capped at the intermediate level, most exposed first)
-        return firewall_block(net, w, None if (k <= -2 or "firewall" in EXPAND) else 10)
-    lines = [section("FIREWALL", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    lines += fw_status_lines(net)
-    ipt, f2b, dr = net.get("iptables"), net.get("f2b"), net.get("drops")
-    bits = []
-    if os_of(net) != "linux" and net.get("firewall"):
-        let_in = {(x["port"], x["proto"]) for x in net.get("listeners") or []
-                  if (x.get("fw") or [""])[0] in ("open", "nofw") and bind_scope(x["addr"]) != "lo"}
-        bits.append(f"{plural(len(let_in), 'listening port')} let in")
-    if ipt:
-        bits.append("INPUT " + ipt["policy"].get("INPUT", "?") + " · FORWARD " + ipt["policy"].get("FORWARD", "?"))
-        bits.append(c(32, "ts-input ✔") if ipt["ts_input"] else c(33, "ts-input ?"))
-    if f2b and not f2b.get("error"):
-        bits.append("fail2ban " + " ".join(f"{safe(j['name'])}:{j['banned']}" for j in f2b["jails"]))
-    if dr is not None:
-        bits.append(f"drop 1h {dr['n']}")
-    lines += wrap_items(bits, w, indent=3, sep="   ")
-    return lines
+    return _native_lines(cards.firewall_card, cards.Ctx(net=net, cfg=CFG), w, k)
 
 
 def ov_boot(b, w, k, now=None):
@@ -1398,40 +1202,8 @@ def ov_tailscale(net, w, k):
     return _native_lines(cards.tailscale_card, cards.Ctx(net=net, cfg=CFG), w, k)
 
 
-REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
-
-
 def ov_webapp(net, cont, w, k):
-    lines = [section("WEB APPS", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    rows = webapp_rows(net, cont)
-    if net.get("listeners") is None and not rows:
-        return lines + [unavail_msg(net, "listeners")]
-    if not rows:
-        return lines + [msg("info", "no web apps found (declare the ones you expect under [webapps] in config.ini)")]
-    up, down = sum(r["state"] == "up" for r in rows), sum(r["state"] == "down" for r in rows)
-    lines[0] = section("WEB APPS", w, f"{up} active" + (f" · {down} down (expected)" if down else ""))
-    declared = bool(CFG["webapps"])
-    nw = max(8, min(22, w - 47))
-    cap = 12 if k <= 0 else 6 if k <= 2 else 4
-    if FULL or "webapps" in EXPAND:
-        cap = len(rows)
-    elif len(rows) > cap:
-        TRUNC.add("webapps")
-    for r in rows[:cap]:
-        ports = ",".join(str(p) for p in r["ports"][:3]) + ("…" if len(r["ports"]) > 3 else "")
-        if r["state"] == "down":
-            mark, reach, flag = c(33, "○"), c(90, "not listening"), c(33, "DOWN (expected)")
-        else:
-            mark = c(32, "●") if r["expected"] or not declared else c(33, "●")
-            col = {"INTERNET": 31, "LAN": 33, "TAILNET": 0, "LOCALE": 90}.get(r["reach"], 0)
-            reach = c(col, REACH_LABEL.get(r["reach"], "?")) if col else REACH_LABEL.get(r["reach"], "?")
-            flag = c(90, "not declared") if declared and not r["expected"] else ""
-        lines.append(f" {mark} {pad(safe(r['name'])[:nw], nw + 1)}{pad(ports, 13)}{pad(reach, 14)}{flag}")
-    if len(rows) > cap:
-        lines.append(c(90, f" … +{len(rows) - cap} more"))
-    return lines
+    return _native_lines(cards.webapps_card, cards.Ctx(net=net, cont=cont, cfg=CFG), w, k)
 
 
 def ov_docker(boot, w, k):
@@ -1450,23 +1222,18 @@ def safe_block(fn, title, width, *a):
 
 
 def ov_attention(pb, bw, k):
-    shown = lim(pb, max(3, 6 - k), "attention")
-    rows = [x for sev, t in shown for x in msg_wrap("err" if sev >= 2 else "warn", t, bw)]
-    extra = [c(90, f"   … +{len(pb) - len(shown)} more")] if len(pb) > len(shown) else []
-    acc = getattr(pb, "accepted", 0)
-    known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
-    return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
+    return _native_lines(cards.attention_card, cards.Ctx(problems=pb, cfg=CFG), bw, k)
 
 
 # The overview's sections as cards (cards.py): each builder returns the card with the lines this file has always drawn for it (ui.Raw)
 # and the state its problems give it, so the console is what it was while a section is rebuilt out of components.
 # (id, title, feature, lines(ctx, k, caps)); the width a card is drawn in is caps.width
 OV_CARDS = (
-    ("attention", "ATTENTION", True, lambda x, k, cp: ov_attention(x.problems, cp.width, k)),
-    ("exposure", "EXPOSURE", "exposure", lambda x, k, cp: safe_block(ov_esposizione, "EXPOSURE", cp.width, x.net, x.cont, cp.width, k, x.new)),
-    ("webapps", "WEB APPS", "webapps", lambda x, k, cp: safe_block(ov_webapp, "WEB APPS", cp.width, x.net, x.cont, cp.width, k)),
-    ("firewall", "FIREWALL", "firewall", lambda x, k, cp: safe_block(ov_firewall, "FIREWALL", cp.width, x.net, cp.width, k)),
-    ("system", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
+    ("attention", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
+    ("exposure", None, None, None),
+    ("webapps", None, None, None),
+    ("firewall", None, None, None),
+    ("system", None, None, None),
     ("containers", None, None, None),
     ("databases", None, None, None),
     ("boot", None, None, None),

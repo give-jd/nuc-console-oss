@@ -180,8 +180,9 @@ _STATE_TONE = {"ok": "ok", "warn": "warn", "err": "err", "down": "err", "unknown
 
 
 def style(text, tone=None, bold=False):
-    """text in the colour of a tone (a token of ui.TOKENS) and bold; plain when the theme gives it no code."""
-    if not text:
+    """text in the colour of a tone (a token of ui.TOKENS) and bold; plain when the theme gives it no code. An empty text with a tone is
+    still written coloured (c() has always done it: the line keeps its bytes when a note turns out empty)."""
+    if not text and not tone and not bold:
         return ""
     code = ui.sgr(tone) if tone else ""
     if bold:
@@ -231,39 +232,56 @@ def _wrap(items, w, indent, sep, max_lines):
 
 
 def _table_lines(t, w):
-    """A Table as lines: a column with a w is padded to it (right-aligned: on the left), the others are the text as it is; gap spaces
-    follow every column but the last. When a line is wider than w the columns with a prio go, the biggest prio first (the one on the
-    right first among equals), until it fits or only the columns that are never dropped are left."""
+    """A Table as lines: a column with a w is padded to it (right-aligned: on the left, centred: on both sides), the others are the text as
+    it is; gap spaces follow every column but the last, and t.indent spaces come before the first. When a line is wider than w the columns
+    with a prio go, the biggest prio first (the one on the right first among equals), until it fits or only the columns that are never
+    dropped are left. A column with a clip is cut to it first (a cut cell ends the colour it was in). Groups: a muted label before its first
+    row, or, titled, a blank line and a bold title with the number of its rows."""
     cols = list(range(len(t.cols)))
+    lead = " " * t.indent
     while True:
         grid = []
-        if t.head:
-            grid.append([style(t.cols[j].label, "muted") for j in cols])
-        grid += [[inline(r.cells[j], r.tone) for j in cols] for r in t.rows]
+        if t.head and t.head_line is None:
+            grid.append(([style(t.cols[j].label, "muted") for j in cols], None))
+        fill = t.fill
+        grid += [([inline(r.cells[j], None if fill else r.tone) for j in cols], r.tone if fill else None) for r in t.rows]
         lines = []
-        for row in grid:
+        for row, tone in grid:
             parts = []
             for n, (j, text) in enumerate(zip(cols, row)):
                 col, last = t.cols[j], n == len(cols) - 1
+                if col.clip is not None:
+                    text = clip(text, col.clip)
                 if col.w is not None and col.align == "r":
                     text = " " * (col.w - vlen(text)) + text
+                elif col.w is not None and col.align == "c":
+                    room = col.w - vlen(text)
+                    left = room // 2 + (room & col.w & 1) if room > 0 else 0  # str.center's own arithmetic
+                    text = " " * left + text + " " * max(0, room - left)
                 elif col.w is not None and not last:
                     text = pad(text, col.w)
                 parts.append(text + ("" if last else " " * col.gap))
-            lines.append(" " + "".join(parts))
+            line = lead + "".join(parts)
+            lines.append(style(line, tone) if tone else line)
         droppable = [j for j in cols if t.cols[j].prio > 0]
         if droppable and max([vlen(x) for x in lines] + [0]) > w:
             cols.remove(max(droppable, key=lambda j: (t.cols[j].prio, j)))
             continue
         break
+    head = [style(t.head_line, None, True)] if t.head_line is not None else []
     if not t.groups:
-        return lines
-    first, marks, out = (1 if t.head else 0), {i: label for label, i in t.groups}, []
+        return head + lines
+    first, marks, out = (1 if t.head and t.head_line is None else 0), {i: label for label, i in t.groups}, []
+    ends = sorted(i for _label, i in t.groups) + [len(t.rows)]
     for i, line in enumerate(lines):
-        if i >= first and (i - first) in marks:
-            out.append(" " + style(marks[i - first], "muted"))
+        at = i - first
+        if i >= first and at in marks:
+            if t.titled:
+                out += ["", style(lead + marks[at], None, True) + style(f"  ({ends[ends.index(at) + 1] - at})", "muted")]
+            else:
+                out.append(" " + style(marks[at], "muted"))
         out.append(line)
-    return out
+    return head + out
 
 
 def render(node, w):
@@ -272,10 +290,18 @@ def render(node, w):
         return list(node.lines), False
     if isinstance(node, ui.Card):
         return card_lines(node, w)
+    if isinstance(node, ui.Line) and node.clip is not None:
+        return [clip(inline(node), node.clip)], False
     if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
         return [inline(node)], False  # as it is: a line carries its own indent (a coloured line starts with its space)
+    if isinstance(node, ui.Problem):
+        return msg_wrap(node.level, node.text, w), False  # the long ones go on under their text, at the commas
+    if isinstance(node, ui.RichMsg):
+        return [msg(node.level, inline(node.rich))], False
     if isinstance(node, ui.Msg):  # a Notice too
         return [msg(node.level, node.text)], False
+    if isinstance(node, ui.Hint):
+        return [], False  # for the web
     if isinstance(node, ui.KV):
         return [kv(k, inline(v), node.lw) for k, v in node.pairs], False
     if isinstance(node, ui.Table):
@@ -283,7 +309,7 @@ def render(node, w):
     if isinstance(node, ui.Wrap):
         return _wrap([inline(x) for x in node.items], w, node.indent, node.sep, node.max_lines)
     if isinstance(node, ui.More):
-        return [" " + style(node.text, "muted")], False
+        return ([" " + style(node.text, "muted")] if node.indent is None else [style(" " * node.indent + node.text, "muted")]), False
     if isinstance(node, ui.Group):
         lines, hid = ([" " + style(node.title, "accent_strong")] if node.title else []), False
         for child in node.children:
@@ -297,6 +323,8 @@ def render(node, w):
         return [" " + style(node.symbol, _STATE_TONE[node.state]) + f" {node.label} {node.value}{node.unit}"], False
     if isinstance(node, ui.Tree):
         return [" " + "  " * d + style(ui.SYMBOLS[st], _STATE_TONE[st]) + " " + inline(x) for d, x, st in node.rows], False
+    if isinstance(node, ui.Details) and node.brief is not None:
+        return [inline(node.brief)], False
     if isinstance(node, ui.Details):
         lines, hid = [" " + style("▾" if node.open else "▸", "muted") + " " + inline(node.summary)], False
         for child in node.body if node.open else ():
