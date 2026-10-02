@@ -394,6 +394,36 @@ class Web(unittest.TestCase):
         self.assertGreaterEqual(out.count(stdhtml.escape(EVIL)), 6)
         self.assertIn("the model is writing the answer", out)
 
+    def test_a_download_without_a_total_is_a_moving_bar_and_one_with_a_total_a_fraction(self):
+        job = {"kind": "use", "model": "m-gpu", "state": "running", "phase": "downloading", "step": "", "done": 0, "total": 0, "rate": 0.0, "pct": 0, "eta": None}
+        out = "".join(htmlview.html(n) for n in self.nodes(hand(), snap_over={"state": ("working", "downloading"), "job": dict(job, done=3 * 2 ** 20)}))
+        self.assertRegex(out, r'<svg class="bar busy t-accent"[^>]*role="progressbar"')
+        self.assertIn("3 MB so far", out.replace("3.0 MB", "3 MB"))
+        self.assertNotIn('aria-label="0%"', out)
+        out = "".join(htmlview.html(n) for n in self.nodes(hand(), snap_over={"state": ("working", "downloading"), "job": dict(job, done=5, total=10, pct=50)}))
+        self.assertIn('aria-label="50%"', out)
+        self.assertNotIn("bar busy", out)
+        self.assertNotIn("bar busy", "".join(htmlview.html(n) for n in self.nodes(hand())))
+        self.assertTrue(ui.Bar(None, "x", busy=True).busy and not ui.Bar(0.5, "x", busy=True).busy)
+        self.assertEqual(ui.Bar(None, "x").value_text, "?")
+
+    def test_the_models_are_rows_of_a_list_with_priorities_for_a_narrow_screen(self):
+        out = "".join(htmlview.html(n) for n in self.nodes(hand(), sel="m-gpu"))
+        rows = re.findall(r"<tr[^>]*data-row[^>]*>", out)
+        self.assertEqual(len(rows), len(hand()["models"]))
+        self.assertEqual(len([x for x in rows if "aria-current" in x]), 1)
+        head = re.search(r"<thead>.*?</thead>", out, re.S).group(0)
+        for p in ("p2", "p3"):
+            self.assertRegex(head, r'<th[^>]*class="[^"]*\b%s\b' % p)
+
+    def test_a_locked_page_with_nothing_asked_has_no_chat(self):
+        out = "".join(htmlview.html(n) for n in self.nodes(hand(), locked=True))
+        self.assertNotIn("CHAT", out)
+        self.assertIn("MODELS", out)
+        chat = [ui.Qa("you", "why?", None, False)]
+        self.assertIn("CHAT", "".join(htmlview.html(n) for n in self.nodes(hand(), locked=True, chat=chat)))
+        self.assertIn("CHAT", "".join(htmlview.html(n) for n in self.nodes(hand())))
+
     def test_what_cannot_be_read_is_a_question_mark_on_the_web_too(self):
         cat = hand()
         cat["hw"] = {"os": "linux", "cpu": {}, "ram": {}, "gpus": [{"name": "g"}]}

@@ -589,9 +589,9 @@ class Server(http.server.ThreadingHTTPServer):
             """The classic page build(False), or the shell's page of the same view (build(True) is its View); one render at a time, kept ttl seconds."""
             if not shell:
                 return self.cached(key, ttl, lambda: build(False))
-            skey = ("shell", view, card, zoom, r, prefs.dump_cookie(eff), cookie) + tuple(here.items()) + tuple(sorted(norm.items()))
+            skey = ("shell", view, card, zoom, r, prefs.dump_cookie(eff), cookie, prefs.custom_layout(src, eff["order"])) + tuple(here.items()) + tuple(sorted(norm.items()))
             return self.cached(skey, ttl, lambda: self.shell_render(view, build, here, zoom, r, eff, cookie, pause, card, edit,
-                                                                     prefs.custom_layout(src)))
+                                                                     prefs.custom_layout(src, eff["order"])))
         if view == "cpu":
             norm = {"sort": state.get("sort", ""), "sel": state.get("sel", ""), "pause": pause}
             key = ("cpu", zoom, r) + tuple(here.items()) + (state.get("sort", ""), state.get("sel", ""))
@@ -811,7 +811,7 @@ class Server(http.server.ThreadingHTTPServer):
         built = [self.shell_card(ctx, cid, w, k, here, False, controls(cid))[1] for cid, w in lay["layout"]]
         for cid in lay["hidden"]:
             if cards.enabled(cid, render.CFG):  # built like the others (showing it with the script needs its body); the style sheet hides the body
-                built.append(self.shell_card(ctx, cid, 1, k, here, False, controls(cid, True), True)[1])
+                built.append(self.shell_card(ctx, cid, lay.get("hidden_w", {}).get(cid, 1), k, here, False, controls(cid, True), True)[1])
         done, reset = page_url(here), set_url("ereset", back)
         bar = ('<section class="ebar" aria-label="Layout editor"><div class="eh"><h2>Edit layout</h2>'
                f'<a class="lnk" href="{esc(done)}">Done</a><a class="lnk" data-set href="{esc(reset)}">Reset layout</a></div>'
@@ -819,8 +819,8 @@ class Server(http.server.ThreadingHTTPServer):
                '\u2715 hides it, and a hidden card has a <b>show</b> button. With JavaScript you can also drag a card by its \u283f handle, drag its '
                'right edge to resize it, or focus a card and press Space, then the arrow keys, + and \u2212, x and Esc (<a href="#help">help</a>). '
                'Every change is saved at once.</p>'
-               '<p class="hintl">While you have a layout of your own the cards stay in this order (the order is fixed), instead of moving by '
-               'severity. <b>Reset layout</b> brings the preset\'s back.</p><p id="live" class="sr-only" role="status" aria-live="polite"></p></section>')
+               '<p class="hintl">While a layout is in force (yours or config.ini\'s) the cards stay in this order (the order is fixed), instead of moving by '
+               'severity, unless the order is set to severity. <b>Reset layout</b> brings the preset\'s back.</p><p id="live" class="sr-only" role="status" aria-live="polite"></p></section>')
         return View("".join(built), [], vhere, False, grid=True, legacy=False, bar=bar)
 
     def shell_card(self, ctx, cid, size, k, here, full, tools="", off=False):
@@ -837,8 +837,10 @@ class Server(http.server.ThreadingHTTPServer):
             else:  # built of components: the web draws them itself, whatever the card is
                 parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
                 note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
-            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full else ""
-            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more, tools, off)
+            wall = k == DETAIL_K["wall"]  # nobody can click on a wall: no link to the whole card
+            more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full and not wall else ""
+            rows = 0 if tools or full else htmlview.est_rows(inner + (f"<p>{more}</p>" if more else ""), size, card.note or note, wall)  # the editor's cards and a card on its own do not pack
+            return card.state, htmlview.card_article(cid, card.title, card.note or note, card.state, size, inner, more, tools, off, rows)
         except Exception as e:  # noqa: BLE001 - a broken card must not take the page down
             print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
             entry = cards.CARDS.get(cid)
@@ -864,8 +866,9 @@ class Server(http.server.ThreadingHTTPServer):
         preset = group("Preset", "preset", [(name.capitalize(), "p" + prefs.PRESET_CODES[name], name, {}) for name in prefs.PRESETS],
                        "A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.")
         order = group("Order", "order", [("By severity", "o" + prefs.ORDER_CODES["severity"], "severity", {}), ("Fixed", "o" + prefs.ORDER_CODES["fixed"], "fixed", {})],
-                      "By severity: what needs you comes first. Fixed: the layout's order, nothing moves."
-                      + (" You have a layout of your own, so for now the cards stay in its order." if prefs.custom_layout(source) else ""))
+                      "By severity: what needs you comes first. Fixed: the layout's order, nothing moves. A layout of your own (from this browser, "
+                      "the link or config.ini) means fixed, unless you choose By severity here."
+                      + (" You have a layout, so for now the cards stay in its order." if prefs.custom_layout(source, eff["order"]) else ""))
         start = group("Start view", "start_view", [(TAB_TITLES[n], "v" + prefs.VIEW_CODES[n], n, {}) for n in prefs.VIEWS])
         cur, boxes = list(eff["kpis"]), []
         for kid in prefs.KPI_IDS:

@@ -403,6 +403,12 @@ class CardOrder(Base):
         self.assertEqual(got[2:], [s for s in self.BASE if s not in ("system", "exposure")])
         self.assertEqual(sorted(got), sorted(self.BASE))
 
+    def test_a_layout_alone_fixes_the_order_and_severity_has_to_be_written(self):
+        self.states.update(exposure="err", firewall="warn")
+        layout = [("system", 1), ("firewall", 1), ("exposure", 1)]
+        self.assertEqual(self.order(layout=layout)[:3], ["system", "firewall", "exposure"], "the states do not move a card")
+        self.assertEqual(self.order(layout=layout, order="severity")[:3], ["exposure", "firewall", "system"])
+
     def test_hidden_cards_are_not_there_and_a_hidden_card_is_hidden_in_a_layout_too(self):
         got = self.order(hidden=["sessions", "docker_disk"])
         self.assertEqual(got, [s for s in self.BASE if s not in ("sessions", "docker_disk")])

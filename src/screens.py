@@ -806,8 +806,8 @@ def hb_cpu(R, w, k, days, now=None):
         body.append(Row([Span(hclean(x.get("app"), nm or 0)), Bar(sh / top, f"{sh * 100:3.0f}%", w=8, tone="accent"), Span("avg " + avg, full=avg),
                          Series(ser, len(ser) if sw is None else min(len(ser), sw)) if isinstance(ser, list) and ser else Span(""),
                          Span("peak " + hwhen(x["peak_hour"], "%a %H:%M"), "muted", full=hwhen(x["peak_hour"], "%a %H:%M")) if x.get("peak_hour") else Span("")]))
-    cols = [Col("app", "App", w=nm, gap=2), Col("share", "Share of CPU time", gap=2), Col("avg", "Avg", w=8, gap=2, num=True), Col("trend", "Per " + ("hour" if days <= 1 else "day"), gap=2),
-            Col("peak", "Peak")]
+    cols = [Col("app", "App", w=nm, gap=2), Col("share", "Share of CPU time", gap=2), Col("avg", "Avg", w=8, gap=2, num=True, wprio=1),
+            Col("trend", "Per " + ("hour" if days <= 1 else "day"), gap=2, wprio=3), Col("peak", "Peak", wprio=2)]
     return out + [Table(cols, body, fit=True)] + _more(hidden)
 
 
@@ -834,9 +834,9 @@ def hb_mem(R, w, k, days, now=None):
                          if t <= -50 else Span("→ steady", "muted"))
         cells.append(Series(ser, len(ser) if sw is None else min(len(ser), sw)) if isinstance(ser, list) and ser else Span(""))
         body.append(Row(cells))
-    cols = [Col("app", "App", w=nm, gap=2), Col("avg", "Avg", w=9, gap=2, num=True), Col("max", "Max", w=9, gap=2, num=True)]
-    cols += [Col("trend", "Trend", w=11, gap=2)] if trend else []
-    cols.append(Col("series", "Per " + ("hour" if days <= 1 else "day")))
+    cols = [Col("app", "App", w=nm, gap=2), Col("avg", "Avg", w=9, gap=2, num=True), Col("max", "Max", w=9, gap=2, num=True, wprio=1)]
+    cols += [Col("trend", "Trend", w=11, gap=2, wprio=2)] if trend else []
+    cols.append(Col("series", "Per " + ("hour" if days <= 1 else "day"), wprio=3))
     return out + [Table(cols, body, fit=True)] + _more(hidden)
 
 
@@ -884,7 +884,7 @@ def hb_logs(R, w, k, days, now=None):
             shown = tpl
         body.append(Row([Span(count), Span("NEW", "warn") if x.get("new") else Span(""), Span(hclean(x.get("unit") or x.get("source"), cut)),
                          Span(shown, "muted", full=tpl)]))
-    cols = [Col("n", "Messages", align="r", w=6, gap=2, num=True), Col("new", "New", w=3, gap=1), Col("unit", "Unit", w=ww or None, gap=1), Col("msg", "Message")]
+    cols = [Col("n", "Messages", align="r", w=6, gap=2, num=True), Col("new", "New", w=3, gap=1), Col("unit", "Unit", w=ww or None, gap=1, wprio=2), Col("msg", "Message")]
     return out + [Table(cols, body)] + _more(hidden)
 
 
@@ -912,7 +912,7 @@ def hb_disks(R, w, k, days, now=None):
     for x in rows:
         pct = hnum(x.get("used_pct"))
         body.append(Row([Span(hclean(x.get("mount"), mw or 0)), Bar(pct / 100.0, "", w=bw), Span(f"{pct:3.0f}%"), when(x)]))
-    cols = [Col("mount", "Mount", w=mw, gap=1), Col("used", "Used", gap=1), Col("pct", "", gap=2, num=True), Col("full", "Full in")]
+    cols = [Col("mount", "Mount", w=mw, gap=1), Col("used", "Used", gap=1, wprio=3), Col("pct", "", gap=2, num=True), Col("full", "Full in")]
     return out + [Table(cols, body)] + _more(hidden)
 
 
@@ -1265,7 +1265,7 @@ def map_notes(G, n=None, w=None):
     return [Line([Span("  · " + x, "muted")], clip=w) for x in nl]
 
 
-def map_branch(G, row, cursor=False, links=None, web=False):
+def map_branch(G, row, cursor=False, links=None, web=False, after=None):
     """One tree row as a component: tree glyphs (console), the mark (▸ opens, ▾ is open, · a leaf, ↻ already above), the arrow by evidence, the name
     by state (a symbol too: colour alone is not enough), the owner of a port, the port used, the qualifier, the note (the worst finding)."""
     p, n = graph.parts(G, row), G["nodes"].get(row["node"]) or {}
@@ -1292,7 +1292,7 @@ def map_branch(G, row, cursor=False, links=None, web=False):
         href = links.row(row)
         if row["kids"] and not row["cycle"]:
             mark_href, tip = links.toggle(row), "close" if row["open"] else f"open: {row['kids']} below"
-    return ui.Branch(row["key"], row["depth"], mark, Line(spans), st if st in ui.STATES else "unknown", href, mark_href, cursor, p["tree"], tip)
+    return ui.Branch(row["key"], row["depth"], mark, Line(spans), st if st in ui.STATES else "unknown", href, mark_href, cursor, p["tree"], tip, after)
 
 
 def map_props(G, nid, h=None, close=None):
@@ -1340,7 +1340,8 @@ def map_web(G, rs, st, sel, nid, links, limit=None, truncated=False):
     limit: the rows the page draws at most (truncated: there were more)."""
     out = [map_title(G, st.only, links, st, True)] + map_notes(G)
     if rs:
-        tree = [Group([ui.Outline([map_branch(G, r, r["key"] == sel, links, True) for r in rs])])]
+        near = map_props(G, nid, None, links.close) if nid is not None else None  # the same details again, under the selected row (CSS shows one of the two)
+        tree = [Group([ui.Outline([map_branch(G, r, r["key"] == sel, links, True, near if r["key"] == sel else None) for r in rs])])]
         if truncated:
             tree.append(Msg("info", f"… more than {limit} rows: close some branches, or show problems only"))
     else:
@@ -2059,6 +2060,9 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
     job = snap.get("job")
     if state == "working" and job and job.get("phase") == "downloading" and job.get("total"):
         out.append(Line([Bar(job["done"] / job["total"], f"{job['pct']}%", w=AI_BAR, tone="accent")]))
+    elif state == "working" and job:  # no total yet (or a step that has none): a moving bar and what is known; the status text says what it does
+        got = job.get("done") or 0
+        out.append(Line([Bar(None, f"{ai_mb(got / 2 ** 20)} so far" if got else "", w=AI_BAR, tone="accent", busy=True)]))
     if not snap["locked"] and state == "off":
         said = ai_choice_line(ch, rows)
         if said is not None:
@@ -2077,6 +2081,8 @@ def ai_chat_nodes(snap, chat, acts):
     """The chat under the switch: what was asked and answered (chat: the Qa of the exchanges, oldest first, built by the page from the engine's
     history), the question box, 'advice now', and why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
     c = snap["chat"]
+    if acts is None and not chat:
+        return []  # a page that only shows, with nothing asked yet: no heading over nothing
     ready = dd(snap.get("switch")).get("on") and snap["state"][0] != "working"
     asleep = not ready or bool(c["busy"])
     out = [Head("CHAT", "ask the model about this machine (it reads this machine's history; AI, check before acting)")] + list(chat)
@@ -2094,8 +2100,8 @@ def ai_models_web(rows, snap, sel, acts, links, windows):
     Badge, the button that uses it, the legend; and the details of the selected one (a Spec with its buttons, and the link that closes it)."""
     if not rows:
         return [Group([Head("MODELS", "best first"), Msg("info", "the catalog lists no model")])]
-    cols = [Col("name", "Model"), Col("params", "Params", prio=2), Col("size", "Size", "r", 1, True), Col("need", "Needs", "r", 0, True), Col("verdict", "Verdict"),
-            Col("tok", "Est tok/s", "r", 3, True), Col("notes", "Notes", prio=3)]
+    cols = [Col("name", "Model"), Col("params", "Params", prio=2, wprio=2), Col("size", "Size", "r", 1, True, wprio=2), Col("need", "Needs", "r", 0, True, wprio=2),
+            Col("verdict", "Verdict"), Col("tok", "Est tok/s", "r", 3, True, wprio=3), Col("notes", "Notes", prio=3, wprio=3)]
     if acts is not None:
         cols.append(Col("use", ""))
     body = []

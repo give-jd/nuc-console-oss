@@ -11,7 +11,7 @@ Fields (a field that is not set falls through to the next source):
   order      severity | fixed                            o<s|f>
   kpis       up to 8 KPI ids, in order                   k<kpi2>(_<kpi2>)*
   layout     the visible cards in order, width 1-4       l<card2>[1-4][x](_...)*   (x = hidden)
-  hidden     the cards not shown                         (the x items of l)
+  hidden     the cards not shown                         (the x items of l; a hidden card keeps its width: `db3x`)
 
 Sources, strongest first: ?ui= (one URL) > cookie nuc_ui > config.ini [ui] > preset > built-in default.
 
@@ -23,6 +23,8 @@ One string for the cookie, ?ui= and localStorage:  "1" *("." field)
     (a KPI twice, a card twice) counts once, the first mention wins;
   - dump_cookie() writes the canonical form (fields in the order t d v p o k l, visible cards first, hidden ones in the order of
     nuc_config.SECTIONS), so equal preferences give an equal string (a cache key).
+  - a hidden card keeps the width it had (`db3x`: hidden, 3 wide; `dbx` is 1 wide), so that showing it again restores it; its place is
+    not kept: it comes back last.
 Example:  1.tl.dw.os.kpb_in_cp_rm.lat2_ex2_wa1_fw1_sy1_ct2_dbx
 
 The layout editor of the web shell (`?edit=1`) changes only l (layout and hidden): move, resize, hide, show and reset are pure functions here
@@ -155,6 +157,15 @@ def _clean(d):
     hidden = d.get("hidden")
     if isinstance(hidden, (list, tuple)):
         out["hidden"] = _hidden_order(c for c in hidden if isinstance(c, str) and c in CARD_CODES)
+        hw = d.get("hidden_w")
+        if isinstance(hw, dict):
+            kept = {}
+            for c in out["hidden"]:
+                it = _item((c, hw[c])) if c in hw else None
+                if it and it[1] > 1:
+                    kept[c] = it[1]
+            if kept:
+                out["hidden_w"] = kept
     layout = d.get("layout")
     if isinstance(layout, (list, tuple)):
         items, seen = [], set(out.get("hidden", ()))
@@ -186,7 +197,7 @@ def _parse_field(seg):
                 ids.append(kpi)
         return {"kpis": ids} if len(ids) <= MAX_KPIS else {}
     if letter == "l":
-        layout, hidden, seen = [], [], set()
+        layout, hidden, hidden_w, seen = [], [], {}, set()
         for part in body.split("_"):
             m = _ITEM_RE.fullmatch(part)
             card = _CARD_BY_CODE.get(m.group(1)) if m else None
@@ -197,9 +208,13 @@ def _parse_field(seg):
             seen.add(card)
             if m.group(3):
                 hidden.append(card)
+                if m.group(2) and m.group(2) != "1":
+                    hidden_w[card] = int(m.group(2))
             else:
                 layout.append((card, int(m.group(2) or 1)))
         out = {"hidden": _hidden_order(hidden)}
+        if hidden_w:
+            out["hidden_w"] = hidden_w
         if layout:
             out["layout"] = layout
         return out
@@ -222,7 +237,8 @@ def dump_cookie(prefs):
     segs = [letter + codes[p[field]] for field, letter, codes in _SCALARS if field in p]
     if "kpis" in p:
         segs.append("k" + "_".join(KPI_CODES[k] for k in p["kpis"]))
-    items = [CARD_CODES[c] + str(w) for c, w in p.get("layout", ())] + [CARD_CODES[c] + "x" for c in p.get("hidden", ())]
+    items = [CARD_CODES[c] + str(w) for c, w in p.get("layout", ())] + [CARD_CODES[c] + (str(p["hidden_w"][c]) if c in p.get("hidden_w", ()) else "") + "x"
+                                                     for c in p.get("hidden", ())]
     if items:
         segs.append("l" + "_".join(items))
     return ".".join([COOKIE_VERSION] + segs)
@@ -259,54 +275,62 @@ def layout_of(prefs, available=None):
     """The layout as the editor works on it, from preferences (usually effective()'s): the cards that show (visible_cards: the ones the
     layout leaves out come last, 1 wide) and the hidden ones (all of them, even a card whose feature is off now: it stays hidden)."""
     p = _clean(prefs)
-    return {"layout": visible_cards(p, available), "hidden": list(p.get("hidden", ()))}
+    return _out([list(i) for i in visible_cards(p, available)], list(p.get("hidden", ())), dict(p.get("hidden_w", {})))
 
 
 def _lay(layout):
     c = _clean(layout)
-    return [list(i) for i in c.get("layout", ())], list(c.get("hidden", ()))
+    return [list(i) for i in c.get("layout", ())], list(c.get("hidden", ())), dict(c.get("hidden_w", {}))
 
 
-def _out(items, hidden):
-    return {"layout": [tuple(i) for i in items], "hidden": hidden}
+def _out(items, hidden, hw):
+    out = {"layout": [tuple(i) for i in items], "hidden": hidden}
+    if hw:
+        out["hidden_w"] = hw  # only where a hidden card is wider than 1
+    return out
 
 
 def move(layout, card, delta):
     """The card `delta` places earlier (< 0) or later (> 0) among the cards that show; at the end of the list it stays; a card that is not
     shown or unknown changes nothing."""
-    items, hidden = _lay(layout)
+    items, hidden, hw = _lay(layout)
     ids = [c for c, _ in items]
     if card in ids and isinstance(delta, int) and not isinstance(delta, bool):
         i = ids.index(card)
         items.insert(max(0, min(len(items) - 1, i + delta)), items.pop(i))
-    return _out(items, hidden)
+    return _out(items, hidden, hw)
 
 
 def resize(layout, card, delta):
     """The card `delta` columns wider (or narrower), held to 1-4; a card that is not shown or unknown changes nothing."""
-    items, hidden = _lay(layout)
+    items, hidden, hw = _lay(layout)
     for it in items:
         if it[0] == card and isinstance(delta, int) and not isinstance(delta, bool):
             it[1] = max(1, min(MAX_WIDTH, it[1] + delta))
-    return _out(items, hidden)
+    return _out(items, hidden, hw)
 
 
 def hide(layout, card):
     """The card out of the shown ones into the hidden ones (a card that is not shown, or unknown, changes nothing)."""
-    items, hidden = _lay(layout)
-    if any(c == card for c, _ in items):
-        items = [i for i in items if i[0] != card]
-        hidden = _hidden_order(hidden + [card])
-    return _out(items, hidden)
+    items, hidden, hw = _lay(layout)
+    for c, w in items:
+        if c == card:
+            if w > 1:
+                hw[card] = w
+            items = [i for i in items if i[0] != card]
+            hidden = _hidden_order(hidden + [card])
+            break
+    return _out(items, hidden, hw)
 
 
 def show(layout, card):
-    """A hidden card back, as the last one of the shown, 1 wide (a card that is not hidden, or unknown, changes nothing)."""
-    items, hidden = _lay(layout)
+    """A hidden card back, as the last one of the shown, as wide as it was when it was hidden (a card that is not hidden, or unknown,
+    changes nothing)."""
+    items, hidden, hw = _lay(layout)
     if card in hidden:
         hidden = [c for c in hidden if c != card]
-        items.append([card, 1])
-    return _out(items, hidden)
+        items.append([card, hw.pop(card, 1)])
+    return _out(items, hidden, hw)
 
 
 def reset(layout=None):
@@ -348,20 +372,27 @@ def apply_edit(current, field, cfg_ui=None, available=None):
     lay = layout_of(eff, available)
     new = _clean({"u": lambda: move(lay, card, -1), "d": lambda: move(lay, card, 1), "s": lambda: resize(lay, card, -1),
                   "g": lambda: resize(lay, card, 1), "h": lambda: hide(lay, card), "w": lambda: show(lay, card)}[op]())
-    if new.get("layout", []) == lay["layout"] and new.get("hidden", []) == lay["hidden"]:
+    if new.get("layout", []) == lay["layout"] and new.get("hidden", []) == lay["hidden"] \
+            and new.get("hidden_w", {}) == lay.get("hidden_w", {}):
         return dump_cookie(prefs)  # nothing moved (the first card up, a card at its widest, an unknown card): do not fix the layout either
     prefs.pop("layout", None)
     if "layout" in new:
         prefs["layout"] = new["layout"]
+    prefs.pop("hidden_w", None)
+    if new.get("hidden_w"):
+        prefs["hidden_w"] = new["hidden_w"]
     prefs["hidden"] = new.get("hidden", [])  # an empty list is stored too: it says 'nothing is hidden', whatever the preset hides
     out = dump_cookie(prefs)
     return out if len(out) <= COOKIE_MAX else dump_cookie(parse_cookie(current))
 
 
-def custom_layout(source):
-    """True when the layout in force is the reader's own (the cookie's or ?ui=): the cards then keep their order (order = fixed) instead of
-    moving by severity. `source` is effective()'s second value."""
-    return source.get("layout") in ("url", "browser")
+def custom_layout(source, order=None):
+    """True when the cards keep the layout's order (order = fixed) instead of moving by severity: the layout in force is a stated one, from
+    any source (?ui=, the cookie or config.ini; the preset's own does not count), unless `order = severity` is set explicitly, by any source
+    too. `source` is effective()'s second value, `order` its prefs' order (None: not asked, the layout alone decides)."""
+    if source.get("layout") not in ("url", "browser", "config.ini"):
+        return False
+    return not (order == "severity" and source.get("order") in ("url", "browser", "config.ini"))
 
 
 # ---------------------------------------------------------------- config.ini [ui]
@@ -416,13 +447,26 @@ def parse_ui(section, sections_default=None):
             warns.append("[ui] kpis: no valid name, the preset's list is used")
     hidden = None
     if "hidden" in sec:
-        hidden = []
+        hidden, hw = [], {}
         for t in _tokens(sec["hidden"]):
-            if t not in CARD_CODES:
-                warns.append(f"[ui] hidden: unknown card '{_show(t)}' ignored (known: {', '.join(CARDS)})")
-            else:
-                hidden.append(t)
+            name, colon, w = t.partition(":")
+            if name not in CARD_CODES:
+                warns.append(f"[ui] hidden: unknown card '{_show(name)}' ignored (known: {', '.join(CARDS)})")
+                continue
+            hidden.append(name)
+            if colon:
+                if w.isascii() and w.isdigit():
+                    width = max(1, min(MAX_WIDTH, int(w)))
+                    if str(width) != w:
+                        warns.append(f"[ui] hidden: {name}:{_show(w)} is not a width of 1-{MAX_WIDTH}: {width} is used")
+                else:
+                    width = 1
+                    warns.append(f"[ui] hidden: {name}:{_show(w)} is not a width of 1-{MAX_WIDTH}: 1 is used")
+                if width > 1:
+                    hw.setdefault(name, width)
         ui["hidden"] = hidden = _hidden_order(hidden)
+        if hw:
+            ui["hidden_w"] = hw
     if "layout" in sec:
         asked, items, seen, hid = _tokens(sec["layout"]), [], set(), set(hidden or ())
         for t in asked:
@@ -469,7 +513,8 @@ def export_ini(prefs):
     if "layout" in p:
         lines.append("layout = " + ", ".join(c if w == 1 else f"{c}:{w}" for c, w in p["layout"]))
     if "hidden" in p:
-        lines.append(("hidden = " + ", ".join(p["hidden"])).rstrip())
+        hw = p.get("hidden_w", {})
+        lines.append(("hidden = " + ", ".join(c if c not in hw else f"{c}:{hw[c]}" for c in p["hidden"])).rstrip())
     return "\n".join(lines) + "\n"
 
 
@@ -484,12 +529,13 @@ def effective(cfg_ui=None, cookie=None, oneshot=None):
     """-> (prefs, source). cfg_ui is cfg["ui"] (parse_ui), cookie the nuc_ui value and oneshot the ?ui= value (strings or parsed dicts).
 
     prefs has the 8 FIELDS: strings, kpis [id], layout [(card, width)] (the cards that show, in order, as stated: visible_cards() adds
-    the cards it leaves out and drops the ones that are off) and hidden [card] (never in layout). source[field] is "url", "browser",
+    the cards it leaves out and drops the ones that are off) and hidden [card] (never in layout), and hidden_w {card: width} (the width
+    a hidden card comes back with, only where it is more than 1). source[field] is "url", "browser",
     "config.ini", "preset" or "default": the first of ?ui=, cookie and [ui] that sets the field, else the preset of the moment
     (chosen: "preset"; nobody chose one: "default"; the layout of the default preset follows [dashboard] sections: "config.ini").
     A card that the layout of a stronger source names is not hidden by a weaker source's hidden list."""
     layers = (("url", _as_prefs(oneshot)), ("browser", _as_prefs(cookie)), ("config.ini", _clean(cfg_ui)))
-    prefs, source = {}, {}
+    prefs, source, hidden_w = {}, {}, {}
     for field, _, _ in _SCALARS:
         for name, layer in layers:
             if field in layer:
@@ -504,6 +550,8 @@ def effective(cfg_ui=None, cookie=None, oneshot=None):
         for name, layer in layers:
             if field in layer:
                 prefs[field], source[field] = list(layer[field]), name
+                if field == "hidden":
+                    hidden_w = dict(layer.get("hidden_w", {}))
                 break
         else:
             prefs[field], source[field] = list(base[field]), from_preset
@@ -514,6 +562,9 @@ def effective(cfg_ui=None, cookie=None, oneshot=None):
         named = {c for c, _ in prefs["layout"]}
         prefs["hidden"] = [c for c in prefs["hidden"] if c not in named]
     prefs["layout"] = [(c, w) for c, w in prefs["layout"] if c not in prefs["hidden"]]  # layout = the cards that show, in order
+    kept = {c: w for c, w in hidden_w.items() if c in prefs["hidden"]}  # the width a hidden card comes back with
+    if kept:
+        prefs["hidden_w"] = kept
     return prefs, source
 
 

@@ -180,10 +180,19 @@ a.kpi:hover{border-color:var(--line-2)}
 @container app (max-width:45.7em){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi{padding:.45em .6em .5em}.kpi .kv{font-size:1.38em}}
 """
 
+ROW_MAX = 200  # htmlview.ROW_MAX: the classes r2..rROW_MAX, one per number of rows a card can span (a test keeps the two equal)
+ROW_CLASSES = "".join(f".card.r{n}{{grid-row:span {n}}}" for n in range(2, ROW_MAX + 1))
+
 GRID = """
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:var(--gap);align-items:start;padding:0 var(--pad) var(--pad)}
 .card{grid-column:span 3;min-width:0;container:card / inline-size;background:var(--surface);border:1px solid var(--line);border-radius:8px;scroll-margin-top:5em}
 .card.s1{grid-column:span 3}.card.s2{grid-column:span 6}.card.s3{grid-column:span 9}.card.s4{grid-column:span 12}
+/* The overview packs its cards densely: the implicit rows are a half em high (and `auto`, so a card taller than its estimate grows them
+   instead of overlapping the next), each card spans the rows its estimated height needs (the server's class rN, htmlview.est_rows), the
+   gap below a card is its margin, and `dense` lets a later card fill a hole an earlier, taller one left. The editor's page keeps the plain
+   rows: its cards are cut to a preview and stay strictly in order. */
+main.grid:not([data-edit]){grid-auto-flow:row dense;grid-auto-rows:minmax(.5em,auto);row-gap:0}
+main.grid:not([data-edit]) .card{margin-bottom:var(--gap)}
 @container app (max-width:84.3em){
   .grid{grid-template-columns:repeat(6,minmax(0,1fr))}
   .card.s1{grid-column:span 3}.card.s2,.card.s3,.card.s4{grid-column:span 6}
@@ -191,7 +200,10 @@ GRID = """
 @container app (max-width:45.7em){
   .grid{grid-template-columns:minmax(0,1fr)}
   .card.s1,.card.s2,.card.s3,.card.s4{grid-column:auto}
+  main.grid:not([data-edit]){grid-auto-flow:row}
+  main.grid:not([data-edit]) .card[class]{grid-row:auto}
 }
+@@ROWS@@
 .card:target{outline:2px solid var(--accent);outline-offset:2px}
 .card.st-err,.card.st-down{border-color:color-mix(in srgb,var(--err) 55%,var(--line))}
 .card.st-unknown{border-style:dashed}
@@ -220,7 +232,7 @@ linear-gradient(to right,var(--line-2),transparent) left center/.5em 100% no-rep
 .toolbar b{color:var(--fg-strong);font-weight:600}
 .toolbar .dot{color:var(--line-2)}
 .legacy{font:14px/1.25 var(--mono);font-size:.93em;min-width:0}
-"""
+""".replace("@@ROWS@@", ROW_CLASSES)
 
 TABLES = """
 table{border-collapse:collapse;width:100%}
@@ -469,6 +481,11 @@ ul.legend .n{color:var(--fg)}
 html[data-density="compact"] .prob .why,html[data-density="compact"] .prob .fix,html[data-density="compact"] .hint,
 html[data-density="wall"] .prob .why,html[data-density="wall"] .prob .fix,html[data-density="wall"] .hint,html[data-density="wall"] code.pid{display:none}
 html[data-density="wall"] ul.grid{display:none}
+/* a wall has no mouse: what can only be clicked is not drawn (the "+N more" keeps its count, as plain text), and a link in a card is text */
+html[data-density="wall"] .card p.more,html[data-density="wall"] details.more p,html[data-density="wall"] details.fix{display:none}
+html[data-density="wall"] details.more>summary{pointer-events:none;list-style:none}
+html[data-density="wall"] details.more>summary::-webkit-details-marker{display:none}
+html[data-density="wall"] .cb a{pointer-events:none;color:inherit;text-decoration:none}
 """
 
 # the full screens built of components (screens.py): a page of panels (ui.Group), key figures (ui.Tiles), meters, a list whose rows are links
@@ -561,7 +578,15 @@ ul.facts .k{color:var(--muted)}
 .hv .advice-cites,.hv .advice-tools{color:var(--muted);font-size:.86em}
 .hv table.tbl{table-layout:auto}
 .hv td.n,.hv td.r{text-align:right}
+.hv .col{container:panel / inline-size}
+.hv table.tbl td:last-child{white-space:normal;overflow-wrap:anywhere}
+@container panel (max-width:44em){.hv th.p3,.hv td.p3{display:none}}
+@container panel (max-width:34em){.hv th.p2,.hv td.p2{display:none}}
+@container panel (max-width:24em){.hv th.p1,.hv td.p1{display:none}}
 svg.bar.t-accent .fg{fill:var(--accent)}
+svg.bar.busy .fg{fill:var(--accent);animation:barbusy 1.4s ease-in-out infinite alternate}
+@keyframes barbusy{from{transform:translateX(0)}to{transform:translateX(65px)}}
+@media (prefers-reduced-motion:reduce){svg.bar.busy .fg{animation:none}}
 svg.series{display:inline-block;width:min(100%,9em);height:1.1em;vertical-align:middle;color:var(--accent)}
 svg.series rect{fill:currentColor}
 .hv .bit .t-banner-err{font-size:.9em}
@@ -580,7 +605,12 @@ MAP_VIEW = """
 .mapv .st .seg:first-of-type{margin-left:auto}
 .mapv .split>div>section.grp{overflow-x:auto}
 .mapv .split{align-items:start}
-@container app (min-width:60em){.mapv .split{grid-template-columns:minmax(0,1.5fr) minmax(20em,1fr)}}
+.mapv li.ob-d{display:none}
+@container app (min-width:60em){.mapv .split{grid-template-columns:minmax(0,1.5fr) minmax(20em,1fr)}
+.mapv .sp-r{position:sticky;top:var(--stick,3.2em);max-height:calc(100vh - var(--stick,3.2em) - 3em);overflow-y:auto}}
+@container app (max-width:59.99em){.mapv .split:has(li.ob-d) .sp-r{display:none}
+.mapv li.ob-d{display:block;margin:.2em 0 .5em 1.6em;padding:.5em .7em;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}
+.mapv li.ob-d .props{font-size:.9em}}
 ul.ol{list-style:none;margin:0;padding:0;font:.92em/1.45 var(--mono)}
 .ob{display:flex;align-items:baseline;gap:.1em;padding:.1em .3em;border-radius:4px}
 DEPTHS
@@ -631,7 +661,7 @@ AI_VIEW = """
 .av .bt.bt-err{background:var(--err-bg);border-color:color-mix(in srgb,var(--err) 45%,transparent);color:var(--err)}
 .av .bt.bt-err:hover{background:var(--err-solid);border-color:var(--err-solid);color:var(--on-solid)}
 .av .bt:disabled,.av .bt:disabled:hover{opacity:.55;cursor:not-allowed;border-color:var(--line);background:var(--surface-2);color:var(--muted)}
-.av table.tbl .bt{padding:.05em .7em;font-size:.92em}
+.av table.tbl .bt{padding:.05em .7em;font-size:.92em;position:relative;z-index:1}
 .av input.q{font:inherit;width:min(42em,100%);padding:.3em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
 .av input.q:disabled{opacity:.55}
 .av .qa{margin:.5em 0}
@@ -656,6 +686,7 @@ dl.spec-dl dd.do{display:flex;flex-wrap:wrap;gap:.4em}
 .av table.tbl{table-layout:auto}
 .av table.tbl td,.av table.tbl td:last-child{width:auto;white-space:nowrap}
 .av table.tbl td.p3:not(.n){white-space:normal;min-width:14em}
+.av table.tbl td:first-child{white-space:normal;min-width:9em}
 .av .bt{white-space:nowrap}
 .av section.grp{overflow-x:auto}
 @container app (max-width:45.7em){.av .st .seg{margin-left:0}dl.spec-dl{grid-template-columns:minmax(0,1fr)}dl.spec-dl dd{margin-bottom:.3em}}

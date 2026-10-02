@@ -91,7 +91,7 @@ class Shell(unittest.TestCase):
             if "data-card" in a:
                 self.assertTrue(re.fullmatch(r"[0-9a-f]{10}", a["data-rev"]))
         for t, a, _ in self.tree.find("article"):
-            self.assertRegex(a["class"], r"^card s[1-4] st-(ok|warn|err|down|unknown|info)$")
+            self.assertRegex(a["class"], r"^card s[1-4] st-(ok|warn|err|down|unknown|info)( r\d+)?$")
 
     def test_main_carries_the_refresh_contract(self):
         (_, a, _), = self.tree.find("main")
@@ -191,6 +191,41 @@ class Shell(unittest.TestCase):
         self.assertEqual([a["data-card"] for t, a, _ in Tree(body).tags if "data-card" in a and not a["data-card"].startswith("__")], ["exposure"])
         self.assertIn("overview", body)
         self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the classic page
+
+    def test_the_overview_packs_densely_and_the_editor_and_a_single_card_do_not(self):
+        import htmlview
+        cards_ = re.findall(r'<article[^>]*class="(card [^"]*)"', self.body)
+        self.assertTrue(cards_)
+        for c in cards_:  # every card of the overview says how many rows it spans, within the styled range
+            n = int(re.search(r"\br(\d+)\b", c).group(1))
+            self.assertTrue(1 <= n <= webcss.ROW_MAX, c)
+            self.assertTrue(n == 1 or ".card.r%d{grid-row:span %d}" % (n, n) in webcss.CSS, c)
+        self.assertIn("main.grid:not([data-edit]){grid-auto-flow:row dense", webcss.CSS)
+        self.assertEqual(htmlview.ROW_MAX, webcss.ROW_MAX)
+        edit = get(self.srv, "/?app=1&edit=1")[2]
+        self.assertTrue(re.search(r'<article[^>]*class="card ', edit))
+        self.assertNotRegex(edit, r'<article[^>]*class="card [^"]*\br\d+\b')
+        full = get(self.srv, "/?card=exposure")[2]
+        self.assertNotRegex(re.search(r'<article[^>]*>', full).group(0), r"\br\d+\b")
+
+    def test_a_narrow_window_does_not_span_rows(self):
+        css = webcss.CSS
+        narrow = css[css.index("@container app (max-width:45.7em){\n  .grid"):]
+        self.assertIn("main.grid:not([data-edit]) .card[class]{grid-row:auto}", narrow.split(".card:target")[0])
+
+    def test_the_estimate_grows_with_the_body_and_stays_in_range(self):
+        import htmlview
+        few = htmlview.est_rows("<p class=\"ln\">one line</p>", 1)
+        many = htmlview.est_rows("".join("<p class=\"ln\">line %d</p>" % i for i in range(30)), 1)
+        table = htmlview.est_rows("<table>" + "<tr><td>a</td><td>b</td></tr>" * 10 + "</table>", 1)
+        self.assertLess(few, table)
+        self.assertGreater(many, few * 5)
+        long_text = "<p>" + "word " * 200 + "</p>"
+        self.assertGreater(htmlview.est_rows(long_text, 1), htmlview.est_rows(long_text, 4))  # wider: fewer lines
+        self.assertEqual(htmlview.est_rows("<p>x</p>" * 5000, 1), htmlview.ROW_MAX)
+        self.assertGreaterEqual(htmlview.est_rows("", 1), 1)
+        hidden = '<details class="fix"><summary>fix</summary>' + "<p>how</p>" * 20 + "</details>"
+        self.assertLess(htmlview.est_rows(hidden, 1, wall=True), htmlview.est_rows(hidden, 1))  # the wall hides it
 
     def test_pause_stops_the_reload(self):
         _, _, body = get(self.srv, "/?app=1&pause=1")
@@ -999,6 +1034,44 @@ class Builder(unittest.TestCase):
         self.assertEqual(first(sev)[0], "attention")  # by severity: what needs you first
         self.assertEqual(first(mine)[:2], ["system", "containers"])  # fixed: as the reader put them
         self.assertEqual(first(self.page("/?app=1", cookie="1.tl")[2])[0], "attention")  # a cookie of another field: still by severity
+
+    def test_a_layout_from_config_ini_fixes_the_order_unless_severity_is_written(self):
+        first = lambda t: [x["data-card"] for tag, x, _ in t.tags if tag == "article"][:2]  # noqa: E731
+        layout = [("system", 2), ("containers", 1), ("attention", 2)]
+        with mock.patch.dict(render.CFG["ui"], {"layout": layout}):
+            self.assertEqual(first(self.page("/?app=1")[2]), ["system", "containers"])
+            _, body, _ = self.page("/?app=1&view=settings")
+            self.assertIn("so for now the cards stay in its order", body)
+            self.assertEqual(first(self.page("/?app=1", cookie="1.os")[2])[0], "attention", "By severity chosen in the browser")
+            self.assertEqual(first(self.page("/?app=1", cookie="1.of")[2]), ["system", "containers"])
+            self.assertNotIn("so for now the cards stay in its order", self.page("/?app=1&view=settings", cookie="1.os")[1])
+        with mock.patch.dict(render.CFG["ui"], {"layout": layout, "order": "severity"}):
+            self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "order = severity written in config.ini")
+        self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "no layout: by severity")
+
+    def test_a_hidden_card_comes_back_as_wide_as_it_was(self):
+        ck = ""
+        for op in ("g", "g", "g"):  # databases: 1 -> 4
+            st, _, ck = self.follow("/?set=e%sdb&back=app%%3D1%%26edit%%3D1" % op, ck)
+            self.assertEqual(st, 302)
+        width = lambda tree: dict((c, [x for x in cls if re.fullmatch(r"s[1-4]", x)][0]) for c, cls in self.cards_of(tree))  # noqa: E731
+        self.assertEqual(width(self.page(cookie=ck)[2])["databases"], "s4")  # three steps from 1
+        st, _, ck = self.follow("/?set=ehdb&back=app%3D1%26edit%3D1", ck)
+        self.assertIn("db4x", ck)
+        _, body, tree = self.page(cookie=ck)
+        hidden = [(c, cls) for c, cls in self.cards_of(tree) if c == "databases"]
+        self.assertIn("off", hidden[0][1])
+        self.assertIn("s4", hidden[0][1], "the hidden card is drawn at its width")
+        st, _, ck = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck)
+        self.assertNotIn("db4x", ck)
+        cards_ = self.cards_of(self.page(cookie=ck)[2])
+        self.assertEqual(cards_[-1][0], "databases", "last")
+        self.assertIn("s4", cards_[-1][1])
+        self.assertNotIn("off", cards_[-1][1])
+        # the script's whole-layout form keeps it too
+        st, _, ck2 = self.follow("/?set=lat2_db3x&back=app%3D1%26edit%3D1")
+        st, _, ck2 = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck2)
+        self.assertEqual(dict(prefs.parse_cookie(ck2)["layout"])["databases"], 3)
 
     def test_the_footer_and_the_settings_lead_to_the_editor(self):
         _, _, tree = self.page("/?app=1")

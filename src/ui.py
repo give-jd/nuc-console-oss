@@ -425,14 +425,15 @@ class Bar(_Component):
     """A fraction of a whole (0..1): its state is read off the thresholds (warn, err), and a fraction that is None (it could not be
     read) is state 'unknown' with the text '?': never an empty bar that looks fine. w: the console's width in columns (the web sizes it
     in CSS). tone: a token that colours the fill whatever the fraction is (a share of a total, not a level); None follows the state."""
-    __slots__ = ("frac", "value_text", "warn", "err", "w", "tone")
+    __slots__ = ("frac", "value_text", "warn", "err", "w", "tone", "busy")
 
-    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10, tone=None):
+    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10, tone=None, busy=False):
+        self.busy = bool(busy) and num(frac) is None  # busy: the web draws a moving bar for work whose total is not known (frac None); never a level
         self.tone = _tone(tone)  # None: the colour follows the state; a token: a bar that is not a level (the slowest units, a share)
         self.w = max(1, int(w))
         f = num(frac)
         self.frac = None if f is None else min(max(f, 0.0), 1.0)
-        self.value_text = "?" if self.frac is None else _text(value_text)
+        self.value_text = "?" if self.frac is None and not self.busy else _text(value_text)
         self.warn, self.err = warn, err
 
     @property
@@ -787,11 +788,13 @@ class Branch(_Component):
     opens, is open, is a leaf, or repeats one above), body (a Line: what the row says, from its arrow to its note), state (the node's: its
     symbol and class on the web), href (where the web goes to select the row; None: no link) and mark_href (to open or close it; None: the
     mark is no link). cursor: the keyboard's row (reverse video on the console, aria-current on the web). prefix: the console's tree glyphs
-    before the mark (the web has the depth); tip: what the mark's link says on the web."""
-    __slots__ = ("key", "depth", "mark", "body", "state", "href", "mark_href", "cursor", "prefix", "tip")
+    before the mark (the web has the depth); tip: what the mark's link says on the web. after: a component (Props) the web draws right under
+    the row, in a narrow window, where the details pane beside the tree has no room (the console ignores it)."""
+    __slots__ = ("key", "depth", "mark", "body", "state", "href", "mark_href", "cursor", "prefix", "tip", "after")
 
-    def __init__(self, key, depth, mark, body, state="info", href=None, mark_href=None, cursor=False, prefix="", tip=""):
+    def __init__(self, key, depth, mark, body, state="info", href=None, mark_href=None, cursor=False, prefix="", tip="", after=None):
         self.key, self.depth, self.mark, self.body = _text(key), int(depth), _inline(mark), _inline(body)
+        self.after = after
         self.state, self.href, self.mark_href = check_state(state), href, mark_href
         self.cursor, self.prefix, self.tip = bool(cursor), _text(prefix), _text(tip)
 

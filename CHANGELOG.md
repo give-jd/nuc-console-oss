@@ -3,7 +3,115 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [1.5.0] - unreleased
+## [Unreleased]
+
+A new web interface, the default from this release, built from the same model as the console; the console gets a tab bar, key figures and
+`[ui]`. Still Python 3.8+, standard library only.
+
+### Upgrade notes
+
+- The web view is the new shell by default (`[ui] web = app`). To keep the classic pages for this release put `web = classic` under `[ui]` in `config.ini`;
+  they will be removed in the next one. The display opens the shell too.
+
+### Added
+
+**A new web interface (the default)**
+
+- **The web view is now the shell.** `[ui] web` defaults to `app`: `/` serves the shell described below (the Map, CPU, Health and AI screens drawn natively,
+  settings, a layout editor, partial refresh, a wall display), and the display (`render.py --kiosk`, `--open`) opens it (the full-screen window its wall
+  display). The classic pages (the console's text turned into HTML) are **kept for one release as a fallback and will be removed**: `[ui] web = classic` in
+  `config.ini` serves them for every page, `?app=0` for one URL (`?app=1` gives the shell back); their output is unchanged. Scripts on the default pages: see
+  Security below.
+
+- The shell (`[ui] web = app`, now the default; `?app=1` for one URL under `web = classic`) is: a top bar (host, status pill, the five screens with badges, clock, help, settings),
+  a row of key figures, the overview as a grid of cards ordered by severity, and the Map, CPU, Health and AI pages in the same frame, in a dark, light,
+  high-contrast or automatic theme and three densities. The classic pages stay available and unchanged (see above).
+- The shell's pages have `style-src 'self'` and no `'unsafe-inline'`: no inline `<style>` or `style=` anywhere (the graph's size is a class); the classic pages are unchanged.
+- `/?view=settings`: appearance (theme, density, preset, order, start view, key figures, each a link), an Export of the `[ui]` block, and a read-only
+  **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
+- The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.
+  The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-shell-the-default-web-interface).
+- In the shell the CPU screen is real HTML, not a text screen: key figures, a meter per logical CPU, the temperatures and the process table, whose column
+  heads are the sort links (the keys `p m t n u` work too) and whose rows select a process, with its details beside the table. The classic page and the
+  console are unchanged.
+- The shell has three small first-party scripts, inline and pinned by their hashes in each page's CSP (`script-src`, `connect-src 'self'`, Trusted Types):
+  **partial refresh** (it polls the page's fragment, `&frag=1` with an `ETag` and `304`, and replaces only the cards that changed; the focus, the open
+  details and the scroll stay; a stopped server shows *stale since HH:MM:SS*, never fresh numbers), **keys** (1-5, `Z`, `?`, arrows and `j`/`k` over lists, from the
+  server's own keymap) and **preferences** (theme and density apply without a reload; a **Copy** button on the settings page). Without scripts everything
+  works as before and the page reloads by `<meta refresh>` inside `<noscript>`. The classic pages are unchanged and still have no script.
+  See [docs/WEB.md](docs/WEB.md#the-shells-scripts) and [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
+- **Layout editor** (`/?app=1&edit=1`, from **Edit layout** in the overview's footer and in the settings): move cards earlier or later, make them
+  narrower or wider (1 to 4 columns), hide them and show them again, **Reset layout**, **Done**. Without JavaScript every button is a link that makes one
+  step on the server (`/?set=euat`, `/?set=ereset`, ...) and comes back to the editor; with JavaScript a fourth first-party script, pinned by its hash on
+  that page only, adds dragging to move and resize with snapping to quarters of the grid, and a keyboard path (Space grabs a card, arrows move it, `+`
+  and `-` resize, `x` hides, Esc puts it back, announced in a live region), and saves every change at once. Only the layout and the hidden cards of the
+  `nuc_ui` cookie change (still 256 bytes at most). A hidden card keeps its width (`db3x` in the cookie, `hidden = databases:3` in `config.ini`) and comes back with it. A layout from any source (browser, link or
+  `config.ini`) keeps its order instead of moving by severity, unless `order = severity` is set. The
+  settings page's Export gives the `layout =` and `hidden =` lines for `config.ini`. See [docs/WEB.md](docs/WEB.md#edit-the-layout).
+- In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
+  (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
+  events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
+- The shell's overview grid packs densely (each card spans the rows its height needs: estimated by the server, measured and corrected by the page script, a later card fills the holes of an earlier one; the editor keeps strict order), and the wall hides what needs a mouse ("… the whole card", fixes, links) and keeps its scroll position across the ten-minute reload.
+- The shell as a wall display: `/?app=1&ui=1.dw&kiosk=1` scrolls one screen every `[dashboard] rotate_seconds` seconds (`&rotate=N` for one URL), shifts the top bar
+  every ten minutes against burn-in and keeps a footer with only the way to close the window. `render.py --kiosk` and `--open` open the shell
+  (the full-screen window its wall display); `web = classic` opens the classic page as before.
+- In the shell the **Map** (`?app=1&view=map`) is drawn natively too: the tree as a list whose rows are links (a symbol and a class for the state, an indent for
+  the depth, a mark that opens or closes a branch), the details of the selected row beside it (below it in a narrow window), and expand all, collapse all and
+  problems only as a segmented control of links with their keys (`e`, `c`, `p`), next to a link to the graph view. The console draws the same model and
+  looks exactly as before.
+- In the shell the **AI screen** (`?app=1&view=ai`) is drawn natively too: the switch and a download's progress bar, the chat, the hardware and the status as
+  labelled values, the models as a table with the verdict as a pill and a button per row, the selected model's details, and the delete confirmations. The buttons are the
+  same forms as on the classic page (same endpoints and CSRF token) and have keys (`e`, `c`, `u`, `x`, `X`, `y`, `n`); a locked page shows a notice and no form. The console
+  draws the same model and looks exactly as before.
+
+### Changed
+
+- **The console has a tab bar, a KPI row, states on the sections and honours `[ui]`.** The first line of every console screen is now
+  ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ N PROBLEMS` (the current screen in reverse video and brackets, a screen
+  switched off left out, `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI` at 79 columns) instead of ` host │ <page> │ time`; from 30 rows up the second line is the KPI row (`[ui] kpis`
+  or the preset's), and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`). The body has one row less for it, so some screens show a line
+  less or move a block. `[ui]` is used by the console now: `theme` (`light`, `high-contrast`; `NO_COLOR` turns the colours off), `density` (`compact`, `wall`),
+  `layout` / `hidden` / `preset` / `order` for the overview's cards (without them the order is `[dashboard] sections`, as before; `order = severity` puts the worst
+  state first and a card moves only when a state changes) and `start_view` (a console with a keyboard opens at that screen; an idle screen goes back to it).
+- **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
+  README lists the keys). Breaking, compared with 1.5.0:
+  - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;
+  - `1`-`5` open the Overview, Map, CPU, Health and AI screens from anywhere (a disabled feature has no digit); `Tab` / `Shift+Tab` go round
+    the screens (`Tab` no longer opens the Map);
+  - the page jumps `1`-`3` of `mode = rotate` are now `←` `→` (and `PgUp` `PgDn`) on the Overview, held for a minute as before; `m` `c` `h` `a`
+    still open the Map, CPU, Health and AI screens, from the Overview only;
+  - `Esc` closes the details pane, then goes back to the Overview; `q` does the same on a screen and, on the Overview, quits a portable console
+    only; `m` / `c` / `h` / `a` no longer leave the screen they opened (they are that screen's letters: `c` collapses on the Map);
+  - new: `?` (the keys of this screen), `r` (redraw now), `Z` (pause or resume the redraw; the header says *paused*);
+  - the overview footer no longer says "keys 1-3: jump to page", and a monitor with no keyboard shows no keys at all.
+
+### Security
+
+- **The default web pages carry scripts.** Now that the shell is the default, `/` has three first-party inline scripts (partial refresh, keys,
+  preferences; a fourth on the layout editor), each pinned by its SHA-256 in that page's Content-Security-Policy (`script-src` lists exactly those
+  hashes, `connect-src 'self'`, Trusted Types for the fragment parser, `default-src 'none'`); the classic pages (`web = classic`, `app=0`) stay
+  script-free except their MAP graph. See [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
+- Every answer of the web view now carries `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`: no
+  other site can load a page as a resource, and a page opened from another site gets a window of its own.
+
+### Fixed
+
+- `--demo` no longer shows the real machine's memory, disk, uptime and load. Neither does it show its CPU cores, temperatures or network
+  traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
+  whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
+- A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
+- The `--demo` screens described one machine each (4 cores on the overview, 16 threads on the CPU screen, 32 GB on the AI screen, a 22 s boot in BOOT and a 58 s one in HEALTH). Each demo OS is now a single machine (cores, memory, uptime, load, temperatures, boot, disks) that every screen reads.
+- The web view answers `HEAD` like `GET` (same status and headers, no body) instead of `405`: link checkers and monitors that probe
+  with `HEAD` work. The token and `Host` checks are the same.
+- `/?token=…&view=map` (any view) kept the token in the cookie but landed on the dashboard. The redirect now keeps the view, rebuilt from
+  the parameters the page understands, checked; anything else is dropped and the token is never in the new address.
+- `render.py --open` (`[display] mode = browser`) ignored `[web] token_file`: the browser got `401`. It now puts the token in the address when
+  the logged-in user can read the file; when not (the usual case on macOS) it shows the dashboard from a page written to a file, as the
+  full-screen window does, and `display.log` says why.
+- Windows, `[display] mode = fullscreen` with neither Edge nor Chrome: nothing opened. Firefox is now found (it opens a window: **F11** for
+  full screen), and with no supported browser at all the default one opens (**F11** again), with a line in `display.log`.
+
+## [1.5.0] - 2026-10-02
 
 nuc-console now runs on Linux, macOS and Windows, has three new screens (MAP, CPU, HEALTH) and an optional local AI advisor, and
 is released as archives built by CI. Still Python 3.8+, standard library only.
@@ -43,59 +151,10 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
     nothing else of the data), a portable run `data/ai`. It holds `web.json` (the page's choices: on/off, model, endpoint; 0644) and
     `job.lock`. It stays when you uninstall.
   - A portable run writes only to the `data/` folder next to `run.sh` / `run.cmd`.
-- The web view is the new shell by default (`[ui] web = app`). To keep the classic pages for this release put `web = classic` under `[ui]` in `config.ini`;
-  they will be removed in the next one. The display opens the shell too.
 - `[web] refresh_seconds` is still read while `[dashboard] refresh_seconds` is absent; use the latter.
 - `install.sh` now clears `/opt/nuc-console/*.py` before it copies every module: do not keep files of your own there.
 
 ### Added
-
-**A new web interface (the default)**
-
-- **The web view is now the shell.** `[ui] web` defaults to `app`: `/` serves the shell described below (the Map, CPU, Health and AI screens drawn natively,
-  settings, a layout editor, partial refresh, a wall display), and the display (`render.py --kiosk`, `--open`) opens it (the full-screen window its wall
-  display). The classic pages (the console's text turned into HTML) are **kept for one release as a fallback and will be removed**: `[ui] web = classic` in
-  `config.ini` serves them for every page, `?app=0` for one URL (`?app=1` gives the shell back); their output is unchanged. Scripts on the default pages: see
-  Security below.
-
-- The shell (`[ui] web = app`, now the default; `?app=1` for one URL under `web = classic`) is: a top bar (host, status pill, the five screens with badges, clock, help, settings),
-  a row of key figures, the overview as a grid of cards ordered by severity, and the Map, CPU, Health and AI pages in the same frame, in a dark, light,
-  high-contrast or automatic theme and three densities. The classic pages stay available and unchanged (see above).
-- The shell's pages have `style-src 'self'` and no `'unsafe-inline'`: no inline `<style>` or `style=` anywhere (the graph's size is a class); the classic pages are unchanged.
-- `/?view=settings`: appearance (theme, density, preset, order, start view, key figures, each a link), an Export of the `[ui]` block, and a read-only
-  **About this machine** (version, installed or portable, web access, display, Telegram, `[ai] web_actions`, config errors). `/?card=<id>` shows one card in full.
-- The choices are kept in the `nuc_ui` cookie (`HttpOnly`, `SameSite=Strict`, validated, 256 bytes at most) by `/?set=`; `?ui=` sets them for one URL.
-  The style sheet is served at `/s/app.<sha8>.css` (immutable). See [docs/WEB.md](docs/WEB.md#the-shell-the-default-web-interface).
-- In the shell the CPU screen is real HTML, not a text screen: key figures, a meter per logical CPU, the temperatures and the process table, whose column
-  heads are the sort links (the keys `p m t n u` work too) and whose rows select a process, with its details beside the table. The classic page and the
-  console are unchanged.
-- The shell has three small first-party scripts, inline and pinned by their hashes in each page's CSP (`script-src`, `connect-src 'self'`, Trusted Types):
-  **partial refresh** (it polls the page's fragment, `&frag=1` with an `ETag` and `304`, and replaces only the cards that changed; the focus, the open
-  details and the scroll stay; a stopped server shows *stale since HH:MM:SS*, never fresh numbers), **keys** (1-5, `Z`, `?`, arrows and `j`/`k` over lists, from the
-  server's own keymap) and **preferences** (theme and density apply without a reload; a **Copy** button on the settings page). Without scripts everything
-  works as before and the page reloads by `<meta refresh>` inside `<noscript>`. The classic pages are unchanged and still have no script.
-  See [docs/WEB.md](docs/WEB.md#the-shells-scripts) and [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
-- **Layout editor** (`/?app=1&edit=1`, from **Edit layout** in the overview's footer and in the settings): move cards earlier or later, make them
-  narrower or wider (1 to 4 columns), hide them and show them again, **Reset layout**, **Done**. Without JavaScript every button is a link that makes one
-  step on the server (`/?set=euat`, `/?set=ereset`, ...) and comes back to the editor; with JavaScript a fourth first-party script, pinned by its hash on
-  that page only, adds dragging to move and resize with snapping to quarters of the grid, and a keyboard path (Space grabs a card, arrows move it, `+`
-  and `-` resize, `x` hides, Esc puts it back, announced in a live region), and saves every change at once. Only the layout and the hidden cards of the
-  `nuc_ui` cookie change (still 256 bytes at most). While you have a layout of your own the cards keep its order instead of moving by severity. The
-  settings page's Export gives the `layout =` and `hidden =` lines for `config.ini`. See [docs/WEB.md](docs/WEB.md#edit-the-layout).
-- In the shell the **Health screen** (`?app=1&view=health`) is drawn natively, with no preformatted text: the period as a segmented control of links
-  (keys `d`, `w`, `m`), the findings as rows that open to their details and fix, the advisor's answer as a highlighted block, the top CPU and memory,
-  events, logs, disks, thermal and boot sections as real tables with SVG bars and sparklines. The console draws the same model and looks exactly as before.
-- The shell as a wall display: `/?app=1&ui=1.dw&kiosk=1` scrolls one screen every `[dashboard] rotate_seconds` seconds (`&rotate=N` for one URL), shifts the top bar
-  every ten minutes against burn-in and keeps a footer with only the way to close the window. `render.py --kiosk` and `--open` open the shell
-  (the full-screen window its wall display); `web = classic` opens the classic page as before.
-- In the shell the **Map** (`?app=1&view=map`) is drawn natively too: the tree as a list whose rows are links (a symbol and a class for the state, an indent for
-  the depth, a mark that opens or closes a branch), the details of the selected row beside it (below it in a narrow window), and expand all, collapse all and
-  problems only as a segmented control of links with their keys (`e`, `c`, `p`), next to a link to the graph view. The console draws the same model and
-  looks exactly as before.
-- In the shell the **AI screen** (`?app=1&view=ai`) is drawn natively too: the switch and a download's progress bar, the chat, the hardware and the status as
-  labelled values, the models as a table with the verdict as a pill and a button per row, the selected model's details, and the delete confirmations. The buttons are the
-  same forms as on the classic page (same endpoints and CSRF token) and have keys (`e`, `c`, `u`, `x`, `X`, `y`, `n`); a locked page shows a notice and no form. The console
-  draws the same model and looks exactly as before.
 
 **Windows and macOS**
 
@@ -226,25 +285,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
-- **The console has a tab bar, a KPI row, states on the sections and honours `[ui]`.** The first line of every console screen is now
-  ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ N PROBLEMS` (the current screen in reverse video and brackets, a screen
-  switched off left out, `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI` at 79 columns) instead of ` host │ <page> │ time`; from 30 rows up the second line is the KPI row (`[ui] kpis`
-  or the preset's), and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`). The body has one row less for it, so some screens show a line
-  less or move a block. `[ui]` is used by the console now: `theme` (`light`, `high-contrast`; `NO_COLOR` turns the colours off), `density` (`compact`, `wall`),
-  `layout` / `hidden` / `preset` / `order` for the overview's cards (without them the order is `[dashboard] sections`, as before; `order = severity` puts the worst
-  state first and a card moves only when a state changes) and `start_view` (a console with a keyboard opens at that screen; an idle screen goes back to it).
-  The web view does not read `[ui]` yet.
-- **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
-  README lists the keys). Breaking, compared with the keys of the screens as they were in development:
-  - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;
-  - `1`-`5` open the Overview, Map, CPU, Health and AI screens from anywhere (a disabled feature has no digit); `Tab` / `Shift+Tab` go round
-    the screens (`Tab` no longer opens the Map);
-  - the page jumps `1`-`3` of `mode = rotate` are now `←` `→` (and `PgUp` `PgDn`) on the Overview, held for a minute as before; `m` `c` `h` `a`
-    still open the Map, CPU, Health and AI screens, from the Overview only;
-  - `Esc` closes the details pane, then goes back to the Overview; `q` does the same on a screen and, on the Overview, quits a portable console
-    only; `m` / `c` / `h` / `a` no longer leave the screen they opened (they are that screen's letters: `c` collapses on the Map);
-  - new: `?` (the keys of this screen), `r` (redraw now), `Z` (pause or resume the redraw; the header says *paused*);
-  - the overview footer no longer says "keys 1-3: jump to page", and a monitor with no keyboard shows no keys at all.
 - A `config.ini` that cannot be read at all (for example a key starting with `:`) raises `config-unreadable` in ATTENTION instead of
   falling back to the defaults in silence; a key written twice no longer makes the whole file unreadable (the last one wins).
 - One refresh rate for every screen and page, `[dashboard] refresh_seconds`; `[web] refresh_seconds` is still read until the new key is set.
@@ -261,10 +301,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Security
 
-- **The default web pages carry scripts.** Now that the shell is the default, `/` has three first-party inline scripts (partial refresh, keys,
-  preferences; a fourth on the layout editor), each pinned by its SHA-256 in that page's Content-Security-Policy (`script-src` lists exactly those
-  hashes, `connect-src 'self'`, Trusted Types for the fragment parser, `default-src 'none'`); the classic pages (`web = classic`, `app=0`) stay
-  script-free except their MAP graph. See [SECURITY.md](SECURITY.md#the-new-web-shells-scripts).
 - **The web view has one script now.** Every page is still GET only, with no JavaScript and `default-src 'none'`, except the MAP's graph
   view: one inline script whose SHA-256 is in that page's Content-Security-Policy. It builds no markup, opens no connection and loads
   nothing; `tests/test_graphjs.py` rejects changes that would let it. The MAP pages are bounded (unknown keys dropped, a capped page cache).
@@ -276,8 +312,6 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
   the catalog (nothing from a request reaches a path, a command line or a shell), Post/Redirect/Get, `form-action 'self'` in the CSP of
   that one page and `'none'` everywhere else, still no JavaScript there. The web account can replace what is in the AI folder, which is why
   `serve --install-service` hashes it again. Details: [SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md#the-ai-pages-buttons).
-- Every answer of the web view now carries `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`: no
-  other site can load a page as a resource, and a page opened from another site gets a window of its own.
 - macOS and Windows run the web view by default, bound to `127.0.0.1` with no token: not reachable from the network, but readable by any
   local user or program, like the state files. `[display] mode = none` with `[web] enabled = no` runs none.
 - macOS and Windows collector: Apple's tools run as root only from protected system folders; third-party tools (`docker`, `tailscale`,
@@ -310,26 +344,12 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Fixed
 
-- `--demo` no longer shows the real machine's memory, disk, uptime and load. Neither does it show its CPU cores, temperatures or network
-  traffic: the SYSTEM block, the System page and the header's problems used to read them from the host, so a screenshot or a test showed
-  whoever ran it. The demo is now an invented machine per OS (`--demo-os windows|darwin`), the same everywhere and at every run but for the clock.
-- A memory, disk, uptime or load figure that cannot be read is `?` in the SYSTEM block and the System page, not an error in the block.
-- The `--demo` screens described one machine each (4 cores on the overview, 16 threads on the CPU screen, 32 GB on the AI screen, a 22 s boot in BOOT and a 58 s one in HEALTH). Each demo OS is now a single machine (cores, memory, uptime, load, temperatures, boot, disks) that every screen reads.
 - The web view drew its pages one column narrower than asked: at the default 200 columns that is 199, below the 2-column layout, and
   NETWORK TRAFFIC, SESSIONS, TAILSCALE, DOCKER · DISK and DISKS were dropped. It also showed sessions and disks as "unavailable" on the
   first page after a start.
 - A long host name no longer pushes the problem status off the header (`✖ 4 PROBLEMS` was cut to `✖ 4 PROBLE`).
 - Docker installed but not running (Docker Desktop closed, the daemon stopped) is shown as such in DATABASE, not as a collector
   error on every cycle.
-- The web view answers `HEAD` like `GET` (same status and headers, no body) instead of `405`: link checkers and monitors that probe
-  with `HEAD` work. The token and `Host` checks are the same.
-- `/?token=…&view=map` (any view) kept the token in the cookie but landed on the dashboard. The redirect now keeps the view, rebuilt from
-  the parameters the page understands, checked; anything else is dropped and the token is never in the new address.
-- `render.py --open` (`[display] mode = browser`) ignored `[web] token_file`: the browser got `401`. It now puts the token in the address when
-  the logged-in user can read the file; when not (the usual case on macOS) it shows the dashboard from a page written to a file, as the
-  full-screen window does, and `display.log` says why.
-- Windows, `[display] mode = fullscreen` with neither Edge nor Chrome: nothing opened. Firefox is now found (it opens a window: **F11** for
-  full screen), and with no supported browser at all the default one opens (**F11** again), with a line in `display.log`.
 
 ## [1.4.0] - 2026-10-01
 

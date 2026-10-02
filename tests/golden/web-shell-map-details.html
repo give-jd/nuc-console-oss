@@ -1,4 +1,4 @@
-<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-A3Gpbgcp+f5SXdMWaQM002Hm/UpECkRmKlNK5v34mvs=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
 <html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
 <head>
@@ -9,7 +9,7 @@
 <meta http-equiv="refresh" content="2">
 </noscript>
 <title>demo-host · map · nuc-console</title>
-<link rel="stylesheet" href="/s/app.5eed8378.css">
+<link rel="stylesheet" href="/s/app.9ee7a975.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="15e8ce0716">
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view" data-refresh="2" data-frag="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;app=1&amp;frag=1">
-<div class="vb" data-card="__view" data-rev="860fcb0f01">
+<div class="vb" data-card="__view" data-rev="2de7df8584">
 <div class="scr mapv">
 <header class="st">
 <h2>MAP</h2>
@@ -438,6 +438,44 @@
 <span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
 </a>
 </li>
+<li class="ob-d">
+<aside class="props">
+<div class="ph">
+<h3 class="sub">DETAILS</h3>
+<a href="/?view=map&amp;all=1&amp;app=1">close ✕</a>
+</div>
+<dl>
+<dt>container</dt>
+<dd class="lv-ok top">shop-api-1  ·  container · shop</dd>
+<dt>kind</dt>
+<dd>container</dd>
+<dt>image</dt>
+<dd>example/shop-api:1.4</dd>
+<dt>compose</dt>
+<dd>shop / api</dd>
+<dt>state</dt>
+<dd>Up 3 days</dd>
+<dt>health</dt>
+<dd>healthy</dd>
+<dt>restart policy</dt>
+<dd>unless-stopped</dd>
+<dt>networks</dt>
+<dd>shop_default 172.18.0.3</dd>
+<dt>listens inside</dt>
+<dd>3000 (seen in its network namespace)</dd>
+<dt>memory</dt>
+<dd>520 MiB</dd>
+<dt>◄ from</dt>
+<dd>shop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop]</dd>
+<dt>► to</dt>
+<dd>shop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside the database))  [postgres · shop]</dd>
+<dt>► to</dt>
+<dd>198.51.100.25 :443  seen now  [Internet]</dd>
+<dt>► to</dt>
+<dd>cache-1  declared  (named in its environment)  [redis]</dd>
+</dl>
+</aside>
+</li>
 <li class="ob st-warn" data-depth="3">
 <span class="tg d" title="nothing below">
 <span class="t-muted">·</span>
@@ -719,7 +757,11 @@
 // Classes it sets on <html>, for the server's CSS:
 //   stale    the numbers on the page are old (the #stale banner says since when)
 //   paused   the refresh is paused with the [data-pause] toggle
-// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+// It also trues up the grid's row spans: the server estimates each overview card's height (class rN), the script measures it and sets
+// the exact span, after load, after every swap and on resize (debounced); the classes r2..r200 are the server's CSS. The class
+// attribute is rewritten as a whole (the class names are computed, and classList is only used with literal names here).
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
+// (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -751,7 +793,11 @@
   function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
     dead = true;
     show("updating the page");
-    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+    setTimeout(again, Math.max(0, 15000 - performance.now()));
+  }
+  function again() {  // a reload that keeps a kiosk wall where it was scrolled to (the next page restores it)
+    try { if (kiosk()) sessionStorage.setItem("nuc-wall-y", String(Math.round(window.scrollY))); } catch (err) { /* storage off */ }
+    location.reload();
   }
   function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
     const a = document.activeElement, sel = window.getSelection();
@@ -806,6 +852,19 @@
     return true;
   }
 
+  function fit() {  // the grid's dense packing with the measured heights: each card spans the rows its own height needs (no hole, no overlap)
+    const g = getComputedStyle(page);
+    if (!/dense/.test(g.gridAutoFlow) || url.indexOf("card=") >= 0) return;  // one column (rows are auto), or one card in full
+    const hit = /([0-9.]+)px/.exec(g.gridAutoRows), unit = hit ? Number(hit[1]) : parseFloat(g.fontSize) * 0.5, todo = [];
+    if (!(unit > 1)) return;
+    for (const c of document.querySelectorAll("article.card[data-card]")) {  // measure all first, then write: one layout, not one per card
+      const names = (c.getAttribute("class") || "").split(/\s+/).filter(n => n), keep = names.filter(n => !/^r[0-9]+$/.test(n));
+      const h = c.getBoundingClientRect().height + (parseFloat(getComputedStyle(c).marginBottom) || 0);
+      const want = Math.min(200, Math.ceil(h / unit - 0.05)), next = want > 1 ? keep.concat("r" + want) : keep;
+      if (h > 0 && next.join(" ") !== names.join(" ")) todo.push([c, next]);
+    }
+    for (const [c, next] of todo) c.setAttribute("class", next.join(" "));
+  }
   async function poll() {
     const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
     busy = true;
@@ -817,6 +876,7 @@
         const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
         if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
         if (!blocks || !swap(blocks)) { reload(); return; }
+        fit();
         etag = r.headers.get("ETag") || "";
       }
       fails = 0; lastOk = Date.now(); show("");
@@ -859,10 +919,18 @@
   window.addEventListener("keydown", () => { touched = Date.now(); }, true);
   window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
   root.classList.toggle("paused", paused);
+  let shaken = 0;
+  window.addEventListener("resize", () => { clearTimeout(shaken); shaken = setTimeout(fit, 150); });
+  window.addEventListener("load", fit);
+  fit();
   if (!paused) plan(period);
   if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
     setTimeout(turn, spin);
-    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+    setTimeout(again, 600000 - Date.now() % 600000 + 2000);
+    const nav = performance.getEntriesByType("navigation")[0];  // only a reload gives the place back: a fresh visit starts at the top
+    let y = 0;
+    try { y = nav && nav.type === "reload" && kiosk() ? Number(sessionStorage.getItem("nuc-wall-y")) || 0 : 0; } catch (err) { y = 0; }
+    if (y > 0) window.scrollTo({top: y, behavior: "instant"});
   }
 })();
 </script>
