@@ -199,6 +199,19 @@ class Web(unittest.TestCase):
         self.assertIn('<pre class="ht">', classic)
         self.assertNotIn('class="hv"', classic)
 
+    def test_the_tables_name_the_columns_they_drop_when_the_panel_is_narrow(self):
+        import webcss
+        view = view_of(self.page("app=1&view=health"))
+        for label, dropped in (("Per day", "p3"), ("Peak", "p2"), ("Avg", "p1"), ("Max", "p1"), ("Trend", "p2"), ("Unit", "p2"), ("Used", "p3")):
+            self.assertRegex(view, r'<th class="[^"]*\b%s\b[^"]*" scope="col">%s</th>' % (dropped, label))
+        for rule in ("@container panel (max-width:44em){.hv th.p3", "@container panel (max-width:34em){.hv th.p2", "@container panel (max-width:24em){.hv th.p1",
+                     ".hv .col{container:panel / inline-size}"):
+            self.assertIn(rule, webcss.HEALTH_VIEW)
+
+    def test_the_console_columns_keep_their_own_priorities(self):
+        cols = [x for x in screens.hb_cpu(report(), 60, 0, 7) if isinstance(x, ui.Table)][0].cols
+        self.assertEqual([c.prio for c in cols], [0] * len(cols))  # wprio is the web's: prio, which the console reads, is untouched
+
     def test_the_period_links_keep_the_rest_of_the_url(self):
         view = view_of(self.page("app=1&view=health&sel=" + golden.SELECTED["finding"]))
         links = re.findall(r'<a href="([^"]*)" data-key="([dwm])"', view)

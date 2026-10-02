@@ -220,6 +220,26 @@ class Web(unittest.TestCase):
         self.assertIn("close ✕", view)
         self.assertNotIn("<aside", view_of(self.page("app=1&view=map")))
 
+    def test_the_details_are_also_right_under_the_selected_row_for_a_narrow_window(self):
+        view = view_of(self.page("app=1&view=map&all=1&sel=" + golden.SELECTED["row"]))
+        self.assertEqual(len(re.findall(r'<li class="ob-d">\s*<aside class="props">', view)), 1)
+        self.assertEqual(view.count('<aside class="props">'), 2)  # the one beside the tree, and the one under the row
+        at = view.index('<li class="ob-d">')
+        self.assertIn('aria-current="true"', view[view.rindex('<li class="ob', 0, at):at])  # the row just before it is the selected one
+        self.assertNotIn("ob-d", view_of(self.page("app=1&view=map")))
+
+    def test_the_style_sheet_keeps_the_details_in_sight(self):
+        import webcss
+        css = webcss.MAP_VIEW
+        self.assertIn(".mapv .sp-r{position:sticky", css)  # wide: the pane stays while the tree scrolls
+        self.assertIn(".mapv .split:has(li.ob-d) .sp-r{display:none}", css)  # narrow: the copy under the row replaces it
+        self.assertIn(".mapv li.ob-d{display:none}", css)
+
+    def test_a_branch_after_is_not_drawn_by_the_console(self):
+        a =ui.Branch("k", 1, ui.Span("·"), ui.Line([ui.Span("name")]))
+        b = ui.Branch("k", 1, ui.Span("·"), ui.Line([ui.Span("name")]), after=ui.Props("X", [("a", "b", "")]))
+        self.assertEqual(ansi.render(ui.Outline([a]), 80), ansi.render(ui.Outline([b]), 80))
+
     def test_a_row_link_selects_and_the_selected_one_deselects(self):
         view = view_of(self.page("app=1&view=map&sel=" + golden.SELECTED["row"] + "&all=1"))
         for href, key in re.findall(r'<a class="oa" href="([^"]*)" data-row data-k="o-([0-9a-f]+)"', view):

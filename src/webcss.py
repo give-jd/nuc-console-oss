@@ -561,6 +561,11 @@ ul.facts .k{color:var(--muted)}
 .hv .advice-cites,.hv .advice-tools{color:var(--muted);font-size:.86em}
 .hv table.tbl{table-layout:auto}
 .hv td.n,.hv td.r{text-align:right}
+.hv .col{container:panel / inline-size}
+.hv table.tbl td:last-child{white-space:normal;overflow-wrap:anywhere}
+@container panel (max-width:44em){.hv th.p3,.hv td.p3{display:none}}
+@container panel (max-width:34em){.hv th.p2,.hv td.p2{display:none}}
+@container panel (max-width:24em){.hv th.p1,.hv td.p1{display:none}}
 svg.bar.t-accent .fg{fill:var(--accent)}
 svg.series{display:inline-block;width:min(100%,9em);height:1.1em;vertical-align:middle;color:var(--accent)}
 svg.series rect{fill:currentColor}
@@ -580,7 +585,12 @@ MAP_VIEW = """
 .mapv .st .seg:first-of-type{margin-left:auto}
 .mapv .split>div>section.grp{overflow-x:auto}
 .mapv .split{align-items:start}
-@container app (min-width:60em){.mapv .split{grid-template-columns:minmax(0,1.5fr) minmax(20em,1fr)}}
+.mapv li.ob-d{display:none}
+@container app (min-width:60em){.mapv .split{grid-template-columns:minmax(0,1.5fr) minmax(20em,1fr)}
+.mapv .sp-r{position:sticky;top:var(--stick,3.2em);max-height:calc(100vh - var(--stick,3.2em) - 3em);overflow-y:auto}}
+@container app (max-width:59.99em){.mapv .split:has(li.ob-d) .sp-r{display:none}
+.mapv li.ob-d{display:block;margin:.2em 0 .5em 1.6em;padding:.5em .7em;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}
+.mapv li.ob-d .props{font-size:.9em}}
 ul.ol{list-style:none;margin:0;padding:0;font:.92em/1.45 var(--mono)}
 .ob{display:flex;align-items:baseline;gap:.1em;padding:.1em .3em;border-radius:4px}
 DEPTHS

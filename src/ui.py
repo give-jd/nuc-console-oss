@@ -787,11 +787,13 @@ class Branch(_Component):
     opens, is open, is a leaf, or repeats one above), body (a Line: what the row says, from its arrow to its note), state (the node's: its
     symbol and class on the web), href (where the web goes to select the row; None: no link) and mark_href (to open or close it; None: the
     mark is no link). cursor: the keyboard's row (reverse video on the console, aria-current on the web). prefix: the console's tree glyphs
-    before the mark (the web has the depth); tip: what the mark's link says on the web."""
-    __slots__ = ("key", "depth", "mark", "body", "state", "href", "mark_href", "cursor", "prefix", "tip")
+    before the mark (the web has the depth); tip: what the mark's link says on the web. after: a component (Props) the web draws right under
+    the row, in a narrow window, where the details pane beside the tree has no room (the console ignores it)."""
+    __slots__ = ("key", "depth", "mark", "body", "state", "href", "mark_href", "cursor", "prefix", "tip", "after")
 
-    def __init__(self, key, depth, mark, body, state="info", href=None, mark_href=None, cursor=False, prefix="", tip=""):
+    def __init__(self, key, depth, mark, body, state="info", href=None, mark_href=None, cursor=False, prefix="", tip="", after=None):
         self.key, self.depth, self.mark, self.body = _text(key), int(depth), _inline(mark), _inline(body)
+        self.after = after
         self.state, self.href, self.mark_href = check_state(state), href, mark_href
         self.cursor, self.prefix, self.tip = bool(cursor), _text(prefix), _text(tip)
 

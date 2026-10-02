@@ -9,7 +9,7 @@
 <meta http-equiv="refresh" content="2">
 </noscript>
 <title>demo-host · map · nuc-console</title>
-<link rel="stylesheet" href="/s/app.5eed8378.css">
+<link rel="stylesheet" href="/s/app.56732638.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="15e8ce0716">
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view" data-refresh="2" data-frag="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;app=1&amp;frag=1">
-<div class="vb" data-card="__view" data-rev="860fcb0f01">
+<div class="vb" data-card="__view" data-rev="2de7df8584">
 <div class="scr mapv">
 <header class="st">
 <h2>MAP</h2>
@@ -437,6 +437,44 @@
 <a class="oa" href="/?view=map&amp;all=1&amp;app=1" data-row data-k="o-99ae4e80a5" aria-current="true">
 <span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
 </a>
+</li>
+<li class="ob-d">
+<aside class="props">
+<div class="ph">
+<h3 class="sub">DETAILS</h3>
+<a href="/?view=map&amp;all=1&amp;app=1">close ✕</a>
+</div>
+<dl>
+<dt>container</dt>
+<dd class="lv-ok top">shop-api-1  ·  container · shop</dd>
+<dt>kind</dt>
+<dd>container</dd>
+<dt>image</dt>
+<dd>example/shop-api:1.4</dd>
+<dt>compose</dt>
+<dd>shop / api</dd>
+<dt>state</dt>
+<dd>Up 3 days</dd>
+<dt>health</dt>
+<dd>healthy</dd>
+<dt>restart policy</dt>
+<dd>unless-stopped</dd>
+<dt>networks</dt>
+<dd>shop_default 172.18.0.3</dd>
+<dt>listens inside</dt>
+<dd>3000 (seen in its network namespace)</dd>
+<dt>memory</dt>
+<dd>520 MiB</dd>
+<dt>◄ from</dt>
+<dd>shop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop]</dd>
+<dt>► to</dt>
+<dd>shop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside the database))  [postgres · shop]</dd>
+<dt>► to</dt>
+<dd>198.51.100.25 :443  seen now  [Internet]</dd>
+<dt>► to</dt>
+<dd>cache-1  declared  (named in its environment)  [redis]</dd>
+</dl>
+</aside>
 </li>
 <li class="ob st-warn" data-depth="3">
 <span class="tg d" title="nothing below">
