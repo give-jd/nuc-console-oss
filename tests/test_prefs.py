@@ -962,10 +962,12 @@ class Docs(unittest.TestCase):
             for c in p["hidden"]:
                 self.assertIn(c, row)
 
-    def test_it_says_the_new_interface_is_not_built_yet(self):
+    def test_it_says_who_reads_it(self):
         low = self.doc.lower()
-        self.assertIn("being built", low)
-        self.assertIn("not use", low)
+        self.assertIn("the console uses this section", low)  # the console reads [ui]
+        self.assertIn("being built", low)  # the web shell is a preview...
+        self.assertIn("web = app", low)  # ...read only when switched on
+        self.assertIn("web = classic", low)
 
     def test_the_shipped_config_has_a_commented_ui_block_that_works(self):
         block = self.ini[self.ini.index("\n[ui]\n") + 1:].split("\n[")[0]
