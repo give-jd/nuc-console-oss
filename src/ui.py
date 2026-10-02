@@ -329,11 +329,13 @@ class Col(_Component):
     """A column of a Table: key, label, align ('l' | 'r' | 'c' centred), prio (0 = never dropped; a bigger number is dropped sooner when
     the room is short), num (the cells are numbers: mono, aligned). w, gap and clip are the console's: w is the columns the cell is
     padded to (None: the text as it is, no padding), gap the spaces after the column, clip the columns the cell is cut to (None: not
-    cut). The web ignores all three."""
-    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap", "clip")
+    cut). The web ignores all three. wprio: the web's own priority (None: prio), by the width of the card it is drawn in: the console's
+    prio is tuned to its columns, a card of the grid has its own sizes."""
+    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap", "clip", "wprio")
 
-    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1, clip=None):
+    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1, clip=None, wprio=None):
         self.key, self.label, self.align, self.prio, self.num = key, _text(label), align if align in ("r", "c") else "l", int(prio), bool(num)
+        self.wprio = None if wprio is None else int(wprio)
         self.w, self.gap = None if w is None else int(w), int(gap)
         self.clip = None if clip is None else int(clip)
 

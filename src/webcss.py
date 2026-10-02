@@ -353,6 +353,84 @@ details.dt>*+*{margin-top:.5em}
 html[data-density="wall"] details.dt{display:none}
 """
 
+# the cards that are built of components (cards.py, web.shell_card): what the console draws as columns of text, drawn as a dashboard. The
+# classes below are the ones of htmlview's own markup that COMPONENTS does not style: a problem (prob, pr, pid, why, fix, how, accept, known),
+# the label / bar / value lines (bl, lb, bx), a note under a row (tr.sub), a sub-heading (h3.sub), an indent (ind), a flow, a core grid, the boot
+# timeline (tl, tp, legend, sw) and the centred cells of a matrix. `c` is the name of an ANSI colour too: it is scoped to the cell.
+CARDS = """
+.cb td.c,.cb th.c{color:inherit;text-align:center;padding-inline:.35em}
+.cb th.c{color:var(--muted)}
+td.c{white-space:nowrap}
+td.c span{font-size:1.2em;line-height:1}
+table.tbl td{overflow-wrap:break-word}
+table.tbl th.n{font-family:var(--sans)}
+.cb>p.ln{font-size:.94em}
+.cb>*+p{margin-top:.55em}
+.cb>*+p.hint{margin-top:.2em}
+.cb>p.ln>span.b:first-child{display:block;margin-top:.5em;font:650 .72em/1.4 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+table.tbl tbody tr:not(.grp):not(.sub):hover>td{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+table.tbl tr.grp th .n{color:var(--muted);font-weight:400}
+table.tbl tbody tr.sub>td{padding:0 0 .5em 1.7em;color:var(--muted);font-size:.9em;white-space:normal}
+table.tbl tbody tr:has(+tr.sub)>td{border-bottom:0}
+p.flow{display:flex;flex-wrap:wrap;gap:.05em .9em;margin:0}
+p.flow .lead{color:var(--muted)}
+p.flow .fi{min-width:0;overflow-wrap:anywhere}
+h3.sub{margin:.9em 0 0;padding-bottom:.3em;border-bottom:1px solid var(--line);font:650 .7em/1.4 var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+h3.sub .note{font-weight:400;letter-spacing:0;text-transform:none;margin-left:.5em}
+.cb>h3.sub{margin-top:1.1em}
+.ind{min-width:0;padding-left:.7em;border-left:2px solid var(--line)}
+.ind>*+*{margin-top:.5em}
+.hint{color:var(--muted);font-size:.86em}
+.hint code.cmd{font-size:.95em}
+.cb .prob+.prob,.cb .prob+.known,.cb .known+.known{margin-top:0}
+.msg.prob,.msg.known{padding:.5em 0;border-top:1px solid var(--line);row-gap:.15em}
+.cb>.msg.prob:first-child,.cb>.msg.known:first-child,.cb>.dt>.msg.known:first-of-type{border-top:0;padding-top:0}
+.msg.prob>:not(.sym),.msg.known>:not(.sym){grid-column:2;min-width:0}
+.prob .pr{font-weight:560}
+code.pid{font:400 .76em/1.5 var(--mono);padding:.04em .55em;margin-left:.4em;border:1px solid var(--line-2);border-radius:99px;background:var(--surface-2);color:var(--muted);white-space:nowrap;vertical-align:.08em}
+.why{color:var(--muted);font-size:.9em;line-height:1.35}
+.msg.prob.lv-err .why,.msg.prob.lv-warn .why{color:var(--muted)}
+details.fix>summary{cursor:pointer;width:fit-content;color:var(--accent);font-size:.84em;font-weight:600;border-radius:3px}
+details.fix[open]>summary{margin-bottom:.3em}
+.how,.accept{color:var(--muted)}
+details.fix>.d{display:block;margin-top:.25em;font-size:.88em;overflow-wrap:anywhere}
+details.fix code.cmd{display:inline-block;max-width:100%;vertical-align:top;user-select:all}
+.known .why code.cmd{font-size:.95em}
+ul.wrap{gap:.3em .4em}
+ul.wrap li{min-width:0;padding:.02em .55em;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);overflow-wrap:anywhere}
+section.grp>p.ln{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .6em}
+.bl{display:grid;grid-template-columns:3.4em minmax(3em,1fr) 7.6em;align-items:center;gap:.05em .6em;min-width:0}
+.bl+.bl{margin-top:.5em}
+.bl .lb{color:var(--muted);font-size:.9em;font-weight:600;white-space:nowrap}
+.bl svg.bar{display:block;width:100%;height:.6em;margin:0}
+.bl .n{text-align:right;white-space:nowrap;line-height:1.2}
+.bl .bx{grid-column:2 / -1;color:var(--muted);font-size:.86em;overflow-wrap:anywhere}
+ul.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(6.2em,1fr));gap:.25em 1.1em}
+ul.grid li{min-width:0}
+ul.grid li.bl{grid-template-columns:1.5em minmax(1.2em,1fr) 2.3em;gap:0 .35em;font-size:.9em}
+ul.grid li.bl .lb{font:600 .86em var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+ul.grid li.bl svg.bar{height:.5em}
+figure.timeline{margin:0;min-width:0}
+svg.tl{display:block;width:100%;height:.9em;border-radius:3px;overflow:hidden;background:var(--surface-2)}
+rect.tp{fill:var(--bar)}
+rect.tp-firmware,ul.legend .tp-firmware .sw{fill:var(--magenta);background:var(--magenta)}
+rect.tp-loader,ul.legend .tp-loader .sw{fill:var(--cyan);background:var(--cyan)}
+rect.tp-kernel,ul.legend .tp-kernel .sw{fill:var(--accent);background:var(--accent)}
+rect.tp-initrd,ul.legend .tp-initrd .sw{fill:color-mix(in srgb,var(--accent) 45%,var(--surface));background:color-mix(in srgb,var(--accent) 45%,var(--surface))}
+rect.tp-main-path,ul.legend .tp-main-path .sw{fill:var(--accent);background:var(--accent)}
+rect.tp-post-boot,ul.legend .tp-post-boot .sw{fill:var(--bar);background:var(--bar)}
+rect.tp-userspace,ul.legend .tp-userspace .sw{fill:var(--bar);background:var(--bar)}
+rect.tp{stroke:var(--surface);stroke-width:.4}
+ul.legend{list-style:none;margin:.45em 0 0;padding:0;display:flex;flex-wrap:wrap;gap:.15em 1em;color:var(--muted);font-size:.86em}
+ul.legend li{white-space:nowrap}
+ul.legend .sw{display:inline-block;width:.7em;height:.7em;margin-right:.2em;border-radius:2px;vertical-align:-.05em;background:var(--bar)}
+ul.legend .n{color:var(--fg)}
+html[data-density="compact"] .prob .why,html[data-density="compact"] .prob .fix,html[data-density="compact"] .hint,
+html[data-density="wall"] .prob .why,html[data-density="wall"] .prob .fix,html[data-density="wall"] .hint,html[data-density="wall"] code.pid{display:none}
+html[data-density="wall"] ul.grid{display:none}
+html[data-density="compact"] ul.grid{grid-template-columns:repeat(auto-fill,minmax(5.8em,1fr))}
+"""
+
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
 ANSI = """
 .r{color:var(--err)}.g{color:var(--ok)}.y{color:var(--warn)}.b{color:var(--accent)}.m{color:var(--magenta)}.c{color:var(--cyan)}
@@ -427,7 +505,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, COMPONENTS, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, COMPONENTS, CARDS, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

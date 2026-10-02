@@ -137,6 +137,7 @@ THEMES = tuple((name, name.replace("-", " "), prefs.THEME_CODES[name]) for name 
 DENSITIES = tuple((name, name, prefs.DENSITY_CODES[name]) for name in prefs.DENSITIES)
 DETAIL_K = {"wall": 1, "desk": -2, "compact": 0}  # the detail level a card is drawn at (render.page_overview's k: -2 is the richest)
 CARD_COLS = {1: 42, 2: 90, 3: 138, 4: 186}  # the width in columns the console's text of a card is laid out for, by the card's width in the grid
+WEB_COLS = 186  # what a native card is built for: the widest layout, no cut in a name; the style sheet shrinks it (priority columns, wrapping)
 WALL_ROWS = 3  # the wall density (a screen seen from afar) shows this many rows of a list; the rest is a "+N more"
 
 
@@ -760,9 +761,11 @@ class Server(http.server.ThreadingHTTPServer):
         saved = render.FULL
         render.FULL = bool(full)  # the console's own switch: nothing is cut in the full card
         try:
-            width = CARD_COLS.get(size, 104)
+            width = WEB_COLS
             card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
             if card.body and all(isinstance(x, ui.Raw) for x in card.body):  # not built of components yet: the console's text, colours as spans
+                width = CARD_COLS.get(size, 104)
+                card = cards.build(cid, ctx, k if not full else -2, cards.Caps(width, bool(full), render.EXPAND, render.TRUNC))
                 lines, cut = ansi.card_lines(card, width)
                 note, inner = htmlview.ansi_card(lines)
             else:  # built of components: the web draws them itself, whatever the card is

@@ -336,8 +336,8 @@ def docker_disk_card(ctx, k, caps):
         return _native_card("docker_disk", ctx, note, [unavail(boot, "docker_df")])
     body = []
     if df["rows"]:
-        cols = [Col("type", "Type", w=14, gap=0), Col("count", "Count", "r", num=True, w=4), Col("active", "In use", gap=2),
-                Col("size", "Size", num=True, w=9), Col("unused", "Unused")]
+        cols = [Col("type", "Type", w=14, gap=0), Col("count", "Count", "r", num=True, w=4, wprio=3), Col("active", "In use", gap=2, num=True, wprio=2),
+                Col("size", "Size", num=True, w=9), Col("unused", "Unused", wprio=1)]
         body.append(Table(cols, [Row([r["type"], str(r["count"]), f"({r['active']} in use)", r["size"], f"unused {r['reclaimable']}"])
                                  for r in df["rows"]]))
     dang = df.get("dangling_images")
@@ -421,8 +421,8 @@ def network_traffic_card(ctx, k, caps):
         rows.append(Row([ui.safe(name)[:11], Line([Span("↓", "ok"), " ", ui.fmt_rate(v["rx"])]), Spark(v["hist_rx"], sw),
                          Line([Span("↑", "accent"), " ", ui.fmt_rate(v["tx"])]), Spark(v["hist_tx"], sw),
                          Span(f" ↓{ui.human(v['rx_tot'])} ↑{ui.human(v['tx_tot'])}", "muted")]))
-    cols = [Col("iface", "Interface", w=11), Col("rx", "Received", num=True, w=12, gap=0), Col("rx_hist", "", gap=1),
-            Col("tx", "Sent", num=True, w=12, gap=0), Col("tx_hist", "", gap=0), Col("total", "Total", prio=0)]
+    cols = [Col("iface", "Interface", w=11), Col("rx", "Received", num=True, w=12, gap=0), Col("rx_hist", "", gap=1, wprio=3),
+            Col("tx", "Sent", num=True, w=12, gap=0, wprio=1), Col("tx_hist", "", gap=0, wprio=3), Col("total", "Total", prio=0, wprio=2)]
     more = More(len(nets) - len(shown), "more") if len(nets) > len(shown) else None
     return _native_card("network_traffic", ctx, note, [Table(cols, rows)] + ([more] if more else []), more)
 
@@ -580,7 +580,7 @@ def system_card(ctx, k, caps):
         if top:
             mx = top[0]["mem"]
             body += [Line([]), Line([Span(" HEAVIEST CONTAINERS (RAM)", "strong")]),
-                     Table([Col("name", "Container", w=35, gap=0), Col("mem", "RAM", w=7, gap=0), Col("share", "")],
+                     Table([Col("name", "Container", w=35, gap=0), Col("mem", "RAM", num=True, w=7, gap=0), Col("share", "", wprio=2)],
                            [Row([ui.safe(ct["name"])[:34], ui.human(ct["mem"]), Bar(ct["mem"] / mx, "", 2, 2, 20)]) for ct in top])]
     return _native_card("system", ctx, up_load_note(s.get("uptime"), s.get("load")), body)
 
@@ -680,7 +680,7 @@ def databases_card(ctx, k, caps):
         else:
             who.append(Span("external clients: not detectable", "warn"))
         notes.append([Flow(who, Span("→", "muted"), 8, "   ", w - 14)])  # wrapped, never silently cut
-    cols = [Col("dot", "", w=1), Col("kind", "Kind", gap=0), Col("name", "Name", w=31, gap=0), Col("ports", "Ports", w=pw, gap=0),
+    cols = [Col("dot", "", w=1), Col("kind", "Kind", gap=0), Col("name", "Name", w=31, gap=0), Col("ports", "Ports", num=True, w=pw, gap=0, wprio=2),
             Col("reach", "Reach")]
     return _native_card("databases", ctx, note, [NoteTable(cols, rows, notes)])
 
@@ -707,7 +707,7 @@ def boot_slowest_parts(b, caps, k):
     mx = max((x["s"] for x in top), default=1) or 1
     rows = [Row([ui.safe(x["unit"])[:38], Bar(max(1, round(20 * x["s"] / mx)) / 20, "", tone="accent", w=20),
                  Span(ui.fmt_s(x["s"]), "warn" if x["s"] >= 5 else None)]) for x in top]
-    return out + [Indent([Table([Col("unit", "Unit", w=39, gap=0), Col("share", "", gap=2), Col("time", "Time", "r", num=True)], rows)], 2)]
+    return out + [Indent([Table([Col("unit", "Unit", w=39, gap=0), Col("share", "", gap=2, wprio=2), Col("time", "Time", "r", num=True)], rows)], 2)]
 
 
 def boot_journal_parts(b, caps, k, w):
@@ -723,7 +723,7 @@ def boot_journal_parts(b, caps, k, w):
     rows = [Row([Span("●", "err" if e["pr"] <= 3 else "warn"), ui.safe(e["id"])[:26], f"{e['n']}×", Span(ui.safe(e["last"])[:room], "muted")])
             for e in caps.lim(j["top"], k, "boot")]
     return out + [Indent([Table([Col("dot", "", w=1), Col("id", "Entry", w=27, gap=0), Col("n", "Count", "r", num=True, w=5, gap=2),
-                                 Col("last", "Last")], rows)], 2)]
+                                 Col("last", "Last", wprio=1)], rows)], 2)]
 
 
 @native("boot", "BOOT", "boot")
@@ -856,8 +856,8 @@ def exposure_full(ctx, caps, rows):
                               Line([Span(tag + " ", "err_strong"), note]) if tag else note],
                              key=f"{r['port']}/{r['proto'][0]}:{g}"))
     head = "   " + "PORT".ljust(9) + "SERVICE".ljust(nw + 1) + "".join(x.center(6) for x in ("LOC", "LAN", "TS", "NET")) + "  NOTE"
-    cols = [Col("port", "Port", w=8, gap=0), Col("service", "Service", w=nw + 1, gap=0), Col("loc", "Loc", "c", w=6, gap=0),
-            Col("lan", "LAN", "c", w=6, gap=0), Col("ts", "TS", "c", w=6, gap=0), Col("net", "Net", "c", w=6), Col("note", "Note")]
+    cols = [Col("port", "Port", num=True, w=8, gap=0), Col("service", "Service", w=nw + 1, gap=0), Col("loc", "Loc", "c", w=6, gap=0, wprio=3),
+            Col("lan", "LAN", "c", w=6, gap=0), Col("ts", "TS", "c", w=6, gap=0), Col("net", "Net", "c", w=6), Col("note", "Note", wprio=2)]
     body.append(Table(cols, trows, groups or None, indent=3, head_line=head, titled=True))
     if by["LOCALE"]:  # exception-based: local is not a risk, compact list
         body += [Line(), Line([Span("   " + titles["LOCALE"], bold=True), Span(f"  ({len(by['LOCALE'])})", "muted")]),
@@ -1055,7 +1055,7 @@ def firewall_full(net, caps, max_rules=None):
             shown = caps.lim(sorted(rules_in, key=lambda r: not open_all(r)), max_rules, "firewall")
         trows = [Row([Span(ui.safe(r["to"])[:26], full=ui.safe(r["to"])), Span(ui.safe(r["action"])[:12], full=ui.safe(r["action"])), ui.safe(r["from"])],
                      tone="warn" if open_all(r) else None) for r in shown]  # no cap: all of them, and the page splits by itself if they do not fit
-        body.append(Table([Col("to", "To", w=28, gap=0), Col("action", "Action", w=14, gap=0), Col("from", "From")], trows, indent=3,
+        body.append(Table([Col("to", "To", w=28, gap=0), Col("action", "Action", num=True, w=14, gap=0), Col("from", "From", wprio=1)], trows, indent=3,
                           head_line="   " + "TO".ljust(28) + "ACTION".ljust(14) + "FROM", fill=True))
         if len(shown) < len(rules_in):
             body.append(More(len(rules_in) - len(shown), "rule" if len(rules_in) - len(shown) == 1 else "rules", indent=3))
@@ -1116,8 +1116,8 @@ def webapps_card(ctx, k, caps):
             reach = Span(label, REACH_TONE.get(r["reach"]))
             flag = Span("not declared", "muted") if declared and not r["expected"] else Span("")
         trows.append(Row([mark, Span(ui.safe(r["name"])[:nw], full=ui.safe(r["name"])), ports, reach, flag], key=r["name"]))
-    cols = [Col("mark", "", w=1), Col("name", "Web app", w=nw + 1, gap=0), Col("ports", "Ports", w=13, gap=0), Col("reach", "Reach", w=14, gap=0),
-            Col("flag", "")]
+    cols = [Col("mark", "", w=1), Col("name", "Web app", w=nw + 1, gap=0), Col("ports", "Ports", num=True, w=13, gap=0, wprio=2), Col("reach", "Reach", w=14, gap=0),
+            Col("flag", "", wprio=1)]
     more = More(len(rows) - len(shown), "more", indent=1) if len(rows) > len(shown) else None
     return _native_card("webapps", ctx, note, [Table(cols, trows)] + ([more] if more else []), more)
 

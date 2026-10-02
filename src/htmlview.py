@@ -202,14 +202,14 @@ _SPARK_W, _SPARK_H = 80, 16
 _BAR_W, _BAR_H = 100, 8
 
 
-def _bar_svg(b):
+def _bar_svg(b, value=True):
     if b.frac is None:
         return '<span class="st-unknown" role="img" aria-label="unknown">?</span>'
     pct = round(b.frac * 100)
     svg = (f'<svg{_cls("bar", "st-" + b.state, "t-" + b.tone if b.tone else "")} viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="img" '
            f'aria-label="{pct}%" preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>'
            f'<rect class="fg" x="0" y="0" width="{round(b.frac * _BAR_W, 1):g}" height="{_BAR_H}"/></svg>')
-    return svg + (f'<span class="n">{_e(b.value_text)}</span>' if b.value_text else "")
+    return svg + (f'<span class="n">{_e(b.value_text)}</span>' if b.value_text and value else "")
 
 
 def _spark_svg(sp):
@@ -236,8 +236,30 @@ def _inline(x):
     return '<span class="st-unknown">?</span>'
 
 
+def _wprio(c):
+    p = c.prio if c.wprio is None else c.wprio
+    return ("p%d" % p) if p else ""
+
+
+def _barline(line):
+    """The inside of a line that has a bar: what comes before it (the label), the bar, its value, and what else the line says (under the bar),
+    each in its own box, so that the page lines the bars of a card up. The value is the bar's text up to its first run of two spaces. None for
+    a line without a bar."""
+    at = next((i for i, x in enumerate(line.spans) if isinstance(x, ui.Bar)), None)
+    if at is None:
+        return None
+    pre, bar, post = line.spans[:at], line.spans[at], line.spans[at + 1:]
+    label = "".join(_inline(x) for x in pre).strip()
+    if bar.frac is None:
+        return f'<span class="lb">{label}</span>{_inline(bar)}'
+    value, _, rest = (bar.value_text or "").strip().partition("  ")
+    extra = (_e(rest.strip()) + " " + "".join(_inline(x) for x in post)).strip()
+    return (f'<span class="lb">{label}</span>{_bar_svg(bar, False)}<span class="n">{_e(value)}</span>'
+            + (f'<span class="bx">{extra}</span>' if extra else ""))
+
+
 def _table(t, notes=None):
-    heads = "".join(f'<th{_cls(c.align if c.align != "l" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")} scope="col">'
+    heads = "".join(f'<th{_cls(c.align if c.align != "l" else "", "n" if c.num else "", _wprio(c))} scope="col">'
                     f"{_e(c.label)}</th>" for c in t.cols)
     marks = {i: label for label, i in (t.groups or ())}
     ends = sorted(marks) + [len(t.rows)]
@@ -252,7 +274,7 @@ def _table(t, notes=None):
             inner = _inline(cell)
             if j == 0 and link:
                 inner = f'<a href="{_e(link)}">{inner}</a>'
-            cells.append(f'<td{_cls(c.align if c.align != "l" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")}>{inner}</td>')
+            cells.append(f'<td{_cls(c.align if c.align != "l" else "", "n" if c.num else "", _wprio(c))}>{inner}</td>')
         key = f' data-key="{_e(r.key)}"' if r.key is not None else ""
         body.append(f'<tr{_cls("t-" + r.tone if r.tone else "")}{key}>{"".join(cells)}</tr>')
         if notes and notes[i]:  # NoteTable: what belongs to the row, in a row of its own under it
@@ -272,22 +294,27 @@ def html(node):
         return f'<article{_cls("card", "st-" + node.state, "s%d" % node.size)} id="card-{_e(node.id)}"{attrs}>{head}{"".join(html(p) for p in node.body)}</article>'
     if isinstance(node, ui.Line) and not node.spans:
         return ""  # a blank line is for the console
+    if isinstance(node, ui.Line) and _barline(node) is not None:
+        return f'<p class="ln bl">{_barline(node)}</p>'
     if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
         return f'<p class="ln">{_inline(node)}</p>'
     if isinstance(node, ui.Problem):
-        # what the console has no room for: the id, why it matters, the fix and how to accept it, each in its own span (the page styles them)
-        extra = "".join(x for x in (
-            f'<span class="d why"><code class="pid" title="{_e(node.title)}">{_e(node.id)}</code>' + (f" · {_e(node.why)}" if node.why else "") + "</span>" if node.id else "",
-            f'<span class="d fix">fix: <code class="cmd">{_e(node.fix)}</code></span>' if node.fix else "",
+        # what the console has no room for: the id (a chip after the text), why it matters (under it), the fix and how to accept it (behind a
+        # disclosure, which the compact and wall densities do not draw)
+        chip = f' <code class="pid" title="{_e(node.title)}">{_e(node.id)}</code>' if node.id else ""
+        why = f'<span class="d why">{_e(node.why)}</span>' if node.id and node.why else ""
+        how = "".join(x for x in (
+            f'<span class="d how">fix: <code class="cmd">{_e(node.fix)}</code></span>' if node.fix else "",
             f'<span class="d accept">accept if known: <code class="cmd">{_e(node.accept)}</code></span>' if node.accept else ""))
-        return (f'<p{_cls("msg", "prob", "lv-" + node.level)} data-problem="{_e(node.id)}">'
-                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span> {_e(node.text)}{extra}</p>')
+        fix = f'<details class="fix" data-k="fix-{_e(node.id)}"><summary>fix</summary>{how}</details>' if how else ""
+        return (f'<div{_cls("msg", "prob", "lv-" + node.level)} data-problem="{_e(node.id)}">'
+                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span><span class="pr">{_e(node.text)}{chip}</span>{why}{fix}</div>')
     if isinstance(node, ui.Accepted):
         when = f" · accepted {_e(node.when)}" if node.when else ""
         undo = f' · undo: <code class="cmd">{_e(node.undo)}</code>' if node.undo else ""
-        return (f'<p{_cls("msg", "known", "lv-info")} data-problem="{_e(node.id)}"><span class="sym">{_e(ui.SYMBOLS["info"])}</span> '
-                f'<code class="pid">{_e(node.id)}</code> {_e(node.text)}'
-                f'<span class="d">reason: “{_e(node.reason)}”{when}{undo}</span></p>')
+        return (f'<div{_cls("msg", "known", "lv-info")} data-problem="{_e(node.id)}"><span class="sym">{_e(ui.SYMBOLS["info"])}</span>'
+                f'<span class="pr">{_e(node.text)} <code class="pid">{_e(node.id)}</code></span>'
+                f'<span class="d why">reason: “{_e(node.reason)}”{when}{undo}</span></div>')
     if isinstance(node, ui.Msg):  # a Notice too
         notice = isinstance(node, ui.Notice)
         role = ' role="status"' if notice else ""
@@ -329,7 +356,7 @@ def html(node):
 
 # ---- the components of the system, container, database and boot cards (ui.py: Head, Indent, Grid, Timeline, NoteTable, Flow) -----------
 #   <h3 class="sub">     Head          <div class="ind">   Indent        <ul class="grid"><li>   Grid (one core a cell)
-#   <figure class="timeline"><svg class="tl"><rect class="seg seg-NAME" x width>   Timeline, then <ul class="legend">
+#   <figure class="timeline"><svg class="tl"><rect class="tp tp-NAME" x width>   Timeline, then <ul class="legend">
 #   <tr class="sub">     the notes of a NoteTable row, spanning the table      <p class="flow"><span class="lead">   Flow
 
 _TL_W, _TL_H = 100, 8
@@ -339,12 +366,17 @@ def _timeline_html(tl):
     x, rects = 0.0, []
     for name, v in tl.parts:
         w = min(max(v / tl.total * _TL_W, 0.0), _TL_W - x)
-        rects.append(f'<rect{_cls("seg", "seg-" + name)} x="{x:.1f}" y="0" width="{w:.1f}" height="{_TL_H}"/>')
+        rects.append(f'<rect{_cls("tp", "tp-" + name)} x="{x:.1f}" y="0" width="{w:.1f}" height="{_TL_H}"/>')
         x += w
     svg = (f'<svg class="tl" viewBox="0 0 {_TL_W} {_TL_H}" width="{_TL_W}" height="{_TL_H}" role="img" aria-label="boot timeline" '
            f'preserveAspectRatio="none">{"".join(rects)}</svg>')
-    legend = "".join(f'<li{_cls("seg-" + name)}><span class="sw"></span> {_e(name)} <span class="n">{_e(ui.fmt_s(v))}</span></li>' for name, v in tl.parts)
+    legend = "".join(f'<li{_cls("tp-" + name)}><span class="sw"></span> {_e(name)} <span class="n">{_e(ui.fmt_s(v))}</span></li>' for name, v in tl.parts)
     return f'<figure class="timeline">{svg}<ul class="legend">{legend}</ul></figure>'
+
+
+def _grid_item(x):
+    bl = _barline(x) if isinstance(x, ui.Line) else None
+    return f'<li class="bl">{bl}</li>' if bl is not None else f"<li>{_inline(x)}</li>"
 
 
 def _flow_html(f):
@@ -355,7 +387,7 @@ def _flow_html(f):
 _HTML = {
     ui.Head: lambda n: f'<h3 class="sub">{_e(n.title)}' + (f' <span class="note">{_e(n.note)}</span>' if n.note else "") + "</h3>",
     ui.Indent: lambda n: '<div class="ind">' + "".join(html(c) for c in n.children) + "</div>",
-    ui.Grid: lambda n: '<ul class="grid">' + "".join(f"<li>{_inline(x)}</li>" for x in n.items) + "</ul>",
+    ui.Grid: lambda n: '<ul class="grid">' + "".join(_grid_item(x) for x in n.items) + "</ul>",
     ui.Timeline: _timeline_html,
     ui.NoteTable: lambda n: _table(ui.Table(n.cols, n.rows, None, n.head), n.notes),
     ui.Flow: _flow_html,
