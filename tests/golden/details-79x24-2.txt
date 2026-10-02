@@ -1,0 +1,24 @@
+[1;41;37m  demo-host │ [7m[1·Ov][27m │ Details 2/2 │ 14:13:20                   ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m [0m[31m✖[0m[1;36m EXPOSURE [0m[36m──────────────────────────────────────────────────────────────[0m[0m[K
+[0m[K
+   Internet [1;31m1[0m    LAN [33m3[0m    Tailscale 4    Local 4[0m[K
+   [31m⚠ 1 DB/broker open on LAN[0m[0m[K
+[90m   ● open   ◐ filtered by source   ? unknown (treated as open)   · no[0m[0m[0m[K
+[0m[K
+[1m   PORT     SERVICE                LOC   LAN    TS   NET    NOTE[0m[0m[K
+[0m[K
+[1m   Reachable from the Internet (Tailscale Funnel)[0m[90m  (1)[0m[0m[K
+    8444/t  funnel /webhook → 12   [90m·[0m     [90m·[0m     [33m●[0m     [1;31m●[0m    [31mbeyond config.ini: …[0m[0m[K
+[0m[K
+[1m   Open on the LAN (and on Tailscale)[0m[90m  (3)[0m[0m[K
+    5432/t [31m⚠[0mshop-db-1              [37m●[0m     [31m●[0m     [31m●[0m     [90m·[0m    [31mbeyond config.ini: …[0m[0m[K
+    8080/t  shop-web-1             [37m●[0m     [33m●[0m     [33m●[0m     [90m·[0m    [90mexpected: LAN · dec…[0m[0m[K
+      22/t  sshd                   [37m●[0m     [36m◐[0m     [33m●[0m     [90m·[0m    [90mLAN only 192.168.0.…[0m[0m[K
+[0m[K
+[1m   This machine only[0m[90m  (4)[0m[0m[K
+     5433 blog-db-1  ·  5678 node  ·  6379 cache-1  ·  8081 blog-app-1[0m[K
+[K
+[K
+[K
+[K
+[90m screen 4/4  ←→: slide  1-5: screens  ?: help  console 79x24[0m[0m

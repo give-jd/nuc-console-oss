@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  [7m[4 Health][27m  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+[36m──[0m[1;36m HEALTH [0m [90mlast 7 days[0m[90m · [0m[31m✖ 1 err[0m  [33m! 6 warn[0m  [90m· 3 info[0m [36m───────────────────────────────────────────[0m [90m d:24h [0m [7m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
+[36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
+ [1;41;37m ✖ ERR  [0m [1mOut of memory: shop-worker-1[0m  [90mshop-worker-1 was hit by an out-of-memory event 3 times in the last 7 days (l…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (31 in total) and exited with an…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+[7m  ! WARN  Memory keeps growing: node  node grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak… [0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 31 hours in the last 7 days (peak 143%, bu…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m14 hours at or above the temperature limit (90 C) in the last 7 days (about 2.0 h/day, max 91 …[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mFailed logins: sshd[0m  [90m412 failed logins on 2026-09-28 against a median of 18 a day; 1204 in the last 7 days.[0m[0m[0m[0m[K
+ [90m · INFO [0m [1mNoisy log: dockerd[0m  [90mdockerd logged one message 18420 times in the last 7 days (about 2631 a day): "level=<v…[0m[0m[0m[0m[K
+[36m──[0m[1;36m DETAILS [0m[36m──────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[0m[K
+ [1;33mMemory keeps growing: node[0m[0m[0m[0m[K
+ [90mwhat   [0mnode grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.[0m[0m[0m[K
+ [90mfacts  [0mslope_mb_day [1m180.2[0m  ·  days [1m5[0m  ·  start_mb [1m920[0m  ·  now_mb [1m1820[0m  ·  r2 [1m0.93[0m[0m[0m[0m[K
+ [90mfix    [0mps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart <unit> / docker[0m[0m[0m[K
+        restart <name>; cap it so it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or[0m[0m[0m[K
+        MemoryMax=1G in a drop-in; then update it or report the leak[0m[0m[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m finding 4/10  ↑↓: move  Enter: hide  d/w/m: period  1-5: screens  Esc: back  ?: help[0m[0m[0m

@@ -19,10 +19,14 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpers (cardlines.py)
+import cardlines  # noqa: E402
 import demo  # noqa: E402
 import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 
 NOW = 1_790_000_000
 WEBAPPS = {"shop-web": [8080], "admin-console": [9443]}  # what demo_defaults() declares: the demo's [webapps]
@@ -33,7 +37,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
-                  "termios", "tty", "graph", "Sampler", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide")
+                  "termios", "tty", "graph", "Sampler", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -82,7 +86,7 @@ def pos(lines):
 
 def chosen(screen):
     """The highlighted (reverse video) lines of a frame, ANSI stripped: the cursor's row."""
-    return [render.ANSI.sub("", x) for x in screen.split(LINE) if ESC + "[7m" in x]
+    return [ansi.ANSI.sub("", x) for x in screen.split(LINE)[1:] if ESC + "[7m" in x]
 
 
 def worker_up(cont, net, boot):
@@ -111,6 +115,7 @@ class MapCase(unittest.TestCase):
         render.time = graph.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
         cfg["features"]["map"], cfg["map_in_rotation"] = True, False
 
@@ -143,7 +148,7 @@ class MapCase(unittest.TestCase):
         the renderer's own colours and line ends. -> the lines, ANSI stripped."""
         rows = screen.split(LINE)
         self.assertEqual(len(rows), h, what)
-        out = [render.ANSI.sub("", x) for x in rows]
+        out = [ansi.ANSI.sub("", x) for x in rows]
         for x in out:
             self.assertLessEqual(len(x), w, (what, x))
         self.assertIsNone(CONTROL.search(SGR.sub("", "".join(rows))), what)
@@ -158,13 +163,13 @@ class MapCase(unittest.TestCase):
         """Keys as the console loop hands them to map_key: the rows rebuilt and the cursor synced after 'rows'.
         -> (the rows afterwards, what map_key returned for each key). After every key the cursor is on one of the rows."""
         rs = graph.rows(G, mv.st)
-        render.map_sync(mv, rs)
+        screens.map_sync(mv, rs)
         acts = []
         for k in keys:
-            act = render.map_key(mv, k, rs, page)
+            act = screens.map_key(mv, k, rs, page)
             if act == "rows":
                 rs = graph.rows(G, mv.st)
-                render.map_sync(mv, rs)
+                screens.map_sync(mv, rs)
             acts.append(act)
             if rs:
                 self.assertTrue(0 <= mv.idx < len(rs), (k, mv.idx, len(rs)))
@@ -177,7 +182,7 @@ class MapCase(unittest.TestCase):
         """The cursor on the first row on screen named name (at that depth). -> the rows."""
         rs = graph.rows(G, mv.st)
         mv.cur = next(r["key"] for r in rs if G["nodes"][r["node"]]["label"] == name and depth in (None, r["depth"]))
-        render.map_sync(mv, rs)
+        screens.map_sync(mv, rs)
         return rs
 
 
@@ -185,7 +190,7 @@ class Navigation(MapCase):
     """map_key on the demo tree: what each key does to the cursor, the open branches and the details pane."""
 
     def test_up_and_down_move_and_stop_at_the_ends(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         n = len(graph.rows(G))
         rs, acts = self.press(G, mv, ["up", "k"])
         self.assertEqual((mv.idx, acts), (0, ["", ""]))                              # the first row: up stays
@@ -199,7 +204,7 @@ class Navigation(MapCase):
         self.assertEqual((mv.st.open, mv.st.shut, mv.st.all), (set(), set(), False))
 
     def test_right_opens_a_branch_then_enters_it_left_closes_it_then_goes_up(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         rs = self.put(G, mv, ":8080/tcp")
         n, key = len(rs), mv.cur
         self.assertEqual((rs[mv.idx]["open"], rs[mv.idx]["kids"]), (False, 4))
@@ -219,7 +224,7 @@ class Navigation(MapCase):
         self.assertEqual((acts, label(G, rs, mv)), ([""], ":5432/tcp"))                              # an open root: into it
 
     def test_a_root_closes_and_reopens_and_a_closed_root_has_no_parent(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         rs = self.put(G, mv, "LAN")
         n, key, kids = len(rs), mv.cur, rs[mv.idx]["kids"]
         rs, acts = self.press(G, mv, ["left"])
@@ -237,7 +242,7 @@ class Navigation(MapCase):
         self.assertEqual(label(G, rs, mv), "LOCAL")
 
     def test_e_expands_everything_c_collapses_back_to_the_roots(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         default = [r["key"] for r in graph.rows(G)]
         rs = self.put(G, mv, ":8080/tcp")
         key = mv.cur
@@ -255,7 +260,7 @@ class Navigation(MapCase):
         self.assertEqual(label(G, rs, mv), "LAN")
 
     def test_p_shows_problems_only_and_the_cursor_stays_on_a_row(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         only = [r["key"] for r in graph.rows(G, graph.State(only=True))]
         rs = self.put(G, mv, "LOCAL")                                                  # nothing wrong under it: not a problem path
         self.assertNotIn(mv.cur, only)
@@ -271,7 +276,7 @@ class Navigation(MapCase):
         self.assertTrue(mv.st.all)
 
     def test_enter_and_space_toggle_the_details_pane_of_the_selected_row(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         rs, acts = self.press(G, mv, ["enter"])
         self.assertEqual((acts, mv.details), ([""], True))
         for name, kind in (("INTERNET", "view"), (":8444/tcp", "entry port"), ("admin-console", "web app"), ("shop", "compose project")):
@@ -281,10 +286,10 @@ class Navigation(MapCase):
             self.assertIn(kind + " ", txt)                                             # the pane follows the cursor
         rs, acts = self.press(G, mv, ["space"])
         self.assertEqual((acts, mv.details), ([""], False))
-        self.assertNotIn("DETAILS", render.ANSI.sub("", render.map_screen(G, [], mv, 119, 33)[0]))
+        self.assertNotIn("DETAILS", ansi.ANSI.sub("", render.map_screen(G, [], mv, 119, 33)[0]))
 
     def test_page_keys_move_a_page_and_stop_at_the_ends(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         n = len(graph.rows(G))
         seen = []
         for k in ("pgdn", "pgdn", "pgup", "end", "pgdn", "pgup", "home", "pgup"):
@@ -292,30 +297,42 @@ class Navigation(MapCase):
             seen.append(mv.idx)
         self.assertEqual(seen, [5, 10, 5, n - 1, n - 1, n - 6, 0, 0])
 
-    def test_m_tab_esc_q_leave_the_map_and_change_nothing(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
-        self.press(G, mv, ["down", "right", "enter"])
+    def test_esc_q_leave_the_map_and_change_nothing(self):
+        G, mv = demo_graph(), screens.MapView(now=NOW)
+        self.press(G, mv, ["down", "right"])
         before = (mv.idx, mv.cur, mv.details, set(mv.st.open), mv.st.all, mv.st.only)
-        for k in ("m", "tab", "btab", "esc", "q"):
+        for k in ("esc", "q"):
             rs, acts = self.press(G, mv, [k])
             self.assertEqual(acts, ["back"], k)
             self.assertEqual((mv.idx, mv.cur, mv.details, mv.st.open, mv.st.all, mv.st.only), before, k)
+        for k in ("m", "tab", "btab", "1", "2", "?", "r", "Z"):  # the keys of every screen are the dispatcher's: the Map does nothing
+            rs, acts = self.press(G, mv, [k])
+            self.assertEqual(acts, [""], k)
+            self.assertEqual((mv.idx, mv.cur, mv.details, mv.st.open, mv.st.all, mv.st.only), before, k)
+
+    def test_esc_closes_the_details_pane_before_it_goes_back(self):
+        G, mv = demo_graph(), screens.MapView(now=NOW)
+        self.press(G, mv, ["down", "enter"])
+        self.assertTrue(mv.details)
+        self.assertEqual(self.press(G, mv, ["esc", "esc"])[1], ["", "back"])
+        self.press(G, mv, ["enter"])
+        self.assertEqual(self.press(G, mv, ["q", "q"])[1], ["", "back"])
 
     def test_other_keys_do_nothing_and_no_rows_is_not_an_error(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         self.press(G, mv, ["down", "down"])
         before = (mv.idx, mv.cur, set(mv.st.open))
         rs, acts = self.press(G, mv, ["x", "1", "", "f1", "PGDN"])                       # key names are exact: PGDN is no pgdn
         self.assertEqual((acts, (mv.idx, mv.cur, mv.st.open)), ([""] * 5, before))
         empty = graph.build(None, None)
-        mv = render.MapView(now=NOW)
+        mv = screens.MapView(now=NOW)
         keys = ["up", "down", "left", "right", "h", "l", "pgup", "pgdn", "home", "end", "c", "x"]
         rs, acts = self.press(empty, mv, keys)                                         # press() checks: no cursor, index 0
         self.assertEqual((rs, acts), ([], [""] * len(keys)))
-        self.assertEqual(self.press(empty, mv, ["e", "p", "enter", "esc"])[1], ["rows", "rows", "", "back"])
+        self.assertEqual(self.press(empty, mv, ["e", "p", "enter", "esc", "esc"])[1], ["rows", "rows", "", "", "back"])
 
     def test_the_cursor_follows_its_row_through_a_refresh(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         self.put(G, mv, ":8080/tcp")
         rs, _ = self.press(G, mv, ["right", "right", "down", "right", "right"])       # LAN > :8080/tcp > shop-api-1 > shop-db-1
         self.assertEqual((label(G, rs, mv), rs[mv.idx]["depth"]), ("shop-db-1", 3))
@@ -323,7 +340,7 @@ class Navigation(MapCase):
         G2 = demo_graph()                                                              # the next refresh: a new graph, same data
         self.assertIsNot(G2, G)
         rs2 = graph.rows(G2, mv.st)
-        self.assertEqual(render.map_sync(mv, rs2), idx)
+        self.assertEqual(screens.map_sync(mv, rs2), idx)
         self.assertEqual((mv.cur, label(G2, rs2, mv)), (key, "shop-db-1"))
         rs = self.put(G, mv, "STACKS")                                                 # rows appear above it: it moves with them
         key, idx = mv.cur, mv.idx
@@ -332,17 +349,17 @@ class Navigation(MapCase):
             boot.update(failed=["nfs-server.service"], deps={})
         G3 = demo_graph(change=failed_unit)
         rs3 = graph.rows(G3, mv.st)
-        self.assertEqual(render.map_sync(mv, rs3), idx + 1)
+        self.assertEqual(screens.map_sync(mv, rs3), idx + 1)
         self.assertEqual((mv.cur, label(G3, rs3, mv)), (key, "STACKS"))
 
     def test_the_cursor_stays_in_place_when_its_row_disappears(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         rs = self.put(G, mv, "worker-1", depth=1)                                      # IMPACT > worker-1 (exited)
         idx, gone = mv.idx, mv.cur
         G2 = demo_graph(change=worker_up)                                              # it runs again: out of IMPACT
         rs2 = graph.rows(G2, mv.st)
         self.assertIsNone(graph.find(rs2, gone))
-        self.assertEqual(render.map_sync(mv, rs2), idx)                                # the same place on the screen
+        self.assertEqual(screens.map_sync(mv, rs2), idx)                                # the same place on the screen
         self.assertEqual((mv.cur, label(G2, rs2, mv)), (rs2[idx]["key"], "STACKS"))
         rs = self.put(G, mv, "shop-api-1", depth=1)                                    # the last row (OUTBOUND)
 
@@ -351,16 +368,16 @@ class Navigation(MapCase):
         G3 = demo_graph(change=quiet)
         rs3 = graph.rows(G3, mv.st)
         self.assertEqual(len(rs3), len(rs) - 1)
-        self.assertEqual(render.map_sync(mv, rs3), len(rs3) - 1)                       # clamped to the new last row
+        self.assertEqual(screens.map_sync(mv, rs3), len(rs3) - 1)                       # clamped to the new last row
         self.assertEqual(label(G3, rs3, mv), "node")
-        self.assertEqual((render.map_sync(mv, []), mv.cur), (0, None))                 # everything gone
-        self.assertEqual((render.map_sync(mv, rs3), mv.cur), (0, rs3[0]["key"]))       # and back
+        self.assertEqual((screens.map_sync(mv, []), mv.cur), (0, None))                 # everything gone
+        self.assertEqual((screens.map_sync(mv, rs3), mv.cur), (0, rs3[0]["key"]))       # and back
 
     def test_the_selected_row_is_always_on_screen(self):
-        G, mv = demo_graph(), render.MapView(now=NOW)
+        G, mv = demo_graph(), screens.MapView(now=NOW)
         rs, _ = self.press(G, mv, ["e"])
         w, h = 119, 24
-        tree = render.map_layout(G, w, h - 2)[1]
+        tree = screens.map_layout(G, w, h - 2)[1]
         self.assertLess(tree, len(rs))                                                 # it has to scroll
         for k in ["down"] * len(rs) + ["pgup", "up", "up"] + ["pgup"] * 9 + ["end", "home"]:
             rs, _ = self.press(G, mv, [k], page=tree - 1)
@@ -376,7 +393,7 @@ class Navigation(MapCase):
         for n, rows in ((54, 20), (10, 20), (21, 21), (54, 5), (54, 2), (54, 1)):
             m, top = min(2, max(0, (rows - 1) // 2)), 0
             for i in list(range(n)) + list(range(n - 1, -1, -1)) + [n - 1, 0, n // 2, 3, n - 4]:
-                top = render.map_scroll(top, i, n, rows)
+                top = ansi.scroll(top, i, n, rows)
                 self.assertTrue(top <= i < top + rows, (n, rows, i, top))
                 self.assertTrue(0 <= top <= max(0, n - rows), (n, rows, i, top))
                 if m <= i < n - m:
@@ -399,14 +416,14 @@ class Once(MapCase):
                     with self.subTest(os=os_name, size=(cols, rows), opts=opts):
                         s, lines = self.screen(opts, cols, rows)
                         self.assertIn("── MAP ", lines[1])
-                        self.assertIn("demo-host │ Map │", lines[0])
+                        self.assertRegex(lines[0], r"^ *demo-host │ .*\[\d[ ·]Map\]")
                         self.assertTrue(pos(lines)[0] >= 1)
 
     def test_expand_none_all_fit_and_a_row_count(self):
         cols, rows = 200, 50
         G = render.map_graph()[0]
         count = lambda st: len(graph.rows(G, st))  # noqa: E731
-        tree = render.map_layout(G, cols - 1, rows - 2)[1]
+        tree = screens.map_layout(G, cols - 1, rows - 2)[1]
         fit = graph.rows(G, graph.State(open=graph.fit_open(G, tree)))
         want = {"none": count(graph.State()), "all": count(graph.State(all=True)), "fit": len(fit),
                 "30": count(graph.State(open=graph.fit_open(G, 30))), "bogus": count(graph.State())}
@@ -422,8 +439,8 @@ class Once(MapCase):
 
     def test_select_opens_the_branches_above_the_first_match(self):
         G = render.map_graph()[0]
-        mv = render.MapView(now=NOW)
-        self.assertTrue(render.map_select(G, mv, "198.51.100.25"))                    # not on screen: found in the whole tree
+        mv = screens.MapView(now=NOW)
+        self.assertTrue(screens.map_select(G, mv, "198.51.100.25"))                    # not on screen: found in the whole tree
         everything = graph.rows(G, graph.State(all=True))
         first = next(r for r in everything if G["nodes"][r["node"]]["label"] == "198.51.100.25")
         rs = graph.rows(G, mv.st)
@@ -446,9 +463,9 @@ class Once(MapCase):
         G = render.map_graph()[0]
 
         def sel(text, st=None):
-            mv = render.MapView(now=NOW)
+            mv = screens.MapView(now=NOW)
             mv.st = st or mv.st
-            found = render.map_select(G, mv, text)
+            found = screens.map_select(G, mv, text)
             rs = graph.rows(G, mv.st)
             i = graph.find(rs, mv.cur) if found else None
             return found, (G["nodes"][rs[i]["node"]]["label"], rs[i]["depth"]) if found else None, mv
@@ -468,7 +485,7 @@ class Once(MapCase):
             w = cols - 1
             s, lines = self.screen(["--select", "shop-db-1", "--details"], cols, rows)
             at = next(i for i, x in enumerate(lines) if "── DETAILS" in x)
-            side = w >= render.MAP_PANE_W
+            side = w >= screens.MAP_PANE_W
             if side:
                 tw = w - (int(w * 0.42) + 3)
                 pane = [x[tw + 3:] for x in lines[at:-1]]
@@ -521,28 +538,28 @@ class Once(MapCase):
 
     def test_title_and_footer_fit_any_width(self):
         G = demo_graph()
-        mv = render.MapView(now=NOW)
+        mv = screens.MapView(now=NOW)
         self.press(G, mv, ["down"] * 4)
         for w in range(20, 260, 3):
             for only in (False, True):
-                t = render.ANSI.sub("", render.map_title(G, w, only))
+                t = ansi.ANSI.sub("", cardlines.map_title(G, w, only))
                 self.assertLessEqual(len(t), w, (w, t))
                 self.assertTrue(t.startswith("── MAP "), t)
             for details, truncated in ((False, False), (True, True)):
                 mv.details = details
-                f = render.ANSI.sub("", render.map_footer(mv, 21, w, truncated))
+                f = ansi.ANSI.sub("", render.map_footer(mv, 21, w, truncated))
                 self.assertLessEqual(len(f), w, (w, f))
                 if w >= 12:
                     self.assertIn("5/21" + ("+" if truncated else ""), f, w)
-        wide = render.ANSI.sub("", render.map_footer(mv, 21, 200))
+        wide = ansi.ANSI.sub("", render.map_footer(mv, 21, 200))
         self.assertIn("row 5/21", wide)
-        for k in ("PgUp/PgDn/Home/End: page", "e/c: expand/collapse all", "m/Esc: back", "Enter: hide details"):
+        for k in ("PgUp/PgDn/Home/End: page", "e/c: expand/collapse all", "Esc: back", "?: help", "1-5: screens", "Enter: hide details"):
             self.assertIn(k, wide)
-        narrow = render.ANSI.sub("", render.map_footer(mv, 21, 78))
-        self.assertIn("m: back", narrow)                                                # the way out is the last key to go
+        narrow = ansi.ANSI.sub("", render.map_footer(mv, 21, 78))
+        self.assertIn("Esc: back", narrow)                                                # the way out is the last key to go
         self.assertNotIn("PgUp", narrow)
-        self.assertIn("━━► seen", render.ANSI.sub("", render.map_title(G, 200)))       # the legend when there is room
-        self.assertIn("row 0/0", render.ANSI.sub("", render.map_footer(mv, 0, 200)))  # no rows at all
+        self.assertIn("━━► seen", ansi.ANSI.sub("", cardlines.map_title(G, 200)))       # the legend when there is room
+        self.assertIn("row 0/0", ansi.ANSI.sub("", render.map_footer(mv, 0, 200)))  # no rows at all
 
 
 class Rotation(MapCase):
@@ -566,14 +583,14 @@ class Rotation(MapCase):
             name, part, parts, body = sl[-1]
             self.assertEqual((part, parts), (1, 1))
             self.assertLessEqual(len(body), body_h)
-            self.assertFalse([x for x in body if len(render.ANSI.sub("", x)) > w], cols)
+            self.assertFalse([x for x in body if len(ansi.ANSI.sub("", x)) > w], cols)
             self.assertFalse([x for x in body if ESC + "[7m" in x], cols)               # no cursor on a monitor without a keyboard
-            txt = "\n".join(render.ANSI.sub("", x) for x in body)
+            txt = "\n".join(ansi.ANSI.sub("", x) for x in body)
             self.assertIn("── MAP ", txt)
             self.assertNotIn("more rows", txt)                                         # opened level by level while it fits
             G = graph.build(self.cont, self.net, self.boot, render.CFG["webapps"], now=NOW, baseline=self.base)
-            fit = graph.rows(G, graph.State(open=graph.fit_open(G, render.map_layout(G, w, body_h)[1])))
-            self.assertIn(G["nodes"][fit[-1]["node"]]["label"], render.ANSI.sub("", body[-1]))  # down to the last row it opened
+            fit = graph.rows(G, graph.State(open=graph.fit_open(G, screens.map_layout(G, w, body_h)[1])))
+            self.assertIn(G["nodes"][fit[-1]["node"]]["label"], ansi.ANSI.sub("", body[-1]))  # down to the last row it opened
             frame = render.frame(sl[-1], 1, len(sl), w, rows, [], keys=False)
             self.check_frame(frame, w, rows, cols)
         sl = self.slides(119, 31)
@@ -584,7 +601,7 @@ class Rotation(MapCase):
         render.CFG["map_in_rotation"] = True
         body = self.slides(78, 8)[-1][3]
         self.assertLessEqual(len(body), 8)
-        self.assertRegex(render.ANSI.sub("", body[-1]), r"… \+\d+ more rows")
+        self.assertRegex(ansi.ANSI.sub("", body[-1]), r"… \+\d+ more rows")
 
     def test_no_map_slide_when_off_or_when_the_feature_is_disabled(self):
         render.CFG["map_in_rotation"] = False
@@ -593,7 +610,8 @@ class Rotation(MapCase):
         render.CFG["features"]["map"] = False
         self.assertNotIn("Map", [x[0] for x in self.slides(199, 48)])
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=True)
-        self.assertNotIn("m: map", render.ANSI.sub("", frame))                         # and the footer does not offer it
+        self.assertNotIn("1-5: screens", ansi.ANSI.sub("", frame))                   # and the footer does not offer 2
+        self.assertIn("1 3-5: screens", ansi.ANSI.sub("", frame))
 
     def test_a_broken_map_slide_is_an_error_line_not_a_crash(self):
         render.CFG["map_in_rotation"] = True
@@ -604,7 +622,7 @@ class Rotation(MapCase):
         sl = self.slides(119, 31)
         self.assertEqual(sl[-1][0], "Map")
         line = sl[-1][3][0]
-        self.assertIn("error on page Map", render.ANSI.sub("", line))
+        self.assertIn("error on page Map", ansi.ANSI.sub("", line))
         self.assertNotIn(ESC + "[2J", line)
 
     def test_config_map_in_rotation_yes_no_and_not_a_boolean(self):
@@ -627,7 +645,7 @@ class Rotation(MapCase):
 
 
 class MainLoop(MapCase):
-    """render.main() on a fake terminal: `m` opens the Map, its keys move it, m/Tab/Esc go back, an idle Map gives the
+    """render.main() on a fake terminal: `m` opens the Map, its keys move it, 1/Esc go back, an idle Map gives the
     monitor back. KEY_CHAR & co. decode the raw reads, as on a real console."""
 
     def run_main(self, script, keyboard=True, cols=80, rows=24):
@@ -668,16 +686,16 @@ class MainLoop(MapCase):
 
     @staticmethod
     def is_map(frame):
-        return " │ Map │ " in frame[0] and "── MAP " in frame[1]
+        return bool(re.search(r"\[\d[ ·]Map\]", frame[0]) and "── MAP " in frame[1])
 
     def test_m_opens_the_map_keys_move_it_tab_and_esc_go_back(self):
         G = render.map_graph()[0]
         n0 = len(graph.rows(G))
-        page = max(1, render.map_layout(G, 79, 22, True)[1] - 1)                        # PgDn: a tree page minus one, details open
-        frames, restored = self.run_main([b"m", b"\x1b[B\x1bOB", b"\x1b[C\x1b[C\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"\t",
-                                          b"\t", b"\x1b"])
+        page = max(1, screens.map_layout(G, 79, 22, True)[1] - 1)                        # PgDn: a tree page minus one, details open
+        frames, restored = self.run_main([b"m", b"\x1b[B\x1bOB", b"\x1b[C\x1b[C\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"1",
+                                          b"2", b"\x1b"])
         self.assertEqual([self.is_map(f) for f in frames], [False, True, True, True, True, True, True, False, True, False])
-        self.assertIn("m: map", frames[0][-1])                                         # a keyboard: the footer offers the Map
+        self.assertIn("1-5: screens", frames[0][-1])                                   # a keyboard: the footer offers the screens (2 is the Map)
         self.assertIn("overview page (stub)", "\n".join(frames[0]))
         self.assertEqual(pos(frames[1]), (1, n0))                                      # opened like `--expand none`
         self.assertEqual(pos(frames[2]), (3, n0))                                      # ↓ (CSI) ↓ (SS3): LAN
@@ -686,12 +704,12 @@ class MainLoop(MapCase):
         self.assertIn("── DETAILS", "\n".join(frames[4]))                              # Enter
         self.assertEqual(pos(frames[5]), (5 + page, n0 + 1))                           # PgDn
         self.assertEqual(pos(frames[6]), (1, n0 + 1))                                  # Home
-        self.assertEqual(pos(frames[8]), (1, n0))                                      # Tab back, Tab again: a new Map
+        self.assertEqual(pos(frames[8]), (1, n0))                                      # 1 back, 2 again: a new Map
         self.assertNotIn("DETAILS", "\n".join(frames[8]))
         self.assertEqual(restored, [["attrs", 5]])                                     # the terminal's settings are put back
 
     def test_an_idle_map_gives_the_monitor_back_to_the_rotation(self):
-        idle = render.MAP_IDLE_S
+        idle = screens.MAP_IDLE_S
         frames, _ = self.run_main([b"m", idle - 1, b"\x1b[B", idle - 1, 2])
         self.assertEqual([self.is_map(f) for f in frames], [False, True, True, True, True, False])
         self.assertEqual(pos(frames[4]), (2, pos(frames[1])[1]))                       # a key restarts the count
@@ -699,14 +717,14 @@ class MainLoop(MapCase):
     def test_without_a_keyboard_the_map_is_not_offered(self):
         frames, restored = self.run_main([2, 2], keyboard=False)
         self.assertEqual(len(frames), 3)
-        self.assertFalse([f for f in frames if self.is_map(f) or "m: map" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_map(f) or "screens" in f[-1]])
         self.assertEqual(restored, [])                                                 # no terminal settings were changed
 
-    def test_feature_off_m_and_tab_do_nothing(self):
+    def test_feature_off_m_and_2_do_nothing(self):
         render.CFG["features"]["map"] = False
-        frames, restored = self.run_main([b"m", b"\t", b"m", b"\x1b[B"])
+        frames, restored = self.run_main([b"m", b"2", b"m", b"\x1b[B"])
         self.assertEqual(len(frames), 5)
-        self.assertFalse([f for f in frames if self.is_map(f) or "m: map" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_map(f) or "1-5: screens" in f[-1]])
         self.assertEqual(restored, [["attrs", 5]])
 
     def failing_once(self):
@@ -723,14 +741,14 @@ class MainLoop(MapCase):
 
     @staticmethod
     def error_frame(frame):
-        return " │ Map │ " in frame[0] and "error on the map" in frame[1]
+        return bool(re.search(r"\[\d[ ·]Map\]", frame[0]) and "error on the map" in frame[1])
 
     def test_a_broken_map_is_an_error_frame_esc_still_works_and_it_retries(self):
         calls = self.failing_once()
         frames, _ = self.run_main([b"m", render.REFRESH_S, b"\x1b", b"m", b"\x1b"])   # check_frame: no raw escape on screen
         self.assertEqual([self.error_frame(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
-        self.assertEqual(frames[1][-1].strip(), "m/Esc back")
+        self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
         self.assertEqual([self.is_map(f) for f in frames], [False, False, True, False, True, False])  # the next refresh draws it
         self.assertEqual(calls, [0, render.REFRESH_S, render.REFRESH_S])
 
@@ -763,7 +781,7 @@ class MainLoop(MapCase):
         self.assertIn("declared tailnet in config.ini, reachable from the Internet", text)
         cont, net, boot, base = demo.snapshot(now=NOW)
         render.CFG["expose"] = {"shop-db": "LOCALE"}                                   # the rotation's map page builds with [expose] as well
-        self.assertIn("declared local in config.ini", "\n".join(render.ANSI.sub("", x) for x in render.map_slide(cont, net, boot, base, 160, 30)))
+        self.assertIn("declared local in config.ini", "\n".join(ansi.ANSI.sub("", x) for x in render.map_slide(cont, net, boot, base, 160, 30)))
 
     def test_the_command_line_refuses_the_map_when_the_feature_is_off(self):
         render.CFG["features"]["map"] = False
@@ -816,7 +834,7 @@ class HostileAndEmpty(MapCase):
         body = render.slides(FakeSampler().sample(), cont, net, 225, 48, boot, base, mode="overview")[-1][3]
         frame = render.frame(("Map", 1, 1, body), 1, 2, 225, 50, [], keys=False)
         self.check_frame(frame, 225, 50)
-        self.assertIn("sampler said ?[2J?", render.ANSI.sub("", frame))
+        self.assertIn("sampler said ?[2J?", ansi.ANSI.sub("", frame))
 
     def test_the_renderer_cleans_even_what_the_graph_would_let_through(self):
         raw = "evil" + ESC + "[2J" + BEL + CSI8 + "1m\r\n" + "end"                     # graph.build cleans names: here it did not
@@ -846,7 +864,7 @@ class HostileAndEmpty(MapCase):
             cont, net, boot, base = demo.snapshot(now=NOW)
             body = render.slides(FakeSampler().sample(), cont, net, cols - 1, rows - 2, boot, base, mode="overview")[-1][3]
             self.check_frame(render.frame(("Map", 1, 1, body), 1, 2, cols - 1, rows, [], keys=False), cols - 1, rows, cols)
-            self.assertIn("evil?[2J??1m??end", render.ANSI.sub("", "\n".join(body)))
+            self.assertIn("evil?[2J??1m??end", ansi.ANSI.sub("", "\n".join(body)))
 
     def test_no_collector_data_says_there_is_nothing_to_draw(self):
         render.DEMO, render.Sampler = False, FakeSampler                                # not the demo: it declares two [webapps]
@@ -868,7 +886,7 @@ class HostileAndEmpty(MapCase):
                 s, lines = self.screen(["--only"], 120, 33)
                 self.assertIn("no problem on any path", "\n".join(lines))
                 body = render.slides(FakeSampler().sample(), data[0], data[1], cols - 1, rows - 2, data[2], None, mode="overview")[-1][3]
-                self.assertIn("nothing to draw", "\n".join(render.ANSI.sub("", x) for x in body), cols)
+                self.assertIn("nothing to draw", "\n".join(ansi.ANSI.sub("", x) for x in body), cols)
         self.feed(data=(demo.snapshot(now=NOW)[0], None, None))                       # containers, but no network collector
         s, lines = self.screen(["--expand", "all"], 120, 33)
         self.assertIn("network collector not running", "\n".join(lines))

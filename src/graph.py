@@ -12,13 +12,14 @@ come from a State, and every row has a stable key (a hash of its path from the r
 import hashlib
 import ipaddress
 import re
-import sys
 import time
+
+import exposure  # the exposure model: what is reachable from where
 
 EV_RANK = {"seen": 3, "declared": 2, "possible": 1, "bind": 0}
 STATE_RANK = {"err": 0, "down": 1, "warn": 2, "unknown": 3, "info": 4, "ok": 5}
 BAD = ("err", "down", "warn")
-# (id, label, what it shows, exposure group of render.group_of)
+# (id, label, what it shows, exposure group of exposure.group_of)
 ROOTS = (("root:internet", "INTERNET", "reachable from the Internet (Tailscale Funnel)", "INTERNET"),
          ("root:lan", "LAN", "open on the LAN (and on the tailnet)", "LAN"),
          ("root:tailnet", "TAILNET", "reachable from the tailnet only", "TAILNET"),
@@ -41,18 +42,6 @@ MAX_DEPTH = 12  # a tree deeper than this is a loop the cycle check missed, or n
 DATA_HOPS = 6   # how far "this entry leads to a database" looks
 TS4, TS6 = ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48")
 CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-TARGET = re.compile(r"^(?:([a-z][a-z0-9+.-]*)://)?(\[[^\]]*\]|[^/:?#]*)(?::(\d+))?(?:[/?#]|$)", re.I)  # scheme, host, port
-
-
-def _render():
-    """render.py's exposure logic: the one source of truth for what is reachable from where. When render.py runs as a
-    script it is __main__, not 'render': importing it again would load a second copy with settings of its own."""
-    for name in ("render", "__main__"):
-        m = sys.modules.get(name)
-        if m is not None and hasattr(m, "exposure_rows"):
-            return m
-    import render
-    return render
 
 
 def safe(s):
@@ -169,7 +158,7 @@ def ext_class(ip, peers=None):
         return "tailnet", (peers or {}).get(str(a), "")
     if a.is_loopback:
         return "this machine", ""
-    if _render().is_private_addr(str(a)):
+    if exposure.is_private_addr(str(a)):
         return "LAN", ""
     return "Internet", ""
 
@@ -262,11 +251,11 @@ def _fmt_pub(p):
     return f"{scope}:{p.get('p') or '?'}" + (f" → {p['c']}" if p.get("c") else "")
 
 
-def _hosts(G, R, net):
+def _hosts(G, net):
     """Host processes that listen (docker's own proxies are not services: the container behind them is)."""
     for ln in (net or {}).get("listeners") or []:
         proc = ln.get("proc") or ""
-        if not proc or proc in R.DOCKER_PROXIES:
+        if not proc or proc in exposure.DOCKER_PROXIES:
             continue
         n = _node(G, "proc:" + proc, "proc", proc, ln.get("unit") or "host process", "ok")
         n.setdefault("_listen", [])
@@ -280,111 +269,14 @@ def _hosts(G, R, net):
             _fact(n, "listens", ", ".join(n["_listen"]))
 
 
-def _pub_scope(R, p):
-    """The bind scope (render.bind_scope) of a port published by Docker, read as exposure_rows reads it."""
-    s = p.get("s") or "*"
-    return "lo" if s == "lo" else "wild" if s == "*" else R.bind_scope(s)
-
-
-def _scopes(R, r, taken=()):
-    """The bind scopes an exposure row comes from: render keeps one row per (port, proto, scope), and where the row landed
-    tells which. 'This machine only' is loopback, or a bind the firewall blocks: what the port's other rows have not taken."""
-    if not r["loc"]:
-        return {"ts"}
-    group = R.group_of(r)
-    if group != "LOCALE":
-        return {"wild", "lan"} if group == "LAN" else {"wild"}
-    return {"lo", "lan", "wild"}.difference(taken)
-
-
-def _owners(G, R, net, cont, port, proto, scopes=None):
-    """Who answers on a host port: the container that publishes it, else the processes listening on it. Only those bound
-    where the entry is (scopes); when no socket of the port is bound there, the scope cannot be told and all are kept."""
-    pub = [(ct["name"], _pub_scope(R, p)) for ct in (cont or {}).get("containers") or [] if ct.get("state") == "running"
-           for p in ct.get("ports") or [] if p.get("p") == port]
-    ls = [(ln.get("proc") or "", R.bind_scope(ln.get("addr"))) for ln in (net or {}).get("listeners") or []
-          if ln.get("port") == port and ln.get("proto") == proto]
-    if scopes is not None and any(sc in scopes for _, sc in pub + ls):
-        pub, ls = [x for x in pub if x[1] in scopes], [x for x in ls if x[1] in scopes]
-    if pub:
-        return ["ct:" + pub[0][0]]
-    procs = []
-    for proc, _ in ls:
-        if proc and proc not in R.DOCKER_PROXIES and "proc:" + proc not in procs:
-            procs.append("proc:" + proc)
-    return procs
-
-
-def _target(t):
-    """(host, port) a Serve/Funnel handler proxies to; None for a file, a text, or a target without a port to tell."""
-    m = TARGET.match(str(t or ""))
-    if not m or not m.group(2):
-        return None
-    scheme, host, port = m.groups()
-    if port is None and not scheme:
-        return None
-    return host.strip("[]").lower(), int(port) if port else 443 if scheme.lower().startswith("https") else 80
-
-
-def _local(host, own):
-    """True if a Serve target is this machine: localhost, loopback, or one of its own addresses."""
-    if host == "localhost" or host in own:
-        return True
-    try:
-        a = ipaddress.ip_address(host.split("%")[0])
-    except ValueError:
-        return False
-    return a.is_loopback or a.is_unspecified
-
-
-def _serve(net):
-    """{port: [handler]} of Tailscale Serve/Funnel: a port can have several handlers (paths), each with a backend of its own."""
-    serve = {}
-    for x in net.get("serve") or []:
-        if isinstance(x, dict):
-            serve.setdefault(x.get("port"), []).append(x)
-    return serve
-
-
-def row_owners(R, net, cont, rows):
-    """[(owners, ports)] of each exposure row. Owners: the nodes ('ct:<container>', 'proc:<process>', 'ext:<host>') that answer
-    behind it: the container that publishes the port, else the processes listening on it, else (Serve/Funnel) what listens on
-    the backend. Ports: the local ports it stands for (its own, and the backend's behind a Serve/Funnel).
-    The map draws the owners; render.py's [expose] check names a service by them (the one behind a Funnel is the one declared)."""
-    serve = _serve(net)
-    taken = {}  # (port, proto) -> the bind scopes of its rows that are not 'this machine only'
-    for r in rows:
-        if R.group_of(r) != "LOCALE":
-            taken.setdefault((r["port"], r["proto"]), set()).update(_scopes(R, r))
-    me = (net.get("ts_peers") or {}).get("self")
-    own = {str(ln.get("addr")) for ln in net.get("listeners") or []}  # this machine: where it listens, its tailnet addresses
-    own.update((me.get("ips") or []) if isinstance(me, dict) else [])
-    out = []
-    for r in rows:
-        svs = serve.get(r["port"], []) if r["name"].startswith(("funnel ", "serve ")) else []
-        scopes = _scopes(R, r, taken.get((r["port"], r["proto"]), ()))
-        owners = [] if svs else _owners(None, R, net, cont, r["port"], r["proto"], scopes)
-        ports = {r["port"]}
-        for sv in svs:  # what listens on a local target; another host is a remote address, not what listens on its port here
-            t = _target(sv.get("target"))
-            if t and _local(t[0], own):
-                found = _owners(None, R, net, cont, t[1], "tcp", {"wild", "lo" if t[0] == "localhost" else R.bind_scope(t[0])})
-                ports.add(t[1])
-            else:
-                found = ["ext:" + t[0]] if t else []
-            owners += [o for o in found if o not in owners]
-        out.append((owners, ports))
-    return out
-
-
-def _ports(G, R, net, cont, baseline, peers, expose=None, webapps=None):
+def _ports(G, net, cont, baseline, peers, expose=None, webapps=None):
     if net is None or net.get("listeners") is None:
         return
-    rows = R.expose_apply(R.exposure_rows(net, cont), net, cont, expose or {}, webapps or {})  # [expose]: r["want"] where a key matches
-    new = R.new_ports(net, cont, baseline) if isinstance(baseline, dict) else {}
-    serve = _serve(net)
-    for r, (owners, _) in zip(rows, row_owners(R, net, cont, rows)):
-        group = R.group_of(r)
+    rows = exposure.expose_apply(exposure.exposure_rows(net, cont), net, cont, expose or {}, webapps or {})  # [expose]: r["want"] where a key matches
+    new = exposure.new_ports(net, cont, baseline) if isinstance(baseline, dict) else {}
+    serve = exposure.serve_by_port(net)
+    for r, (owners, _) in zip(rows, exposure.row_owners(net, cont, rows)):
+        group = exposure.group_of(r)
         nid = f"port:{r['port']}/{r['proto']}@{group.lower()}"
         svs = serve.get(r["port"], []) if r["name"].startswith(("funnel ", "serve ")) else []
         state ="err" if r["warn"] else "warn" if (r["bad_note"] or r["net"] == 1 or r["lan"] == 3) else "info"
@@ -399,9 +291,9 @@ def _ports(G, R, net, cont, baseline, peers, expose=None, webapps=None):
         _fact(n, "Internet", {0: "no", 1: "PUBLIC (Funnel)", 3: "unknown"}.get(r["net"], "?"))
         _fact(n, "firewall", r["note"])
         if r.get("want"):
-            _fact(n, "declared reach", f"{R.EXPOSE_LABEL[r['want']]} (config.ini [expose])")
-            if R.expose_over(r):
-                _find(n, "err", f"declared {R.EXPOSE_LABEL[r['want']]} in config.ini, reachable from {REACH_TEXT[group]}")
+            _fact(n, "declared reach", f"{exposure.EXPOSE_LABEL[r['want']]} (config.ini [expose])")
+            if exposure.expose_over(r):
+                _find(n, "err", f"declared {exposure.EXPOSE_LABEL[r['want']]} in config.ini, reachable from {REACH_TEXT[group]}")
                 _worse(n, "err")
         if r["warn"]:
             _find(n, "err", "database/broker open on the LAN")
@@ -631,7 +523,7 @@ def _roots(G):
         G["roots"].append(rid)
 
 
-def _notes(G, R, net, links, cont):
+def _notes(G, net, links, cont):
     if net is None:
         G["notes"].append("network collector not running: no ports, no connections")
         return
@@ -647,7 +539,7 @@ def _notes(G, R, net, links, cont):
     else:
         errors = [str(x) for x in links.get("errors") or []]
         if links.get("conn_source") == "host" and (links.get("containers") or (cont or {}).get("containers")):
-            if R.os_of(net) != "linux":
+            if exposure.os_of(net) != "linux":
                 G["notes"].append("containers' own connections are not visible on this OS (Docker Desktop VM): declared and "
                                   "same-network links only")
             elif not any("namespace" in x or "nsenter" in x for x in errors):  # else the collector's own note says it, and why
@@ -657,7 +549,7 @@ def _notes(G, R, net, links, cont):
         since = links.get("since")
         if since:
             G["notes"].append(f"connections sampled every 30 s, remembered 24 h (watching since {ago(G['now'] - since).replace(' ago', '')})")
-    if R.exposure_partial(net):
+    if exposure.exposure_partial(net):
         G["notes"].append("some network sections unreadable: reachability may be incomplete")
     if cont is None:
         G["notes"].append("container collector not running")
@@ -665,7 +557,6 @@ def _notes(G, R, net, links, cont):
 
 def build(cont, net, boot=None, webapps=None, now=None, baseline=None, expose=None):
     """The graph of one snapshot. Never raises on missing or partial data: what is missing goes to G["notes"]."""
-    R = _render()
     G = {"nodes": {}, "edges": [], "out": {}, "inc": {}, "notes": [], "roots": [], "_pair": {}, "_kids": {}, "_bad": {},
          "now": now or time.time()}
     net = net if isinstance(net, dict) else None
@@ -675,8 +566,8 @@ def build(cont, net, boot=None, webapps=None, now=None, baseline=None, expose=No
     peers = {ip: safe(p.get("name", "")) for p in ([ts.get("self") or {}] + list(ts.get("peers") or [])) if isinstance(p, dict)
              for ip in p.get("ips") or []}
     _containers(G, cont, net, links)
-    _hosts(G, R, net)
-    _ports(G, R, net, cont, baseline, peers, expose, webapps)
+    _hosts(G, net)
+    _ports(G, net, cont, baseline, peers, expose, webapps)
     _conns(G, links, peers)
     _declared(G, links)
     _dbs(G, net, peers)
@@ -685,7 +576,7 @@ def build(cont, net, boot=None, webapps=None, now=None, baseline=None, expose=No
     _findings(G)
     _stacks(G)  # after the findings: a project is as yellow as its members turned
     _roots(G)
-    _notes(G, R, net, links, cont)
+    _notes(G, net, links, cont)
     return G
 
 

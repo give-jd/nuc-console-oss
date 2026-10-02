@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+[36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
+ [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mx86_64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M[0m[0m[K
+ [90mgovernor [0mschedutil/acpi-cpufreq  ·  [90mclock [0m2200-4850 MHz (base 3800)[0m[0m[K
+ [90mup [0m5d 0h  ·  [90mload [0m0.82 0.64 0.51  ·  [90mctxt [0m18.3k/s  ·  [90mintr [0m6.1k/s  ·  [90mrunning [0m2  ·  [90mblocked [0m0[0m[0m[K
+ [1mALL[0m [32m█[0m[90m░░░░░░░░░░░░░[0m   6.5%  [32muser[0m 4.4  [31msys[0m 1.7  nice 0.2  [90miowait[0m 0.1  irq 0.1  steal 0.0  idle 93.4[0m[0m[K
+  0 [32m█[0m[90m░░░░░░░░░░░░░[0m   6% 4.41G[0m   1 [90m░░░░░░░░░░░░░░[0m   0% 4.39G[0m   2 [31m█[0m[90m░░░░░░░░░░░░░[0m   5% 3.89G[0m   3 [90m░░░░░░░░░░░░░░[0m   2% 3.86G[0m[0m[0m[K
+  4 [32m██████[0m[31m███[0m[90m░░░░░[0m  65% 4.59G[0m   5 [90m░░░░░░░░░░░░░░[0m   2% 4.55G[0m   6 [90m░░░░░░░░░░░░░░[0m   2% 3.57G[0m   7 [90m░░░░░░░░░░░░░░[0m   3% 3.56G[0m[0m[0m[K
+  8 [90m░░░░░░░░░░░░░░[0m   0% 4.01G[0m   9 [90m░░░░░░░░░░░░░░[0m   1% 4.06G[0m  10 [90m░░░░░░░░░░░░░░[0m   3% 3.83G[0m  11 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 3.82G[0m[0m[0m[K
+ 12 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 4.50G[0m  13 [90m░░░░░░░░░░░░░░[0m   1% 4.47G[0m  14 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 3.72G[0m  15 [90m░░░░░░░░░░░░░░[0m   0% 3.70G[0m[0m[0m[K
+[36m──[0m[1;36m TEMPERATURES [0m[36m─────────────────────────────────────────────────────────────────────────────────────[0m[90m  source k10temp[0m[0m[0m[K
+ [90mPKG[0m   [32m█████████████████████████████[0m[90m░░░░░░░░░░░[0m 72°C/100°C   [90mhigh[0m 90°C  [90mcrit[0m 100°C[0m[0m[K
+ [90mhottest core [0m?   ·   [90mthrottled [0m?[0m[0m[K
+ [90msensors[0m Tctl 72°C  ·  Tccd1 66°C[0m[0m[K
+[36m──[0m[1;36m PROCESSES [0m[36m───────────────────────────────────────────[0m[90m  41 total · 3 running · 279 threads · 2 unreadable · by CPU%[0m[0m[0m[K
+ [1;36m  PID[0m [1;36mUSER     [0m [1;36mS[0m [1;36m NI[0m [1;36mTHR[0m [1;33mCPU%▼[0m [1;36m MEM%[0m [1;36m   RSS[0m [1;36m    TIME[0m [1;36mNAME[0m[0m[0m[K
+  2210 alice     [32mR[0m  10  18 [31m296.1[0m   2.0   640M  2:32:00 ffmpeg[0m[0m[K
+  1610 1000      [32mR[0m   0  11 [33m 96.4[0m   1.3   412M  5:03:53 node[0m[0m[K
+  2350 alice     S   0  52 [33m 62.5[0m   7.2   2.2G 13:56:50 java[0m[0m[K
+  1590 999       [32mR[0m   0   1  22.6   0.4   140M  40:10.0 postgres[0m[0m[K
+  2900 alice     [33mD[0m   0   1  12.5   0.0     9M   5:00.0 rsync[0m[0m[K
+  1180 nuc-cons+ S   0   3   1.9   0.1    38M  36:51.8 python3[0m[0m[K
+   901 root      S   0  24   1.5   0.3    98M  1:13:22 dockerd[0m[0m[K
+   733 root      S   0  14   1.2   0.1    46M  30:20.4 tailscaled[0m[0m[K
+  3301 alice     S   0   1   1.1   0.0     5M   0:03.2 htop[0m[0m[K
+   812 root      S   0  18   0.8   0.2    52M  50:10.2 containerd[0m[0m[K
+    15 root      I   0   1   0.7   0.0     0B   3:30.6 rcu_preempt[0m[0m[K
+  2290 999       S   0   5   0.6   0.0     9M   8:40.1 redis-server[0m[0m[K
+   213 root      I   0   1   0.4   0.0     0B   0:51.2 kworker/u32:3-events_unbound[0m[0m[K
+  1703 www-data  S   0   1   0.4   0.0    11M   3:30.4 nginx[0m[0m[K
+[90m … +26 more processes[0m[0m[0m[K
+[90m screen 4/5   ←→: slide   1-5: screens   ?: help   console 120x33[0m[0m

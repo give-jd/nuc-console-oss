@@ -1,0 +1,1197 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-A3Gpbgcp+f5SXdMWaQM002Hm/UpECkRmKlNK5v34mvs=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="wall" class="z100 shift-1" data-prefs-src="url" data-kiosk>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · overview · nuc-console</title>
+<link rel="stylesheet" href="/s/app.5eed8378.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="7c35b1505a">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw" data-key="1" aria-current="page">
+<kbd>1</kbd>Overview</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=map" data-key="2">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="439277b829">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="grid" data-rotate="15" data-refresh="2" data-frag="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;frag=1">
+<article class="card s2 st-err" data-card="attention" data-rev="eb022ed6c7" id="c-attention" data-state="err">
+<div class="ch">
+<h3>ATTENTION</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<div class="msg prob lv-err" data-problem="db-open-lan">
+<span class="sym">✖</span>
+<span class="pr">1 DB/broker open on LAN <code class="pid" title="Database/broker open on the LAN">db-open-lan</code>
+</span>
+<span class="d why">data services should not be reachable from the network</span>
+<details class="fix" data-k="fix-db-open-lan">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-err" data-problem="over-exposed">
+<span class="sym">✖</span>
+<span class="pr">2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet, shop-db :5432 LAN &gt; local <code class="pid" title="Service reaches further than config.ini says">over-exposed</code>
+</span>
+<span class="d why">you declared under [expose] how far it should be reachable, and it is reachable from more places</span>
+<details class="fix" data-k="fix-over-exposed">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem over-exposed --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="container-exited">
+<span class="sym">!</span>
+<span class="pr">1 container exited with an error <code class="pid" title="Container exited with an error">container-exited</code>
+</span>
+<span class="d why">a service that should run is down</span>
+<details class="fix" data-k="fix-container-exited">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">docker ps -a; docker logs &lt;name&gt;; docker start &lt;name&gt; or remove it if obsolete</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem container-exited --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="journal-errors">
+<span class="sym">!</span>
+<span class="pr">2 errors in this boot&#x27;s journal <code class="pid" title="Errors in this boot&#x27;s journal">journal-errors</code>
+</span>
+<span class="d why">usually noise (docker veth races, firmware ACPI), sometimes a real fault</span>
+<details class="fix" data-k="fix-journal-errors">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem journal-errors --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="docker-bypass">
+<span class="sym">!</span>
+<span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
+</span>
+<span class="d why">a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
+<details class="fix" data-k="fix-docker-bypass">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<details class="more">
+<summary>… +1 more</summary>
+</details>
+<p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
+</p>
+<p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
+</p>
+<p class="more">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=attention">… the whole card</a>
+</p>
+</div>
+</article>
+<article class="card s2 st-err" data-card="exposure" data-rev="bf05cf9913" id="c-exposure" data-state="err">
+<div class="ch">
+<h3>EXPOSURE</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<p class="ln"> Internet <span class="t-err-strong">1</span>   LAN 3   tailnet only 0   local only 4   <span class="t-err">⚠ 1 DB/broker on LAN</span>
+</p>
+<p class="ln"> <span class="t-err-strong">●</span> 8444/tcp funnel /webhook → 127.0.0.1:5678/webhook  <span class="t-err">public on the Internet</span>  <span class="t-err">beyond config.ini: tailnet</span>
+</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-err">⚠5432 shop-db-1</span> <span class="t-err">beyond config.ini: local</span>
+</li>
+<li>8080 shop-web-1 <span class="t-muted">expected: LAN</span>
+</li>
+<li>22 sshd</li>
+</ul>
+</div>
+</article>
+<article class="card s1 st-err" data-card="databases" data-rev="37abbee8d1" id="c-databases" data-state="err">
+<div class="ch">
+<h3>DATABASE</h3>
+<span class="note">3 running · 1 exposed</span>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-kind">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Kind</th>
+<th scope="col">Name</th>
+<th class="n p2" scope="col">Ports</th>
+<th scope="col">Reach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-err">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>shop-db-1</td>
+<td class="n p2">*5432</td>
+<td>
+<span class="t-err">exposed</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>api</span>
+<span class="fi">
+<span class="t-err">external clients now: 192.168.0.50</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">postgres </span>
+</td>
+<td>blog-db-1</td>
+<td class="n p2">lo:5433</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-ok">in use now: </span>app</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>
+<span class="t-strong">redis    </span>
+</td>
+<td>cache-1</td>
+<td class="n p2">lo:6379</td>
+<td>
+<span class="t-muted">local only</span>
+</td>
+</tr>
+<tr class="sub">
+<td colspan="5">
+<p class="flow">
+<span class="lead">
+<span class="t-muted">→</span>
+</span> <span class="fi">
+<span class="t-warn">no known service</span>
+<span class="t-muted"> (bridge: cannot tell)</span>
+</span>
+<span class="fi">
+<span class="t-muted">no external client seen in 60 min</span>
+</span>
+</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="firewall" data-rev="4c9ea064f4" id="c-firewall" data-state="warn">
+<div class="ch">
+<h3>FIREWALL</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<p class="msg lv-ok">
+<span class="sym">✔</span> ufw active</p>
+<p class="msg lv-warn">
+<span class="sym">!</span> DOCKER-USER empty: ports published by containers bypass ufw</p>
+<ul class="wrap">
+<li>INPUT DROP · FORWARD DROP</li>
+<li>
+<span class="t-ok">ts-input ✔</span>
+</li>
+<li>fail2ban sshd:2</li>
+</ul>
+<details class="more">
+<summary>… +1 more</summary>
+</details>
+<p class="more">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=firewall">… the whole card</a>
+</p>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="containers" data-rev="10a71ecb86" id="c-containers" data-state="warn">
+<div class="ch">
+<h3>CONTAINER</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<p class="ln"> 7 containers   RAM 1.6G   <span class="t-ok">●</span> 6 ok   <span class="t-err">✖ 1 stopped</span>
+</p>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">blog                       </span>2/2 running   RAM 410M</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> app</li>
+<li>
+<span class="t-ok">●</span> db</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">shop                       </span>3/4 running   RAM 1.2G<span class="t-err">   ✖ 1</span>
+</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> api</li>
+<li>
+<span class="t-ok">●</span> db</li>
+<li>
+<span class="t-ok">●</span> web</li>
+<li>
+<span class="t-err">✖</span> worker</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">(no stack)                 </span>1/1 running   RAM 30M</p>
+<ul class="wrap" data-max-lines="2">
+<li>
+<span class="t-ok">●</span> cache</li>
+</ul>
+</section>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="boot" data-rev="3dc616549b" id="c-boot" data-state="warn">
+<div class="ch">
+<h3>BOOT</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<p class="ln"> finished in <span class="t-strong">58.4s</span>   <span class="t-ok">✔ 0 failed units</span>   journal <span class="t-err">2</span> err · <span class="t-warn">9</span> warn</p>
+<p class="ln"> slowest: <span class="t-muted">systemd-networkd-wait-online 33.5s  ·  docker 6.2s</span>
+</p>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="tailscale" data-rev="5aa95e2591" id="c-tailscale" data-state="warn">
+<div class="ch">
+<h3>TAILSCALE</h3>
+<span class="note">demo-host · 1/2 nodes online</span>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-dot">
+<col class="c-name">
+<col class="c-os">
+<col class="c-state">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Node</th>
+<th class="p2" scope="col">OS</th>
+<th scope="col">State</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>laptop</td>
+<td class="p2">linux</td>
+<td>
+<span class="t-ok">online </span>
+<span class="t-muted">direct</span>
+</td>
+</tr>
+<tr>
+<td>
+<span class="t-muted">○</span>
+</td>
+<td>phone</td>
+<td class="p2">android</td>
+<td>
+<span class="t-muted">offline · seen 2 h ago</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="webapps" data-rev="8cbe0104d5" id="c-webapps" data-state="ok">
+<div class="ch">
+<h3>WEB APPS</h3>
+<span class="note">4 active · 1 down (expected)</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-mark">
+<col class="c-name">
+<col class="c-ports">
+<col class="c-reach">
+<col class="c-flag">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">
+</th>
+<th scope="col">Web app</th>
+<th class="n p2" scope="col">Ports</th>
+<th scope="col">Reach</th>
+<th class="p1" scope="col">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr data-key="shop-web">
+<td>
+<span class="t-ok">●</span>
+</td>
+<td>shop-web</td>
+<td class="n p2">8080</td>
+<td>
+<span class="t-warn">LAN+tailnet</span>
+</td>
+<td class="p1">
+</td>
+</tr>
+<tr data-key="admin-console">
+<td>
+<span class="t-warn">○</span>
+</td>
+<td>admin-console</td>
+<td class="n p2">9443</td>
+<td>
+<span class="t-muted">not listening</span>
+</td>
+<td class="p1">
+<span class="t-warn">DOWN (expected)</span>
+</td>
+</tr>
+<tr data-key="funnel /webhook">
+<td>
+<span class="t-warn">●</span>
+</td>
+<td>funnel /webhook</td>
+<td class="n p2">8444</td>
+<td>
+<span class="t-err">Internet</span>
+</td>
+<td class="p1">
+<span class="t-muted">not declared</span>
+</td>
+</tr>
+</tbody>
+</table>
+<details class="more">
+<summary>… +2 more</summary>
+</details>
+<p class="more">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=webapps">… the whole card</a>
+</p>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="system" data-rev="df21a729c7" id="c-system" data-state="ok">
+<div class="ch">
+<h3>SYSTEM</h3>
+<span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<p class="ln bl">
+<span class="lb">RAM</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>
+<span class="n">10.2G/31.2G</span>
+<span class="bx">cache 4.8G</span>
+</p>
+<p class="ln bl">
+<span class="lb">DISK</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</p>
+<p class="ln bl">
+<span class="lb">TEMP</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="72%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="72" height="8"/>
+</svg>
+<span class="n">72°C/100°C</span>
+<span class="bx">limits 80/90°C   clock 4.1/4.8 GHz</span>
+</p>
+<p class="ln bl">
+<span class="lb">NVMe</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="52%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="51.9" height="8"/>
+</svg>
+<span class="n">44°C/85°C</span>
+<span class="bx">limits 68/76°C</span>
+</p>
+<p class="ln bl">
+<span class="lb">CPU</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6.3" height="8"/>
+</svg>
+<span class="n">6%</span>
+<span class="bx">16 threads</span>
+</p>
+<ul class="grid">
+<li class="bl">
+<span class="lb">0</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">4%</span>
+</li>
+<li class="bl">
+<span class="lb">1</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">2</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">6%</span>
+</li>
+<li class="bl">
+<span class="lb">3</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">4</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="62%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="62" height="8"/>
+</svg>
+<span class="n">62%</span>
+</li>
+<li class="bl">
+<span class="lb">5</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="4%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="4" height="8"/>
+</svg>
+<span class="n">4%</span>
+</li>
+<li class="bl">
+<span class="lb">6</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">7</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">8</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="3" height="8"/>
+</svg>
+<span class="n">3%</span>
+</li>
+<li class="bl">
+<span class="lb">9</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">10</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">11</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">12</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="6%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="6" height="8"/>
+</svg>
+<span class="n">6%</span>
+</li>
+<li class="bl">
+<span class="lb">13</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+<li class="bl">
+<span class="lb">14</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2" height="8"/>
+</svg>
+<span class="n">2%</span>
+</li>
+<li class="bl">
+<span class="lb">15</span>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="1%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="1" height="8"/>
+</svg>
+<span class="n">1%</span>
+</li>
+</ul>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="network_traffic" data-rev="998dbd494a" id="c-network_traffic" data-state="ok">
+<div class="ch">
+<h3>NETWORK TRAFFIC</h3>
+<span class="note">↓ received · ↑ sent</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-iface">
+<col class="c-rx">
+<col class="c-rx-hist">
+<col class="c-tx">
+<col class="c-tx-hist">
+<col class="c-total">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Interface</th>
+<th class="n" scope="col">Received</th>
+<th class="p3" scope="col">
+</th>
+<th class="n p1" scope="col">Sent</th>
+<th class="p3" scope="col">
+</th>
+<th class="p2" scope="col">Total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>eth0</td>
+<td class="n">
+<span class="t-ok">↓</span> 1.8 MB/s</td>
+<td class="p3">
+<svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
+<polyline fill="none" points="0.0,7.6 2.8,8.2 5.5,6.0 8.3,6.5 11.0,4.3 13.8,2.2 16.6,3.0 19.3,1.2 22.1,2.4 24.8,1.0 27.6,2.6 30.3,1.6 33.1,3.6 35.9,3.1 38.6,2.6 41.4,5.1 44.1,4.8 46.9,7.3 49.7,7.0 52.4,9.4 55.2,8.9 57.9,11.0 60.7,10.1 63.4,11.8 66.2,10.5 69.0,9.0 71.7,10.0 74.5,8.1 77.2,8.8 80.0,6.7"/>
+</svg>
+</td>
+<td class="n p1">
+<span class="t-accent">↑</span> 372.4 kB/s</td>
+<td class="p3">
+<svg class="spark" viewBox="0 0 80 16" width="80" height="16" role="img" aria-label="trend">
+<polyline fill="none" points="0.0,5.3 2.8,3.3 5.5,1.4 8.3,2.5 11.0,1.0 13.8,2.5 16.6,1.4 19.3,3.3 22.1,2.6 24.8,4.9 27.6,4.5 30.3,4.2 33.1,6.7 35.9,6.4 38.6,8.8 41.4,8.4 44.1,10.5 46.9,9.7 49.7,11.5 52.4,10.3 55.2,11.7 57.9,10.1 60.7,8.3 63.4,9.1 66.2,7.0 69.0,7.6 71.7,5.4 74.5,5.9 77.2,3.8 80.0,4.5"/>
+</svg>
+</td>
+<td class="p2">
+<span class="t-muted"> ↓40.2G ↑6.3G</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="sessions" data-rev="3eb21bed24" id="c-sessions" data-state="ok">
+<div class="ch">
+<h3>SESSIONS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<p class="ln"> 1 user session   ssh: <span class="t-ok">1 connected</span>
+</p>
+<p class="ln"> <span class="t-ok">●</span> ssh from 192.168.0.20  <span class="t-muted">LAN or Tailscale</span>
+</p>
+<ul class="wrap" data-max-lines="1">
+<li>tty1</li>
+</ul>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="docker_disk" data-rev="f2e79d87cb" id="c-docker_disk" data-state="ok">
+<div class="ch">
+<h3>DOCKER · DISK</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-type">
+<col class="c-count">
+<col class="c-active">
+<col class="c-size">
+<col class="c-unused">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Type</th>
+<th class="r n p3" scope="col">Count</th>
+<th class="n p2" scope="col">In use</th>
+<th class="n" scope="col">Size</th>
+<th class="p1" scope="col">Unused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Images</td>
+<td class="r n p3">14</td>
+<td class="n p2">(6 in use)</td>
+<td class="n">5.2GB</td>
+<td class="p1">unused 2.1GB (40%)</td>
+</tr>
+<tr>
+<td>Containers</td>
+<td class="r n p3">7</td>
+<td class="n p2">(6 in use)</td>
+<td class="n">180MB</td>
+<td class="p1">unused 0B (0%)</td>
+</tr>
+<tr>
+<td>Local Volumes</td>
+<td class="r n p3">5</td>
+<td class="n p2">(5 in use)</td>
+<td class="n">1.4GB</td>
+<td class="p1">unused 0B (0%)</td>
+</tr>
+</tbody>
+</table>
+<p class="ln">
+<span class="t-muted"> dangling images: 0 (0B): safe to prune</span>
+</p>
+<p class="ln">
+<span class="t-warn"> 12 unused volumes (9 anonymous): may hold data, check before pruning</span>
+</p>
+<p class="ln">
+<span class="t-muted"> unused = no container uses it; tagged images can be re-pulled</span>
+</p>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="disks" data-rev="1c01b4a7d0" id="c-disks" data-state="ok">
+<div class="ch">
+<h3>DISKS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-mount">
+<col class="c-usage">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Mount</th>
+<th class="n" scope="col">Used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/</td>
+<td class="n">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</td>
+</tr>
+<tr>
+<td>/data</td>
+<td class="n">
+<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="83" height="8"/>
+</svg>
+<span class="n">249.0G/300.0G</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+</main>
+<footer class="foot">refreshed every 2 s<span class="dot">·</span>read-only<span class="dot">·</span>Alt+F4 closes · F11 leaves full screen<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Overview</h3>
+<dl>
+<dt>
+<kbd>←→</kbd> <kbd>PgUp/PgDn</kbd>
+</dt>
+<dd>previous/next slide</dd>
+<dt>
+<kbd>m</kbd>
+</dt>
+<dd>open the Map (as 2)</dd>
+<dt>
+<kbd>c</kbd>
+</dt>
+<dd>open the CPU screen (as 3)</dd>
+<dt>
+<kbd>h</kbd>
+</dt>
+<dd>open the Health screen (as 4)</dd>
+<dt>
+<kbd>a</kbd>
+</dt>
+<dd>open the AI screen (as 5)</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close the help</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS). It polls main[data-frag] for the page's cards as an HTML
+// fragment and replaces the cards whose data-rev changed. The fragment is parsed inertly and every node and attribute is checked
+// against two allowlists before anything is taken over; a fragment that fails the check reloads the page. It waits while the tab is
+// hidden, while paused and while you type or select; a failed poll backs off (2 s to 60 s) and says so: numbers never look fresh.
+// Classes it sets on <html>, for the server's CSS:
+//   stale    the numbers on the page are old (the #stale banner says since when)
+//   paused   the refresh is paused with the [data-pause] toggle
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const FRAG_TAGS = new Set("a abbr article aside b br button caption circle code col colgroup dd details div dl dt em figure footer form g h2 h3 h4 header hr i input kbd label li line meter nav ol option p path polyline pre progress rect section select small span strong sub summary sup svg table tbody td text textarea tfoot th thead time title tr u ul".split(" ")), FRAG_ATTRS = new Set("action aria-controls aria-disabled aria-current aria-describedby aria-expanded aria-hidden aria-label aria-labelledby aria-live aria-pressed aria-sort aria-valuemax aria-valuemin aria-valuenow autocomplete checked class colspan cx cy d data-card data-copy data-density data-depth data-done data-fail data-k data-key data-kpi data-max-lines data-pause data-problem data-rev data-row data-set data-state data-theme datetime disabled fill for height high href id lang low max maxlength method min name open optimum placeholder points preserveAspectRatio r readonly required role rowspan rx ry scope selected size stroke stroke-linecap stroke-linejoin stroke-width tabindex title transform type value viewBox width x x1 x2 y y1 y2".split(" "));
+  const root = document.documentElement, page = document.querySelector("main"), banner = document.getElementById("stale");
+  if (!page || page.hasAttribute("data-edit")) return;
+  const url = page.getAttribute("data-frag") || "", secs = Number(page.getAttribute("data-refresh"));
+  const period = url && secs >= 1 ? Math.min(secs, 3600) * 1000 : 0, spin = Number(page.getAttribute("data-rotate")) * 1000;
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const opened = new Map();  // <details> the reader opened or closed by hand: data-k -> open
+  let etag = "", fails = 0, lastOk = Date.now(), touched = 0, timer = 0, busy = false, dead = false, policy = null;
+  let paused = page.getAttribute("data-paused") === "1";
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  try { policy = window.trustedTypes ? window.trustedTypes.createPolicy("nuc-frag", {createHTML: s => s}) : null; } catch (err) { policy = null; }
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+  const kiosk = () => root.getAttribute("data-density") === "wall" && root.hasAttribute("data-kiosk");
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+
+  function show(text) {  // the banner under the top bar; "" takes it down
+    root.classList.toggle("stale", !!text);
+    if (banner) { banner.textContent = text; banner.hidden = !text; }
+  }
+  const late = () => show("stale since " + clock(lastOk));
+  function plan(ms) { clearTimeout(timer); if (!dead && period) timer = setTimeout(tick, ms); }
+  function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
+    dead = true;
+    show("updating the page");
+    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+  }
+  function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
+    const a = document.activeElement, sel = window.getSelection();
+    if (a && (a.closest("form") || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+    if (sel && !sel.isCollapsed && !kiosk()) return true;
+    for (const f of document.querySelectorAll("input, textarea")) {
+      if (!/^(hidden|submit|button|reset|image|checkbox|radio)$/.test(f.type) && f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
+
+  function clean(n) {  // true when the node and everything below it is on the allowlists
+    if (n.nodeType === 3) return true;
+    if (n.nodeType !== 1 || !FRAG_TAGS.has(n.localName) || !(n instanceof HTMLElement || n instanceof SVGElement)) return false;
+    for (const a of n.attributes) {
+      const v = a.value;
+      if (!FRAG_ATTRS.has(a.name) || /^(on|style$)/.test(a.name)) return false;
+      if (a.name === "href" && !(v.startsWith("/?") || v.startsWith("#"))) return false;
+      if (a.name === "action" && !/^\/[^\/\\]/.test(v)) return false;
+      if (a.name === "method" && !/^(get|post)$/i.test(v)) return false;
+      if (a.name === "name" && !/^(input|select|textarea|button)$/.test(n.localName)) return false;
+    }
+    for (const c of n.childNodes) if (!clean(c)) return false;
+    return true;
+  }
+  function parse(text) {  // the fragment's blocks, or null when anything in it is off the allowlists
+    const doc = new DOMParser().parseFromString(policy ? policy.createHTML(text) : text, "text/html"), out = [];
+    if (doc.head.childNodes.length || doc.documentElement.attributes.length || doc.body.attributes.length) return null;
+    for (const n of doc.body.childNodes) {
+      if (n.nodeType === 3 && !n.data.trim()) continue;
+      if (n.nodeType !== 1 || !n.hasAttribute("data-card") || !clean(n)) return null;
+      out.push(n);
+    }
+    return out.length && out.length <= 200 ? out : null;
+  }
+  function put(old, node) {  // old gives way to a copy of node; the focus and the open <details> stay as the reader had them
+    const a = document.activeElement, f = a && old.contains(a) ? a.closest("[data-k]") : null, key = f && f.getAttribute("data-k");
+    const fresh = document.importNode(node, true);
+    for (const d of fresh.querySelectorAll("details[data-k]")) {
+      const k = d.getAttribute("data-k");
+      if (opened.has(k)) d.open = opened.get(k);
+    }
+    old.replaceWith(fresh);
+    if (key) for (const el of fresh.querySelectorAll("[data-k]")) if (el.getAttribute("data-k") === key) { el.focus({preventScroll: true}); break; }
+  }
+  function swap(blocks) {  // false when the page has other cards than the fragment: that is a new page, not an update
+    const live = Array.from(document.querySelectorAll("[data-card]")), ids = list => list.map(el => el.getAttribute("data-card")).join(" ");
+    if (ids(live) !== ids(blocks)) return false;
+    const x = window.scrollX, y = window.scrollY;
+    blocks.forEach((b, i) => { if (b.getAttribute("data-rev") !== live[i].getAttribute("data-rev")) put(live[i], b); });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+    return true;
+  }
+
+  async function poll() {
+    const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
+    busy = true;
+    try {
+      const r = await load(url, etag, ctl.signal);
+      if (r.status === 401) { dead = true; show("session expired"); return; }
+      if (r.status !== 304) {
+        if (r.status !== 200 || r.headers.get("X-Nuc-Fragment") !== "1" || !/^text\/html\b/i.test(r.headers.get("Content-Type") || "")) throw new Error("not a fragment");
+        const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
+        if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
+        if (!blocks || !swap(blocks)) { reload(); return; }
+        etag = r.headers.get("ETag") || "";
+      }
+      fails = 0; lastOk = Date.now(); show("");
+      plan(period);
+    } catch (err) {
+      fails++; late();
+      plan(Math.min(60000, Math.max(period, 2000) * Math.pow(2, fails - 1)));
+    } finally { clearTimeout(kill); busy = false; }
+  }
+  function tick() {
+    if (document.hidden || dead || paused) return;  // visibilitychange and the toggle start it again
+    if (busy) { plan(period); return; }
+    if (editing()) {
+      if (Date.now() - lastOk > Math.max(30000, 5 * period)) late();  // a long pause for typing is still old data
+      plan(period);
+    } else poll();
+  }
+  function turn() {  // kiosk: one screen further down, back to the top at the end, unless someone is at the page
+    setTimeout(turn, spin);
+    const room = root.scrollHeight - window.innerHeight;
+    if (!kiosk() || document.hidden || paused || Date.now() - touched < 3 * spin || room < 8) return;
+    window.scrollTo({top: window.scrollY >= room - 8 ? 0 : Math.min(room, window.scrollY + window.innerHeight * 0.9), behavior: calm.matches ? "auto" : "smooth"});
+  }
+
+  document.addEventListener("click", e => {
+    const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
+    if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
+    const b = e.target.closest("[data-pause]");
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
+    e.preventDefault();
+    paused = !paused;
+    root.classList.toggle("paused", paused);
+    page.setAttribute("data-paused", paused ? "1" : "0");
+    for (const t of document.querySelectorAll("[data-pause]")) t.setAttribute("aria-pressed", String(paused));
+    if (!paused) plan(0);
+  }, true);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) plan(0); });
+  window.addEventListener("online", () => plan(0));
+  window.addEventListener("pointerdown", () => { touched = Date.now(); }, true);
+  window.addEventListener("keydown", () => { touched = Date.now(); }, true);
+  window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
+  root.classList.toggle("paused", paused);
+  if (!paused) plan(period);
+  if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
+    setTimeout(turn, spin);
+    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+  }
+})();
+</script>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
+// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

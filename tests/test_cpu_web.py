@@ -18,6 +18,8 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 
 ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)
 EVIL = '<script>alert(1)</script>"onmouseover=alert(1) \'x' + ESC + "[2J" + BEL + CSI8 + "31m"
@@ -32,6 +34,7 @@ def serve(**cfg):
     return srv
 
 
+@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)
@@ -133,7 +136,7 @@ class Page(CpuPageCase):
         self.assertIn('<meta http-equiv="refresh" content="2">', body)
         self.assertIn("<title>demo-host · cpu · nuc-console</title>", body)
         txt = "\n".join(text_of(body))
-        for want in ("demo-host │ CPU │", "── CPU ", "12th Gen Intel(R) Core(TM) i7-1260P", "ALL ", "── TEMPERATURES", "source coretemp", "── PROCESSES",
+        for want in ("demo-host │ CPU │", "── CPU ", "AMD Ryzen 7 5800X 8-Core Processor", "ALL ", "── TEMPERATURES", "source k10temp", "── PROCESSES",
                      "PID USER", "NAME", "ffmpeg", "by CPU%", "processes listed"):
             self.assertIn(want, txt)
         self.assertIn('class="w bR B"', body)                                                     # the demo has problems: the red banner
@@ -211,7 +214,7 @@ class Page(CpuPageCase):
         self.assertIn("state     ?", txt)                                                            # Windows has no process state: '?'
         render.DEMO_OS = None
         self.srv.cache.clear()
-        self.assertIn("12th Gen", "\n".join(text_of(self.page("/?view=cpu"))))                      # and back: the feed follows the demo OS
+        self.assertIn("Ryzen 7 5800X 8-Core", "\n".join(text_of(self.page("/?view=cpu"))))                      # and back: the feed follows the demo OS
 
     def test_a_render_error_is_logged_not_shown(self):
         saved = render.cpu_problems
@@ -326,6 +329,7 @@ class CacheAndSampling(CpuPageCase):
     def pg(self, query):
         return self.srv.page(**web.view_params(web.parse_qs(query)))
 
+    @classic_default()
     def test_the_cache_key_has_the_view_the_sort_and_the_selection(self):
         a = self.pg("view=cpu")
         self.assertIs(self.pg("view=cpu"), a)                                                       # within r/2: the same render

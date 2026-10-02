@@ -1,0 +1,979 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-A3Gpbgcp+f5SXdMWaQM002Hm/UpECkRmKlNK5v34mvs=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · map · nuc-console</title>
+<link rel="stylesheet" href="/s/app.5eed8378.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="15e8ce0716">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?app=1" data-key="1">
+<kbd>1</kbd>Overview</a>
+<a href="/?app=1&amp;view=map" data-key="2" aria-current="page">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?app=1&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?app=1&amp;view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?app=1&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="fba522a530">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?app=1#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="view" data-refresh="2" data-frag="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;app=1&amp;frag=1">
+<div class="vb" data-card="__view" data-rev="860fcb0f01">
+<div class="scr mapv">
+<header class="st">
+<h2>MAP</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">27 nodes</span>
+</span>
+<span class="bit">
+<span class="t-muted">14 links</span>
+</span>
+<span class="bit">
+<span class="t-err">✖ 7 need attention</span>
+</span>
+</p>
+<ul class="legend lgd">
+<li>
+<span class="t-strong">━━►</span> seen</li>
+<li>
+<span>╌╌►</span> declared</li>
+<li>
+<span class="t-muted">┄┄►</span> same network</li>
+<li>
+<span class="t-strong">◄━━</span> connected to it</li>
+</ul>
+<div class="seg" role="group" aria-label="expand">
+<span aria-current="true">expand all</span>
+<a href="/?view=map&amp;sel=99ae4e80a5&amp;app=1" data-key="c" title="key c">collapse all</a>
+</div>
+<div class="seg" role="group" aria-label="paths">
+<span aria-current="true">all paths</span>
+<a href="/?view=map&amp;all=1&amp;only=1&amp;sel=99ae4e80a5&amp;app=1" data-key="p" title="key p">problems only</a>
+</div>
+<div class="seg" role="group" aria-label="view">
+<span aria-current="true">tree</span>
+<a href="/?view=map&amp;as=graph&amp;app=1&amp;sel=881afd34cb">graph</a>
+</div>
+</header>
+<p class="ln">
+<span class="t-muted">  · connections sampled every 30 s, remembered 24 h (watching since 1h)</span>
+</p>
+<div class="split">
+<div class="sp-l">
+<section class="grp">
+<ul class="ol">
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=9b8010b9d8&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-9b8010b9d8">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=9b8010b9d8&amp;app=1" data-row data-k="o-9b8010b9d8">
+<span class="sym">✖</span> <span class="t-err b">INTERNET</span>  <span class="t-muted">reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=3dab9c429f&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-3dab9c429f">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3dab9c429f&amp;app=1" data-row data-k="o-3dab9c429f">
+<span class="sym">✖</span> <span class="t-err">:8444/tcp</span>  <span class="t-strong">node</span>  <span class="t-muted">FUNNEL: public</span>  <span class="t-err">declared tailnet in config.ini, reachable from the Internet (Tailscale Funnel)</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=e0978bd430&amp;app=1" data-row data-k="o-e0978bd430">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=f22f98b733&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-f22f98b733">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=f22f98b733&amp;app=1" data-row data-k="o-f22f98b733">
+<span class="sym">✖</span> <span class="t-err b">LAN</span>  <span class="t-muted">open on the LAN (and on the tailnet)</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=5c58dcd8b6&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-5c58dcd8b6">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5c58dcd8b6&amp;app=1" data-row data-k="o-5c58dcd8b6">
+<span class="sym">✖</span> <span class="t-err">:5432/tcp</span>  <span class="t-strong">shop-db-1</span>  <span class="t-muted">docker: bypasses ufw</span>  <span class="t-err">declared local in config.ini, reachable from the LAN and the tailnet</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=47d434c982&amp;app=1" data-row data-k="o-47d434c982">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 192.168.0.50 :5432  <span class="t-muted">LAN</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=4cc5ea0e7a&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-4cc5ea0e7a">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=4cc5ea0e7a&amp;app=1" data-row data-k="o-4cc5ea0e7a">
+<span class="sym">!</span> <span class="t-warn">:8080/tcp</span>  <span class="t-strong">shop-web-1</span>  <span class="t-warn">docker: bypasses ufw</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=f19336912f&amp;app=1" data-row data-k="o-f19336912f">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 100.64.0.2 :8080  <span class="t-muted">tailnet · laptop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=cc4e8f7cfc&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-cc4e8f7cfc">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=cc4e8f7cfc&amp;app=1" data-row data-k="o-cc4e8f7cfc">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">shop-api-1</span> :3000  <span class="t-muted">container · shop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c3c4b8f599&amp;app=1" data-row data-k="o-c3c4b8f599">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=bfffb726c2&amp;app=1" data-row data-k="o-bfffb726c2">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d6bc8661f6&amp;app=1" data-row data-k="o-d6bc8661f6">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=66bf7b9e31&amp;app=1" data-row data-k="o-66bf7b9e31">
+<span class="sym">!</span> <span class="t-muted">┄┄►</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8279e0d665&amp;app=1" data-row data-k="o-8279e0d665">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=d6a7fd958b&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-d6a7fd958b">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d6a7fd958b&amp;app=1" data-row data-k="o-d6a7fd958b">
+<span class="sym">·</span> :22/tcp  <span class="t-strong">sshd</span>  <span class="t-muted">LAN only 192.168.0.0/24</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3f00958dcb&amp;app=1" data-row data-k="o-3f00958dcb">
+<span class="sym">·</span> <span class="t-strong">◄━━</span> 192.168.0.20 :22  <span class="t-muted">LAN</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=93ed95f8e5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-93ed95f8e5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=93ed95f8e5&amp;app=1" data-row data-k="o-93ed95f8e5">
+<span class="sym">·</span> <span class="t-accent b">LOCAL</span>  <span class="t-muted">this machine only</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b96bcd7a28&amp;app=1" data-row data-k="o-b96bcd7a28">
+<span class="sym">·</span> :5433/tcp  <span class="t-strong">blog-db-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=59b5097c06&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-59b5097c06">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=59b5097c06&amp;app=1" data-row data-k="o-59b5097c06">
+<span class="sym">·</span> :5678/tcp  <span class="t-strong">node</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5663d86e9b&amp;app=1" data-row data-k="o-5663d86e9b">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=60dc00592e&amp;app=1" data-row data-k="o-60dc00592e">
+<span class="sym">·</span> :6379/tcp  <span class="t-strong">cache-1</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=c242c96ccd&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-c242c96ccd">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c242c96ccd&amp;app=1" data-row data-k="o-c242c96ccd">
+<span class="sym">·</span> :8081/tcp  <span class="t-strong">blog-app-1</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=3622aa39b3&amp;app=1" data-row data-k="o-3622aa39b3">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">blog-db-1</span> :5432  <span class="t-muted">postgres · blog</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=575ffc23c4&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-575ffc23c4">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=575ffc23c4&amp;app=1" data-row data-k="o-575ffc23c4">
+<span class="sym">✖</span> <span class="t-err b">IMPACT</span>  <span class="t-muted">what is down or failing, and what depends on it</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d51eee07ec&amp;app=1" data-row data-k="o-d51eee07ec">
+<span class="sym">✖</span> <span class="t-err">admin-console</span>  <span class="t-muted">web app · expected on :9443</span>  <span class="t-warn">declared in [webapps] but nothing listens on :9443</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="1">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=575b2e7f06&amp;app=1" data-row data-k="o-575b2e7f06">
+<span class="sym">✖</span> <span class="t-err">worker-1</span>  <span class="t-muted">container · shop</span>  <span class="t-err">exited with code 137</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=b13e1bbec0&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-b13e1bbec0">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b13e1bbec0&amp;app=1" data-row data-k="o-b13e1bbec0">
+<span class="sym">·</span> <span class="t-accent b">STACKS</span>  <span class="t-muted">compose projects and their containers</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=46c79ece35&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-46c79ece35">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=46c79ece35&amp;app=1" data-row data-k="o-46c79ece35">
+<span class="sym">✔</span> <span class="t-ok">blog</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=d42ceec40f&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-d42ceec40f">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d42ceec40f&amp;app=1" data-row data-k="o-d42ceec40f">
+<span class="sym">✔</span> <span class="t-ok">blog-app-1</span>  <span class="t-muted">container · blog</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=ada02aae31&amp;app=1" data-row data-k="o-ada02aae31">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">blog-db-1</span> :5432  <span class="t-muted">postgres · blog</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5e2223f24a&amp;app=1" data-row data-k="o-5e2223f24a">
+<span class="sym">✔</span> <span class="t-ok">blog-db-1</span>  <span class="t-muted">postgres · blog</span>
+</a>
+</li>
+<li class="ob st-err" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=a9b5a9adec&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-a9b5a9adec">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=a9b5a9adec&amp;app=1" data-row data-k="o-a9b5a9adec">
+<span class="sym">✖</span> <span class="t-err">shop</span>  <span class="t-muted">compose project</span>
+</a>
+</li>
+<li class="ob st-down" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=bfec987788&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-bfec987788">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=bfec987788&amp;app=1" data-row data-k="o-bfec987788">
+<span class="sym">✖</span> <span class="t-err">worker-1</span>  <span class="t-muted">container · shop</span>  <span class="t-err">exited with code 137</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=98b3bebc8d&amp;app=1" data-row data-k="o-98b3bebc8d">
+<span class="sym">!</span> ╌╌► <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8f82a561e6&amp;app=1" data-row data-k="o-8f82a561e6">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=8320aadf16&amp;app=1" data-row data-k="o-8320aadf16">
+<span class="sym">!</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok sel" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=99ae4e80a5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-99ae4e80a5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;app=1" data-row data-k="o-99ae4e80a5" aria-current="true">
+<span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d1c89c618a&amp;app=1" data-row data-k="o-d1c89c618a">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=68e2641548&amp;app=1" data-row data-k="o-68e2641548">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=1ee138ffa4&amp;app=1" data-row data-k="o-1ee138ffa4">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<a class="tg" href="/?view=map&amp;shut=4434075ebf&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-4434075ebf">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=4434075ebf&amp;app=1" data-row data-k="o-4434075ebf">
+<span class="sym">✔</span> <span class="t-ok">shop-web-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<a class="tg" href="/?view=map&amp;shut=1663e193b5&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-1663e193b5">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=1663e193b5&amp;app=1" data-row data-k="o-1663e193b5">
+<span class="sym">✔</span> <span class="t-strong">━━►</span> <span class="t-ok">shop-api-1</span> :3000  <span class="t-muted">container · shop</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=c8b64dca5c&amp;app=1" data-row data-k="o-c8b64dca5c">
+<span class="sym">!</span> <span class="t-strong">━━►</span> <span class="t-warn">shop-db-1</span> :5432  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=6100e76d6a&amp;app=1" data-row data-k="o-6100e76d6a">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="4">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=d73902be6b&amp;app=1" data-row data-k="o-d73902be6b">
+<span class="sym">✔</span> ╌╌► <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-warn" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=5252dffe10&amp;app=1" data-row data-k="o-5252dffe10">
+<span class="sym">!</span> <span class="t-muted">┄┄►</span> <span class="t-warn">shop-db-1</span>  <span class="t-muted">postgres · shop</span>  <span class="t-err">clients from outside connect to it directly: 192.168.0.50</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="3">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=90623b4bdb&amp;app=1" data-row data-k="o-90623b4bdb">
+<span class="sym">✔</span> <span class="t-muted">┄┄►</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=04d7137448&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-04d7137448">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=04d7137448&amp;app=1" data-row data-k="o-04d7137448">
+<span class="sym">✔</span> <span class="t-ok">standalone</span>  <span class="t-muted">containers without a project</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=40998da50f&amp;app=1" data-row data-k="o-40998da50f">
+<span class="sym">✔</span> <span class="t-ok">cache-1</span>  <span class="t-muted">redis</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="0">
+<a class="tg" href="/?view=map&amp;shut=98180ef894&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-98180ef894">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=98180ef894&amp;app=1" data-row data-k="o-98180ef894">
+<span class="sym">·</span> <span class="t-accent b">OUTBOUND</span>  <span class="t-muted">connections this machine opens to other hosts</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=2f98a6d30e&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-2f98a6d30e">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=2f98a6d30e&amp;app=1" data-row data-k="o-2f98a6d30e">
+<span class="sym">✔</span> <span class="t-ok">node</span>  <span class="t-muted">n8n.service</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=a84a1a042a&amp;app=1" data-row data-k="o-a84a1a042a">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.80 :443  <span class="t-muted">Internet</span>  <span class="t-muted">25m ago</span>
+</a>
+</li>
+<li class="ob st-ok" data-depth="1">
+<a class="tg" href="/?view=map&amp;shut=b9314fbc23&amp;all=1&amp;sel=99ae4e80a5&amp;app=1" title="close" data-k="t-b9314fbc23">
+<span class="t-accent">▾</span>
+</a>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=b9314fbc23&amp;app=1" data-row data-k="o-b9314fbc23">
+<span class="sym">✔</span> <span class="t-ok">shop-api-1</span>  <span class="t-muted">container · shop</span>
+</a>
+</li>
+<li class="ob st-info" data-depth="2">
+<span class="tg d" title="nothing below">
+<span class="t-muted">·</span>
+</span>
+<a class="oa" href="/?view=map&amp;all=1&amp;sel=9256f1b5eb&amp;app=1" data-row data-k="o-9256f1b5eb">
+<span class="sym">·</span> <span class="t-strong">━━►</span> 198.51.100.25 :443  <span class="t-muted">Internet</span>  <span class="t-muted">now</span>
+</a>
+</li>
+</ul>
+</section>
+</div>
+<div class="sp-r">
+<section class="grp">
+<aside class="props">
+<div class="ph">
+<h3 class="sub">DETAILS</h3>
+<a href="/?view=map&amp;all=1&amp;app=1">close ✕</a>
+</div>
+<dl>
+<dt>container</dt>
+<dd class="lv-ok top">shop-api-1  ·  container · shop</dd>
+<dt>kind</dt>
+<dd>container</dd>
+<dt>image</dt>
+<dd>example/shop-api:1.4</dd>
+<dt>compose</dt>
+<dd>shop / api</dd>
+<dt>state</dt>
+<dd>Up 3 days</dd>
+<dt>health</dt>
+<dd>healthy</dd>
+<dt>restart policy</dt>
+<dd>unless-stopped</dd>
+<dt>networks</dt>
+<dd>shop_default 172.18.0.3</dd>
+<dt>listens inside</dt>
+<dd>3000 (seen in its network namespace)</dd>
+<dt>memory</dt>
+<dd>520 MiB</dd>
+<dt>◄ from</dt>
+<dd>shop-web-1 :3000  seen now  (compose depends_on; named in its environment)  [container · shop]</dd>
+<dt>► to</dt>
+<dd>shop-db-1 :5432  seen now  (compose depends_on; named in its environment; connected now (seen inside the database))  [postgres · shop]</dd>
+<dt>► to</dt>
+<dd>198.51.100.25 :443  seen now  [Internet]</dd>
+<dt>► to</dt>
+<dd>cache-1  declared  (named in its environment)  [redis]</dd>
+</dl>
+</aside>
+</section>
+</div>
+</div>
+</div>
+</div>
+</main>
+<footer class="foot">refresh every <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;refresh=3&amp;app=1">+</a>
+<span class="dot">·</span>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>text <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=map&amp;all=1&amp;sel=99ae4e80a5&amp;zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dmap%26all%3D1%26sel%3D99ae4e80a5%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dmap%26all%3D1%26sel%3D99ae4e80a5%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dmap%26all%3D1%26sel%3D99ae4e80a5%26app%3D1">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dmap%26all%3D1%26sel%3D99ae4e80a5%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dmap%26all%3D1%26sel%3D99ae4e80a5%26app%3D1">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Map</h3>
+<dl>
+<dt>
+<kbd>←→</kbd> <kbd>h</kbd> <kbd>l</kbd>
+</dt>
+<dd>close (or the parent)/open</dd>
+<dt>
+<kbd>e</kbd> <kbd>c</kbd>
+</dt>
+<dd>expand/collapse all</dd>
+<dt>
+<kbd>p</kbd>
+</dt>
+<dd>problems only</dd>
+</dl>
+</section>
+<section>
+<h3>Lists</h3>
+<dl>
+<dt>
+<kbd>↑↓</kbd>
+</dt>
+<dd>move</dd>
+<dt>
+<kbd>PgUp/PgDn/Home/End</kbd>
+</dt>
+<dd>page</dd>
+<dt>
+<kbd>Enter</kbd>
+</dt>
+<dd>details</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS). It polls main[data-frag] for the page's cards as an HTML
+// fragment and replaces the cards whose data-rev changed. The fragment is parsed inertly and every node and attribute is checked
+// against two allowlists before anything is taken over; a fragment that fails the check reloads the page. It waits while the tab is
+// hidden, while paused and while you type or select; a failed poll backs off (2 s to 60 s) and says so: numbers never look fresh.
+// Classes it sets on <html>, for the server's CSS:
+//   stale    the numbers on the page are old (the #stale banner says since when)
+//   paused   the refresh is paused with the [data-pause] toggle
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const FRAG_TAGS = new Set("a abbr article aside b br button caption circle code col colgroup dd details div dl dt em figure footer form g h2 h3 h4 header hr i input kbd label li line meter nav ol option p path polyline pre progress rect section select small span strong sub summary sup svg table tbody td text textarea tfoot th thead time title tr u ul".split(" ")), FRAG_ATTRS = new Set("action aria-controls aria-disabled aria-current aria-describedby aria-expanded aria-hidden aria-label aria-labelledby aria-live aria-pressed aria-sort aria-valuemax aria-valuemin aria-valuenow autocomplete checked class colspan cx cy d data-card data-copy data-density data-depth data-done data-fail data-k data-key data-kpi data-max-lines data-pause data-problem data-rev data-row data-set data-state data-theme datetime disabled fill for height high href id lang low max maxlength method min name open optimum placeholder points preserveAspectRatio r readonly required role rowspan rx ry scope selected size stroke stroke-linecap stroke-linejoin stroke-width tabindex title transform type value viewBox width x x1 x2 y y1 y2".split(" "));
+  const root = document.documentElement, page = document.querySelector("main"), banner = document.getElementById("stale");
+  if (!page || page.hasAttribute("data-edit")) return;
+  const url = page.getAttribute("data-frag") || "", secs = Number(page.getAttribute("data-refresh"));
+  const period = url && secs >= 1 ? Math.min(secs, 3600) * 1000 : 0, spin = Number(page.getAttribute("data-rotate")) * 1000;
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const opened = new Map();  // <details> the reader opened or closed by hand: data-k -> open
+  let etag = "", fails = 0, lastOk = Date.now(), touched = 0, timer = 0, busy = false, dead = false, policy = null;
+  let paused = page.getAttribute("data-paused") === "1";
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  try { policy = window.trustedTypes ? window.trustedTypes.createPolicy("nuc-frag", {createHTML: s => s}) : null; } catch (err) { policy = null; }
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+  const kiosk = () => root.getAttribute("data-density") === "wall" && root.hasAttribute("data-kiosk");
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+
+  function show(text) {  // the banner under the top bar; "" takes it down
+    root.classList.toggle("stale", !!text);
+    if (banner) { banner.textContent = text; banner.hidden = !text; }
+  }
+  const late = () => show("stale since " + clock(lastOk));
+  function plan(ms) { clearTimeout(timer); if (!dead && period) timer = setTimeout(tick, ms); }
+  function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
+    dead = true;
+    show("updating the page");
+    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+  }
+  function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
+    const a = document.activeElement, sel = window.getSelection();
+    if (a && (a.closest("form") || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+    if (sel && !sel.isCollapsed && !kiosk()) return true;
+    for (const f of document.querySelectorAll("input, textarea")) {
+      if (!/^(hidden|submit|button|reset|image|checkbox|radio)$/.test(f.type) && f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
+
+  function clean(n) {  // true when the node and everything below it is on the allowlists
+    if (n.nodeType === 3) return true;
+    if (n.nodeType !== 1 || !FRAG_TAGS.has(n.localName) || !(n instanceof HTMLElement || n instanceof SVGElement)) return false;
+    for (const a of n.attributes) {
+      const v = a.value;
+      if (!FRAG_ATTRS.has(a.name) || /^(on|style$)/.test(a.name)) return false;
+      if (a.name === "href" && !(v.startsWith("/?") || v.startsWith("#"))) return false;
+      if (a.name === "action" && !/^\/[^\/\\]/.test(v)) return false;
+      if (a.name === "method" && !/^(get|post)$/i.test(v)) return false;
+      if (a.name === "name" && !/^(input|select|textarea|button)$/.test(n.localName)) return false;
+    }
+    for (const c of n.childNodes) if (!clean(c)) return false;
+    return true;
+  }
+  function parse(text) {  // the fragment's blocks, or null when anything in it is off the allowlists
+    const doc = new DOMParser().parseFromString(policy ? policy.createHTML(text) : text, "text/html"), out = [];
+    if (doc.head.childNodes.length || doc.documentElement.attributes.length || doc.body.attributes.length) return null;
+    for (const n of doc.body.childNodes) {
+      if (n.nodeType === 3 && !n.data.trim()) continue;
+      if (n.nodeType !== 1 || !n.hasAttribute("data-card") || !clean(n)) return null;
+      out.push(n);
+    }
+    return out.length && out.length <= 200 ? out : null;
+  }
+  function put(old, node) {  // old gives way to a copy of node; the focus and the open <details> stay as the reader had them
+    const a = document.activeElement, f = a && old.contains(a) ? a.closest("[data-k]") : null, key = f && f.getAttribute("data-k");
+    const fresh = document.importNode(node, true);
+    for (const d of fresh.querySelectorAll("details[data-k]")) {
+      const k = d.getAttribute("data-k");
+      if (opened.has(k)) d.open = opened.get(k);
+    }
+    old.replaceWith(fresh);
+    if (key) for (const el of fresh.querySelectorAll("[data-k]")) if (el.getAttribute("data-k") === key) { el.focus({preventScroll: true}); break; }
+  }
+  function swap(blocks) {  // false when the page has other cards than the fragment: that is a new page, not an update
+    const live = Array.from(document.querySelectorAll("[data-card]")), ids = list => list.map(el => el.getAttribute("data-card")).join(" ");
+    if (ids(live) !== ids(blocks)) return false;
+    const x = window.scrollX, y = window.scrollY;
+    blocks.forEach((b, i) => { if (b.getAttribute("data-rev") !== live[i].getAttribute("data-rev")) put(live[i], b); });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+    return true;
+  }
+
+  async function poll() {
+    const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
+    busy = true;
+    try {
+      const r = await load(url, etag, ctl.signal);
+      if (r.status === 401) { dead = true; show("session expired"); return; }
+      if (r.status !== 304) {
+        if (r.status !== 200 || r.headers.get("X-Nuc-Fragment") !== "1" || !/^text\/html\b/i.test(r.headers.get("Content-Type") || "")) throw new Error("not a fragment");
+        const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
+        if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
+        if (!blocks || !swap(blocks)) { reload(); return; }
+        etag = r.headers.get("ETag") || "";
+      }
+      fails = 0; lastOk = Date.now(); show("");
+      plan(period);
+    } catch (err) {
+      fails++; late();
+      plan(Math.min(60000, Math.max(period, 2000) * Math.pow(2, fails - 1)));
+    } finally { clearTimeout(kill); busy = false; }
+  }
+  function tick() {
+    if (document.hidden || dead || paused) return;  // visibilitychange and the toggle start it again
+    if (busy) { plan(period); return; }
+    if (editing()) {
+      if (Date.now() - lastOk > Math.max(30000, 5 * period)) late();  // a long pause for typing is still old data
+      plan(period);
+    } else poll();
+  }
+  function turn() {  // kiosk: one screen further down, back to the top at the end, unless someone is at the page
+    setTimeout(turn, spin);
+    const room = root.scrollHeight - window.innerHeight;
+    if (!kiosk() || document.hidden || paused || Date.now() - touched < 3 * spin || room < 8) return;
+    window.scrollTo({top: window.scrollY >= room - 8 ? 0 : Math.min(room, window.scrollY + window.innerHeight * 0.9), behavior: calm.matches ? "auto" : "smooth"});
+  }
+
+  document.addEventListener("click", e => {
+    const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
+    if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
+    const b = e.target.closest("[data-pause]");
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
+    e.preventDefault();
+    paused = !paused;
+    root.classList.toggle("paused", paused);
+    page.setAttribute("data-paused", paused ? "1" : "0");
+    for (const t of document.querySelectorAll("[data-pause]")) t.setAttribute("aria-pressed", String(paused));
+    if (!paused) plan(0);
+  }, true);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) plan(0); });
+  window.addEventListener("online", () => plan(0));
+  window.addEventListener("pointerdown", () => { touched = Date.now(); }, true);
+  window.addEventListener("keydown", () => { touched = Date.now(); }, true);
+  window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
+  root.classList.toggle("paused", paused);
+  if (!paused) plan(period);
+  if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
+    setTimeout(turn, spin);
+    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+  }
+})();
+</script>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
+// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

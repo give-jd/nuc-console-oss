@@ -37,7 +37,11 @@ import aiweb  # noqa: E402
 import aisetup  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
 
@@ -1206,6 +1210,7 @@ class WebBase(Base):
         render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
 
     # ---- http
+    @classic_default()
     def request(self, method, path, body=None, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
         c.request(method, path, body=body, headers=headers or {})
@@ -1553,11 +1558,12 @@ class WebSecurity(WebBase):
         self.assertEqual(self.post("x", path="/ai/nope")[0], 404)
         self.assertEqual(self.post("x", path="/ai/on/")[0], 404)
         self.assertEqual(self.post("x", path="/ai/../on")[0], 404)
-        for m in ("PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
+        for m in ("PUT", "DELETE", "PATCH", "OPTIONS"):
             st, h, _b = self.request(m, "/ai/on")
-            self.assertEqual((st, h["Allow"]), (405, "GET"), m)
-        st, h, _b = self.request("GET", "/ai/on")
-        self.assertEqual((st, h["Allow"]), (405, "POST"), "a GET of an action says what it takes")
+            self.assertEqual((st, h["Allow"]), (405, "GET, HEAD"), m)
+        for m in ("GET", "HEAD"):  # HEAD is answered like GET
+            st, h, _b = self.request(m, "/ai/on")
+            self.assertEqual((st, h["Allow"]), (405, "POST"), "a GET of an action says what it takes: " + m)
         self.assertEqual(self.request("GET", "/ai/nope")[0], 404)
         self.assertEqual(self.get("/ai/use")[0], 405)
 
@@ -1639,7 +1645,7 @@ class WebToken(WebBase):
 class WebHttpHeaders(WebBase):
     def test_the_responses_carry_the_policy_of_the_page_that_made_them(self):
         st, h, _b = self.get()
-        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.AI_CSP, "same-origin"))
+        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.page_csp(forms=True), "same-origin"))
         st, h, _b = self.post("off")
         self.assertEqual((st, h["Referrer-Policy"], h["Cache-Control"]), (303, "same-origin", "no-store"))
         self.assertIn("form-action 'none'", h["Content-Security-Policy"], "a redirect has no form: the strict one")
@@ -1675,21 +1681,21 @@ class ConsoleKeys(WebBase):
     def view(self):
         render._AI.clear()
         data = render.ai_data()
-        rows = render.ai_rows(data["cat"])
-        av = render.AiView()
-        render.ai_sync(av, rows)
+        rows = screens.ai_rows(data["cat"])
+        av = screens.AiView()
+        screens.ai_sync(av, rows)
         return data, av, rows
 
     def press(self, av, rows, key):
         """What main() does with a key: ai_key, then ai_do for an action."""
-        act = render.ai_key(av, key, rows)
+        act = screens.ai_key(av, key, rows)
         if act and act != "back":
             render.ai_do(av, act, rows)
         return act
 
     def screen(self, av, data, cols=120, rows=33):
         s, _r = render.ai_screen(data, [], av, cols - 1, rows)
-        return render.ANSI.sub("", s)
+        return ansi.ANSI.sub("", s)
 
     def select(self, av, rows, name):
         av.idx = next(i for i, r in enumerate(rows) if r["id"] == name)
@@ -1734,7 +1740,7 @@ class ConsoleKeys(WebBase):
             self.press(av, rows, "e")
             self.assertEqual(av.confirm[:2], ("on", "tiny"))
             total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
-            self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % render.ai_mb(total / 2 ** 20))
+            self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % screens.ai_mb(total / 2 ** 20))
             self.assertIn("Turn AI on with Tiny test model", self.screen(av, data).splitlines()[-1])
             self.assertEqual(self.httpd.requests, [], "nothing is fetched before the y")
             self.assertEqual(self.press(av, rows, "n"), "")

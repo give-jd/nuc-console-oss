@@ -26,6 +26,9 @@ import health  # noqa: E402
 import history  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import ui  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 
 NOW = 1_790_000_000
 SIZES = ((79, 24), (120, 33), (200, 50), (226, 50))       # console sizes (--cols --rows): the layout gets cols - 1, as in once()
@@ -37,7 +40,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
-                  "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "health_build", "health_slide", "health_extra_lines", "health_screen", "health_state")
+                  "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "health_build", "health_slide", "health_extra_lines", "health_screen", "health_state", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -96,6 +99,7 @@ class HealthCase(unittest.TestCase):
         render.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS, render.DEMO_HEALTH = True, None, ""
         cfg["features"]["health"], cfg["health_in_rotation"], cfg["map_in_rotation"] = True, False, False
         self.calls = []                                                         # the days of every health_build(): the report cache
@@ -126,7 +130,7 @@ class HealthCase(unittest.TestCase):
         the renderer's own colours and line ends. -> the lines, ANSI stripped."""
         rows = screen.split(LINE)
         self.assertEqual(len(rows), h, what)
-        out = [render.ANSI.sub("", x) for x in rows]
+        out = [ansi.ANSI.sub("", x) for x in rows]
         for x in out:
             self.assertLessEqual(len(x), w, (what, x))
         self.assertIsNone(CONTROL.search(SGR.sub("", "".join(rows))), what)
@@ -140,17 +144,17 @@ class HealthCase(unittest.TestCase):
     def view(self, rep=None, **kw):
         """A HealthView and the findings of a report (the demo's by default)."""
         rep = rep or report()
-        hv = render.HealthView(rep["period"]["days"], now=NOW)
+        hv = screens.HealthView(rep["period"]["days"], now=NOW)
         for k, v in kw.items():
             setattr(hv, k, v)
-        return hv, render.health_findings(rep)
+        return hv, screens.health_findings(rep)
 
     def press(self, hv, fl, keys):
         """Keys as the console loop hands them to health_key. -> what health_key returned for each. After every key the cursor is on one finding."""
         acts = []
-        render.health_sync(hv, fl)                                                       # what health_screen() does before every key
+        screens.health_sync(hv, fl)                                                       # what health_screen() does before every key
         for k in keys:
-            acts.append(render.health_key(hv, k, fl))
+            acts.append(screens.health_key(hv, k, fl))
             if fl:
                 self.assertTrue(0 <= hv.idx < len(fl), (k, hv.idx, len(fl)))
                 self.assertEqual(hv.cur, fl[hv.idx]["id"], k)
@@ -194,23 +198,26 @@ class Navigation(HealthCase):
         self.press(hv, fl, ["space"])
         self.assertFalse(hv.details)
 
-    def test_h_esc_q_leave_the_screen_and_change_nothing(self):
+    def test_esc_q_leave_the_screen_and_change_nothing(self):
         hv, fl = self.view()
         self.press(hv, fl, ["down", "down"])
-        for key in ("h", "esc", "q"):
-            self.assertEqual(render.health_key(hv, key, fl), "back")
+        for key in ("esc", "q"):
+            self.assertEqual(screens.health_key(hv, key, fl), "back")
+        for key in ("h", "1", "4", "tab", "?"):  # h is the overview's letter, the digits and Tab are the dispatcher's
+            self.assertEqual(screens.health_key(hv, key, fl), "", key)
         self.assertEqual((hv.idx, hv.days, hv.details), (2, 7, False))
+        self.press(hv, fl, ["enter"])
+        self.assertEqual([screens.health_key(hv, "esc", fl), hv.details, screens.health_key(hv, "esc", fl)], ["", False, "back"])  # details first
 
     def test_period_keys_say_so_only_when_the_period_changes(self):
         hv, fl = self.view()
-        self.assertEqual([render.health_key(hv, k, fl) for k in ("7", "w")], ["", ""])  # the period it already has
-        self.assertEqual(self.press(hv, fl, ["1"]), ["period"])
+        self.assertEqual([screens.health_key(hv, k, fl) for k in ("7", "w")], ["", ""])  # the period it already has
+        self.assertEqual(self.press(hv, fl, ["d"]), ["period"])
         self.assertEqual(hv.days, 1)
         self.assertEqual(self.press(hv, fl, ["d"]), [""])
-        self.assertEqual((self.press(hv, fl, ["3"]), hv.days), (["period"], 30))
-        self.assertEqual((self.press(hv, fl, ["w"]), hv.days), (["period"], 7))
         self.assertEqual((self.press(hv, fl, ["m"]), hv.days), (["period"], 30))
-        self.assertEqual((self.press(hv, fl, ["7"]), hv.days), (["period"], 7))
+        self.assertEqual((self.press(hv, fl, ["w"]), hv.days), (["period"], 7))
+        self.assertEqual((self.press(hv, fl, ["1", "3", "7"]), hv.days), ([""] * 3, 7))  # the digits are the screens now
 
     def test_other_keys_do_nothing_and_no_findings_is_not_an_error(self):
         hv, fl = self.view()
@@ -228,11 +235,11 @@ class Navigation(HealthCase):
         self.press(hv, fl, ["down"] * 4)
         self.assertEqual(hv.cur, "cpu-hog:chrome")
         rep = report(change=lambda r: r["findings"].insert(0, finding("oom:db", "err", "Out of memory: db")))
-        fl2 = render.health_findings(rep)
-        self.assertEqual(render.health_sync(hv, fl2), 5)                                # one more above it: the cursor moved with its finding
+        fl2 = screens.health_findings(rep)
+        self.assertEqual(screens.health_sync(hv, fl2), 5)                                # one more above it: the cursor moved with its finding
         self.assertEqual(hv.cur, "cpu-hog:chrome")
-        fl1 = render.health_findings(report(days=1))                                    # 24 hours: the memory leak is not in the report
-        self.assertEqual(render.health_sync(hv, fl1), 3)
+        fl1 = screens.health_findings(report(days=1))                                    # 24 hours: the memory leak is not in the report
+        self.assertEqual(screens.health_sync(hv, fl1), 3)
         self.assertEqual(hv.cur, "cpu-hog:chrome")
 
     def test_the_cursor_stays_in_place_when_its_finding_disappears(self):
@@ -240,10 +247,10 @@ class Navigation(HealthCase):
         self.press(hv, fl, ["down"] * 6)
         self.assertEqual(hv.cur, "login-fail:sshd")
         fl2 = [f for f in fl if f["id"] != "login-fail:sshd"]
-        self.assertEqual(render.health_sync(hv, fl2), 6)                                # the same place, on what moved up into it
+        self.assertEqual(screens.health_sync(hv, fl2), 6)                                # the same place, on what moved up into it
         self.assertEqual(hv.cur, fl2[6]["id"])
-        self.assertEqual(render.health_sync(hv, fl2[:3]), 2)                            # fewer than that: the last one
-        self.assertEqual(render.health_sync(hv, []), 0)
+        self.assertEqual(screens.health_sync(hv, fl2[:3]), 2)                            # fewer than that: the last one
+        self.assertEqual(screens.health_sync(hv, []), 0)
         self.assertIsNone(hv.cur)
 
     def test_the_cursor_row_is_always_on_screen(self):
@@ -255,16 +262,16 @@ class Navigation(HealthCase):
                 with self.subTest(size=(cols, rows), step=step):
                     frame, _ = render.health_screen(render.health_data(7), [], hv, cols - 1, rows)
                     out = self.check_frame(frame, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE) if ESC + "[7m" in x and "─" not in x]
+                    chosen = [ansi.ANSI.sub("", x) for x in frame.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x]
                     self.assertEqual(len(chosen), 1)                                     # exactly one highlighted finding ...
                     self.assertIn(fl[hv.idx]["title"], chosen[0])                        # ... the selected one
                     self.assertRegex(out[-1], r"finding %d/%d" % (hv.idx + 1, len(fl)))
-                render.health_key(hv, "down", fl)
+                screens.health_key(hv, "down", fl)
             self.assertEqual(hv.idx, len(fl) - 1)
 
     def test_scrolling_keeps_the_cursor_a_few_rows_from_the_edge(self):
         for top, i, n, rows, want in ((0, 0, 40, 10, 0), (0, 9, 40, 10, 2), (2, 5, 40, 10, 2), (0, 39, 40, 10, 30), (30, 20, 40, 10, 18), (0, 3, 5, 10, 0)):
-            self.assertEqual(render.map_scroll(top, i, n, rows), want, (top, i, n, rows))
+            self.assertEqual(ansi.scroll(top, i, n, rows), want, (top, i, n, rows))
 
 
 class Once(HealthCase):
@@ -281,7 +288,7 @@ class Once(HealthCase):
                         for opts in (["--period", str(days)], ["--period", str(days), "--details"]):
                             with self.subTest(os=os_name, variant=variant, size=(cols, rows), opts=opts):
                                 s, lines = self.screen(opts, cols, rows)
-                                self.assertIn(" │ Health │ ", lines[0])
+                                self.assertRegex(lines[0], r"\[\d[ ·](?:Health|Hlth)\]")
                                 self.assertNotIn("Traceback", s)
 
     def test_odd_sizes_never_break_the_frame(self):
@@ -292,44 +299,44 @@ class Once(HealthCase):
                 render.DEMO_HEALTH = variant
                 render._HEALTH.clear()
                 data, pb = render.health_state(None, 7)
-                fl = render.health_findings(data["report"])
+                fl = screens.health_findings(data["report"])
                 for cols in (40, 60, 100, 109, 110, 139, 140, 189, 190, 300):
                     for rows in (10, 14, 20, 40, 80):
                         for details in (False, True):
                             with self.subTest(os=os_name, variant=variant, size=(cols, rows), details=details):
-                                hv = render.HealthView(7, now=NOW)
+                                hv = screens.HealthView(7, now=NOW)
                                 hv.details = details
-                                render.health_select(fl, hv, "crash")
+                                screens.health_select(fl, hv, "crash")
                                 frame, _ = render.health_screen(data, pb, hv, cols - 1, rows)
                                 self.check_frame(frame, cols - 1, rows)
                         body = render.health_slide(cols - 1, rows - 2)
                         self.assertLessEqual(len(body), rows - 2)
-                        self.assertFalse([x for x in body if len(render.ANSI.sub("", x)) > cols - 1], (os_name, variant, cols, rows))
+                        self.assertFalse([x for x in body if len(ansi.ANSI.sub("", x)) > cols - 1], (os_name, variant, cols, rows))
 
     def test_every_finding_with_its_details_fits_every_size(self):
         for os_name in OSES:
             render.DEMO_OS = os_name
             render._HEALTH.clear()
-            names = [f["id"] for f in render.health_findings(report(os_name))]
+            names = [f["id"] for f in screens.health_findings(report(os_name))]
             for fid in names:
                 for cols, rows in SIZES:
                     with self.subTest(os=os_name, finding=fid, size=(cols, rows)):
                         s, lines = self.screen(["--select", fid, "--details"], cols, rows)
                         txt = "\n".join(lines)
                         self.assertIn("── DETAILS", txt)
-                        title = next(f["title"] for f in render.health_findings(report(os_name)) if f["id"] == fid)
+                        title = next(f["title"] for f in screens.health_findings(report(os_name)) if f["id"] == fid)
                         self.assertRegex(txt, r"(?m)^ %s$|│  %s" % (re.escape(title), re.escape(title)))   # the pane's first line: the whole title
                         self.assertIn(" what ", txt)
                         self.assertIn(" fix ", txt)
 
     def test_the_title_says_the_period_the_history_and_the_findings(self):
         s, lines = self.screen([], 200, 50)
-        self.assertRegex(lines[1], r"^── HEALTH  last 7 days · since 20\d\d-\d\d-\d\d \d\d:\d\d UTC · 168 h of data · ✖ 1 err  ! 6 warn  · 3 info ─+  1:24h   7:7d   3:30d")
-        self.assertIn(ESC + "[7m 7:7d ", s)                                            # the period in use is reversed
+        self.assertRegex(lines[1], r"^── HEALTH  last 7 days · since 20\d\d-\d\d-\d\d \d\d:\d\d UTC · 168 h of data · ✖ 1 err  ! 6 warn  · 3 info ─+  d:24h   w:7d   m:30d")
+        self.assertIn(ESC + "[7m w:7d ", s)                                            # the period in use is reversed
         s, lines = self.screen(["--period", "1"], 200, 50)
         self.assertIn("last 24 hours", lines[1])
         self.assertIn("24 h of data", lines[1])
-        self.assertIn(ESC + "[7m 1:24h ", s)
+        self.assertIn(ESC + "[7m d:24h ", s)
         s, lines = self.screen(["--period", "30"], 200, 50)
         self.assertIn("last 30 days", lines[1])
         self.assertIn("384 h of data", lines[1])                                        # the demo machine has 16 days of history
@@ -337,7 +344,7 @@ class Once(HealthCase):
         self.assertIn("last 7 days", lines[1])                                          # narrow: the least needed (the coverage) goes first
         self.assertNotIn("h of data", lines[1])
         self.assertIn("✖ 1 err", lines[1])
-        self.assertIn("1:24h", lines[1])
+        self.assertIn("d:24h", lines[1])
         self.assertIn("PROBLEMS", lines[0])                                              # the header's status is the dashboard's
 
     def test_the_sections_follow_the_width(self):
@@ -369,7 +376,7 @@ class Once(HealthCase):
         self.assertIn("Disk filling up: /data", pane)
         self.assertIn("what", pane)
         self.assertIn("facts", pane)
-        self.assertIn("used_gb 1660.4", pane)
+        self.assertIn("used_gb 249", pane)
         self.assertIn("days_to_full 12.4", pane)
         self.assertIn("fix", pane)
         self.assertIn("du -xh --max-depth=1", pane)
@@ -385,7 +392,7 @@ class Once(HealthCase):
         self.assertIn("── TOP CPU", txt)
         s, lines = self.screen(["--select", "hog"], 200, 50)                            # a selection alone: no pane
         self.assertNotIn("DETAILS", "\n".join(lines))
-        self.assertTrue([x for x in s.split(LINE) if ESC + "[7m" in x and "─" not in x])  # the cursor is still on its row
+        self.assertTrue([x for x in s.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x])  # the cursor is still on its row
         s, lines = self.screen(["--select", "nothing like this", "--details"], 120, 33)  # no match: the cursor stays on the first finding
         self.assertIn("finding 1/10", lines[-1])
 
@@ -399,7 +406,7 @@ class Once(HealthCase):
 
     def test_the_cursor_row_is_highlighted_and_the_pills_keep_their_symbols(self):
         s, lines = self.screen(["--select", "restart", "--details"], 120, 33)
-        shown = [x for x in s.split(LINE) if ESC + "[7m" in x and "FINDINGS" not in x and "1:24h" not in x and "keys" not in x and "finding" not in x]
+        shown = [x for x in s.split(LINE)[1:] if ESC + "[7m" in x and "FINDINGS" not in x and "d:24h" not in x and "keys" not in x and "finding" not in x]
         self.assertEqual(len(shown), 1)
         self.assertIn("Restarting: shop-worker-1", shown[0])
         self.assertNotIn(ESC + "[41m", shown[0].replace(ESC + "[1;41;37m", ""))        # the row is plain reverse video: no pill colour left in it
@@ -452,7 +459,7 @@ class Once(HealthCase):
         render.DEMO_HEALTH = "none"
         s, lines = self.screen([], 120, 33)
         txt = "\n".join(lines)
-        self.assertIn(render.HEALTH_NONE, txt)
+        self.assertIn(screens.HEALTH_NONE, txt)
         self.assertNotIn("── FINDINGS", txt)
         self.assertNotIn("no findings ─", lines[1])                                      # nothing to count: no "no findings" in the title
         self.assertIn("no findings", lines[-1])
@@ -506,10 +513,10 @@ class DataSource(HealthCase):
         hv, fl = self.view(data["report"])
         for _ in range(3):
             for k in ("down", "enter", "up", "enter", "end", "home"):
-                render.health_key(hv, k, fl)
+                screens.health_key(hv, k, fl)
                 render.health_screen(render.health_data(hv.days), [], hv, 119, 33)
         self.assertEqual(self.reports, [7])
-        render.health_key(hv, "1", fl)                                                   # another period: its own report, once
+        screens.health_key(hv, "d", fl)                                                   # another period: its own report, once
         for _ in range(5):
             render.health_screen(render.health_data(hv.days), [], hv, 119, 33)
         self.assertEqual(self.reports, [7, 1])
@@ -522,7 +529,7 @@ class DataSource(HealthCase):
     def test_no_history_yet(self):
         with mock.patch.object(history, "open_ro", lambda path=None: None):
             data = render.health_data(7)
-        self.assertEqual((data["report"], data["msg"], data["err"]), (None, render.HEALTH_NONE, False))
+        self.assertEqual((data["report"], data["msg"], data["err"]), (None, screens.HEALTH_NONE, False))
         self.assertIn("starts recording when [features] health is on", data["msg"])
         self.assertIn("after the first hour", data["msg"])
         s, lines = self.screen([], 79, 24)
@@ -621,12 +628,12 @@ class Rotation(HealthCase):
                     name, part, parts, body = sl[-1]
                     self.assertEqual((part, parts), (1, 1))
                     self.assertLessEqual(len(body), body_h)
-                    self.assertFalse([x for x in body if len(render.ANSI.sub("", x)) > w])
-                    self.assertFalse([x for x in body if ESC + "[7m" in x and "1:24h" in x])   # no period selector, no cursor on a monitor without a keyboard
-                    txt = "\n".join(render.ANSI.sub("", x) for x in body)
+                    self.assertFalse([x for x in body if len(ansi.ANSI.sub("", x)) > w])
+                    self.assertFalse([x for x in body if ESC + "[7m" in x and "d:24h" in x])   # no period selector, no cursor on a monitor without a keyboard
+                    txt = "\n".join(ansi.ANSI.sub("", x) for x in body)
                     self.assertIn("── HEALTH ", txt)
                     self.assertIn("── FINDINGS ", txt)
-                    self.assertNotIn("1:24h", txt)
+                    self.assertNotIn("d:24h", txt)
                     frame = render.frame(sl[-1], 1, len(sl), w, rows, [], keys=False)
                     self.check_frame(frame, w, rows, cols)
         render.DEMO_OS = None
@@ -636,14 +643,14 @@ class Rotation(HealthCase):
 
     def test_findings_that_fit_then_the_top_apps(self):
         render.CFG["health_in_rotation"] = True
-        txt = "\n".join(render.ANSI.sub("", x) for x in self.slides(199, 48)[-1][3])
+        txt = "\n".join(ansi.ANSI.sub("", x) for x in self.slides(199, 48)[-1][3])
         self.assertIn("Out of memory: shop-worker-1", txt)
         self.assertIn("Slower boot", txt)                                                # all ten fit
         self.assertNotIn("more findings", txt)
         self.assertIn("── TOP CPU", txt)
         self.assertIn("── TOP MEMORY", txt)
         self.assertNotIn("── EVENTS", txt)                                              # only the apps
-        body = [render.ANSI.sub("", x) for x in self.slides(78, 22)[-1][3]]
+        body = [ansi.ANSI.sub("", x) for x in self.slides(78, 22)[-1][3]]
         self.assertEqual(len(body), 22)
         self.assertRegex("\n".join(body), r"… \+\d+ more findings")                      # a small screen counts what it cuts
         self.assertIn("Out of memory", body[2])                                          # the worst first
@@ -651,7 +658,7 @@ class Rotation(HealthCase):
 
     def test_a_screen_too_small_for_the_apps_keeps_the_findings(self):
         render.CFG["health_in_rotation"] = True
-        body = [render.ANSI.sub("", x) for x in self.slides(78, 6)[-1][3]]
+        body = [ansi.ANSI.sub("", x) for x in self.slides(78, 6)[-1][3]]
         self.assertLessEqual(len(body), 6)
         self.assertIn("── FINDINGS", "\n".join(body))
         self.assertRegex("\n".join(body), "more findings")
@@ -663,12 +670,12 @@ class Rotation(HealthCase):
         render.CFG["features"]["health"] = False
         self.assertNotIn("Health", [x[0] for x in self.slides(199, 48)])
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=True)
-        self.assertNotIn("h: health", render.ANSI.sub("", frame))                       # and the footer does not offer it
+        self.assertNotIn("4", ansi.ANSI.sub("", frame).splitlines()[-1].split(": screens")[0])  # and the footer does not offer 4
         render.CFG["features"]["health"] = True
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=True)
-        self.assertIn("h: health", render.ANSI.sub("", frame))
+        self.assertIn("1-5: screens", ansi.ANSI.sub("", frame))
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=False)    # a monitor with no keyboard: nothing to press
-        self.assertNotIn("h: health", render.ANSI.sub("", frame))
+        self.assertNotIn("screens", ansi.ANSI.sub("", frame))
 
     def test_no_history_and_little_data_are_said_in_the_slide(self):
         render.CFG["health_in_rotation"] = True
@@ -678,7 +685,7 @@ class Rotation(HealthCase):
             for cols, rows in SIZES:
                 with self.subTest(variant=variant, size=(cols, rows)):
                     body = self.slides(cols - 1, rows - 2)[-1][3]
-                    self.assertIn(word, "\n".join(render.ANSI.sub("", x) for x in body))
+                    self.assertIn(word, "\n".join(ansi.ANSI.sub("", x) for x in body))
                     self.check_frame(render.frame(("Health", 1, 1, body), 1, 2, cols - 1, rows, [], keys=False), cols - 1, rows)
 
     def test_a_broken_slide_is_an_error_line_not_a_crash(self):
@@ -690,7 +697,7 @@ class Rotation(HealthCase):
         sl = self.slides(119, 31)
         self.assertEqual(sl[-1][0], "Health")
         line = sl[-1][3][0]
-        self.assertIn("error on page Health", render.ANSI.sub("", line))
+        self.assertIn("error on page Health", ansi.ANSI.sub("", line))
         self.assertNotIn(ESC + "[2J", line)
 
     def test_config_health_in_rotation_yes_no_and_not_a_boolean(self):
@@ -713,7 +720,7 @@ class Rotation(HealthCase):
 
 
 class MainLoop(HealthCase):
-    """render.main() on a fake terminal: `h` opens the Health screen, its keys move it, h/Esc/q go back, an idle one gives the monitor
+    """render.main() on a fake terminal: `h` opens the Health screen, its keys move it, Esc/q/1 go back, an idle one gives the monitor
     back. KEY_CHAR & co. decode the raw reads, as on a real console."""
 
     def run_main(self, script, keyboard=True, cols=80, rows=24):
@@ -754,7 +761,7 @@ class MainLoop(HealthCase):
 
     @staticmethod
     def is_health(frame):
-        return " │ Health │ " in frame[0] and "── HEALTH " in frame[1]
+        return bool(re.search(r"\[\d[ ·](?:Health|Hlth)\]", frame[0]) and "── HEALTH " in frame[1])
 
     @staticmethod
     def at(frame):
@@ -762,9 +769,9 @@ class MainLoop(HealthCase):
         return (int(m.group(1)), int(m.group(2))) if m else None
 
     def test_h_opens_the_screen_keys_move_it_and_h_esc_q_go_back(self):
-        frames, restored = self.run_main([b"h", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"h", b"h", b"\x1b", b"h", b"q"])
+        frames, restored = self.run_main([b"h", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"1", b"4", b"\x1b", b"h", b"q"])
         self.assertEqual([self.is_health(f) for f in frames], [False, True, True, True, True, True, True, False, True, False, True, False])
-        self.assertIn("h: health", frames[0][-1])                                        # a keyboard: the footer offers it
+        self.assertIn("1-5: screens", frames[0][-1])                                     # a keyboard: the footer offers the screens (4 is this one)
         self.assertIn("overview page (stub)", "\n".join(frames[0]))
         self.assertEqual(self.at(frames[1]), (1, 10))
         self.assertEqual(self.at(frames[2]), (3, 10))                                    # ↓ (CSI) ↓ (SS3)
@@ -777,7 +784,7 @@ class MainLoop(HealthCase):
         self.assertEqual(restored, [["attrs", 5]])                                       # the terminal's settings are put back
 
     def test_the_period_keys_change_the_period_and_ask_for_each_report_once(self):
-        frames, _ = self.run_main([b"h", b"1", b"\x1b[B", b"3", b"3", b"7", b"w", b"d", b"m", b"\x1b"])
+        frames, _ = self.run_main([b"h", b"d", b"\x1b[B", b"m", b"m", b"w", b"w", b"d", b"m", b"\x1b"])
         health = [f for f in frames if self.is_health(f)]
         titles = [re.search(r"last (\d+) (?:days|hours)", f[1]).group(0) for f in health]
         self.assertEqual(titles, ["last 7 days", "last 24 hours", "last 24 hours", "last 30 days", "last 30 days", "last 7 days", "last 7 days",
@@ -801,19 +808,19 @@ class MainLoop(HealthCase):
     def test_without_a_keyboard_the_screen_is_not_offered(self):
         frames, restored = self.run_main([2, 2], keyboard=False)
         self.assertEqual(len(frames), 3)
-        self.assertFalse([f for f in frames if self.is_health(f) or "h: health" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_health(f) or "screens" in f[-1]])
         self.assertEqual(restored, [])                                                   # no terminal settings were changed
 
     def test_feature_off_h_does_nothing(self):
         render.CFG["features"]["health"] = False
-        frames, restored = self.run_main([b"h", b"h", b"\x1b[B"])
+        frames, restored = self.run_main([b"h", b"4", b"\x1b[B"])
         self.assertEqual(len(frames), 4)
-        self.assertFalse([f for f in frames if self.is_health(f) or "h: health" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_health(f) or "1-5: screens" in f[-1]])
         self.assertEqual(restored, [["attrs", 5]])
         self.assertEqual(self.calls, [])                                                 # and the history is never read
 
     def test_the_other_screens_keys_are_not_taken(self):
-        frames, _ = self.run_main([b"1", b"h", b"\x1b"])                                 # 1 jumps to a page on the overview, not to a period
+        frames, _ = self.run_main([b"1", b"h", b"\x1b"])                                 # 1 is the Overview here, not a period
         self.assertEqual([self.is_health(f) for f in frames], [False, False, True, False])
         self.assertEqual(self.calls, [7])
         self.assertIn("last 7 days", frames[2][1])
@@ -828,10 +835,10 @@ class MainLoop(HealthCase):
             return real(smp, days)
         render.health_state = flaky
         frames, _ = self.run_main([b"h", render.REFRESH_S, b"\x1b", b"h", b"\x1b"])  # check_frame: no raw escape on screen
-        error = lambda f: " │ Health │ " in f[0] and "error on the health screen" in f[1]  # noqa: E731
+        error = lambda f: bool(re.search(r"\[\d[ ·](?:Health|Hlth)\]", f[0]) and "error on the health screen" in f[1])  # noqa: E731
         self.assertEqual([error(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
-        self.assertEqual(frames[1][-1].strip(), "h/Esc back")
+        self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
         self.assertEqual([self.is_health(f) for f in frames], [False, False, True, False, True, False])  # the next refresh draws it
         self.assertEqual(calls, [0, render.REFRESH_S, render.REFRESH_S])
         self.assertNotIn("ALL OK", frames[1][0])                                         # nothing could be read: never a reassuring status
@@ -847,11 +854,11 @@ class MainLoop(HealthCase):
 
     def test_no_history_and_a_narrow_console(self):
         render.DEMO_HEALTH = "none"
-        frames, _ = self.run_main([b"h", b"\x1b[B", b"\r", b"7", b"\x1b"], cols=80, rows=24)
-        health = [f for f in frames if " │ Health │ " in f[0]]
-        self.assertEqual(len(health), 4)
+        frames, _ = self.run_main([b"h", b"\x1b[B", b"\r", b"d", b"\x1b", b"\x1b"], cols=80, rows=24)  # Esc: the details, then back
+        health = [f for f in frames if re.search(r"\[\d[ ·](?:Health|Hlth)\]", f[0])]
+        self.assertEqual(len(health), 5)
         for f in health:
-            self.assertIn(render.HEALTH_NONE[:60], "\n".join(f))
+            self.assertIn(screens.HEALTH_NONE[:60], "\n".join(f))
             self.assertIn("no findings", f[-1])
 
 
@@ -899,16 +906,16 @@ class HostileAndEmpty(HealthCase):
 
     def test_every_size_and_cursor_position_of_a_hostile_report(self):
         self.seed(self.hostile())
-        fl = render.health_findings(render.health_data(7)["report"])
+        fl = screens.health_findings(render.health_data(7)["report"])
         for cols, rows in SIZES:
-            hv = render.HealthView(7, now=NOW)
+            hv = screens.HealthView(7, now=NOW)
             for details in (False, True):
                 hv.details = details
                 for i in range(len(fl)):
                     with self.subTest(size=(cols, rows), details=details, finding=i):
                         frame, _ = render.health_screen(render.health_data(7), [], hv, cols - 1, rows)
                         self.check_frame(frame, cols - 1, rows)
-                    render.health_key(hv, "down", fl)
+                    screens.health_key(hv, "down", fl)
 
     def test_a_slide_of_a_hostile_report(self):
         self.seed(self.hostile())
@@ -922,16 +929,16 @@ class HostileAndEmpty(HealthCase):
             s, lines = self.screen([], cols, rows)
             self.assertIn("?[2J", "\n".join(lines))
             self.assertNotIn(ESC + "[2J", s)
-        self.assertEqual(render.hclean(None), "")
-        self.assertEqual(render.hclean("a\x00b\x9bc\nd"), "a?b?c?d")
-        self.assertEqual(render.hclean("x" * 50, 10), "x" * 9 + "…")
-        self.assertEqual(render.hclean("\u202e\u200b\u30e1"), "???")
+        self.assertEqual(ui.hclean(None), "")
+        self.assertEqual(ui.hclean("a\x00b\x9bc\nd"), "a?b?c?d")
+        self.assertEqual(ui.hclean("x" * 50, 10), "x" * 9 + "…")
+        self.assertEqual(ui.hclean("\u202e\u200b\u30e1"), "???")
 
     def test_malformed_reports_are_an_error_not_a_crash_of_the_loop(self):
         for bad in ({}, {"period": None}, {"findings": "no"}, {"findings": [None, 3, {"id": 5}], "coverage": {"hours": 5}, "period": {"days": 7}}):
             self.seed(dict(bad, period=bad.get("period", {"days": 7})), 7)
             try:
-                render.health_screen(render.health_data(7), [], render.HealthView(7), 119, 33)
+                render.health_screen(render.health_data(7), [], screens.HealthView(7), 119, 33)
             except Exception:  # noqa: BLE001 - the loop shows an error frame for it (MainLoop); it never gets past that
                 pass
 
@@ -995,36 +1002,36 @@ class Advisor(HealthCase):
 
 class HelperFunctions(HealthCase):
     def test_hspark_scales_to_the_series_and_blanks_what_was_not_recorded(self):
-        self.assertEqual(render.hspark([None, None, 0, 5, 10], 5), "  ▁▄█"[:2] + "▁▄█"[:3])
-        self.assertEqual(render.hspark([None, None], 4), "    ")
-        self.assertEqual(render.hspark([0, 0, 0], 3), "▁▁▁")
-        self.assertEqual(len(render.hspark(list(range(40)), 10)), 10)                    # more values than room: the mean of each group
-        self.assertEqual(render.hspark(["x", None, 1], 3), " " * 2 + "█")
+        self.assertEqual(ansi.hspark([None, None, 0, 5, 10], 5), "  ▁▄█"[:2] + "▁▄█"[:3])
+        self.assertEqual(ansi.hspark([None, None], 4), "    ")
+        self.assertEqual(ansi.hspark([0, 0, 0], 3), "▁▁▁")
+        self.assertEqual(len(ansi.hspark(list(range(40)), 10)), 10)                    # more values than room: the mean of each group
+        self.assertEqual(ansi.hspark(["x", None, 1], 3), " " * 2 + "█")
 
     def test_hbucket_means(self):
-        self.assertEqual(render.hbucket([1, 3, 5, 7], 2), [2.0, 6.0])
-        self.assertEqual(render.hbucket([None, None, 4, 6], 2), [None, 5.0])
-        self.assertEqual(render.hbucket([1, 2], 5), [1, 2])
+        self.assertEqual(ansi.hbucket([1, 3, 5, 7], 2), [2.0, 6.0])
+        self.assertEqual(ansi.hbucket([None, None, 4, 6], 2), [None, 5.0])
+        self.assertEqual(ansi.hbucket([1, 2], 5), [1, 2])
 
     def test_hrows_never_hides_just_one(self):
-        self.assertEqual(render.hrows([1, 2, 3, 4, 5, 6], 5), ([1, 2, 3, 4, 5, 6], 0))
-        self.assertEqual(render.hrows([1, 2, 3, 4, 5, 6, 7], 5), ([1, 2, 3, 4], 3))
-        self.assertEqual(render.hrows([], 5), ([], 0))
+        self.assertEqual(screens.hrows([1, 2, 3, 4, 5, 6], 5), ([1, 2, 3, 4, 5, 6], 0))
+        self.assertEqual(screens.hrows([1, 2, 3, 4, 5, 6, 7], 5), ([1, 2, 3, 4], 3))
+        self.assertEqual(screens.hrows([], 5), ([], 0))
 
     def test_counts_and_ages(self):
-        self.assertEqual([render.hcount(x) for x in (3, 999, 1200, 18420, 2500000, "x", None)], ["3", "999", "1.2k", "18k", "2.5M", "0", "0"])
-        self.assertEqual([render.hago(NOW - s) for s in (10, 600, 7200, 200000, 90000 * 5)], ["now", "10 min ago", "2 h ago", "2 d ago", "5 d ago"])
-        self.assertEqual(render.hwhen(NOW), "2026-09-21 14:13")
-        self.assertEqual(render.hwhen("x"), "?")
-        self.assertEqual(render.hwhen(10 ** 30), "?")
+        self.assertEqual([ui.hcount(x) for x in (3, 999, 1200, 18420, 2500000, "x", None)], ["3", "999", "1.2k", "18k", "2.5M", "0", "0"])
+        self.assertEqual([screens.hago(NOW - s, NOW) for s in (10, 600, 7200, 200000, 90000 * 5)], ["now", "10 min ago", "2 h ago", "2 d ago", "5 d ago"])
+        self.assertEqual(screens.hwhen(NOW), "2026-09-21 14:13")
+        self.assertEqual(screens.hwhen("x"), "?")
+        self.assertEqual(screens.hwhen(10 ** 30), "?")
 
     def test_details_of_a_finding(self):
         f = finding("a:b", "err", "T", "X", "F", {"last": NOW, "n": 3, "r": 0.5, "t": 1.0, "s": "str", "b": True, "peak_hour": NOW - 7200})
-        level, title, text, facts, fix = render.health_details(f)
+        level, title, text, facts, fix = screens.health_details(f)
         self.assertEqual((level, title, text, fix), ("err", "T", "X", "F"))
         self.assertEqual(facts, [("last", "2026-09-21 14:13 UTC"), ("n", "3"), ("r", "0.5"), ("t", "1"), ("s", "str"), ("b", "yes"),
                                  ("peak_hour", "2026-09-21 12:13 UTC")])
-        self.assertEqual(render.health_details({"id": "x", "level": "weird"})[0], "info")
+        self.assertEqual(screens.health_details({"id": "x", "level": "weird"})[0], "info")
 
 
 if __name__ == "__main__":

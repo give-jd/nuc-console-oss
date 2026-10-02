@@ -15,6 +15,8 @@ import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from webtest import classic_default  # noqa: E402
 
 EVIL = '<script>x</script>"onmouseover=alert(1) \'x'
 ROW = re.compile(r'<div class="ro( sel)?" id="r-([0-9a-f]{10})">(.*?)</div>')
@@ -27,6 +29,7 @@ def serve():
     return srv
 
 
+@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)
@@ -280,6 +283,7 @@ class MapPage(unittest.TestCase):
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual(link(off, "dashboard"), "/?")
 
+    @classic_default()
     def test_cache_is_bounded(self):
         for i in range(web.CACHE_MAX * 2):
             self.srv.page(**web.view_params(web.parse_qs("view=map&sel=%010x" % i)))

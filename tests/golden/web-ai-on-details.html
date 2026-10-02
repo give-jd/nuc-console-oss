@@ -1,0 +1,443 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none' -->
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>demo-host · ai · nuc-console</title>
+<style>html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{margin:0;overflow-x:auto}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}.m{color:#bc8cff}.c{color:#39c5cf}.w{color:#f0f6fc}.d{color:#6e7681}.k{color:#0d1117}.B{font-weight:700}.bR{background:#da3633}.bY{background:#d29922}.rv{background:#c9d1d9;color:#0d1117}footer{position:sticky;bottom:0;margin-top:10px;padding:8px 0;background:#0d1117;border-top:1px solid #30363d;color:#6e7681;font:12px sans-serif}a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}.hd{display:flex;justify-content:space-between;gap:2ch;white-space:pre;padding:0 1ch}.hd>span:first-child{overflow:hidden;text-overflow:ellipsis}.lg{margin:8px 0 2px;color:#8b949e}.nt{margin:2px 0;color:#8b949e}.n{color:#c9d1d9}.mp{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 28px;margin-top:8px}.tree{min-width:0}.ro{display:grid;grid-template-columns:auto minmax(0,1fr);padding:0 4px;border-radius:3px;scroll-margin:30vh 0}.ro:hover{background:#161b22}.ro:target{outline:1px solid #30363d}.sel,.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.tr{white-space:pre;color:#6e7681}.bd{white-space:pre-wrap;overflow-wrap:anywhere}.tg{display:inline-block;width:1.6em;text-align:center;text-decoration:none}a.lb{text-decoration:none}a.lb:hover{text-decoration:underline}.dp{align-self:start;border:1px solid #30363d;border-radius:6px;padding:8px 12px;scroll-margin:8px}.dh{display:flex;justify-content:space-between;gap:2ch;margin-bottom:6px;font-weight:700}.dp table{border-collapse:collapse;width:100%}.dp th{text-align:left;font-weight:400;color:#8b949e;padding:1px 2ch 1px 0;vertical-align:top;white-space:nowrap}.dp td{padding:1px 0;overflow-wrap:anywhere}.dp th.in{padding-left:2ch}.dp tr.top td{font-weight:700}.dl{display:none}@media(min-width:1000px){.mp.two{grid-template-columns:minmax(0,1fr) minmax(340px,40%)}.dp{position:sticky;top:8px;max-height:calc(100vh - 80px);overflow:auto}}@media(max-width:999px){.mp.two .dl{display:inline}}.mv{display:inline-flex;vertical-align:middle;border:1px solid #30363d;border-radius:4px;overflow:hidden}.mv>*{padding:0 7px;line-height:18px}.mv>*+*{border-left:1px solid #30363d}.mv>b{background:#1f6feb40;color:#f0f6fc;font-weight:600}.mv>a{text-decoration:none}.mv>a:hover{background:#161b22}.pl{display:inline-block;min-width:6ch;padding:0 .6ch;border-radius:3px;text-align:center;font-weight:700;white-space:pre}.pl.r{background:#da3633;color:#fff}.pl.y{background:#d29922;color:#0d1117}.pl.d{color:#6e7681;font-weight:400}.ht{margin:8px 0 0}.hs{margin:10px 0 2px;color:#8b949e}.hn{margin:6px 0 0;white-space:pre-wrap}.advice{margin:10px 0 0;padding:4px 10px;border-left:3px solid #39c5cf}.advice p{margin:3px 0;white-space:pre-wrap;overflow-wrap:anywhere}.advice-head,.advice-cites,.advice-tools{color:#8b949e}.advice-head{font-weight:700}.advice-error{border-left-color:#d29922}.pl.g{background:#3fb950;color:#0d1117}.pl.c{background:#39c5cf;color:#0d1117}.mw{overflow-x:auto}.mt{border-collapse:collapse;width:100%}.mt th{text-align:left;font-weight:400;color:#8b949e;padding:2px 2ch 2px 0;white-space:nowrap}.mt td{padding:1px 2ch 1px 0;white-space:nowrap}.mt .r{text-align:right}.mt .mk{white-space:pre;padding-left:4px}.mt .pl{min-width:11ch}.mt tbody tr:hover{background:#161b22}.mt tr.sel,.mt tr.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.mt .no a{color:#8b949e}.mt .nn div{max-width:44ch;overflow:hidden;text-overflow:ellipsis;color:#8b949e}.cmd{background:#161b22;padding:1px 6px;border-radius:3px;user-select:all;overflow-wrap:anywhere}@media(max-width:1399px){.mp.two .nn{display:none}}@media(max-width:699px){.mt .nn,.mt .pm,.mt .sz{display:none}}.ctl,.chat{margin:10px 0;padding:8px 12px;border:1px solid #30363d;border-radius:6px}.ctl .row{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:2px 0}.pl.big{font-size:1.15em;padding:2px 14px}.ctl .st{font-weight:700;overflow-wrap:anywhere}.ctl .note{margin:4px 0}.note.ok{color:#3fb950}.note.bad{color:#ff7b72}.ctl .dir{color:#8b949e}.ctl progress{width:min(48ch,100%);height:14px}form.f{display:inline;margin:0}.bt{font:inherit;cursor:pointer;display:inline-block;text-decoration:none;color:#c9d1d9;background:#21262d;border:1px solid #30363d;border-radius:6px;padding:2px 12px}.bt:hover{background:#30363d}.bt.on,.bt.use{background:#238636;border-color:#2ea043;color:#fff}.bt.off,.bt.del,.bt.stop{background:#8e1519;border-color:#da3633;color:#fff}.bt.use{padding:0 8px}.bt:disabled{opacity:.4;cursor:not-allowed}.cf{margin:6px 0;padding:6px 10px;border-left:3px solid #d29922;background:#161b22}.cf .bt{margin-left:6px}.chat .q{margin:2px 0}.chat .qa{margin:8px 0}input.q{font:inherit;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:3px 8px;width:min(70ch,100%)}input.q:disabled{opacity:.5}.chat .adv{margin:6px 0}.mg{margin:10px 0;color:#8b949e}.mt .ac{padding-left:1ch}body{font-size:14.0px}</style>
+<div class="hd w bR B">
+<span> demo-host │ AI │ 14:13:20</span>
+<span>✖ 6 PROBLEMS </span>
+</div>
+<pre class="ht"><span class="c">──</span><span class="c B"> AI </span> <span class="d">what this machine can run</span><span class="d"> · </span><span class="d">12 models</span><span class="d"> · </span><span class="g">✔ 10 fit</span>  <span class="c">◐ 2 gpu+cpu</span> <span class="c">───────────────────────────────────────────────────────────────────────</span></pre>
+<section class="ctl" id="ctl">
+<div class="row">
+<span class="pl g big">ON</span>
+<span class="st">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
+<form class="f" method="post" action="/ai/off">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<button class="bt off" type="submit" title="stop the model server and turn the advisor off">Turn AI off</button>
+</form>
+</div>
+<div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+</section>
+<section class="chat" id="chat">
+<div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>
+<form class="f ask" id="ask" method="post" action="/ai/ask">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input class="q" type="text" name="q" maxlength="500" size="60" placeholder="ask: why is the disk filling up?" autocomplete="off"> <button class="bt on" type="submit">Ask</button>
+</form>
+<div class="adv">advice now: <form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="days" value="1">
+<button class="bt " type="submit">last 24 h</button>
+</form> <form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="days" value="7">
+<button class="bt " type="submit">last 7 days</button>
+</form> <form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="days" value="30">
+<button class="bt " type="submit">last 30 days</button>
+</form>
+</div>
+</section>
+<pre class="ht"><span class="c">──</span><span class="c B"> HARDWARE </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span><span class="d">  linux x86_64</span>
+ <span class="d">CPU  </span> <span class="B">AMD Ryzen 7 5800X</span><span class="d"> · 8 cores / 16 threads</span><span class="d"> · AVX2</span>
+ <span class="d">RAM  </span> <span class="g">████████</span><span class="d">░░░░░░░░░░░░░░░░</span>  21.0 GB free of 31.2 GB
+ <span class="d">GPU  </span> <span class="B">NVIDIA GeForce RTX 3060</span><span class="d"> · CUDA</span>  <span class="g">██</span><span class="d">░░░░░░░░░░░░░░░░░░░░░░</span>  11.0 GB free of 12.0 GB</pre>
+<div class="hs">MODELS · best first</div>
+<main class="mp two">
+<div class="tree">
+<div class="mw" id="models">
+<table class="mt">
+<thead>
+<tr>
+<th>
+</th>
+<th>model</th>
+<th class="pm">params</th>
+<th class="r sz">size</th>
+<th class="r">needs</th>
+<th>verdict</th>
+<th>est tok/s</th>
+<th class="nn">notes</th>
+<th>
+</th>
+</tr>
+</thead>
+<tbody>
+<tr id="m-0">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=gpt-oss-20b#m-0">OpenAI gpt-oss 20B</a>
+</td>
+<td class="pm">21B-A3.6B</td>
+<td class="r sz">11.8 GB</td>
+<td class="r">12.5 GB</td>
+<td>
+<span class="pl c">◐ GPU+CPU</span>
+</td>
+<td>36-66</td>
+<td class="nn">
+<div>fast for its size (MoE, 3.6B active); reasoning effort is a setting</div>
+</td>
+<td class="ac">
+<span class="d">not pinned yet</span>
+</td>
+</tr>
+<tr id="m-1">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-30b-a3b#m-1">Qwen3 30B-A3B</a>
+</td>
+<td class="pm">30.5B-A3.3B</td>
+<td class="r sz">18.2 GB</td>
+<td class="r">19.3 GB</td>
+<td>
+<span class="pl c">◐ GPU+CPU</span>
+</td>
+<td>19-37</td>
+<td class="nn">
+<div>fast on CPU (MoE: only 3.3B parameters work per token)</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-30b-a3b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-2">
+<td class="mk">
+<span class="y" title="recommended">★</span>  </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=phi-4#m-2">Phi-4 14B</a>
+</td>
+<td class="pm">14.7B</td>
+<td class="r sz">8.9 GB</td>
+<td class="r">9.8 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>17-28</td>
+<td class="nn">
+<div>strong at reasoning and code; short context (16k)</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="phi-4">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-3">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-14b#m-3">Qwen3 14B</a>
+</td>
+<td class="pm">14.8B</td>
+<td class="r sz">8.8 GB</td>
+<td class="r">9.7 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>17-28</td>
+<td class="nn">
+<div>thinking mode: /no_think turns it off</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-14b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-4">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-8b#m-4">Qwen3 8B</a>
+</td>
+<td class="pm">8.2B</td>
+<td class="r sz">4.9 GB</td>
+<td class="r">5.8 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>31-51</td>
+<td class="nn">
+<div>thinking mode: /no_think turns it off</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-8b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-5">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=granite-3.3-8b#m-5">IBM Granite 3.3 8B</a>
+</td>
+<td class="pm">8.2B</td>
+<td class="r sz">4.9 GB</td>
+<td class="r">5.8 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>31-51</td>
+<td class="nn">
+<div>long context (128k); tuned for business tasks</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="granite-3.3-8b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-6">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=phi-4-mini#m-6">Phi-4-mini 3.8B</a>
+</td>
+<td class="pm">3.8B</td>
+<td class="r sz">2.4 GB</td>
+<td class="r">3.3 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>61-102</td>
+<td class="nn">
+<div>small and good at reasoning; long context</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="phi-4-mini">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr class="sel" id="m-7">
+<td class="mk"> <span class="g" title="installed">✓</span>
+<span class="c" title="active">●</span>
+</td>
+<td>
+<a class="lb" href="/?view=ai#m-7">Qwen3 4B</a>
+</td>
+<td class="pm">4B</td>
+<td class="r sz">2.4 GB</td>
+<td class="r">3.3 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>61-102</td>
+<td class="nn">
+<div>the default of nuc-console-ai: good advice in about 4 GB</div>
+</td>
+<td class="ac">
+<span class="g">● in use</span>
+</td>
+</tr>
+<tr id="m-8">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=smollm3-3b#m-8">SmolLM3 3B</a>
+</td>
+<td class="pm">3.1B</td>
+<td class="r sz">1.9 GB</td>
+<td class="r">2.7 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>81-135</td>
+<td class="nn">
+<div>small, multilingual, long context</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="smollm3-3b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-9">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=granite-3.3-2b#m-9">IBM Granite 3.3 2B</a>
+</td>
+<td class="pm">2.5B</td>
+<td class="r sz">1.6 GB</td>
+<td class="r">2.5 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>96-160</td>
+<td class="nn">
+<div>very small; fine for short advice</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="granite-3.3-2b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-10">
+<td class="mk"> <span class="g" title="installed">✓</span> </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-1.7b#m-10">Qwen3 1.7B</a>
+</td>
+<td class="pm">1.7B</td>
+<td class="r sz">1.1 GB</td>
+<td class="r">1.8 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>140-233</td>
+<td class="nn">
+<div>runs anywhere; thinking mode: /no_think</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-1.7b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr id="m-11">
+<td class="mk">   </td>
+<td>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-0.6b#m-11">Qwen3 0.6B</a>
+</td>
+<td class="pm">0.6B</td>
+<td class="r sz">400 MB</td>
+<td class="r">1.1 GB</td>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+<td>384-640</td>
+<td class="nn">
+<div>a toy: too small to give reliable advice</div>
+</td>
+<td class="ac">
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-0.6b">
+<button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<pre class="ht"> <span class="y">★</span><span class="d"> recommended</span>  ·  <span class="g">✓</span><span class="d"> installed</span>  ·  <span class="c">●</span><span class="d"> active</span>  ·  <span class="d">tok/s: rough estimate</span></pre>
+</div>
+<aside class="dp" id="details">
+<div class="dh">
+<span>DETAILS</span>
+<a href="/?view=ai#m-7">close ✕</a>
+</div>
+<table>
+<tr class="top">
+<th>model</th>
+<td>Qwen3 4B</td>
+</tr>
+<tr>
+<th>verdict</th>
+<td>
+<span class="pl g">✔ FITS GPU</span>
+</td>
+</tr>
+<tr>
+<th>why</th>
+<td>needs 3.3 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</td>
+</tr>
+<tr>
+<th>speed</th>
+<td>about 61-102 tokens/s (a rough estimate, not a promise)</td>
+</tr>
+<tr>
+<th>state</th>
+<td>✓ installed · ● active: [ai] model</td>
+</tr>
+<tr>
+<th>remove</th>
+<td>
+<code class="cmd">sudo nuc-console-ai remove qwen3-4b</code>
+</td>
+</tr>
+<tr>
+<th>needs</th>
+<td>3.3 GB of memory: the file (2.4 GB), the context and the runtime</td>
+</tr>
+<tr>
+<th>where</th>
+<td>all 36 layers on the GPU</td>
+</tr>
+<tr>
+<th>model</th>
+<td>4B parameters · Q4_K_M · context up to 40960 tokens</td>
+</tr>
+<tr>
+<th>licence</th>
+<td>Apache-2.0</td>
+</tr>
+<tr>
+<th>notes</th>
+<td>the default of nuc-console-ai: good advice in about 4 GB</td>
+</tr>
+<tr>
+<th>do</th>
+<td>
+<span class="g">● in use</span> <form class="f" method="post" action="/ai/delete">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<input type="hidden" name="model" value="qwen3-4b">
+<button class="bt del" type="submit" title="asks first">delete its files</button>
+</form>
+</td>
+</tr>
+</table>
+</aside>
+</main>
+<pre class="ht"><span class="c">──</span><span class="c B"> STATUS </span><span class="c">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</span>
+ <span class="d">advisor  </span> <span class="g">✔ on</span><span class="d">  (turned on from the AI page or screen)</span>
+ <span class="d">endpoint </span> http://127.0.0.1:8080/v1
+ <span class="d">server   </span> <span class="g">✔ answering</span><span class="d"> · 1 model: qwen3-4b</span>
+ <span class="d">model    </span> <span class="c">●</span> <span class="B">qwen3-4b</span><span class="d">  in the catalog</span>
+ <span class="d">runtime  </span> <span class="g">✔ installed</span><span class="d"> (0.10.6)</span>
+ <span class="d">files    </span> <span class="d">/var/lib/nuc-console/ai</span></pre>
+<div class="mg">manage: <form class="f" method="post" action="/ai/delete-all">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-4b">
+<button class="bt del" type="submit" title="asks first">delete everything</button>
+</form> the runtime and every model (4.0 GB)</div>
+<footer>
+<a href="/?">dashboard</a> · <a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=100#m-7">compact</a> · <a href="/?view=ai&amp;sel=qwen3-4b&amp;cols=200#m-7">wide</a> · text <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=90#m-7">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-4b&amp;zoom=110#m-7">A+</a> · reloads by itself while something runs · <a href="/?view=ai&amp;sel=qwen3-4b#m-7">reload</a> · 14:13:20</footer>
+</html>

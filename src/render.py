@@ -6,9 +6,7 @@ in a full-screen browser (see kiosk()); host metrics come from hostinfo.py inste
 """
 import collections
 import glob
-import ipaddress
 import json
-import math
 import os
 import re
 import select
@@ -20,12 +18,23 @@ import sys
 import textwrap
 import threading
 import time
-import unicodedata
 
+import cards  # same directory: the card registry and the KPI model
+import ansi  # same directory: the console's drawing of the components
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
+import prefs  # same directory: [ui], the console's theme, density, order and KPIs
 import procs
+import ui
+import screens  # same directory: the full screens' view-models and the components of each screen
+from ansi import ANSI, bar, c, cc, clip, columns, kv, msg, msg_wrap, pad, section, vlen
+from ui import dd, dget, fmt_ago, hclean, hnum, human, idict, num, plural, safe
+from screens import (CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS, HEALTH_DAYS, HEALTH_NONE, MAP_IDLE_S, AiView, HealthView, MapView,
+                     ai_key, ai_mb, ai_rows, ai_select, ai_sync, cpu_key, cpu_rows, cpu_select, cpu_sync, health_findings, health_key,
+                     health_nothing, health_select, health_sync, map_key, map_layout, map_select, map_sync, map_view)
+from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
+                      exposure_rows, new_ports, os_of)
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -40,7 +49,7 @@ STATE = os.environ.get("NUC_CONSOLE_STATE", os.path.join(nuc_config.RUN_DIR, "co
 NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "net.json"))
 BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
 BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
-CFG = nuc_config.load()
+CFG = nuc_config.current()  # the process's one configuration dict (tests and --demo change it in place)
 # the commands the advice on screen refers to, in the words of this OS
 if WINDOWS:
     ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
@@ -66,80 +75,12 @@ def on(feature):
 
 ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
-ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
                               ("Boot", on("boot"))) if ok)
-# typical database/broker ports: exposed to the LAN they are the case to flag
-SENSITIVE = {3306, 5432, 5433, 5447, 5984, 6379, 6381, 9200, 27017, 1883, 9001, 18086, 8086}
 
 
-def c(code, s):
-    return f"\x1b[{code}m{s}\x1b[0m"
-
-
-CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def safe(s):
-    """External data (comm, labels, docker stderr) is untrusted: no escapes/newlines on the physical console."""
-    return CTRL.sub("?", str(s))
-
-
-def vlen(s):
-    return len(ANSI.sub("", s))
-
-
-def pad(s, w):
-    return s + " " * max(0, w - vlen(s))
-
-
-def section(title, w, note=""):
-    """Section title: '── TITLE ────────  note'. The caller always puts an empty line before it."""
-    t = f" {title} "
-    return c(36, "──") + c("1;36", t) + c(36, "─" * max(2, w - 4 - len(t) - (len(note) + 2 if note else 0))) \
-        + (c(90, f"  {note}") if note else "")
-
-
-def msg(level, text):
-    """Indented status message: level err/warn/ok/info, with a symbol (colour alone is not enough)."""
-    sym, col = {"err": ("✖", 31), "warn": ("!", 33), "ok": ("✔", 32), "info": ("·", 90)}[level]
-    return f"   {c(col, sym)} {text}"
-
-
-def msg_wrap(level, text, w):
-    """msg(), continued on the lines below (under the text) at the commas when it is wider than w: a long list is not cut."""
-    lines, cur = [], ""
-    for part in text.split(", "):
-        if cur and len(cur) + 2 + len(part) > w - 6:  # -6: the comma that ends the line when it wraps
-            lines.append(cur + ",")
-            cur = part
-        else:
-            cur = cur + ", " + part if cur else part
-    lines.append(cur)
-    return [msg(level, lines[0])] + ["     " + x for x in lines[1:]]
-
-
-def kv(label, value, lw=13):
-    return f"   {c(90, pad(label, lw))}{value}"
-
-
-FULL = False   # True while the detail pages / full view are built: no section hides items
-TRUNC = set()  # sections that hid items in the last overview ("… +N more"): the detail pages show them in full
-EXPAND = set()  # sections whose caps are lifted because the free space allows it (see page_overview)
-
-
-def lim(seq, n, section):
-    """seq[:n] unless FULL; remembers that `section` hides items so the detail pages can show everything."""
-    if FULL or section in EXPAND or len(seq) <= n:
-        return seq
-    TRUNC.add(section)
-    return seq[:n]
-
-
-def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
+def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     """Compact list over several lines without splitting items; beyond max_lines the last line ends with '… +N'."""
-    if FULL or (section and section in EXPAND):
-        max_lines = None
     rows, cur = [], []
     for it in items:
         if cur and indent + vlen(sep.join(cur)) + len(sep) + vlen(it) > w:
@@ -150,8 +91,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
     rows = [r for r in rows if r]
     if not max_lines or len(rows) <= max_lines:
         return [" " * indent + sep.join(r) for r in rows]
-    if section:
-        TRUNC.add(section)
     rows, hidden = rows[:max_lines], sum(len(r) for r in rows[max_lines:])
     while len(rows[-1]) > 1 and indent + vlen(sep.join(rows[-1])) + 8 > w:  # 8 = "  … +NNN"
         rows[-1].pop()
@@ -159,58 +98,7 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + c(90, f"  … +{hidden}")]
 
 
-def fit_join(items, sep, w, lead="", c90=False):
-    """lead + items joined by sep, dropping trailing items until it fits in w columns (at least one is kept)."""
-    items = list(items)
-    while len(items) > 1 and vlen(lead + sep.join(items)) > w:
-        items.pop()
-    text = sep.join(items)
-    return lead + (c(90, text) if c90 else text)
-
-
-def clip(s, w):
-    """Cut to w visible columns, leaving ANSI sequences intact."""
-    out, n, i = [], 0, 0
-    while i < len(s):
-        m = ANSI.match(s, i)
-        if m:
-            out.append(m.group())
-            i = m.end()
-        elif n >= w:
-            break
-        else:
-            out.append(s[i])
-            n += 1
-            i += 1
-    return "".join(out) + "\x1b[0m"
-
-
-def bar(frac, w, warn=0.7, err=0.9):
-    frac = min(max(frac, 0.0), 1.0)
-    n = round(frac * w)
-    col = 32 if frac < warn else 33 if frac < err else 31
-    return c(col, "█" * n) + c(90, "░" * (w - n))
-
-
-def plural(n, word):
-    """'1 rule', '2 rules': English count + noun (regular plurals only)."""
-    return f"{n} {word}" + ("" if n == 1 else "s")
-
-
-def human(nbytes):
-    if nbytes is None:
-        return "-"
-    return f"{nbytes / 2**30:.1f}G" if nbytes >= 2**30 else f"{nbytes / 2**20:.0f}M"
-
-
-def fmt_dur(sec):
-    d, r = divmod(int(sec), 86400)
-    h, r = divmod(r, 3600)
-    return f"{d}d {h}h" if d else f"{h}h {r // 60}m"
-
-
 THROTTLE_WINDOW_S = 60
-THERMAL_WARN, THERMAL_ERR = 0.8, 0.9  # fractions of the maximum declared by the sensor (sysfs temp*_max)
 
 
 def read_file(path):
@@ -275,21 +163,6 @@ def parse_sessions(loginctl_text, ss_text):
         if len(f) >= 4:
             ssh.append(f[3].rpartition(":")[0].strip("[]"))
     return {"local": local, "ssh": sorted(set(ssh))}
-
-
-PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16",
-                                                  "100.64.0.0/10", "::1/128", "fe80::/10", "fc00::/7")]
-
-
-def is_private_addr(addr):
-    """LAN, loopback, link-local, Tailscale (100.64/10, fd7a::/48 in fc00::/7). Explicit list: Python's `is_private`
-    also includes documentation ranges (e.g. 203.0.113.0/24), which are not local at all."""
-    try:
-        ip = ipaddress.ip_address(addr.split("%")[0])
-    except ValueError:
-        return False
-    ip = getattr(ip, "ipv4_mapped", None) or ip
-    return any(ip in n for n in PRIVATE_NETS)
 
 
 _CACHE = {}
@@ -359,7 +232,15 @@ def read_filesystems():
 
 
 class Sampler:
-    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls."""
+    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls.
+
+    sample() is the one place the dashboard reads the host from. Besides the per-core CPU, the thermal sensors, the interfaces, the
+    sessions and the filesystems it holds the figures of the SYSTEM block and of the System page, so that --demo can replace all of
+    them (demo.sampler_data) and no block calls /proc, statvfs or hostinfo while it draws:
+      "mem"        {"MemTotal", "MemAvailable", "Cached", "SwapTotal", "SwapFree"} in bytes, or None (not readable: drawn as ?)
+      "disk_root"  (used, total, label) of the system volume, or None
+      "uptime"     seconds since boot, or None
+      "load"       ['0.12', '0.30', '0.25']; [] where the OS has no load average (Windows); None when it could not be read"""
 
     def __init__(self):
         self.cpu = self._cpu()
@@ -420,7 +301,8 @@ class Sampler:
             th["recent"] = rec if rec is None or rec >= 0 else None  # falling sum = a CPU went offline: invalid figure
         return {"cpu": per, "thermal": th if on("thermal") else {}, "net": net if on("network_traffic") else {},
                 "sessions": cached("sessions", 10, read_sessions) if on("sessions") else None,
-                "fs": cached("fs", 30, read_filesystems) if on("disks") else None}
+                "fs": cached("fs", 30, read_filesystems) if on("disks") else None,
+                "mem": read_host(meminfo), "disk_root": read_host(root_disk), "uptime": read_host(uptime_s), "load": read_load()}
 
 
 def meminfo():
@@ -457,85 +339,65 @@ def root_disk():
     return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, "/"
 
 
-def up_load_note(up, load):
-    return f"up {fmt_dur(up)}" + (f" · load {' '.join(load)}" if load else "")
+def read_host(fn):
+    """fn() for a Sampler figure: its value, or None when the host cannot give it (the screen draws `?`, whatever /proc, sysctl or the
+    Windows API raised: one unreadable figure must not take the SYSTEM block, or the frame, down)."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 - the answer is "unknown", never a traceback in the middle of the dashboard
+        return None
 
 
-def columns(cols, w, gap=2):
-    """Puts blocks of lines side by side; each block is (lines, width)."""
-    rows = max(len(x) for x, _ in cols)
-    out = []
-    for i in range(rows):
-        out.append((" " * gap).join(pad(clip(x[i], cw), cw) if i < len(x) else " " * cw for x, cw in cols))
-    return out
+def read_load():
+    """The Sampler's "load" (see loadavg()): [] where the OS has no load average (Windows), None when it has one but it could not be read."""
+    try:
+        load = loadavg()
+    except Exception:  # noqa: BLE001 - same rule as read_host()
+        return None
+    return [] if load is None else load if len(load) == 3 else None
 
 
-def fmt_min(sec):
-    return f"{sec / 60:.1f} min" if sec >= 60 else f"{sec:.0f} s"
-
-
-def is_absent(d, key):
-    """True if the collector recorded that the tool for that section is not installed (not an error)."""
-    return isinstance(d, dict) and key in (d.get("absent") or [])
-
-
-def is_disabled(d, key):
-    """True if the section was switched off in config.ini (the collector skipped it on purpose)."""
-    return isinstance(d, dict) and key in (d.get("disabled") or [])
+def swap_figures(m):
+    """(used, total) bytes of the swap from a Sampler's "mem": None when there is no swap (or no figures)."""
+    try:
+        total, free = m["SwapTotal"], m["SwapFree"]
+        return (total - free, total) if total else None
+    except (KeyError, TypeError):
+        return None
 
 
 def unavail_msg(d, key, prefix="unavailable"):
     """Line for a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
-    if is_disabled(d, key):
-        return msg("info", "disabled in config.ini")
-    if isinstance(d, dict) and key in (d.get("unsupported") or []):
-        return msg("info", "not available on this OS")
-    if isinstance(d, dict) and key in (d.get("notes") or {}):
-        return msg("info", safe(d["notes"][key])[:70])
-    if is_absent(d, key):
-        return msg("info", "not installed on this machine")
-    return msg("warn", f"{prefix}: " + safe(((d or {}).get("errors") or {}).get(key, "collector needs updating"))[:60])
+    m = cards.unavail(d, key, prefix)
+    return msg(m.level, m.text)
 
 
-def fmt_ago(sec):
-    sec = max(sec, 0)  # clocks out of sync must not produce "-5 s"
-    return f"{sec:.0f} s" if sec < 90 else f"{sec / 60:.0f} min" if sec < 5400 else f"{sec / 3600:.0f} h"
+def _lines_of(parts, w):
+    """The console's lines of a list of components (ansi.render), and whether the drawing cut something."""
+    lines, hid = [], False
+    for part in parts:
+        got, h = ansi.render(part, w)
+        lines += got
+        hid = hid or h
+    return lines, hid
 
 
 def thermal_lines(th, bw, maxw=None):
-    """Temperatures with bar and thresholds (RAM style) + throttling time. Scale and thresholds come from the sensor."""
-    lines = []
-    for label, key in (("TEMP", "cpu"), ("NVMe", "nvme")):
-        if key in th:
-            t, mx = th[key]
-            clk = f"   clock {th['clk'][0]:.1f}/{th['clk'][1]:.1f} GHz" if key == "cpu" and th.get("clk") else ""
-            limits = f"   limits {THERMAL_WARN * mx:.0f}/{THERMAL_ERR * mx:.0f}°C"
-            head = f" {label:<5} {bar(t / mx, bw, THERMAL_WARN, THERMAL_ERR)} {t:.0f}°C/{mx:.0f}°C"
-            # when narrow, drop the clock first, then the limits (the line must not exceed the width)
-            line = next((x for x in (head + limits + clk, head + limits, head) if maxw is None or vlen(x) <= maxw), head)
-            lines.append(line)
-    if th.get("throttle_s") is not None:
-        rec = th.get("recent")
-        state = (c(31, f"✖ THROTTLING now (+{rec} events/min)") if rec else
-                 c(32, "✔ none in the last minute") if rec == 0 else c(90, "measuring"))
-        lines.append(f" {c(90, 'throt')} {fmt_min(th['throttle_s'])} total since boot   {state}")
-    return lines
+    """Temperatures with bar and thresholds (RAM style) + throttling time. Scale and thresholds come from the sensor (cards.thermal_parts)."""
+    return _lines_of(cards.thermal_parts(th, bw, maxw), 0)[0]
 
 
 def page_sistema(s, w, cont=None):
-    m, lines = meminfo(), []
-    load, up = loadavg(), uptime_s()
-    disk_used, disk_tot, disk_label = root_disk()
-    lines.append(f" up {fmt_dur(up)}" + (f"   load {' '.join(load)}" if load else ""))
-    lines.append("")
+    m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), cards.disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
+    lines = [f" up {cards.fmt_up(up)}" + (f"   load {cards.fmt_load(load)}" if load != [] else ""), ""]
     bw = max(10, min(60, w - 40))
-    ram_used = m["MemTotal"] - m["MemAvailable"]
-    swap_used = m["SwapTotal"] - m["SwapFree"]
-    lines.append(f" RAM   {bar(ram_used / m['MemTotal'], bw)} {human(ram_used)}/{human(m['MemTotal'])}"
-                 f"  cache {human(m['Cached'])}")
-    if m["SwapTotal"]:
-        lines.append(f" SWAP  {bar(swap_used / m['SwapTotal'], bw)} {human(swap_used)}/{human(m['SwapTotal'])}")
-    lines.append(f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}  {safe(disk_label)}")
+    ram, swap = cards.ram_figures(m), swap_figures(m)
+    lines.append(f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}  cache {human(m.get('Cached'))}" if ram
+                 else f" RAM   {c(33, '?')}")
+    if swap:
+        lines.append(f" SWAP  {bar(swap[0] / swap[1], bw)} {human(swap[0])}/{human(swap[1])}")
+    lines.append(f" DISK  {bar(disk[0] / disk[1], bw)} {human(disk[0])}/{human(disk[1])}  {safe(disk[2])}" if disk
+                 else f" DISK  {c(33, '?')}")
     if on("thermal"):
         lines += thermal_lines(s.get("thermal") or {}, bw)
     lines.append("")
@@ -614,28 +476,7 @@ def containers_block(data, w, now=None):
     return lines + columns([(cols[0], cw), (cols[1], cw)], w)
 
 
-page_container = containers_block  # historical name used by the tests
-
-
-TS4, TS6 = ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48")
-NET_STALE_S = 120
-# network sections the exposure classification depends on: if one is missing, the baseline comparison is not reliable.
-# The others (Tailscale, fail2ban, drops, databases...) are secondary: an error there must not silence the port alarms.
-EXPOSURE_SECTIONS = frozenset(("listeners", "ufw", "docker_user", "serve", "firewall"))
-# processes that listen on behalf of containers: docker-proxy (Linux), the Docker Desktop / OrbStack / Rancher backends
-DOCKER_PROXIES = {"docker-proxy", "com.docker.backend", "com.docker.vpnkit", "vpnkit", "vpnkit-bridge", "com.docker.proxy",
-                  "OrbStack Helper", "limactl", "rancher-desktop"}  # not wslrelay: it forwards any WSL port, not only containers
-
-
-def os_of(d):
-    """Which OS wrote a state file: 'linux' for files written before the field existed."""
-    return (d or {}).get("os") or "linux"
-
-
-def exposure_partial(net):
-    return bool(set((net or {}).get("errors") or {}) & EXPOSURE_SECTIONS)
 NAMEW = 36
-BOOT_STALE_S = 900
 NCOL3 = 225  # from this width the single screen uses three columns
 NET_SKIP = ("lo", "veth", "br-")  # container virtual interfaces: noise
 NET_HIST = 30  # history samples for the traffic sparklines
@@ -643,274 +484,16 @@ REAL_FS = ("ext4", "ext3", "xfs", "btrfs", "vfat", "f2fs", "zfs", "ntfs3", "exfa
 BOOT_WINDOW_S = 900  # a container started within 15 min of boot "started with the boot"
 
 
-def bind_scope(addr):
-    """Where a connection can come from, looking only at the bind address."""
-    if addr in ("*", "", "0.0.0.0", "::"):
-        return "wild"
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return "lan"
-    return "lo" if ip.is_loopback else "ts" if ip in TS4 or ip in TS6 else "lan"
-
-
-def rule_match(to, port, proto):
-    """(result, interface). Result: True/False, 'all' (Anywhere) or None = rule that cannot be interpreted."""
-    to = to.replace(" (v6)", "").strip()
-    iface = ""
-    m = re.search(r"\s+on\s+(\S+)$", to)
-    if m:
-        iface, to = m.group(1), to[:m.start()].strip()
-    spec, _, pr = to.partition("/")
-    if pr and pr != proto:
-        return False, iface
-    if spec == "Anywhere":
-        return "all", iface
-    if spec == "OpenSSH":  # ufw's default profile: 22/tcp
-        return port == 22 and proto == "tcp", iface
-    if re.fullmatch(r"[\d,:]+", spec):  # 22, 80,443, 8000:8010
-        for item in spec.split(","):
-            lo, _, hi = item.partition(":")
-            if lo.isdigit() and int(lo) <= port <= int(hi or lo):
-                return True, iface
-        return False, iface
-    return None, iface  # application profiles, destinations with an IP...
-
-
-def fw_verdict(port, proto, ufw):
-    """(state, note). State: open | filtered | blocked | nofw | unknown.
-
-    Safety rule: whatever cannot be interpreted is 'unknown' (treated as exposed), never 'blocked'.
-    First match wins, as in ufw. Rules for the tailscale* interface concern the tailnet, not the LAN.
-    ponytail: reads `ufw status verbose`, not the real iptables rules; rules written outside ufw are not seen.
-    """
-    if ufw is None:
-        return "unknown", "ufw n/a"
-    if not ufw.get("active"):
-        return "nofw", "ufw off"
-    d = ufw.get("default", "")
-    if "deny (incoming)" not in d and "reject (incoming)" not in d:
-        return "open", "default allow"
-    allow_src, deny_src, unknown, v6_allow = [], [], False, False
-    for r in ufw.get("rules", []):
-        act = r["action"]
-        allow, deny = act.startswith(("ALLOW", "LIMIT")), act.startswith(("DENY", "REJECT"))
-        if not (allow or deny) or "OUT" in act or "FWD" in act:
-            continue
-        m, iface = rule_match(r["to"], port, proto)
-        if m is False or iface.startswith("tailscale"):
-            continue
-        if m is None:
-            unknown = True
-            continue
-        src = r["from"].replace(" (v6)", "")
-        if re.search(r"\s\d", src):  # source with a port ("Anywhere 53"): not interpreted
-            unknown = True
-            continue
-        if "(v6)" in r["to"] + r["from"]:
-            v6_allow = v6_allow or allow
-            continue
-        if src.startswith("Anywhere"):
-            if allow:
-                return ("filtered", "open except " + ", ".join(deny_src)[:24]) if deny_src else ("open", "open")
-            if allow_src:
-                break
-            return "blocked", "blocked (deny)"
-        (allow_src if allow else deny_src).append(src)
-    if allow_src:
-        return "filtered", "only " + ", ".join(dict.fromkeys(allow_src))[:30]
-    if unknown:
-        return "unknown", "rule not understood"
-    if v6_allow:
-        return "unknown", "IPv6 rule only"
-    return "blocked", "blocked"
-
-
-def docker_verdict(du):
-    """(cell, note, red_note) for a port published by Docker.
-
-    Rules in DOCKER-USER see the *container* port (DNAT already done), not the published one: a rule with
-    --dport cannot be attributed to the port shown, hence 'unknown'. Only a DROP/REJECT without --dport is certain.
-    """
-    if du is None:
-        return 3, "docker: DOCKER-USER n/a", False
-    if not du:
-        return 1, "docker: bypasses ufw", True
-    blanket, unclear = False, False
-    for rule in du:
-        target = rule.rpartition("-j ")[2].strip()
-        if target.startswith(("DROP", "REJECT")):
-            if "--dport" in rule or "--dports" in rule:
-                unclear = True
-            else:
-                blanket = True
-        elif target not in ("ACCEPT", "RETURN"):
-            unclear = True  # jump to an external chain (e.g. ufw-user-forward)
-    if blanket:
-        return 2, f"docker: DROP in DOCKER-USER ({len(du)})", False
-    if unclear:
-        return 3, "docker: per-port/chain rules, check by hand", False
-    return 1, f"docker: DOCKER-USER without DROP ({len(du)})", True
-
-
-CELL = {"open": 1, "nofw": 1, "filtered": 2, "blocked": 0, "unknown": 3}
-# UDP discovery ports that every browser or OS component binds at the same time (macOS/Windows): one stable name, or the
-# "service" of the port would flip between chrome and msedge at every pass and raise CHANGED alarms
-SHARED_UDP = {5353: "mDNS", 5355: "LLMNR", 1900: "SSDP", 3702: "WS-Discovery", 137: "NetBIOS", 138: "NetBIOS"}
-EXPOSED_RANK = {"open": 4, "nofw": 4, "unknown": 3, "filtered": 2, "blocked": 1}
-
-
-def exposure_rows(net, cont):
-    """One row per (port, proto, bind class): 8443 on loopback and 8443 on Tailscale are different services.
-
-    ponytail: the TS column assumes tailscaled has its `ts-input` rules (accept everything from tailscale0
-    before ufw): a reachable bind is open to tailnet peers regardless of ufw. Check with
-    `iptables -S ts-input`; holds only if Tailscale's netfilter mode is on (default).
-    The container name is looked up by port only (two containers on the same port with different IPs: the first wins).
-    """
-    ls, ufw, du = net.get("listeners") or [], net.get("ufw"), net.get("docker_user")
-    # macOS/Windows: the collector already judged each socket against the firewall (it works per program there); the same
-    # firewall filters the Tailscale interface too, and Docker Desktop's port proxy is an ordinary program behind it
-    native = os_of(net) != "linux"
-    serve_err = "serve" in (net.get("errors") or {})
-    serve = {x["port"]: x for x in net.get("serve") or []}
-    funnel_ports = {x["port"] for x in net.get("serve") or [] if x["funnel"]}
-    published = {}
-    for ct in (cont or {}).get("containers", []):
-        if ct["state"] == "running":
-            for p in ct["ports"]:
-                if isinstance(p["p"], int):
-                    published.setdefault((p["p"]), ct["name"])
-    rows = {}
-    for l in ls:
-        sc = bind_scope(l["addr"])
-        r = rows.setdefault((l["port"], l["proto"], sc), {"proc": "", "fw": None, "procs": set()})
-        r["proc"] = r["proc"] or l["proc"]
-        if l["proc"]:
-            r["procs"].add(l["proc"])
-        v = l.get("fw")
-        if v and v[0] in CELL and (r["fw"] is None or EXPOSED_RANK[v[0]] > EXPOSED_RANK[r["fw"][0]]):
-            r["fw"] = v  # IPv4 and IPv6 sockets of one port: the most exposed verdict counts
-    # ports published by Docker with no listening socket (userland-proxy disabled): hidden from ss
-    have = {(port, proto) for (port, proto, _sc) in rows}
-    for ct in (cont or {}).get("containers", []):
-        if ct["state"] != "running":
-            continue
-        for p in ct["ports"]:
-            if isinstance(p["p"], int) and (p["p"], "tcp") not in have:
-                sc = "lo" if p["s"] == "lo" else "wild" if p["s"] == "*" else bind_scope(p["s"])
-                rows.setdefault((p["p"], "tcp", sc), {"proc": "docker-proxy", "fw": None, "procs": set()})
-    out = []
-    for (port, proto, sc), r in rows.items():
-        via_docker = r["proc"] in DOCKER_PROXIES or (not r["proc"] and port in published)
-        name = published.get(port, "container?") if via_docker else (r["proc"] or "?")
-        if native and not via_docker and proto == "udp" and port in SHARED_UDP:
-            name = f"{SHARED_UDP[port]} ({', '.join(sorted(r['procs'])) or '?'})"
-        elif native and not via_docker and len(r["procs"]) > 1:  # several programs on one port: the same name whatever the order
-            name = ", ".join(sorted(r["procs"]))
-        sv = serve.get(port) if sc == "ts" else None
-        if sv:
-            name = f"{'funnel' if sv['funnel'] else 'serve'} {sv['path']} → " + sv["target"].replace("http://", "")
-        lan_cell, note, bad = 0, "", False
-        ts_cell = 1 if sc in ("wild", "ts") else 0
-        if native and sc in ("wild", "lan", "ts"):
-            state, fnote = r["fw"] or ("unknown", "firewall n/a")
-            if sc == "ts":
-                ts_cell, note = CELL[state], "tailnet only" + ("" if state in ("open", "nofw") else " · " + fnote)
-            else:
-                lan_cell, note, bad = CELL[state], fnote, state in ("unknown", "nofw")
-                ts_cell = CELL[state] if sc == "wild" else 0
-        elif sc in ("wild", "lan"):
-            if via_docker:
-                lan_cell, note, bad = docker_verdict(du)
-            else:
-                state, fnote = fw_verdict(port, proto, ufw)
-                lan_cell = CELL[state]
-                note = "LAN " + fnote if not fnote.startswith("ufw") else fnote
-                bad = state in ("unknown", "nofw")
-        elif sc == "ts":
-            note = "tailnet only"
-        net_cell = 1 if port in funnel_ports and sc in ("ts", "wild") else 3 if serve_err and sc == "ts" else 0
-        if net_cell == 1:
-            note, bad = "FUNNEL: public", True
-        out.append({"port": port, "proto": proto, "name": safe(name), "loc": 0 if sc == "ts" else 1,
-                    "lan": lan_cell, "ts": ts_cell, "net": net_cell,
-                    "note": safe(note), "bad_note": bad, "warn": port in SENSITIVE and lan_cell in (1, 3)})
-    out.sort(key=lambda x: (-(x["net"] == 1), -(x["lan"] in (1, 3)), -x["ts"], -x["warn"], x["port"], x["proto"]))
-    return out
-
-
-def cell(v, warn=False, net=False, loc=False):
-    if loc:  # local is not an alarm: neutral colour
-        return c(37, "●") if v else c(90, "·")
-    if v == 3:
-        return c(33, "?")
-    if net:
-        return c("1;31", "●") if v else c(90, "·")
-    if v == 1:
-        return c("31" if warn else "33", "●")
-    return c(36, "◐") if v == 2 else c(90, "·")
-
-
-def fs(x):
-    return f"{x:.1f}s"
-
-
-BOOT_COLORS = {"firmware": 35, "loader": 34, "kernel": 36, "initrd": 33, "userspace": 32, "main path": 36, "post boot": 32}
-# the same BOOT blocks speak of systemd units, Windows services or launchd daemons depending on who wrote boot.json
-BOOT_LABELS = {
-    "linux": {"failed_one": "failed systemd unit", "failed_short": "failed unit", "journal_in": " in this boot's journal",
-              "failed_title": "FAILED UNITS", "enabled_title": "SERVICES ENABLED AT BOOT", "journal_title": "BOOT JOURNAL",
-              "journal_short": "journal", "kernel": "kernel "},
-    "windows": {"failed_one": "failed service", "failed_short": "failed service", "journal_in": " in the System event log since boot",
-                "failed_title": "FAILED SERVICES", "enabled_title": "AUTOMATIC SERVICES", "journal_title": "SYSTEM EVENT LOG",
-                "journal_short": "events", "kernel": ""},
-    "darwin": {"failed_one": "failed launch daemon", "failed_short": "failed daemon", "journal_in": " in the system log",
-               "failed_title": "FAILED LAUNCH DAEMONS", "enabled_title": "LAUNCH DAEMONS (third-party)", "journal_title": "SYSTEM LOG",
-               "journal_short": "log", "kernel": ""},
-}
-
-
-def boot_labels(b):
-    return BOOT_LABELS.get(os_of(b), BOOT_LABELS["linux"])
-
-
-def unsupported(d, key):
-    """The collector of this OS has no such section (e.g. systemd-analyze blame on Windows): leave the block out."""
-    return isinstance(d, dict) and key in (d.get("unsupported") or [])
-
-
 def boot_block_avvio(b, up, w):
-    an, lbl = b.get("analyze"), boot_labels(b)
-    lines = [section("BOOT", w), ""]
-    if an is None:
-        head = [f"   {safe(b.get('kernel', '?'))}   up {fmt_dur(up)}"] if os_of(b) != "linux" else []
-        return lines + head + [unavail_msg(b, "analyze", "boot times unavailable")]
-    parts, total = an["parts"], max(an["total"], 0.001)
-    bw = max(20, min(w - 8, 80))
-    widths = {k: max(1, round(bw * v / total)) for k, v in parts.items()}
-    lines.append(f"   boot finished in {c(1, fs(total))}   {lbl['kernel']}{safe(b.get('kernel', '?'))}   up {fmt_dur(up)}")
-    lines.append("   " + "".join(c(BOOT_COLORS.get(k, 37), "█" * n) for k, n in widths.items()))
-    lines += wrap_items([c(BOOT_COLORS.get(k, 37), "■") + f" {k} {fs(v)}" for k, v in parts.items()], w, indent=3, sep="  ")
-    return lines
+    return [section("BOOT", w)] + _lines_of(cards.boot_start_parts(b, up, w), w)[0]
 
 
 def boot_block_lente(b, w, k):
-    lines = [section("SLOWEST UNITS", w, "activation time: not all of them block boot"), ""]
-    bl = b.get("blame")
-    if bl is None:
-        return lines + [unavail_msg(b, "blame")]
-    top = lim(bl, k, "boot")
-    mx = max((x["s"] for x in top), default=1) or 1
-    for x in top:
-        n = max(1, round(20 * x["s"] / mx))
-        t = c(33, fs(x["s"])) if x["s"] >= 5 else fs(x["s"])
-        lines.append(f"   {pad(safe(x['unit'])[:38], 39)}{c(36, '█' * n)}{c(90, '░' * (20 - n))}  {t}")
-    return lines
+    return _lines_of(cards.boot_slowest_parts(b, cards.Caps(w), k), w)[0]
 
 
 def boot_block_fallite(b, w):
-    lines = [section(boot_labels(b)["failed_title"], w), ""]
+    lines = [section(cards.boot_labels(b)["failed_title"], w), ""]
     f = b.get("failed")
     if f is None:
         return lines + [unavail_msg(b, "failed")]
@@ -918,14 +501,14 @@ def boot_block_fallite(b, w):
 
 
 def boot_block_servizi(b, w, k):
-    lines = [section(boot_labels(b)["enabled_title"], w), ""]
+    lines = [section(cards.boot_labels(b)["enabled_title"], w), ""]
     en = b.get("enabled")
     if en is None:
         return lines + [unavail_msg(b, "enabled")]
     act = [e for e in en if e["state"] == "active"]
     off = [e for e in en if e["state"] != "active"]
     lines.append(f"   {len(en)} enabled   {c(32, f'{len(act)} active')}   {len(off)} inactive (often one-shots already done)")
-    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k, section="boot")
+    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k)
     fail = [e for e in off if e["state"] == "failed"]
     if fail:
         lines += [msg("err", safe(e["unit"]) + " failed") for e in fail]
@@ -948,17 +531,7 @@ def boot_block_container(b, w, k, now):
 
 
 def boot_block_journal(b, w, k):
-    j = b.get("journal")
-    lines = [section(boot_labels(b)["journal_title"], w, "warning and worse"), ""]
-    if j is None:
-        return lines + [unavail_msg(b, "journal")]
-    cap = " (last 500)" if j.get("capped") else ""
-    lines.append(f"   {c(31, str(j['err'])) if j['err'] else 0} errors   {c(33, str(j['warn'])) if j['warn'] else 0} warning{cap}")
-    room = max(20, w - 45)
-    for e in lim(j["top"], k, "boot"):
-        col = 31 if e["pr"] <= 3 else 33
-        lines.append(f"   {c(col, '●')} {pad(safe(e['id'])[:26], 27)}{e['n']:>4}×  {c(90, safe(e['last'])[:room])}")
-    return lines
+    return _lines_of(cards.boot_journal_parts(b, cards.Caps(w), k, w), w)[0]
 
 
 def tight(lines):
@@ -975,13 +548,13 @@ def page_boot(b, w, body_h, now=None):
     now = now or time.time()
     if b is None:
         return ["", msg("err", "boot collector not running: no state in " + BOOT_STATE)]
-    head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > BOOT_STALE_S else []
+    head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > cards.BOOT_STALE_S else []
     up = now - b.get("btime", now)
     wide = w >= WIDE
     # a single page: if it does not fit the height the lists shrink (k), then it splits like the others
     # macOS/Windows: the blocks their collector has no data for are left out, not shown empty
-    slow = (lambda bw, k: []) if unsupported(b, "blame") else (lambda bw, k: boot_block_lente(b, bw, k) + [""])
-    jour = (lambda bw, k: []) if unsupported(b, "journal") else (lambda bw, k: [""] + boot_block_journal(b, bw, k))
+    slow = (lambda bw, k: []) if cards.unsupported(b, "blame") else (lambda bw, k: boot_block_lente(b, bw, k) + [""])
+    jour = (lambda bw, k: []) if cards.unsupported(b, "journal") else (lambda bw, k: [""] + boot_block_journal(b, bw, k))
     for k in (10, 8, 6, 4, 3):
         if wide:
             lw, rw = int(w * 0.5), w - int(w * 0.5) - 3
@@ -998,23 +571,6 @@ def page_boot(b, w, body_h, now=None):
     return tight(lines) if len(tight(lines)) <= body_h else lines
 
 
-def exposure_keys(net, cont):
-    """{'22/t:LAN': {'name': service, 'lan': filter state}} of ports reachable from outside only; None if unknown.
-
-    Comparing service and filter state too (open/filtered) avoids missing a rule change or a change of
-    the process listening on the same port. tailscaled's ephemeral ports (>= 32768, except the fixed
-    41641) are excluded: they change at every start and would raise false alarms.
-    ponytail: does not tell TCP/UDP apart for Docker-published ports, and the exact name 'tailscaled' is trusted.
-    """
-    if net is None or net.get("listeners") is None:
-        return None
-    # macOS/Windows: a shared discovery port is that protocol, whichever browser happens to hold it now
-    stable = lambda r: SHARED_UDP[r["port"]] if os_of(net) != "linux" and r["proto"] == "udp" and r["port"] in SHARED_UDP else r["name"]  # noqa: E731
-    return {f"{r['port']}/{r['proto'][0]}:{group_of(r)}": {"name": stable(r), "lan": r["lan"]}
-            for r in exposure_rows(net, cont)
-            if group_of(r) != "LOCALE" and not (r["name"] == "tailscaled" and r["port"] >= 32768 and r["port"] != 41641)}
-
-
 def load_baseline(path=None):
     """valid dict | None if missing | 'corrotta' (corrupt) if it exists but is unreadable (not 'missing': must be flagged)."""
     path = path or BASELINE
@@ -1022,48 +578,6 @@ def load_baseline(path=None):
         return None
     d = load_json(path)
     return d if isinstance(d, dict) and isinstance(d.get("ports"), dict) else "corrotta"
-
-
-def name_change(old, new, width=20):
-    """'old → new' starting where the two names start to differ (a plain cut at 20 chars showed identical prefixes)."""
-    old, new = safe(old), safe(new)
-    p = 0
-    while p < min(len(old), len(new)) and old[p] == new[p]:
-        p += 1
-    start = max(0, p - 6)  # a little context before the first difference
-    lead = "…" if start else ""
-    return f"{lead}{old[start:start + width]} → {lead}{new[start:start + width]}"
-
-
-def baseline_diff(cur, base):
-    """(new, gone, changed) against the accepted baseline; 'changed' = same port/group but another service,
-    or a LAN filter that went from 'by source' to 'open to all'."""
-    old = base["ports"]
-    val = lambda v: v if isinstance(v, dict) else {"name": v, "lan": None}
-    new = {k: v for k, v in cur.items() if k not in old}
-    gone = {k: val(v) for k, v in old.items() if k not in cur}
-    changed = {}
-    # a shared discovery port now named by its protocol (macOS/Windows): whatever program a baseline recorded there is the same
-    renamed = lambda k, new: new in SHARED_UDP.values() and "/u:" in k  # noqa: E731
-    for k, v in cur.items():
-        if k in old:
-            o = val(old[k])
-            if o["name"] != v["name"] and on("containers") and not renamed(k, v["name"]):  # containers off: names can't be resolved
-                changed[k] = "service " + name_change(o["name"], v["name"])
-            elif o["lan"] == 2 and v["lan"] in (1, 3) and on("firewall"):  # firewall off: verdict unknown, not a rule change
-                changed[k] = "was filtered by source, now open to the whole LAN"
-    return new, gone, changed
-
-
-def new_ports(net, cont, baseline):
-    """{key: 'NEW'|'CHANGED'}; empty if it cannot be computed or data is partial (never an exception)."""
-    try:
-        if isinstance(baseline, dict) and net and net.get("listeners") is not None and not exposure_partial(net):
-            new, _, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
-            return {**{k: "NEW" for k in new}, **{k: "CHANGED" for k in changed}}
-    except Exception:  # noqa: BLE001
-        pass
-    return {}
 
 
 def accept_baseline(if_missing=False, path=None, now=None):
@@ -1076,7 +590,7 @@ def accept_baseline(if_missing=False, path=None, now=None):
         print("baseline already present: left untouched")
         return 0
     net, cont = load_json(NET_STATE), load_containers()
-    if (not isinstance(net, dict) or now - net.get("ts", 0) > NET_STALE_S or exposure_partial(net)
+    if (not isinstance(net, dict) or now - net.get("ts", 0) > cards.NET_STALE_S or exposure_partial(net)
             or cont is None or now - cont.get("ts", 0) > STALE_S):
         print("network/container state missing, stale or incomplete: baseline not created", file=sys.stderr)
         return 1
@@ -1151,10 +665,10 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         for label, key in (("CPU", "cpu"), ("NVMe", "nvme")):
             if key in thermal:
                 t, mx = thermal[key]
-                if t >= THERMAL_ERR * mx:
-                    out.append((2, f"{label} at {t:.0f}°C: above the {THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
-                elif t >= THERMAL_WARN * mx:
-                    out.append((1, f"{label} at {t:.0f}°C: above the {THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
+                if t >= ui.THERMAL_ERR * mx:
+                    out.append((2, f"{label} at {t:.0f}°C: above the {ui.THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
+                elif t >= ui.THERMAL_WARN * mx:
+                    out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
             out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
     if not on("boot"):
@@ -1162,7 +676,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     elif boot is None:
         out.append((1, "boot collector not running", "collector-boot"))
     elif boot:
-        lbl = boot_labels(boot)
+        lbl = cards.boot_labels(boot)
         if boot.get("failed"):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
@@ -1170,14 +684,14 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
-    if now - net.get("ts", 0) > NET_STALE_S:
+    if now - net.get("ts", 0) > cards.NET_STALE_S:
         out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)", "stale-net"))
     if net.get("errors"):
         out.append((1, "network sections not collected: " + ", ".join(net["errors"]), "net-sections"))
     ufw, fw = net.get("ufw"), net.get("firewall")
     if os_of(net) != "linux":  # the OS firewall (Windows Firewall, macOS Application Firewall) instead of ufw
         name = (fw or {}).get("name") or "firewall"
-        if fw is None and is_disabled(net, "firewall"):
+        if fw is None and cards.is_disabled(net, "firewall"):
             pass
         elif fw is None:
             out.append((2, "firewall state unreadable: LAN exposure unknown", "firewall-unreadable"))
@@ -1187,9 +701,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                 out.append((2, f"{name} off{where}: listening services are reachable from the LAN", "firewall-off"))
             if fw.get("policy"):
                 out.append((1, f"{name} has rules from Group Policy: they are not read", "firewall-policy"))
-    elif ufw is None and is_disabled(net, "ufw"):
+    elif ufw is None and cards.is_disabled(net, "ufw"):
         pass  # firewall switched off in config.ini: the user's choice, not an alarm
-    elif ufw is None and is_absent(net, "ufw"):
+    elif ufw is None and cards.is_absent(net, "ufw"):
         out.append((1, "ufw not installed: LAN filtering cannot be verified", "ufw-missing"))
     elif ufw is None:
         out.append((2, "ufw unreadable", "ufw-unreadable"))
@@ -1204,12 +718,12 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
         else:
             new, gone, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
-            for k, v in lim(list(new.items()), 3, "attention"):
+            for k, v in list(new.items())[:3]:
                 port, _, group = k.partition(":")
                 out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})", "port-new"))
-            if len(new) > 3 and not FULL:
+            if len(new) > 3:
                 out.append((3, f"… and {len(new) - 3} more new exposed ports", "port-new"))
-            for k, why in lim(list(changed.items()), 3, "attention"):
+            for k, why in list(changed.items())[:3]:
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
                 out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
@@ -1355,6 +869,7 @@ OS_CATALOG["darwin"].update({
                          "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; log: /var/log/nuc-console/notify.log; "
                          "restart: sudo launchctl kickstart -k system/com.nuc-console.notify"),
 })
+BASE_CATALOG = dict(CATALOG)  # the advice in the words of an installed Linux, before this OS's and the portable run's (tests/golden.py renders with it)
 CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 if nuc_config.PORTABLE:
     CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}
@@ -1384,8 +899,19 @@ def fingerprint(sev, text, pid):
 
 
 class ProblemList(list):
-    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION)."""
+    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION) and .pids = the problem id
+    of each item, in the same order (None when the list was not built by problems(): cards.Ctx then cannot tell which card a problem is
+    about). What only the web has room for, None in a list that problems() did not build: .info = (title, why, fix, accept command) of each
+    item, in the same order (the catalog's words for this OS and this install); .known = what was accepted, [{id, text, reason, ts}] (as
+    many as .accepted); .cmds = the commands the advice refers to: {problems, accept, forget}."""
     accepted = 0
+    pids = None
+    info = None
+    known = None
+
+    @property
+    def cmds(self):
+        return {"problems": PROBLEMS_CMD, "accept": ACCEPT_CMD, "forget": ACCEPT_CMD + " --forget"}
 
 
 def load_accepted(path=None):
@@ -1423,7 +949,7 @@ def accept_problem(pid, reason="", forget=False, path=None, now=None, records=No
         if pid in NOT_ACCEPTABLE:
             print(f"port changes are accepted with the baseline: {ACCEPT_CMD} (no --problem)", file=sys.stderr)
             return 2
-        reason = CTRL.sub(" ", reason).strip()
+        reason = ui.CTRL.sub(" ", reason).strip()
         if not reason:
             print(f"--reason is required: write why this is acceptable (it is shown in `{PROBLEMS_CMD}`)", file=sys.stderr)
             return 2
@@ -1449,11 +975,16 @@ def problems(*a, **kw):
     """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
     acc = load_accepted()
     out = ProblemList()
+    out.pids, out.info, out.known = [], [], []
     for sev, text, pid in problems_raw(*a, **kw):
         if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
             out.accepted += 1
+            out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
+            title, why, fix = CATALOG.get(pid, (pid, "", ""))
             out.append((sev, text))
+            out.pids.append(pid)
+            out.info.append((title, why, fix, "" if pid in NOT_ACCEPTABLE else f'{ACCEPT_CMD} --problem {pid} --reason "..."'))
     return out
 
 
@@ -1505,213 +1036,28 @@ def safe_problems(*a, **kw):
 def status_pill(pb):
     """(text, colour code) for the header: always visible, with a symbol besides the colour."""
     if not pb:
-        return "✔ ALL OK", "1;7"
+        return "✔ ALL OK", ui.sgr("banner_ok")
     if any(sev == 3 for sev, _ in pb):
-        return "✖ EXPOSED PORTS CHANGED", "1;41;37"
+        return "✖ EXPOSED PORTS CHANGED", ui.sgr("banner_err")
     n_err = sum(1 for sev, _ in pb if sev == 2)
-    return (f"✖ {len(pb)} PROBLEMS", "1;41;37") if n_err else (f"! {len(pb)} WARNINGS", "1;43;30")
+    return (f"✖ {len(pb)} PROBLEMS", ui.sgr("banner_err")) if n_err else (f"! {len(pb)} WARNINGS", ui.sgr("banner_warn"))
 
 
-GROUPS = (("INTERNET", "Reachable from the Internet (Tailscale Funnel)"),
-          ("LAN", "Open on the LAN (and on Tailscale)"),
-          ("TAILNET", "Tailnet only"),
-          ("LOCALE", "This machine only"))  # keys are stored in baseline.json: never rename them
-
-
-def group_of(r):
-    return "INTERNET" if r["net"] == 1 else "LAN" if r["lan"] in (1, 2, 3) else "TAILNET" if r["ts"] else "LOCALE"
+def _block(card_id, title, body, w):
+    """The console lines of a card's body (components), drawn under its title."""
+    return ansi.card_lines(ui.Card(card_id, title, "", "ok", body), w)[0]
 
 
 def exposure_block(net, cont, w, new=None):
-    new = new or {}
+    """The whole exposure matrix (the Network page, and the overview when there is room)."""
+    ctx = cards.Ctx(net=net, cont=cont, new=new, cfg=CFG)
     rows = expose_apply(exposure_rows(net, cont), net, cont)
-    by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
-    warn = sum(r["warn"] for r in rows)
-    count = (f"   Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}    "
-             f"LAN {c(33, len(by['LAN'])) if by['LAN'] else 0}    Tailscale {sum(r['ts'] == 1 for r in rows)}    "
-             f"Local {len(by['LOCALE'])}")
-    alert = c(31, f"⚠ {warn} DB/broker open on LAN") if warn else ""
-    summary = [count + "        " + alert] if not warn or vlen(count) + 8 + vlen(alert) <= w else [count, "   " + alert]
-    lines = [section("EXPOSURE", w), ""] + summary + [
-             clip(c(90, "   ● open   ◐ filtered by source   ? unknown (treated as open)   · no"), w), ""]
-    nw = max(12, min(NAMEW, w - 57))  # narrow column (3 columns): the name gets shorter, notes and cells stay visible
-    lines.append(c(1, "   " + pad("PORT", 9) + pad("SERVICE", nw + 1)
-                   + "".join(x.center(6) for x in ("LOC", "LAN", "TS", "NET")) + "  NOTE"))
-    for g, title in GROUPS:
-        if not by[g]:
-            continue
-        lines += ["", c(1, f"   {title}") + c(90, f"  ({len(by[g])})")]
-        if g == "LOCALE":  # exception-based: local is not a risk, compact list
-            lines += wrap_items([f"{r['port']} {r['name']}" for r in by[g]], w, indent=5)
-            continue
-        for r in by[g]:
-            mark = c(31, "⚠") if r["warn"] else " "
-            tag = new.get(f"{r['port']}/{r['proto'][0]}:{g}")
-            declared = r["proto"] == "tcp" and r["port"] in {p for ps in CFG["webapps"].values() for p in ps if p not in SENSITIVE}
-            cells = [cell(r["loc"], loc=True), cell(r["lan"], r["warn"]), cell(r["ts"], r["warn"]), cell(r["net"], net=True)]
-            head = (f"   {r['port']:>5}/{r['proto'][0]} {mark}{pad(r['name'][:nw - 1], nw)}"
-                    + "".join(f"  {x}   " for x in cells) + " ")
-            room = w - vlen(head) - (len(tag) + 1 if tag else 0)  # never clip mid-word: end with an ellipsis
-            base = ("declared: " + r["note"].replace("docker: bypasses ufw", "docker")) if declared and r["bad_note"] else r["note"]
-            xn = expose_note(r)  # [expose]: beyond what config.ini says (red, instead of the note) or within it (grey, before the note)
-            if xn:
-                base = xn[0] if xn[1] else xn[0] + (" · " + base if base else "")
-            text = base if vlen(base) <= room else base[:max(room - 1, 0)] + "…"
-            note = c(31, text) if (xn and xn[1]) or (r["bad_note"] and not declared) else c(90, text)
-            if tag:
-                note = c("1;31", tag + " ") + note
-            lines.append(head + note)
-    return lines
-
-
-def native_fw_lines(net):
-    """macOS/Windows: the status line of the OS firewall (Windows Firewall per network profile, macOS Application Firewall)."""
-    fw, err = net.get("firewall"), net.get("errors") or {}
-    if fw is None and is_disabled(net, "firewall"):
-        return [msg("info", "firewall check disabled in config.ini")]
-    if fw is None:
-        return [msg("err", "firewall unreadable: " + safe(err.get("firewall", "?"))[:70])]
-    name = safe(fw.get("name") or "firewall")
-    if fw.get("kind") == "windows":
-        active = [n for n, p in (fw.get("profiles") or {}).items() if p.get("active")]
-        line = (msg("err", c("1;31", f"{name} OFF") + f" on {safe(', '.join(fw['off']))}: no filtering there") if fw.get("off")
-                else msg("ok", f"{name} on" + (f" (active: {safe(', '.join(active))})" if active else "")))
-        return [line] + ([msg("warn", "rules from Group Policy are not read: those ports show ?")] if fw.get("policy") else [])
-    if fw.get("state") == 0:
-        return [msg("err", c("1;31", f"{name} OFF") + ": every listening program is reachable from the LAN")]
-    return [msg("ok", f"{name} " + ("blocking all incoming" if fw.get("block_all") else "on") + (" · stealth" if fw.get("stealth") else ""))]
-
-
-def native_fw_details(net, w, max_rules=None):
-    """macOS/Windows FIREWALL body: the configuration in a few lines, then which rule or setting opens each listening port."""
-    fw, lines = net.get("firewall"), []
-    if fw and fw.get("kind") == "windows":
-        for name, p in (fw.get("profiles") or {}).items():
-            state = "on" if p.get("enabled", True) else c(31, "OFF")
-            lines.append(kv(name, f"{state}   inbound {'allow' if p.get('inbound') == 1 else 'block'}"
-                            + ("   block all" if p.get("block_all") else "") + (c(36, "   ← active") if p.get("active") else "")))
-        if fw.get("networks"):
-            lines.append(kv("networks", "  ".join(f"{safe(n['alias'])}: {safe(n['category'])}" for n in fw["networks"])))
-        lines.append(kv("rules", f"{fw.get('allow_rules', 0)} allow · {fw.get('block_rules', 0)} block (enabled, inbound)"))
-    elif fw:
-        pf = fw.get("pf")
-        lines.append(kv("signed apps", f"built-in {'allowed' if fw.get('builtin') else 'asked'} · downloaded "
-                        f"{'allowed' if fw.get('downloaded') else 'asked'}"))
-        lines.append(kv("app rules", f"{fw.get('apps_allowed', 0)} allowed · {fw.get('apps_blocked', 0)} blocked"))
-        lines.append(kv("pf", "unreadable" if pf is None else
-                        (f"on, {plural(pf.get('rules', 0), 'rule')} of its own (not interpreted)" if pf.get("enabled") else "off")))
-    opened = {}
-    for lst in net.get("listeners") or []:
-        st, note = (lst.get("fw") or ["", ""])[:2]
-        if st in ("open", "nofw") and bind_scope(lst["addr"]) != "lo":
-            opened.setdefault(note, set()).add((lst["port"], lst["proto"][0]))
-    if opened:
-        rows = sorted(opened.items(), key=lambda kv_: min(kv_[1]))
-        shown = rows if (max_rules is None or FULL or "firewall" in EXPAND) else rows[:max_rules]
-        if len(shown) < len(rows):
-            TRUNC.add("firewall")
-        lines += ["", c(1, f"   WHAT LETS PORTS IN ({len(rows)})"), c(1, "   " + pad("RULE / SETTING", 44) + "PORTS")]
-        for note, ports in shown:
-            plist = ", ".join(f"{p}/{x}" for p, x in sorted(ports))
-            lines.append(f"   {pad(safe(note)[:42], 44)}{clip(plist, max(10, w - 48))}")
-        if len(shown) < len(rows):
-            lines.append(c(90, f"   … +{len(rows) - len(shown)} more"))
-    return lines
-
-
-def fw_status_lines(net):
-    """The two most important status lines: ufw and DOCKER-USER (macOS/Windows: the OS firewall)."""
-    if os_of(net) != "linux":
-        return native_fw_lines(net)
-    err = net.get("errors") or {}
-    ufw, du = net.get("ufw"), net.get("docker_user")
-    lines = []
-    if ufw is None and is_absent(net, "ufw"):
-        lines.append(msg("info", "ufw not installed: LAN filtering cannot be verified from here (nft/firewalld?)"))
-    elif ufw is None:
-        lines.append(msg("err", "ufw unreadable: " + safe(err.get("ufw", "?"))[:80]))
-    elif not ufw["active"]:
-        lines.append(msg("err", c("1;31", "ufw OFF") + ": no LAN filtering for non-Docker services"))
-    else:
-        lines.append(msg("ok", "ufw active"))
-    if du is None and (is_absent(net, "docker_user") or is_absent(net, "iptables")):
-        pass  # no iptables/Docker: the DOCKER-USER chain does not exist, no line to show
-    elif du is None:
-        lines.append(msg("err", "DOCKER-USER unreadable: " + safe(err.get("docker_user", "?"))[:70]))
-    elif not du:
-        lines.append(msg("warn", "DOCKER-USER empty: ports published by containers bypass ufw"))
-    else:
-        lines.append(msg("ok", f"DOCKER-USER: {plural(len(du), 'rule')}"))
-    return lines
-
-
-def short_default(text):
-    """'deny (incoming), allow (outgoing), deny (routed)' -> 'in deny · out allow · fwd deny' (fits a 3-column layout)."""
-    names = {"incoming": "in", "outgoing": "out", "routed": "fwd"}
-    found = re.findall(r"(\w+) \((incoming|outgoing|routed)\)", str(text))
-    return safe("  ·  ".join(f"{names[d]} {a}" for a, d in found)) if found else safe(text)
+    return _block("exposure", "EXPOSURE", cards.exposure_full(ctx, cards.Caps(w), rows), w)
 
 
 def firewall_block(net, w, max_rules=None):
-    err = net.get("errors") or {}
-    ufw, du, ipt = net.get("ufw"), net.get("docker_user"), net.get("iptables")
-    lines = [section("FIREWALL", w), ""] + fw_status_lines(net) + [""]  # the status before any detail
-    if os_of(net) != "linux":
-        return lines + native_fw_details(net, w, max_rules)
-    if ufw is not None:
-        lines.append(kv("ufw", f"{short_default(ufw['default'])}   log: {safe(ufw['logging'])}" if ufw["active"]
-                        else c(31, "off (no rules in force)")))
-    if ipt:
-        pol, cnt = ipt["policy"], ipt["count"]
-        lines.append(kv("iptables", "   ".join(f"{k} {pol.get(k, '?')} ({plural(cnt.get(k, 0), 'rule')})"
-                                                for k in ("INPUT", "FORWARD"))))
-        lines.append(kv("tailscale", c(32, "ts-input accepts tailscale0") if ipt["ts_input"]
-                        else c(33, "ts-input rule not found: TS may not be open")))
-    elif is_absent(net, "iptables"):
-        lines.append(kv("iptables", c(90, "not installed")))
-    elif "iptables" in err:
-        lines.append(kv("iptables", c(31, "n/a: " + safe(err["iptables"])[:70])))
-    f2b = net.get("f2b")
-    if f2b is None and is_absent(net, "f2b"):
-        pass  # fail2ban not installed: no line
-    elif f2b is None or f2b.get("error"):
-        lines.append(kv("fail2ban", c(31, "n/a: " + safe((f2b or {}).get("error") or err.get("f2b", "?"))[:70])))
-    else:
-        for j in f2b["jails"]:
-            lines.append(kv("fail2ban", f"{safe(j['name'])}: {j['banned']} ban  {safe(' '.join(j['ips']))}"))
-    dr = net.get("drops")
-    if ufw is not None and ufw.get("logging", "").startswith("off"):
-        lines.append(kv("drop 1h", c(33, "ufw logging off: blocks not logged")))
-    elif dr is None and is_absent(net, "drops"):
-        pass  # no journalctl: no drop count
-    elif dr is None:
-        lines.append(kv("drop 1h", c(33, "n/a " + safe(err.get("drops", "")))))
-    else:
-        lines.append(kv("drop 1h", str(dr["n"])))
-        if dr["dpt"]:
-            lines.append(kv("  ports", "  ".join(f"{safe(k)}×{v}" for k, v in dr["dpt"])))
-            lines.append(kv("  sources", "  ".join(f"{safe(k)}×{v}" for k, v in dr["src"])))
-    if ufw and ufw["rules"]:
-        # IPv4 inbound only: IPv6 rules mirror them and outbound ones do not filter (default allow): keeping
-        # them all would take the table to dozens of lines and drop the single screen to the compact level
-        v6 = lambda r: "(v6)" in r["to"] + r["from"]
-        rules_in = [r for r in ufw["rules"] if "OUT" not in r["action"] and "FWD" not in r["action"] and not v6(r)]
-        n_out = sum("OUT" in r["action"] for r in ufw["rules"])
-        n_v6 = sum(v6(r) and "OUT" not in r["action"] and "FWD" not in r["action"] for r in ufw["rules"])
-        hidden = ", ".join(x for x in (f"{n_out} outbound" if n_out else "", f"{n_v6} mirrored IPv6" if n_v6 else "") if x)
-        lines += ["", c(1, f"   UFW INBOUND RULES ({len(rules_in)})") + (c(90, f"   + hidden: {hidden}") if hidden else ""),
-                  c(1, "   " + pad("TO", 28) + pad("ACTION", 14) + "FROM")]
-        open_all = lambda r: (r["action"].startswith(("ALLOW", "LIMIT")) and r["from"].startswith("Anywhere")
-                              and not r["to"].startswith("Anywhere"))  # exposes the port to the world: must be seen first
-        shown = rules_in if (max_rules is None or FULL or "firewall" in EXPAND) else sorted(rules_in, key=lambda r: not open_all(r))[:max_rules]
-        if len(shown) < len(rules_in):
-            TRUNC.add("firewall")
-        for r in shown:  # no cap: all of them, and the page splits by itself if they do not fit
-            row = f"   {pad(safe(r['to'])[:26], 28)}{pad(safe(r['action'])[:12], 14)}{safe(r['from'])}"
-            lines.append(c(33, row) if open_all(r) else row)
-        if len(shown) < len(rules_in):
-            lines.append(c(90, f"   … +{plural(len(rules_in) - len(shown), 'rule')}"))
-    return lines
+    """The whole firewall block: status, configuration, rules (max_rules: how many, None for all of them)."""
+    return _block("firewall", "FIREWALL", cards.firewall_full(net, cards.Caps(w), max_rules), w)
 
 
 def page_rete(net, cont, w, now=None, baseline=False):
@@ -1728,7 +1074,7 @@ def page_rete(net, cont, w, now=None, baseline=False):
                                               else [msg("ok", "no problems detected")]) + [""]
 
     if net.get("listeners") is None:  # without the port list "LAN 0" would look like "nothing exposed"
-        if is_absent(net, "listeners"):
+        if cards.is_absent(net, "listeners"):
             return head + ["", msg("warn", "EXPOSURE unavailable: `ss` is missing (iproute2 package)")] + [""] + firewall_block(net, w)
         return head + ["", msg("err", "EXPOSURE unavailable: "
                                  + safe((net.get("errors") or {}).get("listeners", "?")))] \
@@ -1740,541 +1086,10 @@ def page_rete(net, cont, w, now=None, baseline=False):
     return head + exposure_block(net, cont, w, new) + ["", ""] + firewall_block(net, w)
 
 
-SPARK = "▁▂▃▄▅▆▇█"
-
-
-def short_name(name, project=""):
-    """'ethibid-api-1' -> 'api' (without the stack prefix and the replica index)."""
-    n = safe(name)
-    if project and n.startswith(project + "-"):
-        n = n[len(project) + 1:]
-    return re.sub(r"-\d+$", "", n)
-
-
-def ct_ok(ct):
-    return ct["state"] == "running" and "unhealthy" not in ct["status"] and "Restarting" not in ct["status"]
-
-
-def stack_lines(cont, w, cap):
-    """For each stack: a header with counts and RAM, then its services with a status dot."""
-    groups = {}
-    for ct in cont["containers"]:
-        groups.setdefault(safe(ct["project"]), []).append(ct)
-    lines = []
-    for proj in sorted(groups, key=lambda x: (x == "", x)):
-        cts = sorted(groups[proj], key=lambda x: x["name"])
-        bad = sum(not ct_ok(ct) for ct in cts)
-        head = (f" {c('1;36', '▸')} {c(1, pad((proj or '(no stack)')[:26], 27))}{len(cts) - bad}/{len(cts)} running   "
-                f"RAM {human(sum(ct['mem'] or 0 for ct in cts))}" + (c(31, f"   ✖ {bad}") if bad else ""))
-        items = [(c(32, "●") if ct_ok(ct) else c(31, "✖")) + " " + short_name(ct["name"], proj) for ct in cts]
-        lines += [head] + wrap_items(items, w, indent=5, sep="   ", max_lines=cap, section="containers")
-    return lines
-
-
-def ov_sistema(s, w, k, cont=None):
-    m = meminfo()
-    disk_used, disk_tot, _ = root_disk()
-    bw = max(8, min(40, w - 52))
-    ram = m["MemTotal"] - m["MemAvailable"]
-    lines = [section("SYSTEM", w, up_load_note(uptime_s(), loadavg())),
-             f" RAM   {bar(ram / m['MemTotal'], bw)} {human(ram)}/{human(m['MemTotal'])}   cache {human(m['Cached'])}",
-             f" DISK  {bar(disk_used / disk_tot, bw)} {human(disk_used)}/{human(disk_tot)}"]
-    lines += thermal_lines(s.get("thermal") or {}, bw, w)
-    cores = [v for _, v in sorted(s["cpu"].items(), key=lambda kv: int(kv[0][3:]))]
-    if cores:
-        mean = sum(cores) / len(cores)
-        if k <= 2:  # one bar per core, in columns: the normal look; only the tiny-console levels (k>=3) compress to one character per core
-            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   {len(cores)} cores")
-            cells = [f" {i:>2} {bar(v, 9)} {v * 100:3.0f}%" for i, v in enumerate(cores)]
-            per = max(1, min(6, (w - 1) // 20))
-            lines += ["".join(pad(x, 20) for x in cells[i:i + per]) for i in range(0, len(cells), per)]
-        else:
-            spark = "".join(c(32 if v < 0.7 else 33 if v < 0.9 else 31, SPARK[min(7, int(v * 8))]) for v in cores)
-            lines.append(f" CPU   {bar(mean, bw)} {mean * 100:.0f}%   core {spark}")
-    if k <= -2 and cont:
-        top = lim(sorted((ct for ct in cont["containers"] if ct["mem"]), key=lambda ct: -ct["mem"]), 5, "system")
-        if top:
-            lines += ["", c(1, " HEAVIEST CONTAINERS (RAM)")]
-            mx = top[0]["mem"]
-            lines += [f" {pad(safe(ct['name'])[:34], 35)}{pad(human(ct['mem']), 7)}{bar(ct['mem'] / mx, 20, 2, 2)}" for ct in top]
-    return lines
-
-
-def ov_container(cont, w, k):
-    lines = [section("CONTAINER", w)]
-    if cont is None:
-        return lines + [msg("err", "container collector not running")]
-    if cont.get("absent"):
-        return lines + [msg("info", "docker not installed on this machine")]
-    cs = cont["containers"]
-    down = [x for x in cs if x["state"] != "running"]
-    sick = [x for x in cs if x["state"] == "running" and not ct_ok(x)]
-    ok = len(cs) - len(down) - len(sick)
-    lines.append(f" {plural(len(cs), 'container')}   RAM {human(sum(x['mem'] or 0 for x in cs))}   {c(32, '●')} {ok} ok"
-                 + (f"   {c(31, f'✖ {len(down)} stopped')}" if down else "")
-                 + (f"   {c(31, f'✖ {len(sick)} unhealthy')}" if sick else ""))
-    if k <= 2:  # detail: which stacks and which services are running
-        return lines + stack_lines(cont, w, {-2: 4, -1: 3, 0: 3, 1: 2, 2: 1}[k])
-    groups = {}
-    for x in cs:
-        groups[safe(x["project"]) or "(standalone)"] = groups.get(safe(x["project"]) or "(standalone)", 0) + 1
-    if k < 4:
-        lines += wrap_items([f"{g} {n}" for g, n in sorted(groups.items())], w, indent=1, max_lines=1, section="containers")
-    for x in (sick + down)[:max(0, 4 - k)]:
-        lines.append(f" {c(31, '✖')} {pad(safe(x['name'])[:36], 37)}{c(90, safe(x['status'])[:30])}")
-    return lines
-
-
-def fmt_db_port(p):
-    if p["c"] == "host":
-        return "host network"
-    pre = "lo:" if p["s"] == "lo" else "*" if p["s"] == "*" else p["s"] + ":"
-    return f"{pre}{p['p'] or '?'}" + ("/u" if p["c"].endswith("/udp") else "")
-
-
-def ov_database(net, cont, w, k):
-    lines = [section("DATABASE", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    dbs = net.get("dbs")
-    if dbs is None:
-        return lines + [unavail_msg(net, "dbs")]
-    items = dbs["items"]
-    if not items:
-        return lines + [msg("info", "no databases running")]
-    exposed = lambda it: it["host_net"] or any(p["s"] != "lo" for p in it["ports"])
-    open_n = sum(exposed(it) for it in items)
-    lines[0] = section("DATABASE", w, f"{len(items)} running" + (f" · {open_n} exposed" if open_n else ""))
-    now = time.time()
-    kw = min(14, max(len(safe(it["kind"])) for it in items) + 1)
-    txt = {it["name"]: " ".join(fmt_db_port(p) for p in it["ports"]) or "docker net only" for it in items}
-    pw = min(28, max(len(t) for t in txt.values()) + 2)
-    for it in items:
-        lines.append(f" {c(31 if exposed(it) else 32, '●')} {c(1, pad(safe(it['kind']), kw))}{pad(safe(it['name'])[:30], 31)}"
-                     f"{pad(txt[it['name']], pw)}" + (c(31, "exposed") if exposed(it) else c(90, "local only")))
-        if k > 1:
-            continue
-        proj = safe(it["project"])
-        names = lambda lst: ", ".join(short_name(n, proj) for n in lst)
-        who = []
-        if it["active"]:
-            who.append(c(32, "in use now: ") + names(it["active"]))
-        declared = [n for n in it["usano"] if n not in it["active"]]
-        if declared:
-            who.append("declared by " + names(declared))
-        if it["stessa_rete"]:
-            who.append(c(90, "same network: " + names(it["stessa_rete"])))
-        if it["host_clients"]:
-            who.append("host processes: " + ", ".join(safe(x) for x in it["host_clients"]))
-        if not who:
-            who.append(c(33, "no known service") + c(90, " (bridge: cannot tell)"))
-        ext = it["external"]
-        if ext and now - ext[0]["last"] < 900:
-            who.append(c(31, "external clients now: " + ", ".join(safe(e["ip"]) for e in ext if now - e["last"] < 900)))
-        elif ext:
-            who.append(c(33, f"last external client {safe(ext[0]['ip'])} {fmt_ago(now - ext[0]['last'])} ago"))
-        elif it["ext_source"] == "netns":
-            who.append(c(90, f"no external client seen in {fmt_ago(now - dbs['since'])}"))
-        else:
-            who.append(c(33, "external clients: not detectable"))
-        wrapped = wrap_items([clip(x, w - 14) for x in who], w, indent=8, sep="   ")  # wrapped, never silently cut
-        lines.append("      " + c(90, "→") + wrapped[0][7:])
-        lines += wrapped[1:]
-    return lines
-
-
-def ov_esposizione(net, cont, w, k, new=None):
-    new = new or {}
-    if k < 0 and net is not None and net.get("listeners") is not None:
-        return exposure_block(net, cont, w, new)  # enough room: the full table
-    lines = [section("EXPOSURE", w)]
-    if net is None or net.get("listeners") is None:
-        return lines + [msg("err", "unavailable")]
-    rows = expose_apply(exposure_rows(net, cont), net, cont)
-    by = {g: [r for r in rows if group_of(r) == g] for g, _ in GROUPS}
-    warn = sum(r["warn"] for r in rows)
-    lines.append(f" Internet {c('1;31', len(by['INTERNET'])) if by['INTERNET'] else 0}   LAN {len(by['LAN'])}   "
-                 f"tailnet only {len(by['TAILNET'])}   local only {len(by['LOCALE'])}"
-                 + (f"   {c(31, f'⚠ {warn} DB/broker on LAN')}" if warn else ""))
-    for r in lim(by["INTERNET"], 2, "exposure"):
-        tag = new.get(f"{r['port']}/{r['proto'][0]}:INTERNET")
-        xn = expose_note(r)
-        lines.append(f" {c('1;31', '●')} {c('1;31', tag + ' ') if tag else ''}{r['port']}/{r['proto'][0]} "
-                     f"{r['name'][:40]}  {c(31, 'public on the Internet')}")
-        if xn:  # [expose]: after the line when it fits, else below it
-            mark = c(31 if xn[1] else 90, xn[0])
-            lines[-1:] = [lines[-1] + "  " + mark] if vlen(lines[-1]) + 2 + vlen(mark) <= w else [lines[-1], "   " + mark]
-    items = []
-    for r in by["LAN"]:
-        tag = new.get(f"{r['port']}/{r['proto'][0]}:LAN")
-        label = f"{r['port']} {r['name'][:22]}"
-        xn = expose_note(r)
-        items.append((0 if tag or (xn and xn[1]) else 1, (c("1;31", tag + " ") if tag else "") + (c(31, "⚠" + label) if r["warn"] else label)
-                      + (" " + c(31 if xn[1] else 90, xn[0]) if xn else "")))
-    # new/changed items first: they must not end up behind the '… +N'
-    lines += wrap_items([t for _, t in sorted(items, key=lambda x: x[0])], w, indent=1, max_lines=max(1, 3 - min(k, 2)), section="exposure")
-    return lines
-
-
-def ov_firewall(net, w, k):
-    if k < 0 and net is not None:
-        # enough room: with the rule list (capped at the intermediate level, most exposed first)
-        return firewall_block(net, w, None if (k <= -2 or "firewall" in EXPAND) else 10)
-    lines = [section("FIREWALL", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    lines += fw_status_lines(net)
-    ipt, f2b, dr = net.get("iptables"), net.get("f2b"), net.get("drops")
-    bits = []
-    if os_of(net) != "linux" and net.get("firewall"):
-        let_in = {(x["port"], x["proto"]) for x in net.get("listeners") or []
-                  if (x.get("fw") or [""])[0] in ("open", "nofw") and bind_scope(x["addr"]) != "lo"}
-        bits.append(f"{plural(len(let_in), 'listening port')} let in")
-    if ipt:
-        bits.append("INPUT " + ipt["policy"].get("INPUT", "?") + " · FORWARD " + ipt["policy"].get("FORWARD", "?"))
-        bits.append(c(32, "ts-input ✔") if ipt["ts_input"] else c(33, "ts-input ?"))
-    if f2b and not f2b.get("error"):
-        bits.append("fail2ban " + " ".join(f"{safe(j['name'])}:{j['banned']}" for j in f2b["jails"]))
-    if dr is not None:
-        bits.append(f"drop 1h {dr['n']}")
-    lines += wrap_items(bits, w, indent=3, sep="   ")
-    return lines
-
-
-def ov_boot(b, w, k, now=None):
-    if k <= -2 and b is not None:  # the full boot detail only if there really is room to spare
-        up = (now or time.time()) - b.get("btime", time.time())
-        lines = boot_block_avvio(b, up, w)
-        for key, blk in (("blame", lambda: boot_block_lente(b, w, 5)), ("journal", lambda: boot_block_journal(b, w, 4))):
-            if not unsupported(b, key):  # macOS/Windows: no empty "not available" blocks
-                lines += [""] + blk()
-        return lines
-    lines = [section("BOOT", w)]
-    if b is None:
-        return lines + [msg("warn", "boot collector not running")]
-    an, j, failed, lbl = b.get("analyze"), b.get("journal"), b.get("failed"), boot_labels(b)
-    bits = []
-    if an:
-        bits.append(f"finished in {c(1, fs(an['total']))}")
-    if failed is not None:
-        bits.append(c(31, f"✖ {plural(len(failed), lbl['failed_short'])}") if failed else c(32, f"✔ 0 {lbl['failed_short']}s"))
-    if j:
-        bits.append(f"{lbl['journal_short']} {c(31, str(j['err'])) if j['err'] else 0} err · {c(33, str(j['warn'])) if j['warn'] else 0} warn")
-    lines.append(fit_join(bits, "   ", w, " "))
-    if b.get("blame") and k < 3:
-        top = [f"{x['unit'].replace('.service', '')} {fs(x['s'])}" for x in b["blame"][:max(1, 3 - k)]]
-        lines.append(fit_join(top, "  ·  ", w, " slowest: ", c90=True))
-    return lines
-
-
-def fmt_rate(bps):
-    for unit in ("B", "kB", "MB", "GB"):
-        if bps < 1000 or unit == "GB":
-            return f"{bps:.0f} B/s" if unit == "B" else f"{bps:.1f} {unit}/s"
-        bps /= 1000
-
-
-def sparkline(values, width):
-    """Last `width` values as small bars; scaled to the series maximum (with a floor, so noise is not blown up)."""
-    vals = list(values)[-width:]
-    top = max(max(vals, default=0), 1024)
-    return c(90, "▁" * (width - len(vals))) + "".join(SPARK[min(7, int(v / top * 8))] for v in vals)
-
-
-def ov_traffico(s, w, k):
-    lines = [section("NETWORK TRAFFIC", w, "↓ received · ↑ sent")]
-    nets = s.get("net")
-    if not nets:
-        return lines + [msg("info", "no interfaces")]
-    sw = 12 if w >= 100 else 8  # shorter sparkline in narrow columns: the line must not be cut
-    for name, v in lim(sorted(nets.items(), key=lambda kv: -(kv[1]["rx_tot"] + kv[1]["tx_tot"])), 5, "network_traffic"):
-        lines.append(f" {pad(safe(name)[:11], 12)}{c(32, '↓')} {pad(fmt_rate(v['rx']), 10)}{sparkline(v['hist_rx'], sw)} "
-                     f"{c(36, '↑')} {pad(fmt_rate(v['tx']), 10)}{sparkline(v['hist_tx'], sw)}"
-                     + c(90, f" ↓{human(v['rx_tot'])} ↑{human(v['tx_tot'])}"))
-    if len(nets) > 5 and not FULL:
-        lines.append(c(90, f" … +{len(nets) - 5} more"))
-    return lines
-
-
-def ov_sessioni(s, w, k):
-    lines = [section("SESSIONS", w)]
-    sess = s.get("sessions")
-    if sess is None:
-        return lines + [msg("warn", "unavailable")]
-    remote = [ip for ip in sess["ssh"] if not is_private_addr(ip)]
-    lines.append(f" {plural(len(sess['local']), 'user session')}   ssh: " + (
-        c(31 if remote else 32, f"{len(sess['ssh'])} connected") if sess["ssh"]
-        else c(90, "none")))
-    for ip in lim(sess["ssh"], 4, "sessions"):
-        lines.append(f" {c(31, '✖') if ip in remote else c(32, '●')} ssh from {safe(ip)}  "
-                     + (c(31, "address NOT local or Tailscale") if ip in remote else c(90, "LAN or Tailscale")))
-    if len(sess["ssh"]) > 4 and not FULL:
-        lines.append(c(90, f" … +{len(sess['ssh']) - 4} more ssh clients"))
-    for key, label in (("rdp", "remote desktop"), ("vnc", "screen sharing")):  # Windows RDP, macOS Screen Sharing
-        peers = sess.get(key) or []
-        if peers:
-            far = [ip for ip in peers if not is_private_addr(ip)]
-            lines.append(f" {c(31, '✖') if far else c(32, '●')} {label} from {safe(', '.join(peers[:3]))}"
-                         + (c(31, "  address NOT local or Tailscale") if far else c(90, "  LAN or Tailscale")))
-    ttys = sorted({x["tty"] for x in sess["local"] if x["tty"]})
-    if ttys:
-        lines += wrap_items([safe(t) for t in ttys], w, indent=1, sep=" ", max_lines=1, section="sessions")
-    return lines
-
-
-def ov_tailscale(net, w, k):
-    lines = [section("TAILSCALE", w)]
-    ts = (net or {}).get("ts_peers")
-    if ts is None:
-        return lines + [unavail_msg(net, "ts_peers")]
-    peers, me = ts["peers"], ts["self"]
-    on = sum(p["online"] for p in peers)
-    now = time.time()
-    stale = now - net.get("ts", now) > NET_STALE_S
-    lines[0] = section("TAILSCALE", w, f"{safe(me['name'])} · {on}/{len(peers)} nodes online" + (" · exit node" if me["exit_option"] else "")
-                       + (f" · stale data ({fmt_ago(now - net['ts'])} old)" if stale else ""))
-    for p in lim(peers, 8, "tailscale"):
-        if p["online"]:
-            state = c(32, "online ") + c(90, "direct" if p["direct"] else f"via relay {safe(p['relay'])}")
-        else:
-            state = c(90, "offline · " + (f"seen {fmt_ago(now - p['last_seen'])} ago" if p["last_seen"] else "never seen"))
-        lines.append(f" {c(32, '●') if p['online'] else c(90, '○')} {pad(safe(p['name'])[:18], 19)}{pad(safe(p['os'])[:8], 9)}{state}"
-                     + (c(33, "  exit node in use") if p["exit"] else ""))
-    if len(peers) > 8 and not FULL:
-        lines.append(c(90, f" … +{len(peers) - 8} nodes"))
-    return lines
-
-
-INFRA_PROCS = {"sshd", "tailscaled", "systemd-resolve", "systemd-resolved", "cupsd", "avahi-daemon", "chronyd", "rpcbind", "dnsmasq", "named",
-               # Windows and macOS system services that listen on their own (not web apps)
-               "System", "svchost", "lsass", "wininit", "services", "spoolsv", "launchd", "mDNSResponder", "rapportd", "ControlCenter",
-               "sharingd", "remoted", "configd", "netbiosd", "Tailscale", "tailscale-ipn"}
-REACH_ORDER = ("INTERNET", "LAN", "TAILNET", "LOCALE")
-REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
-
-
-# ---- [expose]: the widest reach you intend for a service, against the reach it has --------------------------------------------
-EXPOSE_LABEL = {"INTERNET": "Internet", "LAN": "LAN", "TAILNET": "tailnet", "LOCALE": "local"}  # a reach in the words of [expose]
-
-
-def expose_policy(policy=None):
-    """[(key, (port, proto) or None, group)] of [expose]: keys lowercased; a reach that does not exist or a port that cannot exist is left out."""
-    out = []
-    for k, v in (CFG["expose"] if policy is None else policy).items():
-        k = str(k).lower()
-        try:
-            if v in REACH_ORDER:
-                out.append((k, nuc_config.expose_port(k), v))
-        except ValueError:
-            pass  # nuc_config said so when it read the file
-    return out
-
-
-def _ct_names(name, project="", service=""):
-    """The names a container answers to in [expose]: its own, without a replica number (shop-db-1 -> shop-db), its compose project and service."""
-    out = {name, re.sub(r"[-_]\d+$", "", name), project, service}
-    if project and service:
-        out |= {f"{project}-{service}", f"{project}_{service}"}
-    return {x.lower() for x in out if x}
-
-
-def _unit_names(unit):
-    u = str(unit).lower()
-    return {u, u[:-len(".service")]} if u.endswith(".service") else {u}
-
-
-def expose_cts(net, cont):
-    """{container name: the names it answers to}: every container listed (stopped ones too) and every database (its kind too)."""
-    cts = {}
-
-    def add(name, project="", service="", *more):
-        cts[name] = cts.get(name, set()) | _ct_names(name, project, service) | set(more)
-
-    for ct in (cont or {}).get("containers") or []:
-        if isinstance(ct, dict) and ct.get("name"):
-            add(ct["name"], ct.get("project") or "")
-    for ln in ((net or {}).get("links") or {}).get("containers") or []:
-        if isinstance(ln, dict) and ln.get("name"):
-            add(ln["name"], ln.get("project") or "", ln.get("service") or "")
-    for it in ((net or {}).get("dbs") or {}).get("items") or []:
-        if isinstance(it, dict) and it.get("name"):
-            add(it["name"], it.get("project") or "", "", *([str(it["kind"]).lower()] if it.get("kind") else []))
-    return cts
-
-
-def expose_apply(rows, net, cont, policy=None, webapps=None):
-    """Puts the [expose] verdict on each exposure row (in place): r["want"] = the widest reach intended for it (a group name),
-    r["key"] = the config key that says so. Rows no key matches get nothing (and with no [expose] at all nothing is touched).
-
-    A key is a port (8080, 8080/udp) or a name: the row's service, the container behind it (its name without the replica number,
-    compose project and service, database name and kind), the process and unit that listen, a [webapps] name. Behind a
-    Funnel/Serve row it is what listens on the backend (graph.row_owners: the map and this check agree on who is behind a row).
-    Several keys on one row: the most restrictive reach wins."""
-    pol = expose_policy(policy)
-    if not pol or not rows or (net or {}).get("listeners") is None:
-        return rows
-    webapps = CFG["webapps"] if webapps is None else webapps
-    cts = expose_cts(net, cont)
-    for r, (owners, ports) in zip(rows, graph.row_owners(sys.modules[__name__], net, cont, rows)):
-        names = set() if r["name"] in ("?", "container?") or r["name"].startswith(("funnel ", "serve ")) else {r["name"].lower()}
-        for o in owners:
-            kind, _, who = o.partition(":")
-            if kind == "ct":
-                names |= cts.get(who) or _ct_names(who)
-            elif kind == "proc":  # its unit is the one that listens on one of this row's ports (another service may run the same program)
-                names.add(who.lower())
-                for ln in net["listeners"]:
-                    if ln.get("proc") == who and ln.get("port") in ports and ln.get("unit"):
-                        names |= _unit_names(ln["unit"])
-        if r["proto"] == "tcp":
-            names |= {n.lower() for n, ps in webapps.items() if ports & set(ps)}
-        hit = [(REACH_ORDER.index(g), -i, k) for i, (k, pk, g) in enumerate(pol) if (((pk[1] == r["proto"] == "tcp" and pk[0] in ports) or pk == (r["port"], r["proto"])) if pk else k in names)]
-        r["want"], r["key"] = (REACH_ORDER[max(hit)[0]], max(hit)[2]) if hit else (None, None)  # the highest index is the narrowest reach
-    return rows
-
-
-def _expose_reach(r):
-    return "INTERNET" if r["net"] == 3 else group_of(r)  # Funnel status unreadable (net 3): unknown is treated as open
-
-
-def expose_over(r):
-    """True when an exposure row (after expose_apply) reaches further than [expose] says. A row no key matches never does."""
-    return bool(r.get("want")) and REACH_ORDER.index(_expose_reach(r)) < REACH_ORDER.index(r["want"])
-
-
-def expose_note(r):
-    """The [expose] marker of an exposure row: ('beyond config.ini: local', True), ('expected: LAN', False), None if no key matches."""
-    if not r.get("want"):
-        return None
-    return (f"beyond config.ini: {EXPOSE_LABEL[r['want']]}", True) if expose_over(r) else (f"expected: {EXPOSE_LABEL[r['want']]}", False)
-
-
-def expose_over_items(rows):
-    """['shop-db :5432 LAN > local', ...]: what reaches further than [expose] says, widest first, once per service and port."""
-    items = {}
-    for r in rows:
-        if expose_over(r):
-            pk = nuc_config.expose_port(r["key"])
-            udp = "/udp" if r["proto"] == "udp" else ""
-            who = f"port {pk[0]}" + ("/udp" if pk[1] == "udp" else "") if pk else r["key"]  # a port key is named by itself: the process behind it can change
-            at = "" if pk == (r["port"], r["proto"]) else f" :{r['port']}{udp}"  # (a port key that follows a Funnel to its backend: the row's own port too)
-            items.setdefault((REACH_ORDER.index(_expose_reach(r)), who, r["port"], r["proto"]),
-                             f"{safe(who)}{at} {EXPOSE_LABEL[_expose_reach(r)]} > {EXPOSE_LABEL[r['want']]}")
-    return [items[k] for k in sorted(items)]
-
-
-def expose_unmatched(net, cont, boot=None, policy=None, webapps=None):
-    """The [expose] names that match nothing this machine knows (a typo guards nothing). Port keys are never listed: a port nobody
-    listens on is fine. Known: containers (stopped ones too), compose projects and services, the processes and units that listen,
-    databases (name, kind), [webapps], the units enabled at boot."""
-    webapps = CFG["webapps"] if webapps is None else webapps
-    known = {n.lower() for n in webapps}
-    for names in expose_cts(net, cont).values():
-        known |= names
-    for ln in (net or {}).get("listeners") or []:
-        known |= {str(ln.get("proc") or "").lower()} | _unit_names(ln.get("unit") or "")
-    boot = boot if isinstance(boot, dict) else {}
-    known |= {n for u in boot.get("enabled") or [] if isinstance(u, dict) for n in _unit_names(u.get("unit") or "")}
-    known |= {n for u in boot.get("failed") or [] for n in _unit_names(u)}
-    return [k for k, pk, _ in expose_policy(policy) if pk is None and k not in known]
-
-
-def webapp_rows(net, cont):
-    """Web apps: the ones you declared under [webapps] (up or down) and the listeners found on their own.
-
-    -> [{name, ports, state: 'up'|'down', reach: INTERNET|LAN|TAILNET|LOCALE|None, expected: bool}] sorted for display."""
-    rows = exposure_rows(net, cont) if net and net.get("listeners") is not None else []
-    db_names = {it["name"] for it in ((net or {}).get("dbs") or {}).get("items", [])}
-    by_port = {}
-    for r in rows:
-        by_port.setdefault(r["port"], []).append(r)
-    widest = lambda rs: min((group_of(r) for r in rs), key=REACH_ORDER.index) if rs else None
-    out, used = [], set()
-    for name, ports in CFG["webapps"].items():
-        hit = [r for p in ports for r in by_port.get(p, [])]
-        out.append({"name": name, "ports": list(ports), "state": "up" if hit else "down", "reach": widest(hit), "expected": True})
-        used |= set(ports)
-    found = {}
-    desktop = os_of(net) != "linux"  # macOS/Windows desktops: dozens of apps listen on 127.0.0.1, list only what is reachable
-    for r in rows:
-        if desktop and group_of(r) == "LOCALE":
-            continue
-        if (r["port"] in used or r["port"] in SENSITIVE or r["port"] == 22 or r["proto"] != "tcp" or r["name"] in INFRA_PROCS
-                or r["name"].startswith("svchost/") or r["name"] in db_names or r["name"] == "?"):
-            continue
-        found.setdefault(r["name"], []).append(r)
-    for name, rs in found.items():
-        if name.startswith(("funnel ", "serve ")):
-            name = " ".join(name.split()[:2])  # 'funnel /webhook → 127.0.0.1:…' -> 'funnel /webhook'
-        out.append({"name": name, "ports": sorted({r["port"] for r in rs}), "state": "up", "reach": widest(rs), "expected": False})
-    rank = lambda x: (not x["expected"], x["state"] != "up", REACH_ORDER.index(x["reach"]) if x["reach"] else 9, x["name"])
-    return sorted(out, key=rank)
-
-
-def ov_webapp(net, cont, w, k):
-    lines = [section("WEB APPS", w)]
-    if net is None:
-        return lines + [msg("err", "network collector not running")]
-    rows = webapp_rows(net, cont)
-    if net.get("listeners") is None and not rows:
-        return lines + [unavail_msg(net, "listeners")]
-    if not rows:
-        return lines + [msg("info", "no web apps found (declare the ones you expect under [webapps] in config.ini)")]
-    up, down = sum(r["state"] == "up" for r in rows), sum(r["state"] == "down" for r in rows)
-    lines[0] = section("WEB APPS", w, f"{up} active" + (f" · {down} down (expected)" if down else ""))
-    declared = bool(CFG["webapps"])
-    nw = max(8, min(22, w - 47))
-    cap = 12 if k <= 0 else 6 if k <= 2 else 4
-    if FULL or "webapps" in EXPAND:
-        cap = len(rows)
-    elif len(rows) > cap:
-        TRUNC.add("webapps")
-    for r in rows[:cap]:
-        ports = ",".join(str(p) for p in r["ports"][:3]) + ("…" if len(r["ports"]) > 3 else "")
-        if r["state"] == "down":
-            mark, reach, flag = c(33, "○"), c(90, "not listening"), c(33, "DOWN (expected)")
-        else:
-            mark = c(32, "●") if r["expected"] or not declared else c(33, "●")
-            col = {"INTERNET": 31, "LAN": 33, "TAILNET": 0, "LOCALE": 90}.get(r["reach"], 0)
-            reach = c(col, REACH_LABEL.get(r["reach"], "?")) if col else REACH_LABEL.get(r["reach"], "?")
-            flag = c(90, "not declared") if declared and not r["expected"] else ""
-        lines.append(f" {mark} {pad(safe(r['name'])[:nw], nw + 1)}{pad(ports, 13)}{pad(reach, 14)}{flag}")
-    if len(rows) > cap:
-        lines.append(c(90, f" … +{len(rows) - cap} more"))
-    return lines
-
-
-def ov_docker(boot, w, k):
-    lines = [section("DOCKER · DISK", w)]
-    if boot and time.time() - boot.get("ts", time.time()) > BOOT_STALE_S:
-        lines[0] = section("DOCKER · DISK", w, f"stale data ({fmt_ago(time.time() - boot['ts'])} old)")
-    df = (boot or {}).get("docker_df")
-    if df is None:
-        return lines + [unavail_msg(boot, "docker_df")]
-    for r in df["rows"]:
-        recl = safe(r["reclaimable"])
-        lines.append(f" {pad(safe(r['type']), 14)}{safe(r['count']):>4} ({safe(r['active'])} in use)  {pad(safe(r['size']), 9)} unused {recl}")
-    dang = df.get("dangling_images")
-    if dang is not None:
-        lines.append(c(90 if not dang["bytes"] else 33, f" dangling images: {dang['count']} ({human(dang['bytes']) if dang['bytes'] else '0B'}): safe to prune"))
-    if df.get("volumes_unused"):
-        anon = df.get("volumes_unused_anonymous") or 0
-        lines.append(c(33, f" {df['volumes_unused']} unused volumes ({anon} anonymous): may hold data, check before pruning"))
-    lines.append(c(90, " unused = no container uses it; tagged images can be re-pulled"))
-    return lines
-
-
-def ov_dischi(s, w, k):
-    lines = [section("DISKS", w)]
-    fs = s.get("fs")
-    if not fs:
-        return lines + [msg("info" if fs == [] else "warn", "no filesystems" if fs == [] else "unavailable")]
-    bw = max(8, min(30, w - 42))
-    for f in lim(fs, 5, "disks"):
-        lines.append(f" {pad(safe(f['mount'])[:14], 15)}{bar(f['used'] / f['total'], bw)} {human(f['used'])}/{human(f['total'])}")
-    if len(fs) > 5 and not FULL:
-        lines.append(c(90, f" … +{len(fs) - 5} more"))
-    return lines
+# The overview's sections are cards (cards.py), registered in the order of the screen; every builder is in cards.py (cards.NATIVE).
+for _id in ("attention", "exposure", "webapps", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
+            "tailscale", "docker_disk", "disks"):
+    cards.register(_id, *cards.NATIVE[_id][:2], cards.NATIVE[_id][2])
 
 
 def pack(blocks, ncol, cw, w, body_h, gap):
@@ -2285,7 +1100,7 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     ci = 0
     for fn in blocks:
         lines = fn(cw)
-        if gap and CFG["spacing"] and len(lines) > 1 and lines[1] != "":  # a little air under each section title
+        if gap and spacing_on() and len(lines) > 1 and lines[1] != "":  # a little air under each section title
             lines = [lines[0], ""] + lines[1:]
         while ci < ncol:
             col = cols[ci]
@@ -2305,55 +1120,42 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides().
     `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
     in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
-    global FULL
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
-    def block(fn, title, width, *a):
-        try:
-            return fn(*a)
-        except Exception as e:  # noqa: BLE001 - a broken block must not empty the screen
-            return [section(title, width), msg("err", safe(repr(e))[:60])]
-
-    def guardare(bw, k):
-        shown = lim(pb, max(3, 6 - k), "attention")
-        rows = [x for sev, t in shown for x in msg_wrap("err" if sev >= 2 else "warn", t, bw)]
-        extra = [c(90, f"   … +{len(pb) - len(shown)} more")] if len(pb) > len(shown) else []
-        acc = getattr(pb, "accepted", 0)
-        known = [c(90, f"   · {acc} accepted as known ({PROBLEMS_CMD})")] if acc else []
-        return [section("ATTENTION", bw)] + (rows + extra if pb else [msg("ok", "no problems detected")]) + known
+    ctx = cards.Ctx(s=s, cont=cont, net=net, boot=boot, problems=pb, cfg=CFG, now=now, baseline=baseline, new=new)  # this frame's data and memo
+    lifted, trunc = set(), set()  # the sections whose caps are lifted because the free space allows it; the ones that hid items ("… +N more")
+    caps_at = lambda width, full=False: cards.Caps(width, full, lifted, trunc)  # noqa: E731 - what the registry asks for
 
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
     cw = (w - 3 * (ncol - 1)) // ncol
 
-    def make_cand(k):
-        """(feature, block) per section at detail level k: a section switched off in config.ini does not appear."""
-        cand = {"attention": (True, lambda c_: guardare(c_, k)),
-                "exposure": ("exposure", lambda c_: block(ov_esposizione, "EXPOSURE", c_, net, cont, c_, k, new)),
-                "firewall": ("firewall", lambda c_: block(ov_firewall, "FIREWALL", c_, net, c_, k)),
-                "system": (True, lambda c_: block(ov_sistema, "SYSTEM", c_, s, c_, k, cont)),
-                "containers": ("containers", lambda c_: block(ov_container, "CONTAINER", c_, cont, c_, k))}
-        if k < 4:
-            cand["databases"] = ("databases", lambda c_: block(ov_database, "DATABASE", c_, net, cont, c_, k))
-            cand["boot"] = ("boot", lambda c_: block(ov_boot, "BOOT", c_, boot, c_, k))
-            cand["webapps"] = ("webapps", lambda c_: block(ov_webapp, "WEB APPS", c_, net, cont, c_, k))
-        if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
-            cand.update(network_traffic=("network_traffic", lambda c_: block(ov_traffico, "NETWORK TRAFFIC", c_, s, c_, k)),
-                        sessions=("sessions", lambda c_: block(ov_sessioni, "SESSIONS", c_, s, c_, k)),
-                        tailscale=("tailscale", lambda c_: block(ov_tailscale, "TAILSCALE", c_, net, c_, k)),
-                        docker_disk=("docker_disk", lambda c_: block(ov_docker, "DOCKER · DISK", c_, boot, c_, k)),
-                        disks=("disks", lambda c_: block(ov_dischi, "DISKS", c_, s, c_, k)))
-        # the order is fixed (config.ini [dashboard] sections), never decided by which block happens to fit where
-        return [(n, cand[n][1]) for n in CFG["sections"] if n in cand and (cand[n][0] is True or on(cand[n][0]))]
+    def card_block(n, k, c_, full=False):
+        """The lines of card n at level k in a column c_ wide: its title and body drawn by ansi.card_lines,
+        remembered for the frame by what changes them; a card that hid items tells the Details pages."""
+        caps = caps_at(c_, full)
+        card = cards.build(n, ctx, k, caps)
+        lines, hid = ctx.once(("lines", n, k) + caps.key(n), lambda: ansi.card_lines(card, c_))
+        if hid:
+            trunc.add(n)
+        return list(lines)
 
-    def detail_pages(trunc):
+    def make_cand(k, full=False):
+        """(card id, block) per section at detail level k: a section switched off in config.ini does not appear. The card comes from the
+        registry (cards.build), which remembers it for this frame: the levels and expand() ask for the same card again and again."""
+        have = {"attention", "exposure", "firewall", "system", "containers"}
+        if k < 4:
+            have |= {"databases", "boot", "webapps"}
+        if k <= 3 and (w >= WIDE or scroll):  # wide consoles (or a page that scrolls): the detail sections stay at every level
+            have |= {"network_traffic", "sessions", "tailscale", "docker_disk", "disks"}
+        # the order is fixed (config.ini [dashboard] sections, or [ui] layout / order: card_order), never decided by which block happens to fit where
+        def lines_of(n, c_):
+            return mark_title(card_block(n, k, c_, full), cards.build(n, ctx, k, caps_at(c_, full)).state)  # the card's state in front of its title, when it is not fine
+        return [(n, lambda c_, n=n: lines_of(n, c_)) for n in card_order(ctx, CFG["sections"]) if n in have and cards.enabled(n, CFG)]
+
+    def detail_pages(hid):
         """The sections that hid items ("… +N more"), built in full at the richest level and laid out page by page."""
-        global FULL
-        FULL = True
-        try:
-            blocks = [fn(cw) for n, fn in make_cand(-2) if n in trunc]
-        finally:
-            FULL = False
+        blocks = [fn(cw) for n, fn in make_cand(-2, True) if n in hid]
         pages, cols, ci = [], [[] for _ in range(ncol)], 0
         flush = lambda: pages.append(columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else list(cols[0]))
         for lines in blocks:
@@ -2373,11 +1175,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         return pages
 
     if scroll:
-        FULL = True
-        try:
-            pre = [fn(cw) for _, fn in make_cand(-2)]
-        finally:
-            FULL = False
+        pre = [fn(cw) for _, fn in make_cand(-2, True)]
         blocks = [(lambda c_, lines=lines: lines) for lines in pre]
         # the shortest column height that holds every section in the fixed order: the columns come out even
         lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
@@ -2392,8 +1190,10 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
     levels = ((-2, True), (-1, True), (0, True), (1, True), (2, True), (3, True), (3, False), (4, False))
+    if ui_cfg().get("density") == "wall":  # a wall display is read from afar: it starts at level 0, without the two richest levels (-2, -1)
+        levels = levels[2:]
     for i, (k, spaced) in enumerate(levels):
-        TRUNC.clear()  # only what the level that is finally shown hides counts
+        trunc.clear()  # only what the level that is finally shown hides counts
         blocks = [fn for _, fn in make_cand(k)]
         last = i == len(levels) - 1
         lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, [""] if spaced else [])  # last level: no limit (the page splits)
@@ -2405,36 +1205,36 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
                 def expand(first_lines):
                     ls = first_lines
                     try:
-                        for name in [n for n, _ in make_cand(k) if n in set(TRUNC)]:
-                            EXPAND.add(name)
-                            TRUNC.clear()
+                        for name in [n for n, _ in make_cand(k) if n in set(trunc)]:
+                            lifted.add(name)
+                            trunc.clear()
                             try_lines = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
                             if try_lines is None:
-                                EXPAND.discard(name)
+                                lifted.discard(name)
                             else:
                                 ls = try_lines
-                        TRUNC.clear()
+                        trunc.clear()
                         ls = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else []) or ls
-                        return ls, set(TRUNC)
+                        return ls, set(trunc)
                     finally:
-                        EXPAND.clear()
-                        TRUNC.clear()
+                        lifted.clear()
+                        trunc.clear()
                 lines, left = expand(lines)
-                if left and CFG["spacing"]:
+                if left and spacing_on():
                     saved_spacing = CFG["spacing"]
                     CFG["spacing"] = 0
                     try:
-                        TRUNC.clear()
+                        trunc.clear()
                         tight = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
                         tight_lines, tight_left = expand(tight) if tight is not None else (None, left)
                     finally:
                         CFG["spacing"] = saved_spacing
                     if tight_lines is not None and len(tight_left) < len(left):
                         lines, left = tight_lines, tight_left
-                TRUNC.clear()
-                TRUNC.update(left)
-            if details is not None and CFG["details"] and TRUNC:
-                details.extend(detail_pages(set(TRUNC)))
+                trunc.clear()
+                trunc.update(left)
+            if details is not None and CFG["details"] and trunc:
+                details.extend(detail_pages(set(trunc)))
             return lines  # the last level has a 10**6 limit: we always return here
 
 
@@ -2497,35 +1297,215 @@ def pick_slide(sl, t):
     return 0
 
 
-def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None, healthkey=None, aikey=None):
+# ---- [ui] on the console: the theme, the density, the cards' order, the tab bar and the KPI line ---------------------------------
+# config.ini [ui] (prefs.parse_ui, in CFG["ui"]) is the only source here: a console has no cookie and no URL. Without it nothing below changes
+# what the console draws except the header's tab bar, the KPI line (on a tall screen) and the state symbol on a section's title.
+
+UI_THEMES = {"light": "light", "high-contrast": "hc"}  # [ui] theme -> ui.ANSI_THEMES (auto and dark: the default one)
+KPI_MIN_ROWS = 30  # the KPI line shows from this many rows up, or whenever [ui] kpis is set
+TAB_SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar when the line is narrow
+KPI_TOKEN = {"ok": "ok", "warn": "warn", "err": "err", "down": "err", "unknown": "unknown", "info": "info"}
+TITLE_STATES = ("warn", "err", "down", "unknown")  # the states a section's title says besides the colour (ok and info are quiet)
+LAYOUT_KEYS = ("layout", "hidden", "order", "preset")  # [ui] keys that take the order of the cards from prefs (else [dashboard] sections)
+
+
+def ui_cfg():
+    return CFG.get("ui") or {}
+
+
+def theme_name():
+    """The ANSI theme the frame is written in: NO_COLOR (set and not empty) is always mono, else [ui] theme."""
+    if os.environ.get("NO_COLOR"):
+        return "mono"
+    return UI_THEMES.get(ui_cfg().get("theme"), "default")
+
+
+def themed(screen):
+    """The frame in the console's theme (the screens are drawn in the default one)."""
+    return ansi.retheme(screen, theme_name())
+
+
+def spacing_on():
+    """Empty lines under the section titles: [dashboard] spacing, and never in the compact density."""
+    return bool(CFG["spacing"]) and ui_cfg().get("density") != "compact"
+
+
+def kpi_on(h, page=False):
+    """Is there a KPI line on a screen h rows tall? A browser page (page=True) has its own."""
+    return not page and (h >= KPI_MIN_ROWS or bool(ui_cfg().get("kpis")))
+
+
+def body_rows(h, page=False):
+    """The rows a screen's body has: the frame less the header, the footer and the KPI line."""
+    return h - 2 - (1 if kpi_on(h, page) else 0)
+
+
+def make_ctx(st, sm, pb, now=None):
+    """The cards.Ctx of the KPI line from what a screen has read (snapshot(), the sampler's reading, the header's problems)."""
+    ids = prefs.effective(ui_cfg())[0]["kpis"]
+    net, cont, base = st["net"], st["cont"], st["baseline"]
+    ctx = cards.Ctx(s=sm, cont=cont, net=net, boot=st["boot"], problems=pb, cfg=CFG, now=now, baseline=base, new=new_ports(net, cont, base))
+    for field, ask in (("health", lambda: health_data(7)), ("ai", ai_status)):  # only the KPIs that read them cost a read
+        if field in ids:
+            try:
+                setattr(ctx, field, ask())
+            except Exception:  # noqa: BLE001 - a source that fails is an unknown KPI, never a broken screen
+                pass
+    return ctx
+
+
+KEEP = {}  # what the screens last read (st, sm: map_graph, cpu_problems, health_state, ai_state) and the Ctx made of it (kept_ctx)
+
+
+def keep(st, sm):
+    """Remembers what a screen has read, for the KPI line of its frame."""
+    KEEP.update(st=st, sm=sm)
+
+
+def kept_ctx(pb):
+    """The cards.Ctx of the KPI line of a screen that has no Ctx of its own: made of what was last read (keep) and the header's problems
+    pb, once for each reading. Nothing read: only the problems are known, the other KPIs are '?'."""
+    st, sm = KEEP.get("st"), KEEP.get("sm")
+    if st is None:
+        return cards.Ctx(problems=pb or [], cfg=CFG)
+    hit = KEEP.get("ctx")
+    if hit is None or hit[0] is not st or hit[1] is not sm or hit[2] is not pb:
+        hit = KEEP["ctx"] = (st, sm, pb, make_ctx(st, sm, pb))
+    return hit[3]
+
+
+def kpi_line(ctx, w):
+    """The KPI line: symbol, label and value of each KPI of [ui] (kpis or the preset's), the last ones dropped until it fits w columns."""
+    items = []
+    for k in cards.kpis(ctx, prefs.effective(ui_cfg())[0]["kpis"]):
+        col, val = ui.sgr(KPI_TOKEN[k.state]), k.value + k.unit
+        items.append((len(f"{k.symbol} {k.label} {val}"),
+                      cc(col, k.symbol) + " " + c(ui.sgr("muted"), k.label) + " " + (val if k.state in ("ok", "info") else cc(col, val))))
+    while len(items) > 1 and 1 + sum(n for n, _ in items) + 3 * (len(items) - 1) > w:
+        items.pop()
+    return clip(" " + "   ".join(t for _, t in items), w)
+
+
+def card_order(ctx, base):
+    """The overview's cards in the order to draw them: [dashboard] sections (`base`) unless [ui] says layout, hidden, preset or order.
+    Then it is prefs' layout without the hidden cards, and with `order = severity` the cards with the worst state first: attention
+    stays where the layout puts it (first), the cards of one state keep their order. The order is a function of the states, so a card
+    moves only when its own state changes (or another one's does): the same states are the same order, frame after frame."""
+    ui_ = ui_cfg()
+    if not any(k in ui_ for k in LAYOUT_KEYS):
+        return list(base)
+    ids = [n for n, _w in prefs.visible_cards(prefs.effective(ui_)[0], base)]
+    if ui_.get("order") != "severity":
+        return ids
+    states = ctx.once("card_states", lambda: {n: cards.card_state(n, ctx) for n in ids})
+    rank = {n: -ui._SEVERITY[states[n]] for n in ids}
+    first = ids[:1] if ids[:1] == ["attention"] else []
+    return first + sorted(ids[len(first):], key=lambda n: rank[n])  # sorted() is stable
+
+
+def mark_title(lines, state):
+    """The card's lines with its state in front of the title ('── ✖ EXPOSURE ──'), the rule shortened by as much: width does not change.
+    Quiet states (ok, info) and a first line that is not a section title are left alone."""
+    if state not in TITLE_STATES or not lines:
+        return lines
+    strong, accent = ui.sgr("accent_strong"), ui.sgr("accent")
+    head, line = f"\x1b[{strong}m ", lines[0]
+    at = line.find(head)
+    if at < 0:
+        return lines
+    line = line[:at] + head + "\x1b[0m" + c(ui.sgr(KPI_TOKEN[state]), ui.SYMBOLS[state]) + head + line[at + len(head):]
+    fill = f"\x1b[{accent}m" + "─" * 4  # the rule after the title: 2 columns shorter, for the symbol and its blank
+    cut = line.find(fill)
+    if cut >= 0:
+        line = line[:cut + len(fill) - 4] + line[cut + len(fill) - 2:]
+    return [line] + lines[1:]
+
+
+PAUSED = False  # Z: the redraw is paused, the header says so
+
+
+def tab_bar(cur, shown, short, rev_on, rev_off):
+    """The screens' tabs: '[1 Overview]  2 Map  3 CPU  4 Health  5 AI', or '[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI' when short. The current one has
+    brackets and is in reverse (rev_on / rev_off: the sequences, which depend on the bar being in reverse itself): never colour alone.
+    A screen whose feature is off is left out; the digits are the screens', they do not move."""
+    out = []
+    for i, (name, feat, title) in enumerate(ui.SCREENS):
+        if name != cur and (short is None or feat and not shown(feat)):  # short None: only the current tab, for a very narrow console
+            continue
+        label = f"{i + 1}·{TAB_SHORT[name]}" if short is not False else f"{i + 1} {title}"
+        out.append(f"{rev_on}[{label}]{rev_off}" if name == cur else label)
+    return (" " if short is not False else "  ").join(out)
+
+
+def console_head(name, part, parts, w, text, code, shift, shown):
+    """The header line of the console: ' host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ HH:MM:SS … ✖ N PROBLEMS' on the pill's colour.
+    The tabs have a short form when the long one leaves no room for the host name. A page of the overview that is not 'Overview'
+    (System, Boot, Details...) says which, after the tabs (the footer says which screen of how many)."""
+    cur, title = next(((n, t) for n, _f, t in ui.SCREENS if t == name), ("overview", "Overview"))
+    bar_rev = theme_name() == "mono" or "7" in code.split(";")  # the bar is in reverse already: the current tab is the one that is not
+    rev_on, rev_off = ("\x1b[27m", "\x1b[7m") if bar_rev else ("\x1b[7m", "\x1b[27m")
+    extra = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") if name != title else ""  # the footer counts the screens
+    tail = extra + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "") + " "
+    host = socket.gethostname()
+    for short in (False, True, None):
+        pre = shift + " "
+        mid = " │ " + tab_bar(cur, shown, short, rev_on, rev_off) + tail
+        room = w - len(text) - 2 - vlen(pre + mid)
+        if room >= min(len(host), 14) or short is None:  # a form is chosen when the host name keeps 14 columns (all of it, if it is shorter)
+            break
+    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+        host = host[:max(room - 1, 1)] + "…"
+    left = pre + host + mid
+    return clip(c(code, pad(left, max(vlen(left), w - len(text) - 2)) + text + "  "), w)
+
+
+def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=None, foot=None, cpukey=None, healthkey=None, aikey=None,
+          ctx=None):
     """page=True: a browser page, where all w columns are usable (the Linux console needs w = its width - 1).
-    mapkey / cpukey / healthkey / aikey: say that `m` opens the Map, `c` the CPU screen, `h` the Health screen, `a` the AI screen
-    (default: when keys are); foot: a footer of its own."""
+    mapkey / cpukey / healthkey / aikey: say that `2` opens the Map, `3` the CPU screen, `4` the Health screen, `5` the AI screen
+    (default: when keys are); foot: a footer of its own, else the overview's, made from ui.KEYMAP.
+    The console's frame has the tab bar on top and, from KPI_MIN_ROWS rows (or with [ui] kpis), the KPI line of ctx (a cards.Ctx; without
+    one, of what the screens last read: kept_ctx); its body is body_rows(h) tall. A browser page keeps the plain header and has no KPI line."""
     name, part, parts, body = slide
     text, code = status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
-    tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}"
-    host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
-    if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
-        host = host[:max(room - 1, 1)] + "…"
-    left = shift + f" {host}" + tail
-    head = c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  ")
-    head = clip(head, w)
+    flags = {"map": mapkey, "cpu": cpukey, "health": healthkey, "ai": aikey}
+    shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
+    if page:
+        tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "")
+        host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
+        if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
+            host = host[:max(room - 1, 1)] + "…"
+        left = shift + f" {host}" + tail
+        head = clip(c(code, pad(left, max(len(left), w - len(text) - 2)) + text + "  "), w)
+    else:
+        head = console_head(name, part, parts, w, text, code, shift, shown)
     size = f"{w}x{h}" if page else f"{w + 1}x{h}"
-    mk = ("   m: map" if (keys if mapkey is None else mapkey) and on("map") else "") \
-        + ("   c: cpu" if (keys if cpukey is None else cpukey) and on("cpu") else "") \
-        + ("   h: health" if (keys if healthkey is None else healthkey) and on("health") else "") \
-        + ("   a: ai" if (keys if aikey is None else aikey) and on("ai") else "")
-    if keys and nuc_config.PORTABLE:  # run.sh in a terminal
-        mk += "   q: quit"
     if foot is None:
-        foot = c(90, (f" single screen{mk}   console {size}" if n == 1 else
-                      f" screen {idx + 1}/{n}{mk}" + ("   details: everything the overview cut ('… +N more')" if name == "Details" else "")
-                      + (f"   keys 1-{len(PAGES)}: jump to page" if keys else "") + f"   console {size}") + (f"   {hint}" if hint else ""))
+        foot = c(90, overview_footer(name, idx, n, w, size, keys, hint, shown))
     foot = clip(foot, w)
-    rows = [head] + [clip(x, w) for x in body]
+    rows = [head]
+    if kpi_on(h, page):
+        rows.append(kpi_line(ctx if ctx is not None else kept_ctx(pb), w))
+    rows += [clip(x, w) for x in body[:max(0, h - 1 - len(rows))]]
     rows += [""] * (h - 1 - len(rows)) + [foot]
     return "\x1b[K\r\n".join(rows[:h])  # \x1b[K: clears what is left of the previous frame
+
+
+def overview_footer(name, idx, n, w, size, keys, hint, shown):
+    """The footer of the rotating pages, plain text: where we are, the keys of the overview (ui.KEYMAP), then the console size and the
+    hint, which go first when it is narrow. keys=False (a browser page): no keys. shown(feature): is that screen's digit offered?"""
+    lead = " single screen   " if n == 1 else f" screen {idx + 1}/{n}   "
+    items = []
+    if keys or any(shown(f) for f in ("map", "cpu", "health", "ai")):
+        items = ui.footer_items("overview", shown, dyn={"back": ("q: quit", None) if nuc_config.PORTABLE else None,  # Esc does nothing here
+                                                        "slide-prev": None if n == 1 else ("←→: slide", None)})
+    if n > 1 and name == "Details":
+        items.append((97, "details: everything the overview cut ('… +N more')", ""))
+    items.append((99, f"console {size}", None))
+    if hint:
+        items.append((98, hint, ""))
+    return ui.fit(lead, items, w)
 
 
 def first_slide_of(sl, page_idx):
@@ -2545,6 +1525,16 @@ def snapshot(w):
     return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
 
 
+def host_sample(smp):
+    """The Sampler's reading for a screen. Under --demo it is the demo machine's (demo.sampler_data), whatever sampler is given (the web view
+    always has a real one) and without calling it: nothing of the machine running the demo is read or shown. Without a sampler: no figures
+    ({"thermal": {}}: the screens that only judge the header's problems)."""
+    if DEMO:
+        import demo
+        return demo.sampler_data(DEMO_OS)
+    return smp.sample() if smp else {"thermal": {}}
+
+
 def demo_defaults():
     """--demo: the host name and the [webapps] the screenshots show (one up, one expected-but-down)."""
     socket.gethostname = lambda: "demo-host"
@@ -2557,7 +1547,8 @@ def demo_defaults():
 def map_graph(smp=None):
     """(MAP graph, header problems) of the current state: shared by the console's Map screen and the web view's map page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
@@ -2565,233 +1556,31 @@ def map_graph(smp=None):
 
 
 # ---- MAP screen: graph.py's tree drawn on the console, moved through with the keyboard ------------------------------------
-
-MAP_PANE_W = 140  # from this width up the details pane sits beside the tree, below it otherwise
-MAP_IDLE_S = 600  # the Map left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
-ST_COL = {"err": "31", "down": "31", "warn": "33", "unknown": "33", "ok": "32", "info": ""}
-LV_COL = {"err": "31", "warn": "33", "ok": "32", "info": "90"}
-EV_COL = {"seen": "1", "declared": "", "possible": "90", "bind": "90"}  # how sure the link is: bright, normal, dim
-
-
-def cc(code, s):
-    """c() that leaves the terminal's own colour alone when there is no code."""
-    return c(code, s) if code else s
-
-
-class MapView(object):
-    """The interactive Map: open branches (graph.State), the selected row (its key survives refreshes; its index is where
-    the cursor stays when that row vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, now=None):
-        self.st, self.cur, self.idx, self.top, self.details = graph.State(), None, 0, 0, False
-        self.opened = self.touched = now or time.time()
-
-
-def map_sync(mv, rs):
-    """The cursor back on its row after the rows changed: by key, else the same index (clamped). Returns the index."""
-    i = graph.find(rs, mv.cur) if mv.cur else None
-    mv.idx = i if i is not None else max(0, min(mv.idx, len(rs) - 1))
-    mv.cur = rs[mv.idx]["key"] if rs else None
-    return mv.idx
-
-
-def map_parent(rs, i):
-    d = rs[i]["depth"]
-    return next((j for j in range(i - 1, -1, -1) if rs[j]["depth"] < d), i)
-
-
-def map_key(mv, key, rs, page=10):
-    """One key in the Map, on the rows rs drawn from mv.st. Returns 'back' (leave the Map), 'rows' (branches opened or
-    closed: rebuild the rows, then map_sync) or '' (only the cursor or the details pane changed)."""
-    if key in ("tab", "btab", "m", "esc", "q"):
-        return "back"
-    if key in ("enter", "space"):
-        mv.details = not mv.details
-        return ""
-    if key in ("e", "p"):
-        if key == "e":
-            mv.st.expand_all()
-        else:
-            mv.st.only = not mv.st.only
-        return "rows"
-    if not rs:
-        return ""
-    i = map_sync(mv, rs)
-    row = rs[i]
-    if key == "c":  # every branch closes: the cursor goes up to its root, which stays
-        i = next((j for j in range(i, -1, -1) if rs[j]["depth"] == 0), i)
-        mv.idx, mv.cur = i, rs[i]["key"]
-        mv.st.collapse_all()
-        return "rows"
-    if key in ("right", "l", "left", "h") and (row["open"] if key in ("left", "h") else row["kids"] and not row["open"]):
-        mv.st.toggle(row)
-        return "rows"
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rs) - 1,
-         "right": i + 1 if row["open"] else i, "l": i + 1 if row["open"] else i,  # already open: down to its first child
-         "left": map_parent(rs, i), "h": map_parent(rs, i)}.get(key, i)  # closed or a leaf: up to its parent
-    mv.idx = max(0, min(i, len(rs) - 1))
-    mv.cur = rs[mv.idx]["key"]
-    return ""
-
-
-def map_layout(G, w, h, details=False):
-    """(notes shown, tree rows, details rows, details beside the tree?) of a Map body h lines tall."""
-    notes = min(len(G["notes"]), max(0, (h - 4) // 4))
-    avail = max(1, h - 1 - notes)
-    if not details or avail < 6:
-        return notes, avail, 0, False
-    if w >= MAP_PANE_W:
-        return notes, avail, avail, True
-    return notes, avail - avail // 2, avail // 2, False
-
-
-def map_scroll(top, i, n, rows, margin=2):
-    """First tree row shown, so that row i stays in sight, a few rows from the edges when there is room."""
-    m = min(margin, max(0, (rows - 1) // 2))
-    top = max(min(top, i - m), i + m + 1 - rows)
-    return max(0, min(top, n - rows))
-
-
-def map_title(G, w, only=False):
-    """'── MAP  27 nodes · 14 links · ✖ 7 problems ───── ━━► seen  ╌╌► declared …': the legend goes first when narrow."""
-    k = graph.counts(G)
-    probs = (c(31, f"✖ {k['problems']} need" + ("s" if k["problems"] == 1 else "") + " attention") if k["problems"]
-             else c(90, "none needs attention"))  # not a green: missing data also draws nothing
-    left = (c(36, "──") + c("1;36", " MAP ") + " " + c(90, f"{plural(k['nodes'], 'node')} · {plural(k['edges'], 'link')} · ") + probs
-            + (c("1;33", "  problems only") if only else "") + " ")
-    legend = []
-    for item in graph.LEGEND.split("  "):
-        glyph, _, word = item.partition(" ")
-        ev = "seen" if "━" in glyph else "declared" if "╌" in glyph else "possible" if "┄" in glyph else "bind"
-        legend.append(cc(EV_COL[ev], glyph) + " " + c(90, word))
-    while legend and vlen(left) + 4 + vlen("  ".join(legend)) > w:
-        legend.pop()
-    right = "  ".join(legend)
-    return clip(left + c(36, "─" * max(0, w - vlen(left) - vlen(right) - (1 if right else 0))) + (" " + right if right else ""), w)
-
-
-def map_row(G, row):
-    """One tree row: tree (dim), toggle, arrow (by evidence), label (by state), owner of a port, port used, sub, note."""
-    p, n = graph.parts(G, row), G["nodes"].get(row["node"]) or {}
-    st, label = p["state"], safe(p["label"])
-    s = (c(90, safe(p["tree"])) if p["tree"] else "") + c("36" if p["toggle"] in ("▸", "▾") else "90", safe(p["toggle"])) + " "
-    if p["arrow"]:
-        s += cc(EV_COL.get(p["ev"], ""), safe(p["arrow"])) + " "
-    if not row["depth"]:
-        s += c("1;" + {"err": "31", "down": "31", "warn": "33"}.get(st, "36"), label)
-    else:  # a symbol too: colour alone is not enough
-        s += cc(ST_COL.get(st, ""), {"down": "✖ ", "unknown": "? "}.get(st, "") + label)
-    if p["kind"] == "port":
-        s += "  " + (c(33, "?") if p["owner"] in ("", "?") else c(1, safe(p["owner"])))
-    if p["port"]:
-        s += " " + safe(p["port"])
-    if p["sub"]:
-        s += "  " + c(90, safe(p["sub"]))
-    if p["note"]:
-        lv = next((lv for lv, t in n.get("findings") or [] if t == p["note"]), "")
-        s += "  " + c({"err": "31", "warn": "33"}.get(lv, "90"), safe(p["note"]))
-    return s
-
-
-def map_pane(G, nid, w, h):
-    """Everything known about a node, w columns, h lines at most: long values wrap, what does not fit is counted."""
-    items = graph.details(G, nid)
-    lw = min(max([len(safe(x[0])) for x in items] + [4]) + 2, 18, max(6, w // 3))
-    out = [section("DETAILS", w)]
-    for i, (label, value, level) in enumerate(items):
-        label, col = safe(label), LV_COL.get(level, "")
-        if i == 0:
-            col = "1;" + col if col else "1"
-        head = cc(col if label.strip() in ("!", "·") else "90", pad(label[:lw - 1], lw))
-        chunks = textwrap.wrap(safe(value), max(8, w - lw), break_on_hyphens=False) or [""]
-        out += [(head if j == 0 else " " * lw) + cc(col, x) for j, x in enumerate(chunks)]
-    if len(out) > h:
-        out = out[:max(0, h - 1)] + [c(90, f" … +{len(out) - h + 1} more lines")]
-    return out[:h]
-
-
-def map_view(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
-    """(the Map body: at most h lines, none wider than w; the first tree row shown). details: True = the selected row's
-    node, or a node id. Without a cursor (the rotation slide) what does not fit is counted on the last line."""
-    notes, tree_h, pane_h, side = map_layout(G, w, h, bool(details))
-    out = [map_title(G, w, only)]
-    nl = [safe(x) for x in G["notes"]]
-    if len(nl) > notes:
-        nl = nl[:max(0, notes - 1)] + ([f"… +{len(nl) - notes + 1} more notes"] if notes else [])
-    out += [clip(c(90, "  · " + x), w) for x in nl]
-    i = graph.find(rs, cursor_key) if cursor_key else None
-    tw = w - (int(w * 0.42) + 3 if side else 0)
-    if not rs:
-        tree, top = [msg("info", "no problem on any path: p shows every path" if only else "nothing to draw: see the notes above")], 0
-    elif cursor_key is None and len(rs) > tree_h:
-        tree, top = [clip(map_row(G, r), tw) for r in rs[:tree_h - 1]] + [c(90, f"   … +{len(rs) - tree_h + 1} more rows")], 0
-    else:
-        top = map_scroll(top or 0, i or 0, len(rs), tree_h)
-        tree = [c(7, pad(ANSI.sub("", clip(map_row(G, rs[j]), tw)), tw)) if j == i else clip(map_row(G, rs[j]), tw)
-                for j in range(top, min(len(rs), top + tree_h))]
-    nid = details if isinstance(details, str) else rs[i if i is not None else 0]["node"] if rs else None
-    if pane_h and nid:
-        tree += [""] * (tree_h - len(tree))
-        if side:
-            pane = map_pane(G, nid, w - tw - 3, pane_h)
-            tree = [pad(t, tw) + c(90, " │ ") + (pane[k] if k < len(pane) else "") for k, t in enumerate(tree)]
-        else:
-            tree += map_pane(G, nid, w, pane_h)
-    return [clip(x, w) for x in (out + tree)[:h]], top
-
-
-def map_lines(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
-    """The Map body as ANSI lines (title and legend, notes, tree, details pane): the console, --once, the rotation slide."""
-    return map_view(G, rs, w, h, cursor_key, details, top, only)[0]
+# The screen's model (MapView, its keys, the tree, the details, the layout) is in screens.py as components that ansi.render draws; what is
+# here is what needs this process (the footer's enabled keys, the frame, the producers).
 
 
 def map_footer(mv, n, w, truncated=False):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     hide, only = mv.details, mv.st.only
-    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (2, "←→: close/open", "←→: open"),
-            (3, "Enter: " + ("hide details" if hide else "details"), "Enter: " + ("hide" if hide else "details")),
-            (5, "e/c: expand/collapse all", "e/c: all"), (4, "p: " + ("all paths" if only else "problems only"), "p: " + ("all" if only else "problems")),
-            (0, "m/Esc: back", "m: back")]
     pos = f"{mv.idx + 1}/{n}{'+' if truncated else ''}" if n else "0/0"
-    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
+    dyn = {"details": ("Enter: " + ("hide details" if hide else "details"), "Enter: " + ("hide" if hide else "details")),
+           "problems": ("p: " + ("all paths" if only else "problems only"), "p: " + ("all" if only else "problems"))}
+    return clip(c(90, ui.footer("map", f" row {pos}   ", w, on, dyn)), w)
 
 
 def map_screen(G, pb, mv, w, h):
     """(the interactive Map as one frame: header, body, key help; the rows it shows): the live loop and --once."""
     rs = graph.rows(G, mv.st)
     map_sync(mv, rs)
-    body, mv.top = map_view(G, rs, w, h - 2, mv.cur, mv.details, mv.top, mv.st.only)
+    body, mv.top = map_view(G, rs, w, body_rows(h), mv.cur, mv.details, mv.top, mv.st.only)
     return frame(("Map", 1, 1, body), 0, 1, w, h, pb, foot=map_footer(mv, len(rs), w, getattr(rs, "truncated", False))), rs
 
 
 def map_slide(cont, net, boot, baseline, w, body_h):
     """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
     G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline, expose=CFG["expose"])
-    return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
-
-
-def map_select(G, mv, text):
-    """The cursor on the first row whose name (or port owner) contains text, the branches above it opened. False: none."""
-    t = text.lower()
-    for rs in (graph.rows(G, mv.st), graph.rows(G, graph.State(all=True, only=mv.st.only))):
-        i = next((j for j, r in enumerate(rs) if t in (G["nodes"][r["node"]]["label"] + " " + graph.parts(G, r)["owner"]).lower()), None)
-        if i is None:
-            continue
-        d = rs[i]["depth"]
-        for r in reversed(rs[:i]):  # its ancestors: the nearest row above it at each smaller depth
-            if r["depth"] < d:
-                d = r["depth"]
-                mv.st.shut.discard(r["key"])
-                if d:
-                    mv.st.open.add(r["key"])
-        mv.cur = rs[i]["key"]
-        return True
-    return False
+    return map_view(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)[0]
 
 
 def map_once(argv, w, h):
@@ -2808,7 +1597,7 @@ def map_once(argv, w, h):
     if exp == "all":
         mv.st.expand_all()
     elif exp == "fit" or exp.isdigit():
-        mv.st.open = graph.fit_open(G, int(exp) if exp.isdigit() else map_layout(G, w, h - 2, mv.details)[1])
+        mv.st.open = graph.fit_open(G, int(exp) if exp.isdigit() else map_layout(G, w, body_rows(h), mv.details)[1])
     if opt("--select"):
         map_select(G, mv, opt("--select"))
     return map_screen(G, pb, mv, w, h)[0]
@@ -2820,79 +1609,7 @@ def map_once(argv, w, h):
 
 SENSORS = os.environ.get("NUC_CONSOLE_SENSORS", os.path.join(nuc_config.RUN_DIR, "sensors.json"))  # written by the macOS/Windows collector
 SENSORS_STALE_S = 60  # an older sensors.json is not "now": it is ignored, and the screen says so
-CPU_SORTS = ("cpu", "mem", "time", "pid", "user")
-CPU_SORT_KEYS = {"p": "cpu", "m": "mem", "t": "time", "n": "pid", "u": "user"}  # htop's letters
-CPU_SORT_NAME = {"cpu": "CPU%", "mem": "memory", "time": "CPU time", "pid": "PID", "user": "user"}
-CPU_SORT_SHORT = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}  # what the footer calls them
-CPU_PANE_W = 140  # from this width up the process details sit beside the table, below it otherwise
 CPU_IDLE_S = MAP_IDLE_S  # left alone this long, the CPU screen gives the monitor back to the rotation
-CPU_STATES = {"R": "running", "S": "sleeping", "D": "uninterruptible (disk) wait", "Z": "zombie: exited, not yet collected",
-              "T": "stopped", "I": "idle", "U": "uninterruptible wait", "X": "dead"}
-CPU_PRESSURE = {"nominal": "32", "moderate": "33", "heavy": "31", "trapping": "31", "sleeping": "90"}  # macOS thermal pressure
-CPU_CELL_MIN_BAR, CPU_CELL_MAX_BAR = 10, 32
-
-
-def num(x):
-    """x as a float when it is a finite number (a bool is not one), else None: what a producer hands over is data, not a promise."""
-    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
-
-
-def idict(d):
-    """{int: value} of a dict whose keys may be digits or strings (JSON keys are always strings); other keys are dropped."""
-    out = {}
-    for k, v in (d.items() if isinstance(d, dict) else ()):
-        try:
-            out[int(k)] = v
-        except (TypeError, ValueError):
-            pass
-    return out
-
-
-def dget(d, *keys):
-    """d[k1][k2]... or None when any step is missing or not a dict."""
-    for k in keys:
-        d = d.get(k) if isinstance(d, dict) else None
-    return d
-
-
-def dd(x):
-    """x when it is a dict, else an empty one: a producer's section that is not what the contract says is a section with nothing in it."""
-    return x if isinstance(x, dict) else {}
-
-
-def qf(x, spec=".0f", unit=""):
-    """A number formatted, or '?' when it is not one."""
-    x = num(x)
-    return "?" if x is None else format(x, spec) + unit
-
-
-def fmt_size(b):
-    b = num(b)
-    if b is None:
-        return "?"
-    for unit, div in (("G", 2 ** 30), ("M", 2 ** 20), ("K", 2 ** 10)):
-        if b >= div:
-            v = b / div
-            return (f"{v:.0f}" if v >= 10 or v == int(v) else f"{v:.1f}") + unit
-    return f"{b:.0f}B"
-
-
-def fmt_k(x):
-    """Events per second: 842, 18.3k, 1.2M."""
-    x = num(x)
-    return "?" if x is None else f"{x:.0f}" if x < 1000 else f"{x / 1e3:.1f}k" if x < 1e6 else f"{x / 1e6:.1f}M"
-
-
-def fmt_cputime(sec):
-    """CPU seconds as htop writes them: 6:52.3, 5:03:53, 123h05m."""
-    sec = num(sec)
-    if sec is None:
-        return "?"
-    sec = max(sec, 0.0)
-    if sec < 3600:
-        return f"{int(sec // 60)}:{sec % 60:04.1f}"
-    h, r = divmod(int(sec), 3600)
-    return f"{h}:{r // 60:02d}:{r % 60:02d}" if h < 100 else f"{h}h{r // 60:02d}m"
 
 
 def cpu_os():
@@ -2995,67 +1712,11 @@ class CpuFeed(object):
         return self.data
 
 
-class CpuView(object):
-    """The interactive CPU screen: the sort, the process under the cursor (its pid survives refreshes; its index is where the
-    cursor stays when that process vanishes), the scroll position, the details pane, when it was opened and last touched."""
+class CpuView(screens.CpuView):
+    """The interactive CPU screen's state (screens.CpuView, with the data source of this process)."""
 
     def __init__(self, now=None):
-        self.sort, self.cur, self.idx, self.top, self.details, self.page = "cpu", None, 0, 0, False, 10
-        self.feed = CpuFeed()
-        self.opened = self.touched = now or time.time()
-
-
-def cpu_rows(pl, sort="cpu"):
-    """The processes in the order of `sort`: CPU%, memory, CPU time (largest first), PID, user (smallest first). A process whose value
-    is unknown goes last, by PID."""
-    field = {"cpu": "cpu", "mem": "mem", "time": "time", "pid": "pid", "user": "user"}.get(sort, "cpu")
-    val = lambda p: (str(p["user"]).lower() if isinstance(p.get("user"), str) else None) if field == "user" else num(p.get(field))  # noqa: E731
-    known = [p for p in pl if val(p) is not None]
-    rest = sorted((p for p in pl if val(p) is None), key=lambda p: p["pid"])
-    if field in ("pid", "user"):
-        known.sort(key=lambda p: (val(p), p["pid"]))
-    else:
-        known.sort(key=lambda p: (-val(p), p["pid"]))
-    return known + rest
-
-
-def cpu_sync(cv, rows):
-    """The cursor back on its process: by pid, else the same index (clamped). Returns the index."""
-    i = next((j for j, p in enumerate(rows) if p["pid"] == cv.cur), None) if cv.cur is not None else None
-    cv.idx = i if i is not None else max(0, min(cv.idx, len(rows) - 1))
-    cv.cur = rows[cv.idx]["pid"] if rows else None
-    return cv.idx
-
-
-def cpu_key(cv, key, rows, page=10):
-    """One key on the CPU screen. Returns 'back' (leave it), 'rows' (the sort changed: sort again, then cpu_sync) or ''."""
-    k = key.lower() if len(key) == 1 else key  # P and p are the same key
-    if k in ("c", "q", "esc"):
-        return "back"
-    if k in CPU_SORT_KEYS:
-        cv.sort = CPU_SORT_KEYS[k]
-        return "rows"
-    if k in ("enter", "space"):
-        cv.details = not cv.details
-        return ""
-    if not rows:
-        return ""
-    i = cpu_sync(cv, rows)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(k, i)
-    cv.idx = max(0, min(i, len(rows) - 1))
-    cv.cur = rows[cv.idx]["pid"]
-    return ""
-
-
-def cpu_select(rows, cv, text):
-    """The cursor on the process whose pid is text, else on the first one whose name contains it (any case). False: none."""
-    t = text.strip().lower()
-    for hit in (lambda p: t == str(p["pid"]), lambda p: t in str(p.get("name")).lower()):
-        for p in rows:
-            if t and hit(p):
-                cv.cur = p["pid"]
-                return True
-    return False
+        screens.CpuView.__init__(self, CpuFeed(), now or time.time())
 
 
 # -- what is known about each logical CPU
@@ -3074,436 +1735,28 @@ def cpu_topology(ids):
     return _TOPO[key]
 
 
-def cpu_core_of(d, ids):
-    """{logical CPU: physical core id} among the cores that have a temperature. The sampler's own `core_of` map when it gives one, else
-    sysfs' topology (Linux); without either, the logical CPUs of a core are taken to be next to each other (how Windows numbers
-    them) and the cores to be in the order of their sensors, which only holds when every core has one sensor and the same number
-    of threads. Otherwise unknown: nothing is invented."""
-    cpu = d["cpu"]
-    by_core = {k for k, v in idict(dget(cpu, "temps", "cores")).items() if num(v) is not None}
-    core_of = idict(cpu.get("core_of")) or cpu_topology(ids)
-    if core_of:
-        return {i: core_of[i] for i in ids if core_of.get(i) in by_core}
-    n = int(num(cpu.get("cores")) or 0)
-    if n and len(by_core) == n and len(ids) % n == 0 and ids == sorted(ids):
-        per, order = len(ids) // n, sorted(by_core)
-        return {i: order[j // per] for j, i in enumerate(ids)}
-    return {}
-
-
-def cpu_core_temps(d, ids):
-    """{logical CPU: C}: the temperature of the physical core each one runs on."""
-    by_core = {k: float(v) for k, v in idict(dget(d["cpu"], "temps", "cores")).items() if num(v) is not None}
-    return {i: by_core[k] for i, k in cpu_core_of(d, ids).items()}
-
-
-def cpu_tags(d, ids):
-    """{logical CPU: 'P' or 'E'}: from the sampler's kinds (ids), else from the cluster names of the Apple Silicon sensors."""
-    out = {}
-    kinds = dget(d["cpu"], "kinds")
-    for tag in ("P", "E"):
-        for i in (kinds.get(tag) if isinstance(kinds, dict) and isinstance(kinds.get(tag), (list, tuple)) else []):
-            if isinstance(i, int):
-                out[i] = tag
-    for cl in d["extra"]["clusters"]:
-        tag = str(cl.get("name") or "")[:1].upper()
-        out.update({i: tag for i in idict(cl.get("cpus")) if tag in ("P", "E")})
-    return {i: t for i, t in out.items() if i in ids}
-
-
-def cpu_mhz(d):
-    """{logical CPU: MHz}: the sampler's per-CPU clocks (an id of -1 is a whole-machine value, not a CPU), else the Apple clusters'."""
-    out = {i: float(v) for i, v in idict(dget(d["cpu"], "freq", "cur")).items() if i >= 0 and num(v) is not None}
-    for cl in d["extra"]["clusters"]:
-        for i, v in idict(cl.get("cpus")).items():
-            if num(v) is not None:
-                out.setdefault(i, float(v))
-    return out
-
-
-def cpu_usage_rows(d):
-    rows = dget(d["cpu"], "usage", "cores")
-    return sorted((r for r in (rows if isinstance(rows, list) else []) if isinstance(r, dict) and isinstance(r.get("id"), int)
-                   and not isinstance(r["id"], bool)), key=lambda r: r["id"])
-
-
-# -- drawing
-
-def cpu_bar(parts, w):
-    """A w-wide bar of consecutive segments [(percent, colour, glyph)], the rest idle: htop's CPU meter (user green, system red,
-    other busy blue, I/O wait grey; a different glyph for the wait, so that colour is not all that tells it)."""
-    out, done, acc = "", 0, 0.0
-    for pct, col, ch in parts:
-        acc += max(num(pct) or 0.0, 0.0)
-        end = min(w, int(round(acc * w / 100.0)))
-        if end > done:
-            out += c(col, ch * (end - done))
-            done = end
-    return out + c(90, "░" * (w - done))
-
-
-def cpu_parts(user, system, iowait, busy):
-    """The segments of one CPU's bar. Without the user/system split the whole busy part is one plain segment."""
-    user, system, iowait, busy = num(user), num(system), num(iowait), num(busy)
-    if busy is None:
-        return []
-    split = [(user, "32", "█"), (system, "31", "█"), (max(busy - (user or 0) - (system or 0), 0.0), "34", "█")] \
-        if user is not None and system is not None else [(busy, "36", "█")]
-    return split + ([(iowait, "90", "▒")] if iowait else [])
-
-
-def pct_col(p, warn=70, err=90):
-    p = num(p)
-    return "" if p is None else "31" if p >= err else "33" if p >= warn else ""
-
-
-def cpu_head(d, w, h):
-    """The title and the machine in a few lines: what it is, then what it is doing."""
-    cpu, pr = d["cpu"], d["procs"]
-    lab = lambda name, value: c(90, name + " ") + value  # noqa: E731
-    qi = lambda x: "?" if num(x) is None else str(int(num(x)))  # noqa: E731
-    model = safe(cpu.get("model") or "?")
-    ident = [lab("sockets", qi(cpu.get("sockets"))), lab("cores", qi(cpu.get("cores"))), lab("threads", qi(cpu.get("threads")))]
-    kinds = dd(cpu.get("kinds"))
-    if kinds:
-        cnt = lambda x: len(x) if isinstance(x, (list, tuple)) else qi(x)  # noqa: E731
-        ident.append(f"P {cnt(kinds.get('P'))} + E {cnt(kinds.get('E'))} " + ("threads" if isinstance(kinds.get("P"), (list, tuple)) else "cores"))
-    ident.append(lab("arch", safe(cpu.get("arch") or "?")))
-    cache = dd(cpu.get("cache"))
-    sizes = [f"{k} {fmt_size(cache[k])}" for k in ("L1d", "L1i", "L2", "L3") if k in cache]
-    ident.append(lab("cache", "  ".join(sizes) if sizes else "?"))
-    fr = dd(cpu.get("freq"))
-    gov = [safe(x) for x in (fr.get("governor"), fr.get("driver")) if isinstance(x, str) and x]
-    ident.append(lab("governor", "/".join(gov) if gov else "?"))
-    lo, hi, base = num(fr.get("min")), num(fr.get("max")), num(fr.get("base"))
-    clock = [x for x in idict(fr.get("cur")).items() if x[0] < 0 and num(x[1]) is not None]
-    ident.append(lab("clock", (f"{qf(lo)}-{qf(hi)} MHz" if lo is not None or hi is not None else "?") + (f" (base {qf(base)})" if base is not None else "")
-                     + (f" now {qf(clock[0][1])}" if clock else "")))
-    rates, load = dd(cpu.get("rates")), cpu.get("load")
-    tot = pr["total"]
-    run = rates.get("running") if num(rates.get("running")) is not None else tot.get("running")
-    up = num(cpu.get("uptime"))
-    act = [lab("up", fmt_dur(up) if up is not None else "?"),
-           lab("load", " ".join(qf(x, ".2f") for x in load[:3]) if isinstance(load, (list, tuple)) and len(load) >= 3 else "?"),
-           lab("ctxt", fmt_k(rates.get("ctxt")) + "/s"), lab("intr", fmt_k(rates.get("intr")) + "/s"),
-           lab("running", qf(run)), lab("blocked", qf(rates.get("blocked")))]
-    lines = [section("CPU", w, model)]
-    lines += wrap_items(ident, w, indent=1, sep="  ·  ", max_lines=1 if h < 28 else 2)
-    lines += wrap_items(act, w, indent=1, sep="  ·  ", max_lines=1)
-    return lines
-
-
-def cpu_cells(d):
-    """One dict per logical CPU: id, tag, busy/user/system/iowait, mhz, temp. None for what is not known."""
-    rows = cpu_usage_rows(d)
-    ids = [r["id"] for r in rows]
-    tags, mhz, temps = cpu_tags(d, ids), cpu_mhz(d), cpu_core_temps(d, ids)
-    return [{"id": r["id"], "tag": tags.get(r["id"], ""), "busy": num(r.get("busy")), "user": r.get("user"), "system": r.get("system"),
-             "iowait": r.get("iowait"), "mhz": mhz.get(r["id"]), "temp": temps.get(r["id"])} for r in rows]
-
-
-def cpu_limit(d):
-    """The package sensor's own limit (crit, else high): what the temperatures are measured against. None = not known."""
-    t = dd(d["cpu"].get("temps"))
-    return num(t.get("crit")) or num(t.get("high"))
-
-
-def temp_col(t, mx):
-    t = num(t)
-    return "" if t is None or not mx else "31" if t >= THERMAL_ERR * mx else "33" if t >= THERMAL_WARN * mx else ""
-
-
-def cpu_grid(d, w):
-    """(top lines, cell rows, cells per row, cells): the whole CPU as one bar with its split, then one cell per logical CPU in 2-4
-    columns, htop style: id, P/E, bar (user green, system red, I/O wait grey), busy %, GHz and °C where known."""
-    tot = dget(d["cpu"], "usage", "total")
-    cells = cpu_cells(d)
-    show_f, show_t = any(x["mhz"] is not None for x in cells), any(x["temp"] is not None for x in cells)
-    show_tag = any(x["tag"] for x in cells)
-    idw = max([len(str(x["id"])) for x in cells] + [2])
-    fixed = idw + (1 if show_tag else 0) + 1 + 1 + 4 + (6 if show_f else 0) + (6 if show_t else 0)  # id tag _ bar _ busy _GHz _temp
-    gap, room = 2, w - 1  # one column of margin
-    ncol = 1
-    for n in (4, 3, 2):
-        if n <= max(1, len(cells)) and (room - (n - 1) * gap) // n - fixed >= CPU_CELL_MIN_BAR:
-            ncol = n
-            break
-    cw = (room - (ncol - 1) * gap) // ncol
-    bw = max(4, min(CPU_CELL_MAX_BAR, cw - fixed))
-    top = []
-    if isinstance(tot, dict):
-        busy, user, system, iow = (num(tot.get(k)) for k in ("busy", "user", "system", "iowait"))
-        items = [c(32, "user") + " " + qf(user, ".1f"), c(31, "sys") + " " + qf(system, ".1f"), "nice " + qf(tot.get("nice"), ".1f"),
-                 c(90, "iowait") + " " + qf(iow, ".1f"), "irq " + qf(tot.get("irq"), ".1f"), "steal " + qf(tot.get("steal"), ".1f"),
-                 "idle " + qf(tot.get("idle"), ".1f")]
-        shown = cc(pct_col(busy), f"{busy:5.1f}%") if busy is not None else "    ?%"
-        top.append(fit_join(items, "  ", w, f" {c(1, 'ALL')} {cpu_bar(cpu_parts(user, system, iow, busy), bw)} {shown}  "))
-    if not cells:
-        return top + [msg("warn", "per-CPU usage: ? (the sampler gave none)")], [], 1, 0
-    mx = cpu_limit(d)
-    out = []
-    for x in cells:
-        busy = x["busy"]
-        s = f"{x['id']:>{idw}}"
-        if show_tag:
-            s += c("1;36", x["tag"]) if x["tag"] == "P" else c(90, x["tag"]) if x["tag"] else " "
-        s += " " + cpu_bar(cpu_parts(x["user"], x["system"], x["iowait"], busy), bw)
-        s += " " + (cc(pct_col(busy), f"{busy:3.0f}%") if busy is not None else "   ?")
-        if show_f:
-            s += " " + (f"{x['mhz'] / 1000:4.2f}G" if x["mhz"] is not None else "    ?")
-        if show_t:
-            s += " " + (cc(temp_col(x["temp"], mx), f"{x['temp']:3.0f}°C") if x["temp"] is not None else "    ?")
-        out.append(s)
-    rows = [" " + (" " * gap).join(pad(clip(x, cw), cw) for x in out[i:i + ncol]).rstrip() for i in range(0, len(out), ncol)]
-    return top, rows, ncol, len(cells)
-
-
-def cpu_grid_lines(grid, n):
-    """The grid in at most n lines: the whole-CPU bar first, then rows of cells; when some are left out the last line counts them."""
-    top, rows, ncol, ncells = grid
-    if len(top) + len(rows) <= n:
-        return top + rows
-    keep = max(n - len(top) - 1, 0)
-    return (top + rows[:keep] + [c(90, f" … +{max(ncells - keep * ncol, 0)} more CPUs")])[:n]
-
-
-def deg(x):
-    return "?" if num(x) is None else f"{num(x):.0f}°C"
-
-
-def cpu_temps(d, w):
-    """The temperatures block, most important line first: package with its limits, hottest core and throttling, then macOS pressure and
-    clusters, every sensor, and what is missing."""
-    cpu, extra = d["cpu"], d["extra"]
-    t = dd(cpu.get("temps"))
-    pkg, high, crit, mx = num(t.get("package")), num(t.get("high")), num(t.get("crit")), cpu_limit(d)
-    bw = max(10, min(40, w - 60))
-    lines = [section("TEMPERATURES", w, "source " + safe(t.get("source") or "?"))]
-    if pkg is None:
-        lines.append(f" {c(90, 'PKG')}   ?   {c(90, 'no package temperature')}")
-    elif mx:
-        lines.append(f" {c(90, 'PKG')}   {bar(pkg / mx, bw, THERMAL_WARN, THERMAL_ERR)} {pkg:.0f}°C/{mx:.0f}°C   "
-                     f"{c(90, 'high')} {deg(high)}  {c(90, 'crit')} {deg(crit)}")
-    else:
-        lines.append(f" {c(90, 'PKG')}   {pkg:.0f}°C   {c(90, 'high ?  crit ?')}")
-    ids = [r["id"] for r in cpu_usage_rows(d)]
-    by_core = {k: float(v) for k, v in idict(t.get("cores")).items() if num(v) is not None}
-    on_core = cpu_core_of(d, ids)
-    summary = []
-    if by_core:
-        core, hot = max(by_core.items(), key=lambda kv: (kv[1], -kv[0]))
-        cpus = [str(i) for i, k in on_core.items() if k == core]
-        summary.append(c(90, "hottest core ") + f"{core} " + cc(temp_col(hot, mx), f"{hot:.0f}°C")
-                       + (c(90, " (cpu " + ",".join(cpus[:4]) + ")") if cpus and len(cpus) <= 4 else ""))
-    else:
-        summary.append(c(90, "hottest core ") + "?")
-    th = dd(cpu.get("throttle"))
-    n, secs, cores = num(th.get("package")), num(th.get("package_s")), idict(th.get("cores"))
-    per = sorted(((k, num(v)) for k, v in cores.items() if num(v) is not None), key=lambda kv: (-kv[1], kv[0]))
-    if n is None and not per:
-        summary.append(c(90, "throttled ") + "?")
-    else:
-        txt = f"{n:.0f} events" if n is not None else "? events"
-        if secs is not None:
-            txt += f", {fmt_min(secs)} in all"
-        if per:
-            txt += "; cores " + ", ".join(f"{k}: {v:.0f}" for k, v in per[:3]) + (f" … +{len(per) - 3}" if len(per) > 3 else "")
-        hit = bool(n) or any(v for _, v in per)
-        summary.append(c(90, "throttled ") + c(33 if hit else 32, ("! " if hit else "✔ ") + txt))
-    lines.append(" " + "   ·   ".join(summary))
-    if cpu_os() == "darwin" or extra["pressure"] or extra["clusters"]:
-        pr = extra["pressure"]
-        parts = [c(90, "thermal pressure ") + (c(CPU_PRESSURE.get(pr.lower(), "33"), safe(pr)) if isinstance(pr, str) else "?")]
-        parts += [safe(cl.get("name") or "?") + " " + qf(cl.get("mhz")) + " MHz " + qf(cl.get("active")) + "% active" for cl in extra["clusters"]]
-        lines.append(" " + "   ·   ".join(parts))
-    sensors = [s for s in (t.get("sensors") or []) if isinstance(s, dict) and num(s.get("c")) is not None]
-    if sensors:
-        items = [safe(s.get("label") or "?") + " " + cc(temp_col(s["c"], num(s.get("crit")) or mx), f"{s['c']:.0f}°C") for s in sensors]
-        rows = wrap_items(items, w, indent=9, sep="  ·  ", max_lines=2)
-        rows[0] = " " + c(90, "sensors") + " " + rows[0][9:]
-        lines += rows
-    lines += [msg(lv, safe(text)) for lv, text in extra["notes"]]
-    return lines
-
-
-def cut_lines(lines, n, what="lines"):
-    """The first n lines; when some are left out the last one says how many ('… +3 more lines')."""
-    if len(lines) <= n:
-        return lines
-    return lines[:max(n - 1, 0)] + ([c(90, f" … +{len(lines) - n + 1} more {what}")] if n else [])
-
-
-# -- the processes
-
-CPU_COLS = (("pid", "PID", ">"), ("user", "USER", "<"), ("state", "S", "<"), ("nice", "NI", ">"), ("threads", "THR", ">"), ("cpu", "CPU%", ">"),
-            ("mem_pct", "MEM%", ">"), ("mem", "RSS", ">"), ("time", "TIME", ">"))
-CPU_COL_W = {"user": 9, "state": 1, "nice": 3, "cpu": 5, "mem_pct": 5, "mem": 6, "time": 8}
-CPU_SORT_COLS = {"cpu": ("cpu",), "mem": ("mem_pct", "mem"), "time": ("time",), "pid": ("pid",), "user": ("user",)}
-CPU_DROPPABLE = ("state", "nice", "threads")  # a column unknown for every process on this OS (Windows has no state or nice) is left out
-CPU_STATE_COL = {"R": "32", "D": "33", "Z": "31", "T": "33"}
-
-
-def cpu_cell_text(p, key):
-    v = p.get(key)
-    if key == "user":
-        s = safe(v) if isinstance(v, str) and v else "?"
-        return s if len(s) <= 9 else s[:8] + "+"
-    if key == "state":
-        return safe(v)[:1] if isinstance(v, str) and v else "?"
-    if key == "cpu":
-        return "?" if num(v) is None else f"{num(v):.1f}" if num(v) < 1000 else f"{num(v):.0f}"
-    if key == "mem_pct":
-        return qf(v, ".1f")
-    if key == "mem":
-        return fmt_size(v)
-    if key == "time":
-        return fmt_cputime(v)
-    return qf(v)  # pid, nice, threads
-
-
-def cpu_columns(rows, w, minname=12):
-    """[(key, title, align, width)] that fit in w columns beside a name of at least minname: dropped from the right, the name stays."""
-    wid = dict(CPU_COL_W)
-    wid["pid"] = max([len(str(p["pid"])) for p in rows] + [5])
-    wid["threads"] = max([len(cpu_cell_text(p, "threads")) for p in rows] + [3])
-    unknown = lambda p, k: num(p.get(k)) is None and not isinstance(p.get(k), str)  # noqa: E731
-    cols = [(k, t, a, wid[k]) for k, t, a in CPU_COLS if not (k in CPU_DROPPABLE and rows and all(unknown(p, k) for p in rows))]
-    while cols and 1 + sum(x[3] + 1 for x in cols) + minname > w:
-        cols.pop()
-    return cols
-
-
-def cpu_proc_line(p, cols, nw):
-    s = " "
-    for key, _, align, width in cols:
-        txt = cpu_cell_text(p, key)
-        cell = f"{txt:>{width}}" if align == ">" else f"{txt:<{width}}"
-        if key == "state":
-            cell = cc(CPU_STATE_COL.get(txt, ""), cell)
-        elif key == "cpu":
-            cell = cc(pct_col(p.get("cpu"), 50, 100), cell)
-        s += cell + " "
-    return s + safe(p.get("name") or "?")[:nw]
-
-
-def cpu_pane(p, rows, w, h, now, two=False):
-    """Everything known about one process in at most h lines of w columns: the contract's fields, the parent's name, '?' for what is
-    unknown. two: the fields in two columns (a pane under the table, which has few lines to spare)."""
-    ppid = p.get("ppid") if isinstance(p.get("ppid"), int) else None
-    parent = next((q for q in rows if q["pid"] == ppid), None) if ppid is not None else None
-    st = p.get("state") if isinstance(p.get("state"), str) and p.get("state") else None
-    start, mem = num(p.get("start")), num(p.get("mem"))
-    when = "?" if start is None else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start)) + (f" ({fmt_ago(now - start)} ago)" if now >= start else "")
-    items = [("parent", "?" if ppid is None else f"{ppid}  " + (safe(parent.get("name") or "?") if parent else "? (not in the list)")),
-             ("user", safe(p.get("user") or "?")), ("state", "?" if st is None else safe(st[:1]) + "  " + CPU_STATES.get(st[:1], "")),
-             ("threads", qf(p.get("threads"))), ("nice", qf(p.get("nice"))), ("priority", qf(p.get("prio"))),
-             ("CPU", qf(p.get("cpu"), ".1f", " %") + ("  (100 % = one core)" if num(p.get("cpu")) is not None else "")),
-             ("memory", qf(p.get("mem_pct"), ".1f", " %") + ("" if mem is None else f"  {fmt_size(mem)} resident")),
-             ("CPU time", fmt_cputime(p.get("time"))), ("started", when),
-             ("children", str(sum(1 for q in rows if q.get("ppid") == p["pid"])))]
-    out = [section(f"PROCESS {p['pid']}", w, safe(p.get("name") or "?"))]
-    if two:
-        half = (len(items) + 1) // 2
-        cw = (w - 2) // 2
-        for a, b in zip(items[:half], items[half:] + [None] * half):
-            out.append(" " + "".join(pad(clip(c(90, pad(x[0], 9)) + x[1], cw), cw + 1) if x else "" for x in (a, b)).rstrip())
-    else:
-        lw = 10
-        for label, value in items:
-            chunks = textwrap.wrap(value, max(8, w - lw - 1), break_on_hyphens=False) or [""]
-            out += [" " + (c(90, pad(label, lw)) if j == 0 else " " * lw) + x for j, x in enumerate(chunks)]
-    return cut_lines(out, h, "details")
-
-
-def cpu_procs(d, rows, w, avail, cur, top, sort):
-    """The process table in `avail` lines (title, column heads, rows). With a cursor it scrolls to keep it in sight; without one
-    (the rotation slide, a web page) what does not fit is counted on the last line.
-    -> (lines, first row shown, rows visible, [(line, pid)] of the rows drawn)."""
-    tot = d["procs"]["total"]
-    cnt = int(num(tot.get("count")) or len(rows))
-    run, thr, unread = num(tot.get("running")), num(tot.get("threads")), num(tot.get("unreadable"))
-    note = f"{cnt} total" + (f" · {run:.0f} running" if run is not None else "") + (f" · {thr:.0f} threads" if thr is not None else "") \
-        + (f" · {unread:.0f} unreadable" if unread else "") + f" · by {CPU_SORT_NAME.get(sort, sort)}"
-    if rows and all(num(p.get("cpu")) is None for p in rows):
-        note += " · CPU% ?: measuring"
-    lines = [section("PROCESSES", w, note)]
-    if not rows:
-        return (lines + [msg("warn", "processes: ? (the sampler gave none)")])[:avail], 0, 0, []
-    cols = cpu_columns(rows, w)
-    nw = max(4, w - 1 - sum(x[3] + 1 for x in cols))
-    head = " "
-    for key, title, align, width in cols:
-        mark = key in CPU_SORT_COLS.get(sort, ())  # the column the rows are in the order of: yellow, with an arrow for the direction
-        title = title + ("▼" if sort in ("cpu", "mem", "time") else "▲") if mark and key != "mem" else title
-        cell = f"{title:>{width}}" if align == ">" else f"{title:<{width}}"
-        head += c("1;33" if mark else "1;36", cell) + " "
-    lines.append(head + c("1;36", "NAME"))
-    vis = max(0, avail - 2)
-    i = next((j for j, p in enumerate(rows) if p["pid"] == cur), None) if cur is not None else None
-    rest = 0
-    if i is None:
-        top = 0
-        if len(rows) > vis:
-            vis = max(0, vis - 1)  # the last line says what is left out
-            rest = len(rows) - vis
-    else:
-        top = map_scroll(top, i, len(rows), vis) if vis else 0
-    shown = rows[top:top + vis]
-    pids = []
-    for j, p in enumerate(shown):
-        line = cpu_proc_line(p, cols, nw)
-        lines.append(c(7, pad(ANSI.sub("", clip(line, w)), w)) if i is not None and top + j == i else line)
-        pids.append((len(lines) - 1, p["pid"]))
-    if rest:
-        lines.append(c(90, f" … +{rest} more processes"))
-    return lines[:avail], top, len(shown), pids
+def cpu_ctx(full=False):
+    """What the CPU screen needs of this process (screens.CpuCtx): whose machine it describes, the topology, whether nothing is cut (full),
+    the clock."""
+    return screens.CpuCtx(cpu_os(), cpu_topology, full, time)
 
 
 def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
     """(the CPU screen's body: at most h lines, none wider than w; the first process shown; the processes in order; how many are
     visible; [(line, pid)] of the process rows). cur: the pid under the cursor (None: no cursor, the table is cut at the bottom);
-    details: the cursor's process in a pane (beside the table from CPU_PANE_W columns on, below it otherwise)."""
-    rows = cpu_rows(d["procs"]["procs"], sort)
-    head = cpu_head(d, w, h)
-    grid = cpu_grid(d, w)
-    n_grid = len(grid[0]) + len(grid[1])
-    temps = cpu_temps(d, w)
-    sel = next((p for p in rows if p["pid"] == cur), None) if details else None
-    side = sel is not None and w >= CPU_PANE_W
-    tw = w - (max(46, int(w * 0.42)) + 3 if side else 0)
-    pane = cpu_pane(sel, rows, w, 40, d["at"], two=w >= 70) if sel is not None and not side else []
-    free = h - len(head)
-    p_min = 2 + (5 if cur is not None else 3)
-    pane_h = min(len(pane), max(0, free // 2))
-    free -= pane_h
-    g_len = min(n_grid, max(min(n_grid, 3), free - p_min - min(len(temps), 3)))
-    free -= g_len
-    t_len = min(len(temps), max(0, free - p_min))
-    if t_len < min(len(temps), 3):  # not even the title and two lines: the processes get the room instead of a "… +N more"
-        t_len = 0
-    free -= t_len
-    lines = head + cpu_grid_lines(grid, g_len) + cut_lines(temps[1:] if t_len < len(temps) else temps, t_len)  # cut: no title, the lines say it
-    table, top, vis, pids = cpu_procs(d, rows, tw, max(free, 0), cur, top, sort)
-    pids = [(len(lines) + k, pid) for k, pid in pids]
-    if side:  # the pane may be taller than a short table: it has all the room the table could have had
-        beside = cpu_pane(sel, rows, w - tw - 3, max(free, 0), d["at"])
-        table = [pad(table[k] if k < len(table) else "", tw) + c(90, " │ ") + (beside[k] if k < len(beside) else "")
-                 for k in range(max(len(table), len(beside)))]
-    lines += table + (cut_lines(pane, pane_h, "details") if pane_h < len(pane) else pane)
-    return [clip(x, w) for x in lines[:h]], top, rows, vis, pids
+    details: the cursor's process in a pane (beside the table from CPU_PANE_W columns on, below it otherwise). screens.cpu_view makes
+    the components; this draws them."""
+    sc = screens.cpu_view(d, cpu_ctx(), w, h, sort, cur, details, top)
+    lines = [x for node in sc.nodes for x in ansi.render(node, w)[0]]
+    return [clip(x, w) for x in lines[:h]], sc.top, sc.rows, sc.vis, sc.pids
+
 
 
 def cpu_footer(cv, n, w):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     sorts = "  ".join(f"{k.upper()} {CPU_SORT_SHORT[v]}" for k, v in CPU_SORT_KEYS.items())
-    keys = [(1, "↑↓: move", "↑↓: move"), (6, "PgUp/PgDn/Home/End: page", ""), (3, "Enter: " + ("hide details" if cv.details else "details"), "Enter: details"),
-            (2, "sort: " + sorts, sorts), (0, "c/Esc: back", "c: back")]
-    pos = f"{cv.idx + 1}/{n}" if n else "0/0"
-    text = f" row {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
+    dyn = {"sort": ("sort: " + sorts, sorts), "details": ("Enter: " + ("hide details" if cv.details else "details"), "Enter: details")}
+    text = ui.footer("cpu", f" row {cv.idx + 1}/{n}   " if n else " row 0/0   ", w, on, dyn)
     here = f"{next(k for k, v in CPU_SORT_KEYS.items() if v == cv.sort).upper()} {CPU_SORT_SHORT[cv.sort]}"
     return clip(c(90, text.replace(here, "\x1b[0m" + c("1;7", here) + "\x1b[90m", 1)), w)  # the sort in use, reversed
 
@@ -3512,7 +1765,7 @@ def cpu_screen(d, pb, cv, w, h):
     """(the interactive CPU screen as one frame: header, body, key help; the processes in order): the live loop and --once."""
     rows = cpu_rows(d["procs"]["procs"], cv.sort)
     cpu_sync(cv, rows)
-    body, cv.top, _, vis, _ = cpu_view(d, w, h - 2, cv.sort, cv.cur, cv.details, cv.top)
+    body, cv.top, _, vis, _ = cpu_view(d, w, body_rows(h), cv.sort, cv.cur, cv.details, cv.top)
     cv.page = max(1, vis - 1)
     return frame(("CPU", 1, 1, body), 0, 1, w, h, pb, foot=cpu_footer(cv, len(rows), w)), rows
 
@@ -3535,7 +1788,8 @@ def fill_cpu(sl, idx, w, body_h, feed):
 def cpu_problems(smp=None):
     """The header's problems of the current state: the CPU screen has no graph of its own to take them from."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -3567,30 +1821,28 @@ def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
 def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False, cpu_feed=None):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
+    pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None  # the KPI line (a console; a browser page has its own)
+    sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
         h = len(sl[0][3]) + 2
     n = pick_slide(sl, at) if at is not None else n
-    fill_cpu(sl, n % len(sl), w, h - 2, cpu_feed or CpuFeed(settle=0.5))  # only the slide shown reads the processes
-    return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h,
-                 safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]), keys=keys, page=page), len(sl)
+    fill_cpu(sl, n % len(sl), w, body_rows(h, page), cpu_feed or CpuFeed(settle=0.5))  # only the slide shown reads the processes
+    return frame(sl[n % len(sl)], n % len(sl), len(sl), w, h, pb, keys=keys, page=page, ctx=ctx), len(sl)
 
 
 def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     """Every slide (overview + detail pages) as ANSI frames: the web "full details" view."""
-    st, sm = snapshot(w), smp.sample()
+    st, sm = snapshot(w), host_sample(smp)
     if DEMO:
-        import demo
-        sm = demo.sampler_data(sm, DEMO_OS)
         demo_defaults()
-    sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
+    sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
     pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page) for i, x in enumerate(sl)]
+    ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None
+    return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page, ctx=ctx) for i, x in enumerate(sl)]
 
 
 def utf8_stdout():
@@ -3608,6 +1860,9 @@ def once(argv):
     arg = lambda k, d: int(argv[argv.index(k) + 1]) if k in argv else d
     w, h, n = arg("--cols", 120) - 1, arg("--rows", 33), arg("--slide", 0)
     view = argv[argv.index("--view") + 1] if "--view" in argv[:-1] else ""
+    if view == "start":  # the screen the console opens at: [ui] start_view (the overview when it is not set)
+        view = ui_cfg().get("start_view", "overview")
+        view = "" if view == "overview" else view
     if view == "map":  # the Map screen (see map_once for its options)
         if not on("map"):
             print("the map is off: [features] map = no in config.ini", file=sys.stderr)
@@ -3631,30 +1886,20 @@ def once(argv):
             return 2
         out = ai_once(argv, w, h)
     else:
-        smp = Sampler()
-        smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
-        time.sleep(0.5)
+        smp = None if DEMO else Sampler()  # the demo reads nothing from this machine (render_screen)
+        if smp:
+            smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
+            time.sleep(0.5)
         out, _ = render_screen(smp, w, h, n=n)
-    print(out if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
+    print(themed(out) if "--color" in argv else ANSI.sub("", out))  # --color keeps the ANSI codes (used by tools/ansi2svg.py)
 
 
 # ---- HEALTH screen: health.py's report (the history over days and weeks) on the console, moved through with the keyboard ------
 
-HEALTH_DAYS = (1, 7, 30)                                    # the periods: keys 1/d, 7/w, 3/m (the web: period=1|7|30)
-HEALTH_KEYS = {"1": 1, "d": 1, "7": 7, "w": 7, "3": 30, "m": 30}
+# The view-model of the screen is in screens.py; this file reads the report and runs the loop.
 HEALTH_TTL = 60          # the report is computed at most this often per period, whatever the number of keys or requests
 HEALTH_IDLE_S = 600      # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
-HEALTH_PANE_W = 140      # from this width up the details pane sits beside the findings, below them otherwise
-HEALTH_NONE = "no history yet: the collector starts recording when [features] health is on; data appears after the first hour"
 DEMO_HEALTH = ""         # --demo-health little|none: the demo with 5 hours of history, or none (demo.HEALTH_VARIANTS)
-LEVEL_PILL = {"err": ("✖ ERR ", "1;41;37"), "warn": ("! WARN", "1;43;30"), "info": ("· INFO", "90")}  # a symbol besides the colour
-KIND_ORDER = ("oom", "crash", "hang", "unexpected_shutdown", "hw_error", "service_failed", "restart", "exit_error", "throttle", "disk_low",
-              "login_fail")
-KIND_LABEL = {"oom": "out of memory", "crash": "crash", "hang": "hang", "unexpected_shutdown": "unexpected off", "hw_error": "hardware",
-              "service_failed": "service failed", "restart": "restart", "exit_error": "exit error", "throttle": "throttle",
-              "disk_low": "disk low", "login_fail": "login failed"}
-KIND_COL = {"oom": "31", "unexpected_shutdown": "31", "hw_error": "31", "crash": "33", "hang": "33", "service_failed": "33", "restart": "33",
-            "exit_error": "33"}
 _HEALTH, _HEALTH_LOCK = {}, threading.Lock()
 
 
@@ -3765,460 +2010,49 @@ def health_extra_lines(report, w):
     return [c(90, text[0])] + text[1:-1 if cut else None] + ([c(90, text[-1])] if cut else [])
 
 
-def hclean(s, n=0):
-    """Text of the report (an app, a unit, a message template: all names the history took from the machine) as one plain line: control
-    and format characters, and wide characters (they would break the columns), become '?'; at most n characters (0: no limit)."""
-    out = []
-    for ch in safe("" if s is None else s):
-        cat = unicodedata.category(ch)
-        out.append(" " if cat in ("Zl", "Zp") else "?" if cat[0] == "C" or unicodedata.east_asian_width(ch) in "WF" else ch)
-    t = "".join(out)
-    return t[:n - 1] + "…" if n and len(t) > n else t
-
-
 def hansi(line):
     """A line from the advisor hook: its colours (SGR) stay, every other escape sequence and control character becomes '?'."""
     return "".join(x if re.fullmatch(r"\x1b\[[0-9;]*m", x) else hclean(x) for x in re.split(r"(\x1b\[[0-9;]*m)", str(line)))
 
 
-def hnum(x, default=0.0):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return default
-    return v if v == v and abs(v) != float("inf") else default
-
-
-def hwhen(ts, fmt="%Y-%m-%d %H:%M"):
-    """An epoch as UTC (the report's own texts say UTC), '?' when it is not one."""
-    try:
-        return time.strftime(fmt, time.gmtime(float(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return "?"
-
-
-def hago(ts):
-    sec = time.time() - hnum(ts, time.time())
-    return "now" if sec < 90 else f"{sec / 60:.0f} min ago" if sec < 5400 else f"{sec / 3600:.0f} h ago" if sec < 129600 else f"{sec / 86400:.0f} d ago"
-
-
-def hcount(n):
-    n = hnum(n)
-    return f"{n:.0f}" if n < 1000 else f"{n / 1000:.1f}k" if n < 10000 else f"{n / 1000:.0f}k" if n < 1e6 else f"{n / 1e6:.1f}M"
-
-
-def hmsg(level, text, w):
-    """msg() as one or more lines: it wraps at w instead of running off the screen (the no-history message is long)."""
-    rows = textwrap.wrap(hclean(text), max(10, w - 5)) or [""]
-    return [msg(level, rows[0])] + ["     " + x for x in rows[1:]]
-
-
-def hsec(title, w, note=""):
-    """section() that drops its note rather than overflowing a narrow column."""
-    return section(title, w, note if len(note) + len(title) + 10 <= w else "")
-
-
-def hbar(frac, w):
-    n = round(min(max(frac, 0.0), 1.0) * w)
-    return c(36, "█" * n) + c(90, "░" * (w - n))
-
-
-def hbucket(vals, n):
-    """vals as at most n values: the mean of each group (None when a group has no value)."""
-    if len(vals) <= n:
-        return list(vals)
-    step = len(vals) / float(n)
-    out = []
-    for i in range(n):
-        g = [v for v in vals[int(i * step):int((i + 1) * step) or 1] if v is not None]
-        out.append(sum(g) / len(g) if g else None)
-    return out
-
-
-def hspark(vals, width):
-    """vals (None = not recorded) as small bars scaled to their own maximum, `width` columns; none recorded: blank."""
-    vals = hbucket([hnum(v, None) if v is not None else None for v in vals], width)
-    top = max([v for v in vals if v is not None] or [0])
-    bars = "".join(" " if v is None else SPARK[0] if top <= 0 else SPARK[min(7, int(v / top * 7.999))] for v in vals)
-    return pad(bars, width)
-
-
-def hjoin(items, w, lead="", sep="  ·  "):
-    """lead + items (ANSI strings) joined by sep; the ones that do not fit are counted: '… +N'. At least one is always kept (clipped)."""
-    keep = list(items)
-    while len(keep) > 1 and vlen(lead + sep.join(keep)) + (8 if len(keep) < len(items) else 0) > w:
-        keep.pop()
-    more = len(items) - len(keep)
-    return clip(lead + sep.join(keep) + (c(90, f"  … +{more}") if more else ""), w)
-
-
-def hcut(lines, n, w):
-    """lines as exactly at most n lines: the last one says how many were left out."""
-    if len(lines) <= n:
-        return lines
-    return lines[:max(0, n - 1)] + ([c(90, clip(f" … +{len(lines) - n + 1} more lines", w))] if n else [])
-
-
-def hrows(rows, n):
-    """(the rows to draw, how many are left out) for a list of room n: one row more than n is drawn rather than a '… +1' line."""
-    return (rows, 0) if len(rows) <= n + 1 else (rows[:n - 1], len(rows) - n + 1)
-
-
-def health_findings(R):
-    """The findings of the report that can be drawn (a dict with an id), in the report's order (err, warn, info)."""
-    return [f for f in (R or {}).get("findings") or [] if isinstance(f, dict) and isinstance(f.get("id"), str)]
-
-
-def health_nothing(R):
-    """Why the list of findings is empty: with less than a day of data no conclusion is not 'all fine'."""
-    return ("too little data to conclude anything yet" if hnum((R.get("coverage") or {}).get("hours")) < 24
-            else "nothing to report in this period")
-
-
-def health_level(f):
-    return f.get("level") if f.get("level") in LEVEL_PILL else "info"
-
-
-def hfact(k, v):
-    if isinstance(v, bool):
-        return "yes" if v else "no"
-    if isinstance(v, (int, float)):
-        if v > 1e9 and (k == "last" or k.endswith("_hour")):  # an epoch
-            return hwhen(v) + " UTC"
-        v = hnum(v)
-        return "%d" % v if v == int(v) else ("%.2f" % v).rstrip("0").rstrip(".")
-    return hclean(v, 80)
-
-
-def health_details(f):
-    """What the details of a finding say, as plain cleaned values: (level, title, text, [(fact, value)], fix). Console and web share it."""
-    facts = f.get("facts") if isinstance(f.get("facts"), dict) else {}
-    return (health_level(f), hclean(f.get("title"), 100), hclean(f.get("text"), 400), [(hclean(k, 40), hfact(str(k), v)) for k, v in facts.items()],
-            hclean(f.get("fix"), 600))
-
-
 def health_find_row(f, w):
-    """A finding on one line: level pill, title, the text as far as it fits."""
-    label, code = LEVEL_PILL[health_level(f)]
-    title, text = hclean(f.get("title"), max(10, w - 12)), hclean(f.get("text"))
-    room = w - 11 - len(title)
-    return f" {c(code, ' ' + label + ' ')} " + c(1, title) + ("  " + c(90, text if len(text) <= room - 2 else text[:room - 3] + "…") if room >= 14 else "")
-
-
-def health_counts(fl):
-    n = {lv: sum(1 for f in fl if health_level(f) == lv) for lv in LEVEL_PILL}
-    bits = [c(col, f"{sym} {n[lv]} {word}") for lv, sym, word, col in (("err", "✖", "err", 31), ("warn", "!", "warn", 33), ("info", "·", "info", 90)) if n[lv]]
-    return "  ".join(bits) if bits else c(90, "no findings")
+    """A finding on one line (not cut to w): level pill, title, the text as far as it fits."""
+    return ansi.finding_text(screens.health_finding(f, False, False, False), w)
 
 
 def health_title(R, w, days, fl, selector=True):
-    """'── HEALTH  last 7 days · since 2026-09-24 14:00 UTC · 168 h of data · ✖ 1 err ───── 1:24h 7:7d 3:30d': the period, how much history
-    the report rests on, the findings per level; the least needed go first when narrow."""
-    cov = (R or {}).get("coverage") or {}
-    hours = hnum(cov.get("hours"))
-    bits = [c(90, "last 24 hours" if days == 1 else f"last {days} days"),
-            c(90, (f"since {hwhen(cov.get('since'))} UTC · " if cov.get("since") else "") + f"{hours:.0f} h of data")]
-    if R is not None and hours:
-        bits.append(health_counts(fl))
-    left = c(36, "──") + c("1;36", " HEALTH ") + " "
-    right = " ".join(c(7 if d == days else 90, f" {k}:{lab} ") for d, k, lab in ((1, "1", "24h"), (7, "7", "7d"), (30, "3", "30d"))) if selector else ""
-    while len(bits) > 1 and vlen(left + c(90, " · ").join(bits)) + vlen(right) + 3 > w:
-        bits.pop(1)
-    text = left + c(90, " · ").join(bits) + " "
-    return clip(text + c(36, "─" * max(0, w - vlen(text) - vlen(right) - (1 if right else 0))) + (" " + right if right else ""), w)
-
-
-def hb_cpu(R, w, k, days):
-    rows, n = [x for x in R.get("top_cpu") or [] if isinstance(x, dict)], (10, 5, 4, 3, 2)[k + 1]
-    lines = [hsec("TOP CPU", w, "share of CPU time · per " + ("hour" if days <= 1 else "day"))]
-    if not rows:
-        return lines + [c(90, " no CPU data")]
-    if k == 3:  # one line: the biggest users
-        return lines + [hjoin([hclean(x.get("app"), 20) + f" {hnum(x.get('share')) * 100:.0f}%" for x in rows], w, " ", "  ·  ")]
-    nm, sw = max(8, min(18, w // 4)), 14 if w < 70 else 24 if w < 100 else 30
-    top = max(hnum(x.get("share")) for x in rows) or 1.0  # the bar compares the apps, the number is the share of all CPU time
-    rows, hidden = hrows(rows, n)
-    for x in rows:
-        sh, ser = hnum(x.get("share")), x.get("series")
-        items = [pad(hclean(x.get("app"), nm), nm), hbar(sh / top, 8) + f" {sh * 100:3.0f}%", pad(f"avg {hnum(x.get('avg_pct')):.0f}%", 8)]
-        if isinstance(ser, list) and ser:
-            items.append(c(36, hspark(ser, min(len(ser), sw))))
-        if x.get("peak_hour"):
-            items.append(c(90, "peak " + hwhen(x["peak_hour"], "%a %H:%M")))
-        lines.append(fit_join(items, "  ", w, " "))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_mem(R, w, k, days):
-    rows, n = [x for x in R.get("top_mem") or [] if isinstance(x, dict)], (10, 5, 4, 3, 2)[k + 1]
-    lines = [hsec("TOP MEMORY", w, "RSS · per " + ("hour" if days <= 1 else "day"))]
-    if not rows:
-        return lines + [c(90, " no memory data")]
-    rising = lambda x: x.get("trend_mb_day") is not None and hnum(x.get("trend_mb_day")) >= 50  # noqa: E731
-    if k == 3:  # one line: the biggest, with an arrow on the ones that keep growing
-        return lines + [hjoin([hclean(x.get("app"), 20) + f" {human(hnum(x.get('rss_avg')))}" + (c(33, " ↗") if rising(x) else "") for x in rows], w, " ", "  ·  ")]
-    nm, sw = max(8, min(18, w // 4)), 14 if w < 70 else 24 if w < 100 else 30
-    trend = any(x.get("trend_mb_day") is not None for x in rows)
-    rows, hidden = hrows(rows, n)
-    for x in rows:
-        t, ser = x.get("trend_mb_day"), x.get("series")
-        items = [pad(hclean(x.get("app"), nm), nm), pad(f"avg {human(hnum(x.get('rss_avg')))}", 9), pad(f"max {human(hnum(x.get('rss_max')))}", 9)]
-        if trend:
-            t = None if t is None else hnum(t)
-            items.append(pad(c(90, "no trend") if t is None else c(33, f"↗ {t:+.0f}M/day") if rising(x) else c(90, f"↘ {t:+.0f}M/day") if t <= -50
-                             else c(90, "→ steady"), 11))
-        if isinstance(ser, list) and ser:
-            items.append(c(36, hspark(ser, min(len(ser), sw))))
-        lines.append(fit_join(items, "  ", w, " "))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_events(R, w, k, days):
-    ev = R.get("events") if isinstance(R.get("events"), dict) else {}
-    kinds = [x for x in KIND_ORDER if ev.get(x)] + sorted(x for x in ev if x not in KIND_ORDER and ev[x])
-    lines = [hsec("EVENTS", w, "by kind · subject ×times, last")]
-    if not kinds:
-        return lines + [c(90, " none recorded in this period")]
-    rows = {x: [r for r in ev[x] if isinstance(r, dict)] for x in kinds}
-    if k == 3:  # one line: the totals
-        return lines + [hjoin([c(KIND_COL.get(x, "90"), hclean(KIND_LABEL.get(x, x), 14)) + f" {hcount(sum(hnum(r.get('n')) for r in rows[x]))}" for x in kinds],
-                              w, " ", "  ")]
-    nk, ns = (12, 8, 6, 4)[k + 1], (6, 4, 3, 2)[k + 1]
-    shown, hidden = hrows(kinds, nk)
-    for x in shown:
-        items = [hclean(r.get("subject"), 40) + f" ×{hcount(r.get('n'))} " + c(90, hago(r.get("last"))) for r in rows[x]]
-        lines.append(hjoin(items[:ns] if len(items) <= ns + 1 else items[:ns - 1], w, " " + c(KIND_COL.get(x, "90"), pad(hclean(KIND_LABEL.get(x, x), 14), 14)) + " ")
-                     + (c(90, f"  … +{len(items) - ns + 1}") if len(items) > ns + 1 else ""))
-    return lines + ([c(90, f" … +{hidden} more kinds")] if hidden else [])
-
-
-def hb_logs(R, w, k, days):
-    rows, n = [x for x in R.get("logs") or [] if isinstance(x, dict)], (10, 6, 4, 3, 2)[k + 1]
-    lines = [hsec("NOISY / NEW LOGS", w, "messages in the period")]
-    if not rows:
-        return lines + [c(90, " none recorded in this period")]
-    rows, hidden = hrows(rows, n)
-    ww = max(8, max(len(hclean(x.get("unit") or x.get("source"), 16)) for x in rows))
-    for x in rows:
-        head = f" {hcount(x.get('n')):>6}  " + (c(33, "NEW") if x.get("new") else "   ") + " " + pad(hclean(x.get("unit") or x.get("source"), 16), ww) + " "
-        room = w - vlen(head)
-        tpl = hclean(x.get("template"))
-        lines.append(head + c(90, tpl if len(tpl) <= room else tpl[:max(room - 1, 0)] + "…"))
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_disks(R, w, k, days):
-    rows, n = [x for x in R.get("disks") or [] if isinstance(x, dict)], (10, 6, 4, 3, 2)[k + 1]
-    lines = [hsec("DISKS", w, "used · days to full at the current growth")]
-    if not rows:
-        return lines + [c(90, " no disk data")]
-    full = lambda x: x.get("days_to_full")  # noqa: E731
-
-    def when(x):
-        d = full(x)
-        if d is None:
-            return c(90, "no trend")
-        d = hnum(d)
-        return c(31 if d < 7 else 33 if d < 30 else 90, "full now" if d < 1 / 24.0 else f"full in {d * 24:.0f} h" if d < 1 else f"full in {d:.0f} d" if d < 365 else "full in > 1 y")
-    if k == 3:
-        return lines + [hjoin([hclean(x.get("mount"), 14) + f" {hnum(x.get('used_pct')):.0f}%" + ("" if full(x) is None else " " + when(x)) for x in rows],
-                              w, " ", "  ·  ")]
-    rows, hidden = hrows(rows, n)
-    mw = min(14, max(6, max(len(hclean(x.get("mount"))) for x in rows)))
-    bw = max(6, min(24, w - mw - 26))
-    for x in rows:
-        pct = hnum(x.get("used_pct"))
-        lines.append(f" {pad(hclean(x.get('mount'), mw), mw)} {bar(pct / 100.0, bw)} {pct:3.0f}%  {when(x)}")
-    return lines + ([c(90, f" … +{hidden} more")] if hidden else [])
-
-
-def hb_thermal(R, w, k, days):
-    th = R.get("thermal") if isinstance(R.get("thermal"), dict) else {}
-    hot, top = hnum(th.get("hours_hot")), th.get("max")
-    lines = [hsec("THERMAL", w, "hours at or above the temperature limit")]
-    if top is None:  # no sensor: unknown is not "cool"
-        return lines + [" " + c(33, "?") + c(90, " no temperature data in this period")]
-    apps = [f"{hclean(a.get('app'), 20)} {hnum(a.get('share')) * 100:.0f}%" for a in th.get("apps_when_hot") or [] if isinstance(a, dict)]
-    head = (c(31 if hot >= 24 else 33, f"{hot:.0f} h hot") if hot else c(90, "never hot")) + c(90, f"  ·  max {hnum(top):.0f} °C")
-    if k == 3 or not apps:
-        return lines + [hjoin([head] + ([c(90, "when hot: " + ", ".join(apps[:3]))] if apps else []), w, " ", "  ·  ")]
-    return lines + [" " + head, hjoin(apps, w, " " + c(90, "when hot: "), "  ·  ")]
-
-
-def hb_boots(R, w, k, days):
-    rows = [x for x in R.get("boots") or [] if isinstance(x, dict)]
-    lines = [hsec("BOOTS", w, "boot time")]
-    vals = [hnum(x.get("total_s"), None) if x.get("total_s") is not None else None for x in rows]
-    known = sorted(v for v in vals if v)
-    if not known:
-        return lines + [c(90, " no boot times recorded" if not rows else " ? boot times unknown")]
-    last = vals[-1]
-    med = known[len(known) // 2] if len(known) % 2 else (known[len(known) // 2 - 1] + known[len(known) // 2]) / 2.0
-    return lines + [" " + c(36, hspark(vals, min(len(vals), 21))) + "  " + c(90, "last " + ("?" if not last else f"{last:.0f} s") + f" · median {med:.0f} s · {plural(len(vals), 'boot')}")]
-
-
-HEALTH_BLOCKS = {"cpu": hb_cpu, "mem": hb_mem, "events": hb_events, "logs": hb_logs, "disks": hb_disks, "thermal": hb_thermal, "boots": hb_boots}
-HEALTH_GROUPS = {3: (("cpu", "mem"), ("events", "logs"), ("disks", "thermal", "boots")),
-                 2: (("cpu", "mem", "thermal", "boots"), ("events", "logs", "disks")),
-                 1: (("cpu", "mem", "events", "logs", "disks", "thermal", "boots"),)}
-
-
-def health_columns(R, w, k):
-    """The sections under the findings at level k (-1 everything, 0 the usual, 3 one or two lines each), one list of lines per column:
-    1 column up to 109 wide, 2 up to 189, 3 from 190."""
-    ncol = 3 if w >= 190 else 2 if w >= 110 else 1
-    cw, days = (w - 3 * (ncol - 1)) // ncol, int(hnum((R.get("period") or {}).get("days"), 7))
-    cols = []
-    for names in HEALTH_GROUPS[ncol]:
-        col = []
-        for name in names:
-            try:
-                blk = HEALTH_BLOCKS[name](R, cw, k, days)
-            except Exception as e:  # noqa: BLE001 - one odd row must not blank the other sections
-                blk = [c(33, f" {name}: could not be shown: " + safe(repr(e))[:cw - 40])]
-            col += ([""] if col and k <= 1 else []) + [clip(x, cw) for x in blk]
-        cols.append(col)
-    return cols, ncol, cw
+    """The title line of the screen at w columns (screens.health_title drawn by ansi)."""
+    return ansi.render(screens.health_title(R, days, fl, selector), w)[0][0]
 
 
 def health_tables(R, w, h=None):
     """The sections under the findings as lines: the fullest level that fits h lines (None: everything, the web page scrolls)."""
-    for k in ((-1,) if h is None else (0, 1, 2, 3)):
-        cols, ncol, cw = health_columns(R, w, k)
-        if h is None or max(len(x) for x in cols) <= h:
-            break
-    cols = [hcut(x, h, cw) for x in cols] if h is not None else cols
-    return columns([(x, cw) for x in cols], w, gap=3) if ncol > 1 else cols[0]
+    return screens.health_tables_lines(R, w, h, time.time())
 
 
-def health_pane(f, w, h):
-    """Everything known about a finding, w columns, h lines at most: the text and the fix wrap, what does not fit is counted."""
-    level, title, text, facts, fix = health_details(f)
-    lw = 7
-    out = [section("DETAILS", w), " " + cc("1;" + LV_COL.get(level, ""), title)]
-    for label, body in (("what", text), ("facts", ""), ("fix", fix)):
-        if label == "facts":
-            rows = wrap_items([f"{k} {c(1, v)}" for k, v in facts], w, lw + 1, "  ·  ") if facts else []
-            out += [" " + c(90, pad(label, lw)) + r[lw + 1:] if i == 0 else r for i, r in enumerate(rows)]
-            continue
-        chunks = textwrap.wrap(body, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
-        out += [(" " + c(90, pad(label, lw)) if i == 0 else " " * (lw + 1)) + x for i, x in enumerate(chunks)]
-    return [clip(x, w) for x in hcut(out, h, w)]
-
-
-class HealthView(object):
-    """The interactive Health screen: the period, the selected finding (its id survives refreshes and period changes; its index is where the
-    cursor stays when that finding vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, days=7, now=None):
-        self.days, self.cur, self.idx, self.top, self.details, self.rows = days, None, 0, 0, False, 10
-        self.opened = self.touched = now or time.time()
-
-
-def health_sync(hv, fl):
-    """The cursor back on its finding: by id, else the same index (clamped). Returns the index."""
-    i = next((j for j, f in enumerate(fl) if f["id"] == hv.cur), None) if hv.cur else None
-    hv.idx = i if i is not None else max(0, min(hv.idx, len(fl) - 1))
-    hv.cur = fl[hv.idx]["id"] if fl else None
-    return hv.idx
-
-
-def health_key(hv, key, fl):
-    """One key on the Health screen. Returns 'back' (leave it), 'period' (another period: the report is asked for again, from its
-    cache) or '' (only the cursor or the details pane changed)."""
-    if key in ("h", "esc", "q"):
-        return "back"
-    if key in HEALTH_KEYS:
-        days, hv.days = hv.days, HEALTH_KEYS[key]
-        return "period" if days != hv.days else ""
-    if key in ("enter", "space"):
-        hv.details = not hv.details
-        return ""
-    if not fl:
-        return ""
-    i, page = health_sync(hv, fl), max(1, hv.rows - 1)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(fl) - 1}.get(key, i)
-    hv.idx = max(0, min(i, len(fl) - 1))
-    hv.cur = fl[hv.idx]["id"]
-    return ""
+def health_advice_node(R, w):
+    """The ADVICE block for the console: the advisor's lines (health_extra_lines, cut and cleaned) in a ui.Advice, None when there are none."""
+    lines = [clip(hansi(x), w) for x in health_extra_lines(R, w)[:6]]
+    return ui.Advice(lines=lines) if lines else None
 
 
 def health_body(data, hv, fl, w, h):
-    """The Health screen's body: at most h lines, none wider than w. Title, notes, findings (the cursor's row in reverse), the advisor's
-    ADVICE block, then the details pane (below the findings, beside them from HEALTH_PANE_W) or the sections of tables."""
-    R = data["report"]
-    if R is None:  # no history, or it could not be read
-        return [health_title(None, w, hv.days, [])] + hmsg("err" if data.get("err") else "info", data["msg"], w)
-    out = [health_title(R, w, hv.days, fl)]
-    notes = [hclean(x) for x in R.get("notes") or [] if isinstance(x, str)]
-    if not (R.get("coverage") or {}).get("since"):  # nothing recorded yet: the message below says it
-        notes = [x for x in notes if x != "no history yet"]
-    nn = 2 if h >= 30 else 1
-    shown = notes if len(notes) <= nn else notes[:nn - 1] + [f"… +{len(notes) - nn + 1} more notes"]
-    out += [clip(c(90, "  · " + x), w) for x in shown]
-    if not hnum((R.get("coverage") or {}).get("hours")):
-        return (out + hmsg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w))[:h]
-    adv = [clip(hansi(x), w) for x in health_extra_lines(R, w)[:6]]
-    avail = h - len(out) - (len(adv) + 1 if adv else 0)
-    nf, pane = len(fl), bool(hv.details and fl)
-    side = pane and w >= HEALTH_PANE_W
-    tmin = max(len(x) for x in health_columns(R, w, 3)[0])  # the sections at their shortest
-    nothing = hmsg("info", health_nothing(R), w) if not nf else []  # never a green: what is not recorded is not fine
-    if not nf:
-        area = 1 + len(nothing)
-    elif side:  # as tall as the details need (at least the list), leaving the sections their shortest form
-        health_sync(hv, fl)
-        area = max(6, min(avail - tmin, max(1 + nf, len(health_pane(fl[hv.idx], w - int(w * 0.45) - 3, 99)))))
-    elif pane:
-        area = 1 + max(1, min(nf, avail // 3, 8))
-    else:
-        area = 1 + max(min(nf, 3), min(nf, avail - 1 - tmin))
-    rows = area - 1
-    fw = int(w * 0.45) if side else w
-    hv.rows = max(1, rows)
-    head = [section("FINDINGS", fw, "")]
-    if not nf:
-        head += nothing
-        lst = []
-    else:
-        health_sync(hv, fl)
-        hv.top = map_scroll(hv.top, hv.idx, nf, rows)
-        lst = [c(7, pad(ANSI.sub("", clip(health_find_row(f, fw), fw)), fw)) if j == hv.idx else clip(health_find_row(f, fw), fw)
-               for j, f in enumerate(fl) if hv.top <= j < hv.top + rows]
-    block = head + lst
-    if side:
-        pw = w - fw - 3
-        pn = health_pane(fl[hv.idx], pw, area)
-        block = [pad(x, fw) + c(90, " │ ") + (pn[i] if i < len(pn) else "") for i, x in enumerate(block + [""] * (area - len(block)))]
-    out += block
-    if adv:
-        out += [section("ADVICE", w)] + adv
-    if pane and not side:
-        out += health_pane(fl[hv.idx], w, avail - area)
-    else:
-        out += health_tables(R, w, max(0, avail - area))
-    return [clip(x, w) for x in out[:h]]
+    """The Health screen's body: at most h lines, none wider than w (screens.health_lines draws the components the screen is made of)."""
+    return screens.health_lines(data, hv, fl, w, h, health_advice_node, time.time())
 
 
 def health_footer(hv, n, w):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first."""
-    keys = [(1, "↑↓: move", "↑↓: move"), (5, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if hv.details else "details"),
-                                                                                "Enter: " + ("hide" if hv.details else "details")),
-            (3, "1/7/3: 24h/7d/30d", "1/7/3: period"), (0, "h/Esc: back", "h: back")]
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     pos = f"finding {hv.idx + 1}/{n}" if n else "no findings"
-    text = f" {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
+    dyn = {"details": ("Enter: " + ("hide details" if hv.details else "details"), "Enter: " + ("hide" if hv.details else "details"))}
+    return clip(c(90, ui.footer("health", f" {pos}   ", w, on, dyn)), w)
 
 
 def health_screen(data, pb, hv, w, h):
     """(the interactive Health screen as one frame: header, body, key help; its findings): the live loop and --once."""
     fl = health_findings(data["report"])
     health_sync(hv, fl)
-    body = health_body(data, hv, fl, w, h - 2)
+    body = health_body(data, hv, fl, w, body_rows(h))
     return frame(("Health", 1, 1, body), 0, 1, w, h, pb, foot=health_footer(hv, len(fl), w)), fl
 
 
@@ -4228,19 +2062,20 @@ def health_slide(w, body_h):
     data = health_data(7)
     R = data["report"]
     if R is None:
-        return ([section("HEALTH", w)] + hmsg("err" if data.get("err") else "info", data["msg"], w))[:body_h]
+        return ([section("HEALTH", w)] + ansi.render(ui.Group(screens._msg("err" if data.get("err") else "info", data["msg"], w)), w)[0])[:body_h]
     fl = health_findings(R)
+    now = time.time()
     out = [health_title(R, w, 7, fl, selector=False)]
     notes = [hclean(x) for x in R.get("notes") or [] if isinstance(x, str) and (R.get("coverage") or {}).get("since")]
     if notes and body_h >= 10:  # "collecting: 5 hours so far": a monitor nobody types on must not look conclusive
         out.append(clip(c(90, "  · " + notes[0]), w))
     avail = body_h - len(out)
     if not hnum((R.get("coverage") or {}).get("hours")):
-        return (out + hmsg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w))[:body_h]
+        return (out + ansi.render(ui.Group(screens._msg("info", "no data in this period" if (R.get("coverage") or {}).get("since") else HEALTH_NONE, w)), w)[0])[:body_h]
     ncol, apps = (2 if w >= 110 else 1), []
     cw, days = ((w - 3) // 2 if ncol == 2 else w), int(hnum((R.get("period") or {}).get("days"), 7))
     for k in (0, 1, 2, 3):
-        cols = [hb_cpu(R, cw, k, days), hb_mem(R, cw, k, days)]
+        cols = [ansi.render(ui.Group(f(R, cw, k, days, now)), cw)[0] for f in (screens.hb_cpu, screens.hb_mem)]
         cand = columns([(x, cw) for x in cols], w, gap=3) if ncol == 2 else cols[0] + cols[1]
         if len(cand) <= avail - 3:  # the findings keep at least a title and two rows
             apps = cand
@@ -4248,7 +2083,7 @@ def health_slide(w, body_h):
     rows = max(0, avail - len(apps) - 1)
     out.append(section("FINDINGS", w))
     if not fl:
-        out += hmsg("info", health_nothing(R), w)
+        out += ansi.render(ui.Group(screens._msg("info", health_nothing(R), w)), w)[0]
     elif rows:
         out += [clip(health_find_row(f, w), w) for f in fl[:rows if len(fl) <= rows else rows - 1]]
         if len(fl) > rows:
@@ -4256,20 +2091,11 @@ def health_slide(w, body_h):
     return [clip(x, w) for x in (out + apps)[:body_h]]
 
 
-def health_select(fl, hv, text):
-    """The cursor on the first finding whose id or title contains text (any case). False: none does."""
-    t = text.lower()
-    i = next((j for j, f in enumerate(fl) if t in (f["id"] + " " + str(f.get("title", ""))).lower()), None)
-    if i is None:
-        return False
-    hv.idx, hv.cur = i, fl[i]["id"]
-    return True
-
-
 def health_state(smp, days):
     """(the cached report data, the header's problems): shared by the console loop and --once."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return health_data(days), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
@@ -4296,20 +2122,25 @@ def health_once(argv, w, h):
 # Everything in it is data (a model's name comes from a catalog file, a GPU's from a driver): text goes through hclean(), numbers through
 # num(), a value that is missing is drawn as "?". The screen runs nothing and downloads nothing: it shows the commands to type.
 
-AI_PANE_W = 140          # from this width up the details sit beside the list, below it otherwise
+# The screen's view-model is in screens.py (the AI block: the model rows, the view and its keys, every piece drawn as components); what is
+# here reads the world (the catalog, the engine, the probe of the model server) and runs the live loop.
+
+
+def ai_body(data, st, av, rows, w, h):
+    return screens.ai_lines(data, st, av, rows, w, h)
+
+
+def ai_footer(av, n, w, snap=None):
+    """The footer of the AI screen as one line (screens.ai_footer drawn)."""
+    return ansi.render(screens.ai_footer(av, n, w, snap, on), w)[0][0]
+
+
 AI_IDLE_S = 600          # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
 AI_TTL = 10              # the catalog is read at most this often, whatever the number of keys or requests
 AI_PROBE_TTL = 60        # does the model server answer? looked at most this often ...
 AI_PROBE_TIMEOUT = 1.0   # ... for at most this long ...
 AI_PROBE_STUCK = 30      # ... in a thread of its own (a key or a page never waits for it; one stuck this long is given up)
-AI_ID_MAX = 64           # characters of a model id: it is a cursor, and a value in a URL
-AI_NAME_MIN = 24         # the name column keeps this much (or its longest name) before another column is given up
 AI_NONE = "the model catalog could not be read"
-AI_VERDICT = {  # verdict -> (label: a symbol besides the colour, SGR of the pill, web class, SGR of the text)
-    "gpu": ("✔ FITS GPU", "1;42;30", "g", "32"), "partial": ("◐ GPU+CPU", "1;46;30", "c", "36"), "ram": ("✔ FITS RAM", "1;42;30", "g", "32"),
-    "slow": ("! SLOW", "1;43;30", "y", "33"), "no": ("✖ TOO BIG", "1;41;37", "r", "31")}
-AI_UNKNOWN = ("? UNKNOWN", "90", "d", "90")
-AI_BACKEND = {"cuda": "CUDA", "rocm": "ROCm", "metal": "Metal", "vulkan": "Vulkan"}
 _AI, _AI_LOCK = {}, threading.Lock()
 _AIPROBE, _AIPROBE_LOCK = {"res": None, "at": 0.0, "key": None, "thread": None, "started": 0.0}, threading.Lock()
 
@@ -4438,124 +2269,13 @@ def ai_status(wait=0.0):
 def ai_state(smp):
     """(the catalog's data, the header's problems): shared by the console loop, --once and the web page."""
     st = snapshot(0)
-    sm = smp.sample() if smp else {"thermal": {}}
+    sm = host_sample(smp)
+    keep(st, sm)
     if DEMO:
         demo_defaults()
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
-def ai_id(x):
-    return hclean(x, AI_ID_MAX) if isinstance(x, str) and x.strip() else None
-
-
-def ai_mb(x):
-    """Megabytes (MiB) as the usual words: 400 MB, 4.9 GB, 128 GB; '?' when it is not a number."""
-    x = num(x)
-    if x is None:
-        return "?"
-    return f"{x:.0f} MB" if x < 1024 else f"{x / 1024:.1f} GB" if x < 102400 else f"{x / 1024:.0f} GB"
-
-
-def ai_params(p, a):
-    """'8.2B', or '30B-A3B' for a mixture of experts (3B parameters work per token): the size of the model in billions of parameters."""
-    p, a = num(p), num(a)
-    return "?" if p is None else f"{p:g}B" + (f"-A{a:g}B" if a else "")
-
-
-def ai_tok(t):
-    """'40-70' tokens per second: an estimate, said so in the header, the legend and the details; '-' when there is none."""
-    if not t:
-        return "-"
-    f = lambda x: f"{x:.0f}" if x >= 10 else f"{x:.1f}".rstrip("0").rstrip(".")  # noqa: E731
-    return f(t[0]) if f(t[0]) == f(t[1]) else f"{f(t[0])}-{f(t[1])}"
-
-
-def ai_rows(cat):
-    """The models of a catalog as plain rows, best first (rank, then the catalog's own order): every text cleaned, every number checked.
-    The id of a row is what the cursor and the web's sel= are made of, so the same text is never in two rows. Console and web share it."""
-    cat = dd(cat)
-    rec, act = ai_id(cat.get("recommended")), ai_id(cat.get("active"))
-    rows, seen = [], set()
-    for i, m in enumerate(cat.get("models") if isinstance(cat.get("models"), list) else []):
-        mid = ai_id(m.get("id")) if isinstance(m, dict) else None
-        if mid is None or mid in seen:
-            continue
-        seen.add(mid)
-        a, cmds, tok = dd(m.get("assess")), dd(m.get("commands")), dd(m.get("assess")).get("tok_s")
-        tok = (num(tok[0]), num(tok[1])) if isinstance(tok, (list, tuple)) and len(tok) == 2 else None
-        size = num(m.get("approx_mb"))
-        if size is None and num(m.get("size")) is not None:
-            size = num(m.get("size")) / 2 ** 20
-        rows.append({
-            "id": mid, "i": i, "name": hclean(m.get("name") or mid, 60), "rank": num(m.get("rank")), "params": ai_params(m.get("params_b"), m.get("active_b")),
-            "size_mb": size, "need_mb": num(a.get("need_mb")), "verdict": a.get("verdict") if a.get("verdict") in AI_VERDICT else None,
-            "where": hclean(a.get("where"), 12), "gpu_layers": num(a.get("gpu_layers")), "layers": num(m.get("layers")),
-            "tok": tok if tok and None not in tok else None, "why": hclean(a.get("why"), 300), "license": hclean(m.get("license"), 40),
-            "quant": hclean(m.get("quant"), 20), "ctx_max": num(m.get("ctx_max")), "notes": hclean(m.get("notes"), 200),
-            "installed": bool(m.get("installed")), "pinned": bool(m.get("pinned")), "rec": mid == rec, "active": mid == act,
-            "commands": {k: hclean(cmds.get(k), 200) for k in ("install", "use", "remove") if isinstance(cmds.get(k), str) and cmds[k].strip()}})
-    rows.sort(key=lambda r: (r["rank"] is None, r["rank"] or 0.0, r["i"]))
-    return rows
-
-
-class AiView(object):
-    """The interactive AI screen: the selected model (its id survives refreshes; its index is where the cursor stays when that model
-    vanishes), the scroll position, the details pane, when it was opened and last touched."""
-
-    def __init__(self, now=None):
-        self.cur, self.idx, self.top, self.details, self.rows = None, 0, 0, False, 10
-        self.confirm = None   # (kind, model id, the question) while a key waits for y or n
-        self.msg = None       # (level, text): a line only this screen says (the engine's own answers are in its snapshot)
-        self.opened = self.touched = now or time.time()
-
-
-def ai_sync(av, rows):
-    """The cursor back on its model: by id, else the same index (clamped); the first time on the recommended one, where Enter shows what
-    to type. Returns the index."""
-    if av.cur is None and rows:
-        av.idx = next((j for j, r in enumerate(rows) if r["rec"]), 0)
-    else:
-        i = next((j for j, r in enumerate(rows) if r["id"] == av.cur), None)
-        av.idx = i if i is not None else max(0, min(av.idx, len(rows) - 1))
-    av.cur = rows[av.idx]["id"] if rows else None
-    return av.idx
-
-
-AI_ACTION_KEYS = {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"}  # AI on/off, use the model, delete it, delete all, cancel
-
-
-def ai_key(av, key, rows):
-    """One key on the AI screen. Returns 'back' (leave it), an action for ai_do() ('toggle', 'use', 'delete', 'delete-all', 'cancel', and 'yes' for the
-    question that is waiting) or '' (only the cursor or the details pane changed)."""
-    if av.confirm:  # a question is waiting: y does it, any other key says no
-        yes = key in ("y", "Y")
-        if not yes:
-            av.confirm = None
-        return "yes" if yes else ""
-    if key in ("a", "esc", "q"):
-        return "back"
-    if key in AI_ACTION_KEYS:
-        return AI_ACTION_KEYS[key]
-    if key in ("enter", "space"):
-        av.details = not av.details
-        return ""
-    if not rows:
-        return ""
-    i, page = ai_sync(av, rows), max(1, av.rows - 1)
-    i = {"up": i - 1, "k": i - 1, "down": i + 1, "j": i + 1, "pgup": i - page, "pgdn": i + page, "home": 0, "end": len(rows) - 1}.get(key, i)
-    av.idx = max(0, min(i, len(rows) - 1))
-    av.cur = rows[av.idx]["id"]
-    return ""
-
-
-def ai_select(rows, av, text):
-    """The cursor on the first model whose id or name contains text (any case). False: none does."""
-    t = text.strip().lower()
-    i = next((j for j, r in enumerate(rows) if t and t in (r["id"] + " " + r["name"]).lower()), None)
-    if i is None:
-        return False
-    av.idx, av.cur = i, rows[i]["id"]
-    return True
 
 
 def ai_do(av, act, rows):
@@ -4604,19 +2324,10 @@ def ai_do(av, act, rows):
             if not used and not any(r["installed"] for r in rows):
                 av.msg = ("warn", "nothing is downloaded: nothing to delete")
                 return None
-            av.confirm = ("delete-all", None, f"Delete the runtime and every downloaded model ({aisetup_size(used)})?")
+            av.confirm = ("delete-all", None, f"Delete the runtime and every downloaded model ({screens.ai_size(used)})?")
     except Exception as e:  # noqa: BLE001 - the screen goes on
         av.msg = ("err", "the AI engine could not do that: " + hclean(repr(e), 120))
     return None
-
-
-def aisetup_size(n):
-    """5000000000 -> '5.0 GB' ('nothing' for none): sizes of files, as aisetup says them."""
-    try:
-        import aisetup
-        return aisetup.fmt_size(n) if n else "nothing"
-    except Exception:  # noqa: BLE001
-        return "?"
 
 
 def ai_busy():
@@ -4627,372 +2338,12 @@ def ai_busy():
         return False
 
 
-def ai_work_lines(st, cat, av, w, k=0):
-    """The lines under the title: whether the AI is on and what it is doing (a download with its bar, the server starting, an error), that it is locked,
-    the answer to the last key, and the folder the models are downloaded to with what it holds and what is free. At level k the folder goes first
-    when the screen is small (k 1), then the lock and the answer (k 2), the state line stays (k 3). [] when the status has no engine snapshot."""
-    snap = dd(st).get("snap")
-    if not isinstance(snap, dict) or not isinstance(snap.get("state"), (list, tuple)):
-        return []
-    state, text = snap["state"]
-    mark, col = {"off": ("○ OFF", "90"), "working": ("◐ WORKING", "36"), "running": ("● ON", "32"), "on": ("● ON", "32"), "error": ("✖ ERROR", "31")}.get(state, ("?", "90"))
-    job, extra = snap.get("job"), ""
-    if state == "working" and job and job.get("total"):
-        n = min(14, round(14 * job["done"] / job["total"]))
-        extra = " " + c(36, "█" * n) + c(90, "░" * (14 - n))
-    tail = c(90, "   (c: cancel)") if state == "working" and not snap.get("locked") else ""
-    lock = c(33, "[locked by config.ini] ") if snap.get("locked") and k >= 2 else ""  # the line that says it is gone: it goes up front, where a narrow screen keeps it
-    out = [clip(" " + c("1;" + col, pad(mark, 10)) + " " + lock + hclean(text, 200) + extra + tail, w)]
-    if k >= 3:
-        return out
-    note = av.msg if av is not None and av.msg else None
-    if note is None and isinstance(snap.get("notice"), dict):
-        note = ("ok" if snap["notice"].get("ok") else "err", snap["notice"].get("text"))
-    if snap.get("locked") and k < 2:
-        out.append(clip(" " + c(33, "locked by config.ini ([ai] web_actions = no): this screen only shows"), w))
-    if note and note[1] and k < 3:
-        out.append(clip(" " + c({"ok": 32, "err": 31, "warn": 33}.get(note[0], 90), hclean(note[1], 300)), w))
-    cat = dd(cat)
-    if cat.get("dir") and k < 1:
-        sp = dd(cat.get("space"))
-        free = num(sp.get("free"))
-        out.insert(1, clip(" " + c(90, "folder") + " " + hclean(cat["dir"], 120) + c(90, f" · {aisetup_size(sp.get('used'))} downloaded · "
-                                                                                   + (f"{aisetup_size(free)} free on that disk" if free else "free space unknown")), w))
-    return out
-
-
-def ai_title(rows, w):
-    """'── AI  what this machine can run · 12 models · ✔ 7 fit  ! 2 slow  ✖ 2 too big': the tagline goes first when narrow, then the count."""
-    n = {v: sum(1 for r in rows or [] if r["verdict"] == v) for v in AI_VERDICT}
-    counts = "  ".join(c(col, f"{sym} {k} {word}") for k, sym, word, col in ((n["gpu"] + n["ram"], "✔", "fit", 32), (n["partial"], "◐", "gpu+cpu", 36),
-                                                                           (n["slow"], "!", "slow", 33), (n["no"], "✖", "too big", 31)) if k)
-    tag, count = c(90, "what this machine can run"), c(90, plural(len(rows or []), "model"))
-    left = c(36, "──") + c("1;36", " AI ") + " "
-    for bits in ([tag, count, counts], [count, counts], [counts], [count]) if rows is not None else ([],):
-        bits = [x for x in bits if x]
-        if vlen(left + c(90, " · ").join(bits)) + 3 <= w:
-            break
-    text = left + c(90, " · ").join(bits) + " "
-    return clip(text + c(36, "─" * max(0, w - vlen(text))), w)
-
-
-def ai_simd(cpu):
-    flags = {x.lower() for x in cpu.get("flags") if isinstance(x, str)} if isinstance(cpu.get("flags"), list) else set()
-    return [n for n, ok in (("AVX2", "avx2" in flags), ("AVX-512", any(x.startswith("avx512") for x in flags)), ("NEON", "neon" in flags)) if ok], flags
-
-
-def ai_cpu_name(s):
-    """A processor's name without the trademarks, the clock and the core count: 'Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz' -> 'Intel Core i7-10750H'."""
-    s = hclean(s, 80)
-    for pat in (r"\((?:R|TM|r|tm)\)", r"\s*@\s*[0-9.]+\s*[GM]Hz", r"\s+\d+-Core Processor", r"\s+CPU\b"):
-        s = re.sub(pat, "", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def ai_cpu_text(hw, short=False):
-    """'AMD Ryzen 7 5800X · 8 cores / 16 threads · AVX2' (short: the name and the threads)."""
-    cpu = dd(hw.get("cpu"))
-    cores, threads = num(cpu.get("cores")), num(cpu.get("threads"))
-    topo = f"{threads:.0f} threads" if threads else ""
-    if cores:
-        topo = f"{cores:.0f} cores" + (f" / {threads:.0f} threads" if threads and threads != cores else "")
-    simd, flags = ai_simd(cpu)
-    x86 = any(k in str(hw.get("arch")).lower() for k in ("x86", "amd64", "i386", "i686"))
-    if short:
-        return c(1, ai_cpu_name(cpu.get("model")) or "?") + (c(90, f" · {threads or cores:.0f} threads") if threads or cores else "")
-    return (c(1, ai_cpu_name(cpu.get("model")) or "?") + (c(90, " · " + topo) if topo else "") + (c(90, " · " + " ".join(simd)) if simd else "")
-            + (c(33, " · no AVX2: slow") if x86 and flags and "avx2" not in flags and not simd else ""))
-
-
-def ai_memory_text(tot, free, bw):
-    """'██████░░░░  18.4 GB free of 31.2 GB': a bar of what is in use (bw 0: none), what is free of the total; '(free: ?)' when only the total is known."""
-    if free is None:
-        return ((c(90, "░" * bw) + "  ") if bw else "") + ai_mb(tot) + c(90, " (free: ?)")
-    return ((bar(1 - free / tot, bw) + "  ") if bw else "") + f"{ai_mb(free)} free of {ai_mb(tot)}"
-
-
-def ai_ram_text(hw, bw):
-    tot, free = num(dd(hw.get("ram")).get("total_mb")), num(dd(hw.get("ram")).get("available_mb"))
-    return ai_memory_text(tot, free, bw) if tot else c(33, "?") + c(90, " could not be read")
-
-
-def ai_gpu_text(g, bw):
-    """(the GPU's name and backend, its memory): a bar of the video memory in use (bw 0: none), or 'unified memory' when it shares the RAM."""
-    backend = AI_BACKEND.get(g.get("backend"))
-    head = c(1, hclean(g.get("name"), 48) or "?") + (c(90, " · " + backend) if backend else c(33, " · no usable backend: not used"))
-    if g.get("unified"):
-        return head, c(90, "unified memory: it shares the RAM" if bw else "unified memory")
-    tot = num(g.get("vram_mb"))
-    return head, ai_memory_text(tot, num(g.get("vram_free_mb")), bw) if tot else c(33, "?") + c(90, " video memory could not be read")
-
-
-def ai_hw_lines(hw, w, k=0):
-    """The HARDWARE section at level k: 0 everything (the bars, eight GPUs, a GPU on two lines when it does not fit on one, three notes), 1 one
-    line each without bars (three GPUs) and one note, 2 the CPU and the RAM on one line (two GPUs) and no notes, 3 nothing. Lines at most w wide."""
-    if k >= 3:
-        return []
-    hw = dd(hw)
-    gpus = [g for g in hw.get("gpus") if isinstance(g, dict)] if isinstance(hw.get("gpus"), list) else []
-    notes = [hclean(x, 200) for x in hw.get("notes") if isinstance(x, str) and x.strip()] if isinstance(hw.get("notes"), list) else []
-    bw = max(6, min(24, (w - 7) // 5))
-    lab = lambda t: " " + c(90, pad(t, 5)) + " "  # noqa: E731
-    lines = [hsec("HARDWARE", w, " ".join(hclean(hw.get(x), 12) for x in ("os", "arch") if hw.get(x)))]
-    if k >= 2:
-        lines.append(clip(" " + ai_cpu_text(hw, True) + c(90, "  ·  RAM ") + ai_ram_text(hw, 0), w))
-    else:
-        lines += [clip(lab("CPU") + ai_cpu_text(hw), w), clip(lab("RAM") + ai_ram_text(hw, bw), w)]
-    keep = (8, 3, 2)[k]  # the GPUs drawn: every one when there is room
-    for i, g in enumerate(gpus[:keep]):
-        head, mem = ai_gpu_text(g, bw if k == 0 else 0)  # the bars only at level 0
-        one = lab("GPU" if i == 0 or k >= 2 else "") + head + "  " + mem
-        lines += [clip(one, w)] if k >= 1 or vlen(one) <= w else [clip(lab("GPU" if i == 0 else "") + head, w), clip(lab("") + mem, w)]
-    if len(gpus) > keep:
-        lines.append(clip(c(90, f"       … +{len(gpus) - keep} more GPUs"), w))
-    if not gpus:
-        lines.append(clip(lab("GPU") + c(33, "none found") + c(90, ": the models run on the CPU, from RAM"), w))
-    if k < 2:
-        nn = 3 if k == 0 else 1
-        shown = notes if len(notes) <= nn else notes[:nn - 1] + [f"… +{len(notes) - nn + 1} more notes"]
-        for x in shown:
-            rows = textwrap.wrap(x, max(10, w - 4), break_on_hyphens=False) if k == 0 else [x]
-            lines += [c(90, "  · " + rows[0] if len(rows[0]) + 4 <= w else "  · " + rows[0][:max(1, w - 5)] + "…")] + [c(90, "    " + y) for y in rows[1:2]]
-    return lines
-
-
-def ai_status_texts(st, cat, ids):
-    """The STATUS section's pieces as ANSI text: what [ai] says (adv, with its note), the endpoint and whether it answers (ep, ans, and ans in
-    short), the model in use (model), the runtime (run), the directory of the files (files)."""
-    st, probe, rt = dd(st), dd(st).get("probe"), dd(dd(cat).get("runtime"))
-    on_, sw = bool(st.get("enabled")), dd(st.get("switch"))
-    note = ("  ([ai] enabled = yes)" if on_ else "  ([ai] enabled = no in config.ini)") if not sw else \
-        "  ([ai] enabled = yes)" if sw.get("by") == "config" else "  (turned on from the AI page or screen)" if on_ else "  (off: the AI switch turns it on)"
-    out = {"on": on_, "adv": c(32, "✔ on") if on_ else c(90, "· off"), "note": c(90, note), "ep": hclean(st.get("endpoint"), 120)}
-    out["detail"] = ""
-    if not on_ or (probe or {}).get("state") == "off":
-        out["short"] = c(90, "· not asked while the advisor is off")
-    elif probe is None:
-        out["short"] = c(90, "· checking…")
-    elif probe.get("state") == "answering":
-        names = [x for x in probe.get("models") or [] if isinstance(x, str)]
-        out["short"] = c(32, "✔ answering")
-        out["detail"] = plural(len(names), "model") + (": " + ", ".join(names[:3]) + ("…" if len(names) > 3 else "") if names else "")
-    else:
-        out["short"] = c(31, "✖ not answering")
-        out["detail"] = hclean(probe.get("msg"), 160)
-    model = hclean(st.get("model"), 80)
-    out["model"] = (c(36, "●") + " " + c(1, model) + (c(90, "  in the catalog") if model in ids else c(33, "  not in the catalog")) if model
-                    else c(90, "· none chosen ([ai] model is empty)"))
-    out["run"] = (c(32, "✔ installed") + (c(90, f" ({hclean(rt.get('version'), 20)})") if rt.get("version") else "") if rt.get("installed")
-                  else c(33, "! not installed") + c(90, ": setup downloads it"))
-    out["files"] = hclean(dd(cat).get("dir"), 120)
-    out["ans"] = out["short"] + (c(90, " · " + out["detail"]) if out["detail"] else "")
-    return out
-
-
-def ai_status_lines(st, cat, ids, w, k=0):
-    """The STATUS section at level k: 0 six lines (more when the server's answer wraps), 1 two (no endpoint, runtime or files), 2 one without a
-    title, 3 nothing."""
-    if k >= 3:
-        return []
-    t = ai_status_texts(st, cat, ids)
-    lab = lambda x: " " + c(90, pad(x, 9)) + " "  # noqa: E731
-    if k >= 2:
-        return [clip(" " + c(90, "status ") + t["adv"] + c(90, " · ") + t["short"] + c(90, " · ") + t["model"], w)]
-    if k == 1:
-        return [hsec("STATUS", w), clip(lab("advisor") + t["adv"] + (c(90, " · ") + t["short"] if t["on"] else t["note"]), w), clip(lab("model") + t["model"], w)]
-    srv = [lab("server") + t["ans"]]
-    if vlen(srv[0]) > w:  # what the server said does not fit beside the verdict: under it, wrapped
-        srv = [lab("server") + t["short"]] + [lab("") + c(90, x) for x in textwrap.wrap(t["detail"], max(10, w - 11), break_on_hyphens=False)[:2]]
-    return [hsec("STATUS", w), clip(lab("advisor") + t["adv"] + t["note"], w), clip(lab("endpoint") + t["ep"], w)] + [clip(x, w) for x in srv] \
-        + [clip(lab("model") + t["model"], w), clip(lab("runtime") + t["run"], w)] + ([clip(lab("files") + c(90, t["files"]), w)] if t["files"] else [])
-
-
-def ai_legend(w):
-    """One line: what the marks in front of a model mean, and that the speed is a guess."""
-    return hjoin([c(33, "★") + c(90, " recommended"), c(32, "✓") + c(90, " installed"), c(36, "●") + c(90, " active"),
-                  c(90, "tok/s: rough estimate")], w, " ", "  ·  ")
-
-
-def ai_layout(rows, w):
-    """(the columns to draw, the name's width, the params' width, the notes' width) of a table w wide: the notes go first when it is narrow,
-    then the parameters, the speed, the size, and the name keeps AI_NAME_MIN (or its longest name) before any of them."""
-    want = {"params": max([len(r["params"]) for r in rows] + [6]), "size": 7, "need": 7, "verdict": 12, "tok": 9}
-    names = max([len(r["name"]) for r in rows] + [5])
-    keep = ["params", "size", "need", "verdict", "tok"]
-    fixed = lambda: 6 + sum(want[k] + 2 for k in keep)  # noqa: E731  # " " + the marks + 2, and every column with its gap
-    for drop in ("params", "tok", "size", "need", "verdict"):
-        if w - fixed() >= min(names, AI_NAME_MIN):
-            break
-        keep.remove(drop)
-    nw = max(4, min(names, w - fixed()))
-    room = w - fixed() - nw - 2
-    return keep, nw, want["params"], (min(room, 100) if room >= 16 and "verdict" in keep else 0)
-
-
-def ai_header(lay):
-    keep, nw, pw, nn = lay
-    cells = {"params": pad("params", pw), "size": " size".rjust(7), "need": "needs".rjust(7), "verdict": " verdict".ljust(12), "tok": "est tok/s"}
-    return c(90, "      " + pad("model", nw + 2) + "  ".join(cells[k] for k in keep) + ("  notes" if nn else ""))
-
-
-def ai_pill(v):
-    label, code = AI_VERDICT.get(v, AI_UNKNOWN)[:2]
-    return c(code, " " + label.ljust(10) + " ")
-
-
-def ai_row_text(r, lay):
-    """One model as a table row: the marks (recommended, installed, active), the name, the columns that fit, the notes."""
-    keep, nw, pw, nn = lay
-    name = r["name"] if len(r["name"]) <= nw else r["name"][:nw - 1] + "…"
-    cells = {"params": c(90, pad(r["params"], pw)), "size": ai_mb(r["size_mb"]).rjust(7), "need": ai_mb(r["need_mb"]).rjust(7), "verdict": ai_pill(r["verdict"]),
-             "tok": pad(ai_tok(r["tok"]), 9)}
-    marks = (c(33, "★") if r["rec"] else " ") + (c(32, "✓") if r["installed"] else " ") + (c(36, "●") if r["active"] else " ")
-    return (" " + marks + "  " + (c(90, pad(name, nw)) if r["verdict"] == "no" else pad(name, nw)) + "  " + "  ".join(cells[k] for k in keep)
-            + ("  " + c(90, r["notes"][:nn - 1] + "…" if len(r["notes"]) > nn else r["notes"]) if nn else ""))
-
-
-def ai_where(r):
-    """Where the model would run, in words: 'all 36 layers on the GPU', '19 of 36 layers on the GPU, the rest in RAM', 'the CPU, from RAM'."""
-    g, n = r["gpu_layers"], r["layers"]
-    if not g:
-        return "all on the GPU" if r["verdict"] == "gpu" else "the CPU, from RAM" if r["verdict"] in ("ram", "slow") else "-"
-    if n and g >= n:
-        return f"all {n:.0f} layers on the GPU"
-    return f"{g:.0f} of {n:.0f} layers on the GPU, the rest in RAM" if n else f"{g:.0f} layers on the GPU, the rest in RAM"
-
-
-def ai_details(r, windows=False):
-    """What the details of a model say, as plain cleaned values: (title, [(label, value, kind)]). kind: the verdict for the verdict row,
-    'cmd' for a command to type, 'warn', 'dim' or ''. The commands are the catalog's, word for word, right after the state: when the screen
-    is too small the notes and the licence are cut, not what to type. Console and web share it."""
-    label = AI_VERDICT.get(r["verdict"], AI_UNKNOWN)[0]
-    items = [("verdict", label, r["verdict"] or "")]
-    if r["why"]:
-        items.append(("why", r["why"], ""))
-    items.append(("speed", f"about {ai_tok(r['tok'])} tokens/s (a rough estimate, not a promise)" if r["tok"] else "no estimate", ""))
-    state = [x for x, ok in (("★ recommended for this machine", r["rec"]), ("✓ installed", r["installed"]), ("● active: [ai] model", r["active"])) if ok]
-    items.append(("state", " · ".join(state) if state else "not installed", ""))
-    cmds = r["commands"]
-    if windows:
-        items.append(("prompt", "run the commands in an administrator prompt (PowerShell or Command Prompt)", "dim"))
-    if not r["installed"]:
-        can = r["pinned"] and "install" in cmds  # what cannot be downloaded has no command to type
-        items.append(("install", cmds["install"] if can else "not pinned yet: this build cannot download it", "cmd" if can else "warn"))
-    if r["installed"] and not r["active"] and "use" in cmds:
-        items.append(("use", cmds["use"], "cmd"))
-    if r["installed"] and "remove" in cmds:
-        items.append(("remove", cmds["remove"], "cmd"))
-    items.append(("needs", f"{ai_mb(r['need_mb'])} of memory: the file ({ai_mb(r['size_mb'])}), the context and the runtime", ""))
-    if r["verdict"] in ("gpu", "partial", "ram", "slow"):
-        items.append(("where", ai_where(r), ""))
-    ctx = f"context up to {r['ctx_max']:.0f} tokens" if r["ctx_max"] else ""
-    items.append(("model", " · ".join(x for x in (f"{r['params']} parameters", r["quant"], ctx) if x), ""))
-    items.append(("licence", r["license"] or "?", ""))
-    if r["notes"]:
-        items.append(("notes", r["notes"], ""))
-    return r["name"], items
-
-
-def ai_pane(r, w, h, windows=False):
-    """Everything known about a model, w columns, h lines at most: the sentences wrap, the commands stay whole (clipped when the screen is
-    narrower than they are), what does not fit is counted."""
-    title, items = ai_details(r, windows)
-    lw = 9
-    out = [hsec("DETAILS", w), " " + c(1, title)]
-    for label, value, kind in items:
-        chunks = [value] if kind == "cmd" else textwrap.wrap(value, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
-        for j, x in enumerate(chunks):
-            col = AI_VERDICT.get(kind, AI_UNKNOWN)[3] if kind in AI_VERDICT else {"cmd": "36", "warn": "33", "dim": "90"}.get(kind, "")
-            out.append(" " + (c(90, pad(label, lw)) if j == 0 else " " * lw) + cc(col, x))
-    return [clip(x, w) for x in hcut(out, h, w)]
-
-
-def ai_body(data, st, av, rows, w, h):
-    """The AI screen's body: at most h lines, none wider than w. Title, HARDWARE (and STATUS beside it from 110 columns), MODELS with the
-    cursor's row in reverse video, the legend, then the details (below the list, beside it from AI_PANE_W) or, without them, STATUS under
-    the list. The sections lose detail from the bottom up, as the screen gets smaller, before the list loses rows."""
-    cat = data["cat"]
-    if cat is None:  # the catalog could not be read
-        return ([ai_title(None, w)] + hmsg("err" if data.get("err") else "info", data["msg"], w))[:h]
-    n, hwd = len(rows), dd(cat.get("hw"))
-    ai_sync(av, rows)
-    sel = rows[av.idx] if rows else None
-    pane = bool(av.details and sel)
-    side, two, ids = pane and w >= AI_PANE_W, w >= 110, {r["id"] for r in rows}
-    windows = hwd.get("os") == "windows"
-    fw = int(w * 0.55) if side else w
-    lay = ai_layout(rows, fw)
-    full = len(ai_pane(sel, w - fw - 3 if side else w, 99, windows)) if pane else 0
-    for want in ((6, 4) if pane and not side else (8, 4)):  # first the comfortable list, then the tight one
-        for k in range(4):
-            work = ai_work_lines(st, cat, av, w, k)  # the switch, the folder, the last answer: they give way last, one line at a time
-            if two:
-                lw = (w - 3) * 6 // 11
-                top, bottom = columns([(ai_hw_lines(hwd, lw, k), lw), (ai_status_lines(st, cat, ids, w - 3 - lw, k), w - 3 - lw)], w, gap=3) if k < 3 else [], []
-            else:
-                top, bottom = ai_hw_lines(hwd, w, k), [] if pane else ai_status_lines(st, cat, ids, w, k)
-            avail = h - 1 - len(work) - len(top) - len(bottom) - 3  # the title and the work lines; MODELS and its header and the legend
-            if pane and not side:  # the details need their lines: the list keeps what is left
-                rows_n = min(n, max(want, avail - full))
-                fits = avail - rows_n >= full
-            else:  # the sections above give up detail before the list loses rows (or the details beside it their height)
-                rows_n = min(n, avail)
-                fits = rows_n >= min(n, want) and (not side or avail + 2 >= min(full, 12))
-            if fits:
-                break
-        if fits:
-            break
-    else:
-        rows_n = min(n, avail // 2 if pane and not side else avail)  # a screen too small for either: the list and the details share it
-    rows_n = max(1, rows_n) if n else 0
-    out = [ai_title(rows, w)] + work + top
-    av.rows, av.top = max(1, rows_n), map_scroll(av.top, av.idx, n, rows_n) if n else 0
-    note = f"{av.top + 1}-{min(n, av.top + rows_n)} of {n} · best first" if n > rows_n else "best first"
-    block = [hsec("MODELS", fw, note), ai_header(lay)]
-    if not n:
-        block.append(msg("info", "the catalog lists no model"))
-    for j in range(av.top, min(n, av.top + rows_n)):
-        line = clip(ai_row_text(rows[j], lay), fw)
-        block.append(c(7, pad(ANSI.sub("", line), fw)) if j == av.idx else line)
-    if side:
-        pn = ai_pane(sel, w - fw - 3, max(len(block), min(full, avail + 2)), windows)
-        block = [pad(x, fw) + c(90, " │ ") + (pn[i] if i < len(pn) else "") for i, x in enumerate(block + [""] * (len(pn) - len(block)))]
-    out += block + [ai_legend(w)]
-    if pane and not side:
-        out += ai_pane(sel, w, max(0, avail - rows_n), windows)
-    else:
-        out += bottom
-    return [clip(x, w) for x in out[:h]]
-
-
-def ai_footer(av, n, w, snap=None):
-    """Where the cursor is, and the keys: in short words when the screen is narrow, then the least needed go first. The keys that act (AI on/off,
-    use the model, delete, delete all, cancel) are there unless [ai] web_actions = no locked them (snap says); a question that waits is the footer."""
-    if av.confirm:
-        ask = " " + av.confirm[2]
-        return clip(c("1;33", ask) + c(90, "  y: yes   any other key: no" if len(ask) + 27 <= w else "  [y/n]"), w)
-    acts = isinstance(snap, dict) and not snap.get("locked")
-    keys = [(1, "↑↓: move", "↑↓: move"), (7, "PgUp/PgDn/Home/End: page", ""), (2, "Enter: " + ("hide details" if av.details else "details"), "Enter: " + ("hide" if av.details else "details"))]
-    if acts:
-        keys += [(3, "e: AI on/off", "e: on/off"), (3, "u: use model", "u: use"), (4, "x: delete", "x: del"), (6, "X: delete all", "X: all"), (5, "c: cancel", "c: cancel")]
-    keys.append((0, "a/Esc: back", "a: back"))
-    if acts:
-        keys.append((8, "questions: web page or nuc-console-ask", ""))
-    pos = f"model {av.idx + 1}/{n}" if n else "no models"
-    text = f" {pos}   " + "   ".join(k[1] for k in keys)
-    keys = [k for k in keys if k[2]]
-    while len(text) > w and keys:
-        text = f" {pos}  " + "  ".join(k[2] for k in keys)
-        keys.remove(max(keys))
-    return clip(c(90, text), w)
-
-
 def ai_screen(data, pb, av, w, h, wait=0.0):
     """(the interactive AI screen as one frame: header, body, key help; its model rows): the live loop and --once."""
     rows = ai_rows(data["cat"])
     ai_sync(av, rows)
     st = ai_status(wait)
-    body = ai_body(data, st, av, rows, w, h - 2)
+    body = ai_body(data, st, av, rows, w, body_rows(h))
     return frame(("AI", 1, 1, body), 0, 1, w, h, pb, foot=ai_footer(av, len(rows), w, st.get("snap"))), rows
 
 
@@ -5037,7 +2388,9 @@ def kiosk_grid():
 BROWSERS = {
     "windows": [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
                 r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
-                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"],
+                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
+                r"%ProgramFiles%\Mozilla Firefox\firefox.exe", r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe",
+                r"%LOCALAPPDATA%\Mozilla Firefox\firefox.exe"],  # Firefox last: it cannot start full screen (see browser_command)
     "darwin": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
     "linux": ["chromium", "chromium-browser", "google-chrome", "microsoft-edge", "brave-browser", "firefox"],
@@ -5076,6 +2429,28 @@ def browser_command(exe, url, profile):
             "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
 
 
+def kiosk_command(exe, target, base):
+    """browser_command() for the kiosk, and the log line of a browser that cannot start full screen (Firefox)."""
+    cmd = browser_command(exe, target, os.path.join(base, "browser"))
+    if cmd and "firefox" in os.path.basename(exe).lower():
+        print("Firefox does not start full screen: press F11 in its window", file=sys.stderr, flush=True)
+    return cmd
+
+
+def default_browser(exe, target):
+    """Windows, none of BROWSERS found (find_browser() said ""; not `[display] browser = none`): the default browser, in a normal window
+    (no flag can make it full screen: F11). True once opened."""
+    if exe != "" or not WINDOWS:
+        return False
+    try:
+        os.startfile(target)  # as this user, like open_in_browser
+    except OSError as e:
+        print("no supported browser found for full screen, and the default browser did not open:", repr(e)[:200], file=sys.stderr, flush=True)
+        return False
+    print("no supported browser found for full screen: opened the default browser (F11 for full screen)", file=sys.stderr, flush=True)
+    return True
+
+
 def launch(cmd):
     """Starts the browser, detached from our console (its output is not ours to show)."""
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -5111,24 +2486,52 @@ def web_up(port, wait):
 
 
 def dashboard_url(fullscreen=False, cols=0, rows=0):
-    query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
+    """The page the display opens. [ui] web = classic: the classic page (fit to the window; full screen: sized to the grid, the pages taking
+    turns, the kiosk footer). [ui] web = app: the shell (app=1); full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by
+    itself, says how to close the window). Both take the token the caller appends."""
+    app = (CFG.get("ui") or {}).get("web") == "app"
+    if app:
+        query = {"app": 1, "ui": "1.dw", "kiosk": 1} if fullscreen else {"app": 1}
+    else:
+        query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
     from urllib.parse import urlencode
     return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
+
+
+def read_web_token(path):
+    """(the token in [web] token_file, "") if this user can read it, else ("", why). The text never holds the token."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            token = f.read(512).strip()
+    except (OSError, ValueError) as e:  # not there, not allowed (the service user's 0600 file), not text
+        return "", f"{path} cannot be read by this user ({e.strerror if isinstance(e, OSError) and e.strerror else type(e).__name__})"
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{16,}", token):  # what the web view accepts (src/web.py TOKEN_OK): safe in a URL, too
+        return "", f"{path} does not hold a token the web view accepts"
+    return token, ""
 
 
 def open_in_browser(argv):
     """`render.py --open`: the dashboard in a normal window of the default browser ([display] mode = browser, at every login).
 
-    The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more."""
+    The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more. With a
+    token in [web], the URL carries it when this user can read the token file (the web view moves it into a cookie and keeps the view);
+    otherwise the dashboard is the page written to a file, as `--kiosk` does."""
     base = user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    url = dashboard_url()
+    url, token = dashboard_url(), ""
+    if CFG["web"]["token_file"]:
+        token, why = read_web_token(CFG["web"]["token_file"])
+        if not token:
+            print(f"[web] token_file is set but {why}: the dashboard is shown from a page written to a file instead", file=sys.stderr, flush=True)
+            return kiosk_file(argv, base, *kiosk_grid())
     if not web_up(CFG["web"]["port"], 60):
         print(f"the web view does not answer on 127.0.0.1:{CFG['web']['port']}: dashboard not opened", file=sys.stderr, flush=True)
         return 1
-    print(f"open -> {url}", file=sys.stderr, flush=True)
+    print(f"open -> {url}" + (" (with the token of [web] token_file)" if token else ""), file=sys.stderr, flush=True)  # never the token itself
+    if token:
+        url += "&token=" + token
     if WINDOWS:
         os.startfile(url)  # the default browser, as this user
     elif MACOS:
@@ -5153,13 +2556,16 @@ def kiosk(argv):
     web = CFG["web"]
     if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
         url = dashboard_url(fullscreen=True, cols=cols, rows=rows)
-        cmd = browser_command(find_browser(), url, os.path.join(base, "browser"))
+        exe = find_browser()
+        cmd = kiosk_command(exe, url, base)
         print(f"kiosk -> {url}", file=sys.stderr, flush=True)
-        if not cmd or "--no-browser" in argv:
-            print("no browser started: open " + url, file=sys.stderr, flush=True)
-            return 0 if "--no-browser" in argv else 1
-        launch(cmd)
-        return 0
+        if "--no-browser" not in argv and cmd:
+            launch(cmd)
+            return 0
+        if "--no-browser" not in argv and default_browser(exe, url):
+            return 0
+        print("no browser started: open " + url, file=sys.stderr, flush=True)
+        return 0 if "--no-browser" in argv else 1
     return kiosk_file(argv, base, cols, rows)
 
 
@@ -5190,12 +2596,14 @@ def kiosk_file(argv, base, cols, rows):
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
         if browser is None and "--no-browser" not in argv:
             import pathlib
-            cmd = browser_command(find_browser(), pathlib.Path(path).resolve().as_uri(), os.path.join(base, "browser"))
+            exe = find_browser()
+            cmd = kiosk_command(exe, pathlib.Path(path).resolve().as_uri(), base)
             if cmd:
                 browser, started = launch(cmd), time.time()
             else:
                 browser = False
-                print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
+                if not default_browser(exe, path):
+                    print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
         # the viewer closed the window (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
         if browser and cmd[0] != "/usr/bin/open" and browser.poll() is not None and time.time() - started > 10:
             return 0
@@ -5276,7 +2684,55 @@ def windows_key(timeout):
         time.sleep(0.05)
 
 
+HELP_W = 64  # the help box's widest size (columns), inside the frame
+
+
+def new_view(name, opened):
+    """(mv, cv, hv, av): the screen `name` (map, cpu, health, ai) open, the others None."""
+    v = {"map": MapView, "cpu": CpuView, "health": HealthView, "ai": AiView}[name]()
+    v.opened = v.touched = opened
+    return tuple(v if n == name else None for n in ("map", "cpu", "health", "ai"))
+
+
+def help_box(scope, w, h, enabled, portable=None, paused=False):
+    """The `?` overlay's box: the screen's own keys and the global ones from ui.KEYMAP, as many as fit in a frame w x h (the header and the
+    footer stay visible): the last ones of the table go first and the box says how many are left. Lines of equal width, ANSI allowed."""
+    groups = ui.help_rows(scope, enabled, nuc_config.PORTABLE if portable is None else portable, paused)
+    bw = max(20, min(HELP_W, w - 2))
+    lw = min(max(len(k) for _t, items in groups for k, _v in items) + 2, bw // 2)
+    inner = bw - 4
+    room = max(1, h - 5)  # the frame's header and footer, the box's two borders, the line that says how to close it
+    keep = [list(items) for _t, items in groups]
+    dropped = 0
+
+    def size(sep):
+        shown = [g for g in keep if g]
+        return sum(1 + len(g) for g in shown) + (len(shown) - 1 if sep and shown else 0) + (1 if dropped else 0)
+    sep = size(True) <= room  # a blank line between the groups when there is room
+    while size(sep) > room and any(keep):
+        next(g for g in reversed(keep) if g).pop()
+        dropped += 1
+    lines = []
+    for (title, _items), g in zip(groups, keep):
+        if g:
+            lines += ([""] if lines and sep else []) + [c(ui.sgr("accent_strong"), title)]
+            lines += [c(ui.sgr("strong"), pad(k[:lw - 2], lw)) + v[:inner - lw] for k, v in g]
+    if dropped:
+        lines.append(c(ui.sgr("muted"), f"+{dropped} more"))
+    lines.append(c(ui.sgr("muted"), "any key closes this help"))
+    top = c(ui.sgr("accent"), "┌─ ") + c(ui.sgr("accent_strong"), "Keys") + c(ui.sgr("accent"), " " + "─" * (bw - 9) + "┐")
+    box = [c(ui.sgr("accent"), "│") + " " + pad(clip(x, inner), inner) + " " + c(ui.sgr("accent"), "│") for x in lines]
+    return [top] + box + [c(ui.sgr("accent"), "└" + "─" * (bw - 2) + "┘")]
+
+
+def help_overlay(screen, scope, w, h, enabled, paused=False):
+    """The frame (as frame() returns it) with the help box over its middle."""
+    lines = screen.split("\x1b[K\r\n")
+    return "\x1b[K\r\n".join(ansi.overlay(lines, help_box(scope, w, h, enabled, paused=paused), w))
+
+
 def main(argv):
+    global PAUSED
     utf8_stdout()
     if "--problems" in argv:
         return print_problems(argv)
@@ -5313,11 +2769,29 @@ def main(argv):
         cpu_ok = on("cpu") and bool(old or win_keys)  # so does the CPU screen (cpu_in_rotation is for a monitor without one)
         health_ok = on("health") and bool(old or win_keys)  # and the Health screen (health_in_rotation without one)
         ai_ok = on("ai") and bool(old or win_keys)  # and the AI screen (it is not part of the rotation: nobody chooses a model from a monitor)
+        kctx = None  # the overview's cards.Ctx (the KPI line); the other screens' is made of what they read (kept_ctx)
         mv, G, pb, fresh, rs = None, None, [], 0.0, []  # the Map while it is shown, its graph and problems, next data refresh
         err, last_pb = None, []  # why the Map or Health could not be drawn (until the next refresh); the rotation's last problems
         cv, cpu_d, cpu_fresh, cpu_rows_, rot_feed = None, None, 0.0, [], None  # the CPU screen, its data and rows; the rotation slide's feed
         hv, hd, hl = None, None, []  # the Health screen while it is shown, its report data and findings
         av, ad, al = None, None, []  # the AI screen while it is shown, its catalog data and model rows
+        avail = {"map": map_ok, "cpu": cpu_ok, "health": health_ok, "ai": ai_ok}  # the screens the digits (and Tab) can open
+        enabled = lambda f: avail.get(f, True)  # noqa: E731
+        sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
+        paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
+        dirty, help_open = True, False  # a frame is due even when paused; the `?` overlay is shown
+        start = ui_cfg().get("start_view", "overview")  # [ui] start_view: the screen at the start, and where an idle one goes back to
+        start = start if start != "overview" and avail.get(start) else "overview"  # a screen needs its keyboard (and its feature on)
+        if start != "overview":
+            mv, cv, hv, av = new_view(start, time.time())
+
+        def resume():
+            """Z again (or another screen): the redraw goes on; a paused overview carries on with the slide it was at."""
+            nonlocal paused, t0, hold_until
+            if paused and pause_ov:
+                gap = time.time() - pause_t
+                t0, hold_until = t0 + gap, pre_hold + gap
+            paused = False
         while True:
             w, h = shutil.get_terminal_size((120, 33))
             # config.ini [dashboard] columns/rows: layout size forced smaller than the real console (never larger: it would run off-screen)
@@ -5325,24 +2799,30 @@ def main(argv):
             if (w, h) != size:  # the real console size ends up in the journal: journalctl -u nuc-console
                 print(f"console {w}x{h} mode={MODE}", file=sys.stderr, flush=True)
                 out.write("\x1b[2J")
-                size = (w, h)
+                size, dirty = (w, h), True
             w -= 1  # the Linux VT keeps the cursor on the last column: \x1b[K there would erase the last character
             now = time.time()
+            was_open = any(x is not None for x in (mv, cv, hv, av))
             if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
-                t0, mv = t0 + now - mv.opened, None
+                t0, mv, paused, dirty = t0 + now - mv.opened, None, False, True
                 out.write("\x1b[2J")
             if cv is not None and now - cv.touched > CPU_IDLE_S:  # same for the CPU screen
-                t0, cv = t0 + now - cv.opened, None
+                t0, cv, paused, dirty = t0 + now - cv.opened, None, False, True
                 out.write("\x1b[2J")
             if hv is not None and now - hv.touched > HEALTH_IDLE_S:  # and the Health screen
-                t0, hv = t0 + now - hv.opened, None
+                t0, hv, paused, dirty = t0 + now - hv.opened, None, False, True
                 out.write("\x1b[2J")
             if av is not None and now - av.touched > AI_IDLE_S:  # and the AI screen
-                t0, av = t0 + now - av.opened, None
+                t0, av, paused, dirty = t0 + now - av.opened, None, False, True
                 out.write("\x1b[2J")
+            if start != "overview" and was_open and mv is cv is hv is av is None:  # an idle screen: back to the start view, not the rotation
+                mv, cv, hv, av = new_view(start, now)
+                fresh = cpu_fresh = 0.0
+                err, cpu_d = None, None
+            PAUSED = paused
             if mv is not None:  # the Map: new data every REFRESH_S, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + REFRESH_S, None  # set first: after a failure keys redraw the error, never postpone the retry
                         G, pb = map_graph(smp)
                     if err is None:
@@ -5352,24 +2832,25 @@ def main(argv):
                     pb = last_pb + [(2, "the map could not be built")]  # its problems are unknown: never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("Map", 1, 1, [c(31, f" error on the map: {safe(repr(err))[:w - 20]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " m/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             elif cv is not None:  # the CPU screen: new data every REFRESH_S (the first one after a second: a CPU% needs two readings)
                 try:
-                    if now >= cpu_fresh:
+                    if now >= cpu_fresh and not paused:
                         cpu_fresh = now + (min(1.0, REFRESH_S) if cpu_d is None else REFRESH_S)
                         st, sm = snapshot(w), smp.sample()  # the header's status pill stays true while the screen is open
                         last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                        keep(st, sm)
                         cpu_d = cv.feed.read()
                     screen, cpu_rows_ = cpu_screen(cpu_d, last_pb, cv, w, h)
                 except Exception as e:  # noqa: BLE001 - a broken screen must not take the console down; c/Esc still go back
                     cpu_rows_ = []
                     screen = frame(("CPU", 1, 1, [c(31, f" error on the CPU screen: {safe(repr(e))[:w - 26]}")]), 0, 1, w, h,
-                                   last_pb + [(2, "the CPU screen could not be drawn")], foot=c(90, " c/Esc back"))
+                                   last_pb + [(2, "the CPU screen could not be drawn")], foot=c(90, " Esc: back   1-5: screens"))
                 wait = cpu_fresh - time.time()
             elif hv is not None:  # the Health screen: the report comes from its one-minute cache, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + REFRESH_S, None
                         hd, pb = health_state(smp, hv.days)
                     if err is None:
@@ -5379,11 +2860,11 @@ def main(argv):
                     pb = last_pb + [(2, "the health screen could not be built")]  # never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("Health", 1, 1, [c(31, f" error on the health screen: {safe(repr(err))[:w - 30]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " h/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             elif av is not None:  # the AI screen: the catalog comes from its short cache, a new frame at every key
                 try:
-                    if now >= fresh:
+                    if now >= fresh and not paused:
                         fresh, err = now + (1.0 if ai_busy() else REFRESH_S), None  # while something runs (a download) it looks again every second
                         ad, pb = ai_state(smp)
                     if err is None:
@@ -5393,22 +2874,36 @@ def main(argv):
                     pb = last_pb + [(2, "the AI screen could not be built")]  # never a reassuring "ALL OK"
                 if err is not None:
                     screen = frame(("AI", 1, 1, [c(31, f" error on the AI screen: {safe(repr(err))[:w - 28]}")]), 0, 1, w, h, pb,
-                                   foot=c(90, " a/Esc back"))
+                                   foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
             else:
-                st, sm = snapshot(w), smp.sample()
-                sl = slides(sm, st["cont"], st["net"], w, h - 2, st["boot"], st["baseline"], cpu_lazy=True)
-                idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
-                if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
-                    rot_feed = rot_feed or CpuFeed()
-                    fill_cpu(sl, idx, w, h - 2, rot_feed)
+                if paused and ov_cache is not None:  # the slide and the data it was paused on
+                    sl, last_pb, kctx = ov_cache
+                    idx = held % len(sl)
                 else:
-                    rot_feed = None
-                last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
-                screen = frame(sl[idx], idx, len(sl), w, h, last_pb, mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok, aikey=ai_ok)
+                    st, sm = snapshot(w), smp.sample()
+                    sl = slides(sm, st["cont"], st["net"], w, body_rows(h), st["boot"], st["baseline"], cpu_lazy=True)
+                    idx = (held if now < hold_until else pick_slide(sl, now - t0)) % len(sl)
+                    if sl[idx][0] == "CPU":  # its samplers run only while it is on screen
+                        rot_feed = rot_feed or CpuFeed()
+                        fill_cpu(sl, idx, w, body_rows(h), rot_feed)
+                    else:
+                        rot_feed = None
+                    last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                    kctx = make_ctx(st, sm, last_pb) if kpi_on(h) else None
+                    ov_cache = (sl, last_pb, kctx)
+                screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,
+                               aikey=ai_ok, ctx=kctx)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
-            out.write("\x1b[H" + screen)
-            out.flush()
+            scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
+            if help_open:
+                screen = help_overlay(screen, scope, w, h, enabled, paused)
+            if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
+                wait = REFRESH_S
+            if dirty or not paused:
+                out.write("\x1b[H" + themed(screen))
+                out.flush()
+                dirty = False
             keys = []
             if old:
                 keys = read_keys(fd, wait)
@@ -5420,67 +2915,100 @@ def main(argv):
             else:
                 time.sleep(max(0.0, wait))
             for k in keys:
-                if cv is not None:
-                    cv.touched = time.time()
-                    act = cpu_key(cv, k, cpu_rows_, cv.page)
-                    if act == "back":
-                        t0, cv, cpu_d = t0 + time.time() - cv.opened, None, None  # the rotation was paused: it goes on where it was
+                dirty = True
+                if help_open:  # any key closes the help, and does nothing else
+                    help_open = False
+                    continue
+                view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                if view is not None:
+                    view.touched = time.time()
+                asking = av is not None and bool(av.confirm)  # a question waits: any key answers it (y: yes), as it always did
+                act = "" if asking else ui.action(scope, k, enabled)
+                tgt = None  # the screen to go to
+                if act == "screen":
+                    tgt = dict(ui.screen_keys(enabled)).get(k)  # a screen that is off: nothing happens
+                elif act in ("next", "prev"):
+                    order = [n for _d, n in ui.screen_keys(enabled)]
+                    tgt = order[(order.index(scope) + (1 if act == "next" else -1)) % len(order)] if scope in order else None
+                elif act.startswith("open-"):  # the overview's letters m c h a
+                    tgt = act[5:] if enabled(act[5:]) else None
+                elif act == "help":
+                    help_open = True
+                elif act == "redraw":
+                    out.write("\x1b[2J")
+                    if not paused:  # new data too
+                        fresh, cpu_fresh, ov_cache = 0.0, 0.0, None
+                elif act == "pause":
+                    if paused:
+                        resume()
+                        fresh, cpu_fresh, ov_cache = 0.0, 0.0, None
+                    else:
+                        paused, pause_t, pause_ov = True, time.time(), scope == "overview"
+                        if pause_ov:  # this slide stays until the redraw goes on
+                            pre_hold, held, hold_until = hold_until, idx, float("inf")
+                elif scope == "overview":
+                    if act == "back" and k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
+                        return 0
+                    if act in ("slide-prev", "slide-next") and sl:  # held like a digit used to: HOLD_S
+                        held = (idx + (1 if act == "slide-next" else -1)) % len(sl)
+                        idx = held
+                        hold_until = hold_until if paused else time.time() + HOLD_S
                         out.write("\x1b[2J")
-                        break
-                    if act == "rows" and cpu_d is not None:  # the next key of the same read moves on the new order
+                elif cv is not None:
+                    res = cpu_key(cv, k, cpu_rows_, cv.page)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "rows" and cpu_d is not None:  # the next key of the same read moves on the new order
                         cpu_rows_ = cpu_rows(cpu_d["procs"]["procs"], cv.sort)
                         cpu_sync(cv, cpu_rows_)
                 elif hv is not None:
-                    hv.touched = time.time()
-                    act = health_key(hv, k, hl)
-                    if act == "back":
-                        t0, hv = t0 + time.time() - hv.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act == "period":  # asked again (the report of that period may be cached)
+                    res = health_key(hv, k, hl)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "period":  # asked again (the report of that period may be cached)
                         fresh = 0.0
                 elif av is not None:
-                    av.touched = time.time()
-                    act = ai_key(av, k, al)
-                    if act == "back":
-                        t0, av = t0 + time.time() - av.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act:  # a key that acts: the engine does it in the background, the screen shows what it says
-                        ai_do(av, act, al)
+                    res = ai_key(av, k, al)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res:  # a key that acts: the engine does it in the background, the screen shows what it says
+                        ai_do(av, res, al)
                         fresh = 0.0
                 elif mv is not None:
-                    mv.touched = time.time()
-                    act = map_key(mv, k, rs, max(1, map_layout(G, w, h - 2, mv.details)[1] - 1) if G else 10)
-                    if act == "back":
-                        t0, mv = t0 + time.time() - mv.opened, None  # the rotation was paused: it goes on where it was
-                        out.write("\x1b[2J")
-                        break
-                    if act == "rows" and G is not None:  # the next key of the same read moves on the new tree
+                    res = map_key(mv, k, rs, max(1, map_layout(G, w, body_rows(h), mv.details)[1] - 1) if G else 10)
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "rows" and G is not None:  # the next key of the same read moves on the new tree
                         rs = graph.rows(G, mv.st)
                         map_sync(mv, rs)
-                elif k in ("m", "tab") and map_ok:
-                    mv, fresh = MapView(), 0.0
+                if tgt == "overview" and scope == "overview" and sl:  # 1 on the overview: its first slide
+                    held = next((i for i, x in enumerate(sl) if x[0] == "Overview"), 0)
+                    idx = held
+                    hold_until = hold_until if paused else time.time() + HOLD_S
+                    out.write("\x1b[2J")
+                elif tgt is not None and tgt != scope and (tgt == "overview" or avail.get(tgt)):
+                    opened = view.opened if view is not None else time.time()  # the rotation stays paused all the time on the screens
+                    resume()
+                    mv = cv = hv = av = None
+                    cpu_d = None
+                    if tgt == "overview":
+                        t0 += time.time() - opened  # the rotation was paused: it goes on where it was
+                        ov_cache = None
+                    elif tgt == "map":
+                        mv, fresh, err = MapView(), 0.0, None
+                    elif tgt == "cpu":
+                        cv, cpu_fresh, rot_feed = CpuView(), 0.0, None
+                    elif tgt == "health":
+                        hv, fresh, err = HealthView(), 0.0, None
+                    else:
+                        av, fresh, err = AiView(), 0.0, None
+                    nv = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                    if nv is not None:
+                        nv.opened = nv.touched = opened
                     out.write("\x1b[2J")
                     break
-                elif k == "c" and cpu_ok:
-                    cv, cpu_d, cpu_fresh, rot_feed = CpuView(), None, 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "h" and health_ok:
-                    hv, fresh, err = HealthView(), 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "a" and ai_ok:
-                    av, fresh, err = AiView(), 0.0, None
-                    out.write("\x1b[2J")
-                    break
-                elif k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
-                    return 0
-                elif len(k) == 1 and k in "123456789" and int(k) <= len(PAGES):
-                    held, hold_until = first_slide_of(sl, int(k) - 1), time.time() + HOLD_S
-                    out.write("\x1b[2J")
     finally:
+        PAUSED = False
         out.write("\x1b[?25h\x1b[0m")
         out.flush()
         if old:

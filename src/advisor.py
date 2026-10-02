@@ -1380,6 +1380,25 @@ def html(result):
         " advice-shared" if _is_int(result.get("stale_s"), 0) else "", esc(_head(result)), body, foot)
 
 
+def parts(result):
+    """A result of advise()/ask() (or try_advise()'s {"error"}) -> {"kind": "advice" | "shared" | "error", "head", "paras" (paragraphs,
+    each a list of lines), "notes" [("cites" | "tools", text)]}: what html() draws, as data, for a screen that draws it itself. Pure; {}
+    for what is not a result."""
+    if not isinstance(result, dict):
+        return {}
+    if result.get("error"):
+        return {"kind": "error", "head": "ADVICE (AI) — not available", "paras": [[clean_line(result["error"], 300)]], "notes": []}
+    paras = [p.split("\n") for p in re.split(r"\n\s*\n", clean_text(result.get("text"))) if p.strip()]
+    notes = []
+    if result.get("cites"):
+        notes.append(("cites", "cites: " + " ".join("[%s]" % clean_line(c, 100) for c in result["cites"])))
+    if result.get("tools_used"):
+        notes.append(("tools", "queries: " + ", ".join(clean_line(t, 30) for t in result["tools_used"])))
+    if "tools_used" in result and not result["tools_used"]:
+        notes.append(("tools", NO_QUERY))
+    return {"kind": "shared" if _is_int(result.get("stale_s"), 0) else "advice", "head": _head(result), "paras": paras, "notes": notes}
+
+
 # ------------------------------------------------------------------------------------------------------------------ CLI
 
 USAGE = """usage: advisor.py advise [--days N]     advice on the last N days (default 7) of this machine's health

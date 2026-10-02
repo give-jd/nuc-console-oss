@@ -25,6 +25,9 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import ui  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 
 NOW = 1_790_000_000
 SIZES = ((79, 24), (120, 33), (200, 50), (226, 50))       # console sizes (--cols --rows): the layout gets cols - 1, as in once()
@@ -34,7 +37,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "ACCEPTED_PATH", "SENSORS", "time", "os", "sys", "signal", "shutil",
-                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "write_text_atomic")
+                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "write_text_atomic", "KPI_MIN_ROWS")
 CELL = re.compile(r"(?<![\d.])(\d{1,3})([PE]?) [█▒░]+ +(\d+)%( \d\.\d\dG)?( +\d+°C)?")
 EVIL = "x" + ESC + "[2J" + "y" + ESC + "]0;owned" + BEL + "z" + CSI8 + "31m\r\n<b>&amp;"
 
@@ -83,6 +86,7 @@ class CpuCase(unittest.TestCase):
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.SENSORS = os.path.join(self.tmp.name, "sensors.json")            # missing unless a test writes it
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
         cfg["features"]["cpu"], cfg["cpu_in_rotation"] = True, False
 
@@ -112,6 +116,33 @@ class CpuCase(unittest.TestCase):
             change(d)
         return d
 
+    def hybrid_laptop(self):
+        """The Linux demo CPU becomes an Intel hybrid laptop (i7-1260P: 4 P cores with 2 threads + 8 E cores, coretemp, throttle counters):
+        the shape of data a coretemp machine gives, with P/E tags, a temperature per physical core and throttling. The default demo is an AMD
+        desktop (k10temp: the package only), so this is where those paths of the screen are covered. Undone in tearDown (demo.cpu_sample)."""
+        real = demo.cpu_sample
+
+        def sample(os_name=None, now=None):
+            d = real(os_name, now)
+            if os_name in ("windows", "darwin"):
+                return d
+            now = now or time.time()
+            core_of = {i: (i // 2) * 4 for i in range(8)}
+            core_of.update({8 + i: 16 + i for i in range(8)})
+            hot = {0: 63, 4: 66, 8: 94, 12: 68, 16: 57, 17: 58, 18: 55, 19: 59, 20: 56, 21: 58, 22: 54, 23: 57}
+            cores = {k: float(v + demo._wob(now, k, 1)) for k, v in hot.items()}
+            pkg = 78.0 + demo._wob(now, 99, 1)
+            d.update(model="12th Gen Intel(R) Core(TM) i7-1260P", vendor="GenuineIntel", cores=12, kinds={"P": list(range(8)), "E": list(range(8, 16))},
+                     core_of=core_of, cache={"L1d": 448 * 1024, "L1i": 640 * 1024, "L2": 9 * demo.MiB, "L3": 18 * demo.MiB},
+                     load=[2.41, 1.98, 1.75], throttle={"package": 1204, "cores": {8: 812, 4: 37}, "package_s": 252.4},
+                     temps={"package": pkg, "cores": cores, "high": 100.0, "crit": 100.0, "source": "coretemp",
+                            "sensors": [{"label": "Package id 0", "c": pkg, "high": 100.0, "crit": 100.0}]
+                            + [{"label": f"Core {k}", "c": v, "high": 100.0, "crit": 100.0} for k, v in sorted(cores.items())]})
+            d["freq"] = dict(d["freq"], min=400, max=4700, base=2100, governor="powersave", driver="intel_pstate")
+            d["rates"] = dict(d["rates"], running=4, blocked=1)
+            return d
+        demo.cpu_sample = sample
+
     def procs(self, d, **where):
         return next(p for p in d["procs"]["procs"] if all(p[k] == v for k, v in where.items()))
 
@@ -120,7 +151,7 @@ class CpuCase(unittest.TestCase):
         the renderer's own colours and line ends. -> the lines, ANSI stripped."""
         rows = screen.split(LINE)
         self.assertEqual(len(rows), h, what)
-        out = [render.ANSI.sub("", x) for x in rows]
+        out = [ansi.ANSI.sub("", x) for x in rows]
         for x in out:
             self.assertLessEqual(len(x), w, (what, x))
         self.assertIsNone(CONTROL.search(SGR.sub("", "".join(rows))), what)
@@ -172,6 +203,11 @@ def grid_cells(lines):
             out[int(m.group(1))] = (m.group(2).strip(), int(m.group(3)), m.group(4).strip() if m.group(4) else None,
                                     int(m.group(5).strip()[:-2]) if m.group(5) else None)
     return out
+
+
+def rows_first(lines):
+    """The first process row of a screen."""
+    return process_lines(lines)[0]
 
 
 def process_lines(lines):
@@ -250,9 +286,9 @@ class Data(CpuCase):
         self.assertEqual((t["package"], t["cores"], [x["label"] for x in t["sensors"]], t["source"]), (None, {4: 44.5}, ["c"], None))
         self.assertEqual((extra["pressure"], extra["clusters"]), (None, [{"name": "E-Cluster"}]))
         for bad in (True, "3", None, nan, inf, [], {}):
-            self.assertIsNone(render.num(bad), bad)
-        self.assertEqual((render.num(3), render.num(2.5), render.num(0)), (3.0, 2.5, 0.0))
-        self.assertEqual(render.idict({"1": "a", 2: "b", "x": "c", None: "d", "²": "e"}), {1: "a", 2: "b"})
+            self.assertIsNone(ui.num(bad), bad)
+        self.assertEqual((ui.num(3), ui.num(2.5), ui.num(0)), (3.0, 2.5, 0.0))
+        self.assertEqual(ui.idict({"1": "a", 2: "b", "x": "c", None: "d", "²": "e"}), {1: "a", 2: "b"})
 
     def test_collector_errors_are_notes(self):
         render.DEMO_OS = "darwin"
@@ -296,7 +332,7 @@ class Data(CpuCase):
                                                                                                          {"pid": 5, "name": None}, 3], "total": []}))
         d = render.CpuFeed().read()
         self.assertEqual([p["pid"] for p in d["procs"]["procs"]], [5])
-        body = "\n".join(render.ANSI.sub("", x) for x in render.cpu_view(d, 119, 31)[0])
+        body = "\n".join(ansi.ANSI.sub("", x) for x in render.cpu_view(d, 119, 31)[0])
         self.assertRegex(body, r"\s+5 \?\s+.* \?\n?")                              # a nameless process: '?'
 
     def test_the_feed_reads_once_per_max_age_and_again_when_the_demo_changes(self):
@@ -346,18 +382,42 @@ class Screens(CpuCase):
                 for opts in self.OPTIONS:
                     with self.subTest(os=os_name, size=(cols, rows), opts=opts):
                         s, lines = self.once(opts, cols, rows)
-                        self.assertIn("test-host │ CPU │", lines[0].replace("demo-host", "test-host"))
+                        self.assertRegex(lines[0], r"^ *demo-host │ .*\[\d[ ·]CPU\]")
                         self.assertIn("── CPU ", lines[1])
                         self.assertRegex(lines[-1], r"\d+/\d+")
                         self.assertIn("PROCESSES", "\n".join(lines))
                         self.assertTrue(process_lines(lines), "no process row")
 
-    def test_the_linux_demo_shows_the_machine_the_cpus_the_temperatures_and_the_processes(self):
+    def test_the_linux_demo_is_the_ryzen_desktop_of_the_other_screens(self):
+        d = self.data()
+        s, lines = self.once([], 200, 50)
+        txt = "\n".join(lines)
+        for want in ("AMD Ryzen 7 5800X 8-Core Processor", "sockets 1", "cores 8", "threads 16", "arch x86_64", "L1d 256K  L1i 256K  L2 4M  L3 32M",
+                     "governor schedutil/acpi-cpufreq", "clock 2200-4850 MHz (base 3800)", "up 5d 0h", "load 0.82 0.64 0.51", "ctxt 18", "intr 6."):
+            self.assertIn(want, txt)
+        cells = grid_cells(lines)
+        self.assertEqual(sorted(cells), list(range(16)))
+        self.assertEqual({v[0] for v in cells.values()}, {""})                    # no P/E on this CPU
+        self.assertEqual({v[3] for v in cells.values()}, {None})                  # k10temp has no per-core temperature
+        for i, (tag, busy, ghz, temp) in cells.items():
+            self.assertEqual(busy, round(d["cpu"]["usage"]["cores"][i]["busy"]), i)
+            self.assertEqual(ghz, f"{d['cpu']['freq']['cur'][i] / 1000:4.2f}G".strip(), i)
+        self.assertRegex(txt, r"PKG +█+░* 72°C/100°C +high 90°C +crit 100°C")
+        self.assertIn("source k10temp", txt)
+        self.assertIn("Tctl 72°C", txt)
+        self.assertIn("Tccd1 66°C", txt)
+        self.assertIn("hottest core ?", txt)
+        self.assertIn("throttled ?", txt)                                         # no counter on this CPU: not "none", unknown
+        self.assertRegex(txt, r"41 total · 3 running · \d+ threads · 2 unreadable · by CPU%")
+        self.assertRegex(rows_first(lines), r"^\s+2210 alice +R +10 +18 +\d+\.\d +2\.0 +640M +2:32:00 ffmpeg")      # 640 MiB of 31.2 GiB
+
+    def test_a_hybrid_intel_laptop_shows_tags_core_temperatures_and_throttling(self):
+        self.hybrid_laptop()
         d = self.data()
         s, lines = self.once([], 200, 50)
         txt = "\n".join(lines)
         for want in ("12th Gen Intel(R) Core(TM) i7-1260P", "sockets 1", "cores 12", "threads 16", "P 8 + E 8 threads", "arch x86_64",
-                     "L1d 448K  L1i 640K  L2 9M  L3 18M", "governor powersave/intel_pstate", "clock 400-4700 MHz (base 2100)", "up 3d 4h",
+                     "L1d 448K  L1i 640K  L2 9M  L3 18M", "governor powersave/intel_pstate", "clock 400-4700 MHz (base 2100)", "up 5d 0h",
                      "load 2.41 1.98 1.75", "ctxt 18", "intr 6.", "running 4", "blocked 1"):
             self.assertIn(want, txt)
         cells = grid_cells(lines)
@@ -416,17 +476,20 @@ class Screens(CpuCase):
     def test_the_cpu_to_core_map_is_never_a_guess(self):
         d = self.data("windows")
         ids = list(range(16))
-        self.assertEqual(render.cpu_core_of(d, ids), {i: 1 + i // 2 for i in ids})  # adjacent threads, cores in sensor order: said in the docstring
+        self.assertEqual(screens.cpu_core_of(d, ids, render.cpu_topology), {i: 1 + i // 2 for i in ids})  # adjacent threads, cores in sensor order: said in the docstring
         d["cpu"]["cores"] = 6                                                       # 8 sensors for 6 cores: not the same cores
-        self.assertEqual(render.cpu_core_of(d, ids), {})
+        self.assertEqual(screens.cpu_core_of(d, ids, render.cpu_topology), {})
         d["cpu"]["cores"] = 8
         d["cpu"]["temps"]["cores"].pop(3)                                           # a core without a sensor
-        self.assertEqual(render.cpu_core_of(d, ids), {})
+        self.assertEqual(screens.cpu_core_of(d, ids, render.cpu_topology), {})
         d["cpu"]["core_of"] = {i: 1 + i // 2 for i in ids}                          # the sampler says which core each CPU is on
-        self.assertEqual(render.cpu_core_of(d, ids), {i: 1 + i // 2 for i in ids if 1 + i // 2 != 3})
-        self.assertNotIn(4, render.cpu_core_temps(d, ids))
+        self.assertEqual(screens.cpu_core_of(d, ids, render.cpu_topology), {i: 1 + i // 2 for i in ids if 1 + i // 2 != 3})
+        self.assertNotIn(4, screens.cpu_core_temps(d, ids, render.cpu_topology))
         lin = self.data()
-        self.assertEqual(render.cpu_core_of(lin, list(range(16)))[9], 16 + 1)       # Linux: core ids as sysfs names them (the demo's map)
+        self.assertEqual(screens.cpu_core_of(self.data("linux"), [0, 1, 2], render.cpu_topology), {})     # the Ryzen demo has no per-core temperature to map
+        self.hybrid_laptop()
+        lin = self.data()
+        self.assertEqual(screens.cpu_core_of(lin, list(range(16)), render.cpu_topology)[9], 16 + 1)       # Linux: core ids as sysfs names them (the hybrid laptop's map)
 
     def test_macos_shows_pressure_clusters_and_apple_cores(self):
         render.DEMO_OS = "darwin"
@@ -451,7 +514,7 @@ class Screens(CpuCase):
         d = self.data()
         seen = []
         for w in (78, 66, 60, 50, 40, 30, 20):
-            lines = [render.ANSI.sub("", x) for x in render.cpu_view(d, w, 40)[0]]
+            lines = [ansi.ANSI.sub("", x) for x in render.cpu_view(d, w, 40)[0]]
             head = next(x for x in lines if re.match(r"\s+PID[▼▲ ]", x))
             self.assertTrue(head.rstrip().endswith("NAME"), (w, head))
             self.assertTrue(all(len(x) <= w for x in lines), w)
@@ -466,18 +529,18 @@ class Screens(CpuCase):
         d = self.data()
         widths = {}
         for cols, rows in SIZES:
-            lines = [render.ANSI.sub("", x) for x in render.cpu_view(d, cols - 1, rows - 2)[0]]
+            lines = [ansi.ANSI.sub("", x) for x in render.cpu_view(d, cols - 1, rows - 2)[0]]
             widths[cols] = max(len(CELL.findall(x)) for x in lines)
-        self.assertEqual(widths, {79: 2, 120: 3, 200: 4, 226: 4})
+        self.assertEqual(widths, {79: 3, 120: 4, 200: 4, 226: 4})
 
     def test_the_height_is_shared_and_what_does_not_fit_is_counted(self):
         d = self.data()
-        full = [render.ANSI.sub("", x) for x in render.cpu_view(d, 119, 200)[0]]
+        full = [ansi.ANSI.sub("", x) for x in render.cpu_view(d, 119, 200)[0]]
         self.assertEqual(len(process_lines(full + ["x"])), 40)                      # plenty of room: everything, and no padding
         for h in range(4, 40):
-            body = [render.ANSI.sub("", x) for x in render.cpu_view(d, 78, h)[0]]
+            body = [ansi.ANSI.sub("", x) for x in render.cpu_view(d, 78, h)[0]]
             self.assertLessEqual(len(body), h, h)
-        small = [render.ANSI.sub("", x) for x in render.cpu_view(d, 78, 22)[0]]
+        small = [ansi.ANSI.sub("", x) for x in render.cpu_view(d, 78, 22)[0]]
         self.assertRegex("\n".join(small), r"… \+\d+ more processes")                # no cursor (the rotation slide): the last line says it
         self.assertRegex("\n".join(small), r"… \+\d+ more lines|… \+\d+ more CPUs|TEMPERATURES")
         n = len(grid_cells(small))
@@ -540,7 +603,7 @@ class Screens(CpuCase):
                     if cpu_os:
                         self.assertIn("no sensors.json", txt)
             lines = self.once([], 120, 33)[1]
-            self.assertIn("│ CPU │", lines[0])
+            self.assertRegex(lines[0], r"\[\d[ ·]CPU\]")
         render.WINDOWS = render.MACOS = False
 
     def test_no_collector_file_and_a_stale_one_are_said_on_the_screen(self):
@@ -572,7 +635,7 @@ class Sorting(CpuCase):
             d = self.data(os_name)
             pl = d["procs"]["procs"]
             for sort, field, rev in (("cpu", "cpu", True), ("mem", "mem", True), ("time", "time", True), ("pid", "pid", False)):
-                rows = render.cpu_rows(pl, sort)
+                rows = screens.cpu_rows(pl, sort)
                 self.assertEqual(sorted(p["pid"] for p in rows), sorted(p["pid"] for p in pl), (os_name, sort))
                 known = [p for p in rows if p[field] is not None]
                 self.assertEqual(rows[:len(known)], known, (os_name, sort))                    # unknowns after all the known ones
@@ -580,13 +643,13 @@ class Sorting(CpuCase):
                 self.assertEqual(vals, sorted(vals, reverse=rev), (os_name, sort))
                 unknown = [p["pid"] for p in rows[len(known):]]
                 self.assertEqual(unknown, sorted(unknown), (os_name, sort))
-            users = render.cpu_rows(pl, "user")
+            users = screens.cpu_rows(pl, "user")
             names = [p["user"] for p in users if p["user"] is not None]
             self.assertEqual(names, sorted(names, key=str.lower), os_name)
             self.assertTrue(all(p["user"] is None for p in users[len(names):]))
         tie = [{"pid": 9, "cpu": 1.0}, {"pid": 3, "cpu": 1.0}, {"pid": 5, "cpu": 2.0}, {"pid": 4, "cpu": None}, {"pid": 1, "cpu": None}]
-        self.assertEqual([p["pid"] for p in render.cpu_rows(tie, "cpu")], [5, 3, 9, 1, 4])
-        self.assertEqual([p["pid"] for p in render.cpu_rows(tie, "bogus")], [5, 3, 9, 1, 4])  # an unknown name sorts by cpu
+        self.assertEqual([p["pid"] for p in screens.cpu_rows(tie, "cpu")], [5, 3, 9, 1, 4])
+        self.assertEqual([p["pid"] for p in screens.cpu_rows(tie, "bogus")], [5, 3, 9, 1, 4])  # an unknown name sorts by cpu
 
     def test_the_command_line_sorts_and_selects(self):
         d = self.data()
@@ -609,11 +672,11 @@ class Sorting(CpuCase):
         for opts, pid in ((["--select", "ffmpeg"], 2210), (["--select", "FFMPEG"], 2210), (["--select", "postgres"], 1590), (["--select", "2900"], 2900),
                           (["--select", "kworker/4"], 288)):
             s, lines = self.once(opts, 200, 50)
-            reverse = [render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x]
+            reverse = [ansi.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x]
             self.assertEqual(len(reverse), 1, opts)
             self.assertRegex(reverse[0], r"^\s+%d " % pid)                                         # the cursor row, highlighted
         s, lines = self.once(["--select", "no such process"], 200, 50)
-        self.assertRegex([render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x][0], r"^\s+2210 ")  # not found: the first row
+        self.assertRegex([ansi.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x][0], r"^\s+2210 ")  # not found: the first row
         self.assertIn("1/40", lines[-1])
 
 
@@ -624,14 +687,14 @@ class Keys(CpuCase):
         """Keys as the console loop hands them to cpu_key (the rows sorted again and the cursor synced after 'rows').
         -> (the rows afterwards, what cpu_key returned for each key). After every key the cursor is on one of the rows."""
         d = d or self.data()
-        rows = render.cpu_rows(d["procs"]["procs"], cv.sort)
-        render.cpu_sync(cv, rows)
+        rows = screens.cpu_rows(d["procs"]["procs"], cv.sort)
+        screens.cpu_sync(cv, rows)
         acts = []
         for k in keys:
-            act = render.cpu_key(cv, k, rows, page)
+            act = screens.cpu_key(cv, k, rows, page)
             if act == "rows":
-                rows = render.cpu_rows(d["procs"]["procs"], cv.sort)
-                render.cpu_sync(cv, rows)
+                rows = screens.cpu_rows(d["procs"]["procs"], cv.sort)
+                screens.cpu_sync(cv, rows)
             acts.append(act)
             if rows:
                 self.assertTrue(0 <= cv.idx < len(rows), (k, cv.idx))
@@ -664,7 +727,7 @@ class Keys(CpuCase):
                           ("n", "pid"), ("u", "user")):
             rows, acts = self.press(cv, [key])
             self.assertEqual((acts, cv.sort), (["rows"], sort), key)
-            self.assertEqual([p["pid"] for p in rows], [p["pid"] for p in render.cpu_rows(self.data()["procs"]["procs"], sort)], key)
+            self.assertEqual([p["pid"] for p in rows], [p["pid"] for p in screens.cpu_rows(self.data()["procs"]["procs"], sort)], key)
 
     def test_the_cursor_follows_its_process_through_a_new_sort(self):
         cv = render.CpuView(now=NOW)
@@ -688,16 +751,22 @@ class Keys(CpuCase):
             self.assertIn(f"── PROCESS {pid} ", txt)                                           # the pane follows the cursor
         rows, acts = self.press(cv, ["space"], d)
         self.assertEqual((acts, cv.details), ([""], False))
-        self.assertNotIn("── PROCESS ", render.ANSI.sub("", render.cpu_screen(d, [], cv, 119, 33)[0]))
+        self.assertNotIn("── PROCESS ", ansi.ANSI.sub("", render.cpu_screen(d, [], cv, 119, 33)[0]))
 
-    def test_c_esc_q_leave_and_change_nothing(self):
+    def test_esc_q_leave_and_change_nothing(self):
         cv = render.CpuView(now=NOW)
-        self.press(cv, ["down", "enter", "m"])
+        self.press(cv, ["down", "m"])
         before = (cv.idx, cv.cur, cv.details, cv.sort)
-        for k in ("c", "C", "esc", "q", "Q"):
+        for k in ("esc", "q"):
             rows, acts = self.press(cv, [k])
             self.assertEqual(acts, ["back"], k)
             self.assertEqual((cv.idx, cv.cur, cv.details, cv.sort), before, k)
+        for k in ("c", "C", "tab", "3", "?", "r", "Z"):  # c is the overview's letter now, the others are the dispatcher's
+            rows, acts = self.press(cv, [k])
+            self.assertEqual(acts, [""], k)
+            self.assertEqual((cv.idx, cv.cur, cv.details, cv.sort), before, k)
+        self.press(cv, ["enter"])
+        self.assertEqual(self.press(cv, ["esc", "esc"])[1], ["", "back"])  # the details pane closes first
 
     def test_other_keys_do_nothing_and_no_rows_is_not_an_error(self):
         cv = render.CpuView(now=NOW)
@@ -710,7 +779,7 @@ class Keys(CpuCase):
         keys = ["up", "down", "pgup", "pgdn", "home", "end", "j", "k", "x"]
         rows, acts = self.press(cv, keys, empty)
         self.assertEqual((rows, acts, cv.idx, cv.cur), ([], [""] * len(keys), 0, None))
-        self.assertEqual(self.press(cv, ["enter", "u", "esc"], empty)[1], ["", "rows", "back"])
+        self.assertEqual(self.press(cv, ["enter", "u", "esc", "esc"], empty)[1], ["", "rows", "", "back"])
 
     def test_the_cursor_stays_in_place_when_its_process_disappears(self):
         d = self.data()
@@ -718,12 +787,12 @@ class Keys(CpuCase):
         rows, _ = self.press(cv, ["down", "down", "down"], d)
         idx, pid = cv.idx, cv.cur
         d["procs"]["procs"] = [p for p in d["procs"]["procs"] if p["pid"] != pid]
-        rows = render.cpu_rows(d["procs"]["procs"], "cpu")
-        self.assertEqual(render.cpu_sync(cv, rows), idx)                                       # the same place, another process
+        rows = screens.cpu_rows(d["procs"]["procs"], "cpu")
+        self.assertEqual(screens.cpu_sync(cv, rows), idx)                                       # the same place, another process
         self.assertEqual(cv.cur, rows[idx]["pid"])
         d["procs"]["procs"] = d["procs"]["procs"][:2]
-        rows = render.cpu_rows(d["procs"]["procs"], "cpu")
-        self.assertEqual(render.cpu_sync(cv, rows), 1)                                         # fewer rows than before: the last one
+        rows = screens.cpu_rows(d["procs"]["procs"], "cpu")
+        self.assertEqual(screens.cpu_sync(cv, rows), 1)                                         # fewer rows than before: the last one
 
     def test_the_selected_row_is_always_on_screen(self):
         d = self.data()
@@ -735,13 +804,13 @@ class Keys(CpuCase):
                 for step in list(range(n)) + list(range(n, 0, -1)):
                     self.press(cv, ["down" if step < n else "up"], d)
                     s, vis = render.cpu_screen(d, [], cv, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x]
+                    chosen = [ansi.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x]
                     self.assertEqual(len(chosen), 1, (cols, rows, details, step, cv.idx))
                     self.assertRegex(chosen[0], r"^\s+%d " % cv.cur)
 
     def test_scrolling_keeps_the_row_away_from_the_edges(self):
         for n, rows_, i in ((40, 10, 20), (40, 10, 0), (40, 10, 39), (5, 10, 4), (40, 3, 20), (40, 1, 20), (40, 0, 20)):
-            top = render.map_scroll(0, i, n, rows_)
+            top = ansi.scroll(0, i, n, rows_)
             self.assertTrue(0 <= top <= max(0, n - rows_), (n, rows_, i, top))
             if rows_:
                 self.assertTrue(top <= i < top + rows_, (n, rows_, i, top))
@@ -759,11 +828,11 @@ class Details(CpuCase):
         txt = "\n".join(self.pane(2210, 200, 50))
         pane = txt[txt.index("── PROCESS 2210"):]
         for want in ("ffmpeg", "parent    1  systemd", "user      alice", "state     R  running", "threads   18", "nice      10", "priority  30",
-                     "CPU       ", "(100 % = one core)", "memory    3.9 %  640M resident", "CPU time  2:32:00", "children  0"):
+                     "CPU       ", "(100 % = one core)", "memory    2.0 %  640M resident", "CPU time  2:32:00", "children  0"):
             self.assertIn(want, pane)
         when = re.search(r"started   (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \((\d+) h ago\)", pane)
         self.assertTrue(when, pane)
-        self.assertEqual(when.group(2), "7")                                                    # started 24320 s before the reading
+        self.assertEqual(when.group(2), "51")                                                   # started 182000 s before the reading
         self.assertEqual(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p["start"])), when.group(1))
 
     def test_the_parent_is_named_and_the_children_are_counted(self):
@@ -790,7 +859,7 @@ class Details(CpuCase):
         for cols, rows in SIZES:
             lines = self.pane(2210, cols, rows)
             at = next(i for i, x in enumerate(lines) if "── PROCESS 2210" in x)
-            if cols - 1 >= render.CPU_PANE_W:
+            if cols - 1 >= screens.CPU_PANE_W:
                 self.assertTrue(all(x[x.index(" │ ") + 1] == "│" for x in lines[at:-1] if " │ " in x), cols)
                 self.assertGreater(lines[at].index("── PROCESS 2210"), 80, cols)              # beside: the table is on its left
                 self.assertTrue(re.match(r"── PROCESSES ", lines[at]), cols)
@@ -839,15 +908,15 @@ class Rotation(CpuCase):
             name, part, parts, body = sl[-1]
             self.assertEqual((part, parts), (1, 1))
             self.assertLessEqual(len(body), body_h)
-            self.assertFalse([x for x in body if len(render.ANSI.sub("", x)) > w], cols)
+            self.assertFalse([x for x in body if len(ansi.ANSI.sub("", x)) > w], cols)
             self.assertFalse([x for x in body if ESC + "[7m" in x], cols)                       # no cursor on a monitor without a keyboard
-            txt = "\n".join(render.ANSI.sub("", x) for x in body)
+            txt = "\n".join(ansi.ANSI.sub("", x) for x in body)
             for want in ("── CPU ", "ALL ", "TEMPERATURES", "── PROCESSES", "ffmpeg"):
                 self.assertIn(want, txt, cols)
             self.assertEqual(sorted(grid_cells(txt.split("\n"))), list(range(16)) if (cols, rows) != (79, 24) else sorted(grid_cells(txt.split("\n"))))
             frame = render.frame(sl[-1], 1, len(sl), w, rows, [], keys=False)
             self.check_frame(frame, w, rows, cols)
-            self.assertIn("│ CPU │", render.ANSI.sub("", frame).split("\r\n")[0])
+            self.assertRegex(ansi.ANSI.sub("", frame).split("\r\n")[0], r"\[\d[ ·]CPU\]")
         sl = self.slides(119, 31)
         self.assertEqual(render.pick_slide(sl, sum(render.slide_seconds(x, len(sl)) for x in sl) - 1), 1)   # its turn comes
         self.assertEqual([x[0] for x in self.slides(119, 31, scroll=True)], ["Overview"])        # the scrolling web page: one page only
@@ -857,11 +926,11 @@ class Rotation(CpuCase):
     def test_the_slide_shows_the_top_processes_that_fit_and_counts_the_rest(self):
         render.CFG["cpu_in_rotation"] = True
         body = self.slides(78, 22)[-1][3]
-        txt = "\n".join(render.ANSI.sub("", x) for x in body)
+        txt = "\n".join(ansi.ANSI.sub("", x) for x in body)
         self.assertRegex(txt, r"… \+\d+ more processes")
         rows = process_lines(txt.split("\n") + ["x"])
         self.assertIn("ffmpeg", rows[0])
-        big = "\n".join(render.ANSI.sub("", x) for x in self.slides(199, 90)[-1][3])
+        big = "\n".join(ansi.ANSI.sub("", x) for x in self.slides(199, 90)[-1][3])
         self.assertNotIn("more processes", big)
         self.assertEqual(len(process_lines(big.split("\n") + ["x"])), 40)
 
@@ -872,7 +941,7 @@ class Rotation(CpuCase):
         render.CFG["features"]["cpu"] = False
         self.assertNotIn("CPU", [x[0] for x in self.slides(199, 48)])
         frame = render.frame(self.slides(199, 48)[0], 0, 1, 199, 50, [], keys=True)
-        self.assertNotIn("c: cpu", render.ANSI.sub("", frame))                                   # and the footer does not offer it
+        self.assertNotIn("c: cpu", ansi.ANSI.sub("", frame))                                   # and the footer does not offer it
 
     def test_the_lazy_slide_is_empty_until_it_is_the_one_shown(self):
         render.CFG["cpu_in_rotation"] = True
@@ -887,7 +956,7 @@ class Rotation(CpuCase):
         self.assertEqual(log["proc_sampled"], 0)                                                 # the overview is the one shown: still nothing
         render.fill_cpu(sl, 1, 119, 31, feed)
         self.assertEqual((log["cpu_made"], log["proc_made"], log["proc_sampled"]), (1, 1, 1))
-        self.assertIn("PROCESSES", "\n".join(render.ANSI.sub("", x) for x in sl[1][3]))
+        self.assertIn("PROCESSES", "\n".join(ansi.ANSI.sub("", x) for x in sl[1][3]))
 
     def test_a_broken_cpu_slide_is_an_error_line_not_a_crash(self):
         render.CFG["cpu_in_rotation"] = True
@@ -898,11 +967,11 @@ class Rotation(CpuCase):
         sl = self.slides(119, 31)
         line = sl[-1][3][0]
         self.assertEqual(sl[-1][0], "CPU")
-        self.assertIn("error on page CPU", render.ANSI.sub("", line))
+        self.assertIn("error on page CPU", ansi.ANSI.sub("", line))
         self.assertNotIn(ESC + "[2J", line)
         lazy = self.slides(119, 31, cpu_lazy=True)
         render.fill_cpu(lazy, 1, 119, 31, render.CpuFeed())
-        self.assertIn("error on page CPU", render.ANSI.sub("", lazy[1][3][0]))
+        self.assertIn("error on page CPU", ansi.ANSI.sub("", lazy[1][3][0]))
 
     def test_config_cpu_in_rotation_yes_no_and_not_a_boolean(self):
         path = os.path.join(self.tmp.name, "config.ini")
@@ -933,7 +1002,7 @@ class Rotation(CpuCase):
             out, count = render.render_screen(smp, 119, 33, n=n)
             self.assertEqual(log["proc_sampled"] >= 1, bool(want), n)
         out, _ = render.render_screen(smp, 119, 33, at=0)
-        self.assertNotIn("PROCESSES", render.ANSI.sub("", out))
+        self.assertNotIn("PROCESSES", ansi.ANSI.sub("", out))
 
     def test_the_kiosk_page_reads_the_processes_only_while_the_cpu_slide_is_shown(self):
         render.CFG["cpu_in_rotation"] = True
@@ -950,7 +1019,7 @@ class Rotation(CpuCase):
         self.on_sleep = sleep
         with self.assertRaises(Stop), contextlib.redirect_stderr(io.StringIO()):
             render.kiosk_file(["render.py", "--no-browser", "--html", os.path.join(self.tmp.name, "k.html")], self.tmp.name, 120, 33)
-        shows = [" │ CPU │ " in text for text, _ in pages]
+        shows = [" │ CPU │ " in text for text, _ in pages]  # a browser page: the plain header
         self.assertEqual(shows, [False, False, True, True, False, False])
         self.assertEqual([x["proc_sampled"] for _, x in pages][:2], [0, 0])                     # nobody looks at the CPU: nothing is made or read
         self.assertEqual(pages[3][1]["proc_made"], 1)                                            # one pair for the stay on the CPU slide
@@ -962,38 +1031,39 @@ class Rotation(CpuCase):
 class Footer(CpuCase):
     def test_the_overview_offers_the_cpu_screen_when_there_is_a_keyboard_and_the_feature_is_on(self):
         slide = ("Overview", 1, 1, ["x"])
-        on = render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
-        self.assertIn("m: map   c: cpu", on)
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, cpukey=False)))
-        self.assertIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, cpukey=True)))
+        on = ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
+        self.assertIn("1-5: screens", on)                                                         # 3 is the CPU screen
+        self.assertNotIn("screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
+        self.assertIn("1 2 4 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, cpukey=False)))
+        self.assertIn("1 3: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, cpukey=True)))
         render.CFG["features"]["cpu"] = False
-        self.assertNotIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1 2 4 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         render.CFG["features"]["cpu"] = True
         render.CFG["features"]["map"] = False
-        self.assertIn("c: cpu", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
-        two = render.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
-        self.assertIn("c: cpu", two)                                                              # and it fits the narrowest footer
+        self.assertIn("1 3-5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        two = ansi.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
+        self.assertIn("1 3-5: screens", two)                                                      # and it fits the narrowest footer
         self.assertLessEqual(len(two), 79)
 
     def test_the_cpu_footer_gives_up_keys_from_the_least_needed_when_narrow(self):
         cv = render.CpuView(now=NOW)
         seen = []
-        for w in (140, 100, 78, 60, 40, 24, 12):
-            f = render.ANSI.sub("", render.cpu_footer(cv, 40, w))
+        for w in (200, 100, 78, 60, 40, 24, 12):
+            f = ansi.ANSI.sub("", render.cpu_footer(cv, 40, w))
             self.assertLessEqual(len(f), w, w)
             seen.append(f)
         self.assertIn("PgUp/PgDn/Home/End: page", seen[0])
-        self.assertIn("c/Esc: back", seen[0])
+        self.assertIn("Esc: back", seen[0])
+        self.assertIn("?: help", seen[0])
         self.assertIn("sort: P cpu  M mem  T time  N pid  U user", seen[0])
-        self.assertIn("c: back", seen[2])                                                       # the way back is the last thing to go
+        self.assertIn("Esc: back", seen[2])                                                     # the way back is the last thing to go
         self.assertIn("P cpu", seen[2])
         self.assertNotIn("PgUp", seen[2])
         cv.details = True
-        self.assertIn("Enter: hide details", render.ANSI.sub("", render.cpu_footer(cv, 40, 140)))
+        self.assertIn("Enter: hide details", ansi.ANSI.sub("", render.cpu_footer(cv, 40, 200)))
         cv.cur, cv.idx = 5, 5
-        self.assertIn("row 6/40", render.ANSI.sub("", render.cpu_footer(cv, 40, 140)))
-        self.assertIn("0/0", render.ANSI.sub("", render.cpu_footer(cv, 0, 140)))
+        self.assertIn("row 6/40", ansi.ANSI.sub("", render.cpu_footer(cv, 40, 140)))
+        self.assertIn("0/0", ansi.ANSI.sub("", render.cpu_footer(cv, 0, 140)))
 
 
 class MainLoop(CpuCase):
@@ -1040,7 +1110,7 @@ class MainLoop(CpuCase):
 
     @staticmethod
     def is_cpu(frame):
-        return " │ CPU │ " in frame[0] and "── CPU " in frame[1]
+        return bool(re.search(r"\[\d[ ·]CPU\]", frame[0]) and "── CPU " in frame[1])
 
     @staticmethod
     def row(frame):
@@ -1051,9 +1121,9 @@ class MainLoop(CpuCase):
         self.feed()
 
     def test_c_opens_the_cpu_screen_its_keys_move_and_sort_it_c_and_esc_go_back(self):
-        frames, restored = self.run_main([b"c", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"M", b"c", b"c", b"\x1b"])
+        frames, restored = self.run_main([b"c", b"\x1b[B\x1bOB", b"\x1b[B", b"\r", b"\x1b[6~", b"\x1b[H", b"M", b"1", b"c", b"\x1b"])
         self.assertEqual([self.is_cpu(f) for f in frames], [False, True, True, True, True, True, True, True, False, True, False])
-        self.assertIn("c: cpu", frames[0][-1])                                                    # a keyboard: the footer offers the screen
+        self.assertIn("1-5: screens", frames[0][-1])                                              # a keyboard: the footer offers the screens (3 is this one)
         self.assertEqual(self.row(frames[1]), 1)
         self.assertEqual(self.row(frames[2]), 3)                                                  # ↓ (CSI) ↓ (SS3)
         self.assertEqual(self.row(frames[3]), 4)
@@ -1062,7 +1132,7 @@ class MainLoop(CpuCase):
         self.assertGreater(self.row(frames[5]), 4)                                                # PgDn
         self.assertEqual(self.row(frames[6]), 1)                                                  # Home
         self.assertIn("by memory", "\n".join(frames[7]))                                          # M
-        self.assertNotIn("CPU", frames[8][0])                                                     # c: back to the dashboard
+        self.assertNotRegex(frames[8][0], r"\[\d[ ·]CPU\]")                                                     # 1: back to the dashboard
         self.assertIn("overview page (stub)", "\n".join(frames[8]))
         self.assertIn("by CPU%", "\n".join(frames[9]))                                            # a new screen: the defaults again
         self.assertNotIn("── PROCESS ", "\n".join(frames[9]))
@@ -1094,7 +1164,7 @@ class MainLoop(CpuCase):
         log = self.producers()
         render.DEMO = False
         self.feed()
-        self.run_main([2, 2, b"c", 2, b"c", 2, 2, 2])
+        self.run_main([2, 2, b"c", 2, b"1", 2, 2, 2])
         made_while_open = (log["cpu_made"], log["proc_made"])
         self.assertEqual(made_while_open, (1, 1))
         self.assertEqual(log["proc_sampled"], 2)                                                  # the frame it opened with, one refresh later
@@ -1102,21 +1172,22 @@ class MainLoop(CpuCase):
         self.run_main([2, 2, 2])
         self.assertEqual((log2["cpu_made"], log2["proc_made"], log2["proc_sampled"]), (0, 0, 0))   # the dashboard alone never touches them
         log3 = self.producers()
-        self.run_main([b"c", b"c", 2, 2])
+        self.run_main([b"c", b"1", 2, 2])
         self.assertEqual(log3["proc_made"], 1)
-        self.run_main([b"c", b"c", b"c", b"c"])
+        self.run_main([b"c", b"1", b"c", b"1"])
         self.assertEqual(log3["proc_made"], 3)                                                    # each opening: fresh samplers, no old averages
 
     def test_without_a_keyboard_the_cpu_screen_is_not_offered(self):
         frames, _ = self.run_main([2, 2], keyboard=False)
         self.assertEqual(len(frames), 3)
-        self.assertFalse([f for f in frames if self.is_cpu(f) or "c: cpu" in f[-1]])
+        self.assertFalse([f for f in frames if self.is_cpu(f) or "screens" in f[-1]])
 
     def test_feature_off_c_does_nothing(self):
         render.CFG["features"]["cpu"] = False
-        frames, _ = self.run_main([b"c", b"c", b"m"])
+        frames, _ = self.run_main([b"c", b"3", b"m"])
         self.assertFalse([f for f in frames if self.is_cpu(f)])
-        self.assertNotIn("c: cpu", frames[0][-1])
+        self.assertNotIn("1-5: screens", frames[0][-1])
+        self.assertIn("1 2 4 5: screens", frames[0][-1])
         self.assertEqual(len(frames), 4)
 
     def test_the_cpu_slide_runs_its_samplers_only_while_it_is_the_one_on_screen(self):
@@ -1125,7 +1196,7 @@ class MainLoop(CpuCase):
         render.DEMO = False
         self.feed((None, None, None))
         frames, _ = self.run_main([0, render.CFG["overview_seconds"] - 1, 0, 1, 1, 1])
-        shown = [f for f in frames if " │ CPU │ " in f[0]]
+        shown = [f for f in frames if re.search(r"\[\d[ ·]CPU\]", f[0])]
         self.assertTrue(shown)
         self.assertEqual(log["proc_sampled"], len(shown))                                          # one reading per CPU frame, none for the others
         self.assertEqual(log["proc_made"], 1)
@@ -1143,13 +1214,13 @@ class MainLoop(CpuCase):
                 raise ValueError("bad state " + ESC + "[2J")
             return real(d, pb, cv, w, h)
         render.cpu_screen = broken
-        frames, _ = self.run_main([b"c", b"x", b"x", b"c"])
+        frames, _ = self.run_main([b"c", b"x", b"x", b"1"])
         self.assertIn("error on the CPU screen", "\n".join(frames[1]))
         self.assertNotIn(ESC, "".join("".join(f) for f in frames))
         before = int(re.search(r"(\d+) (PROBLEMS|WARNINGS)", frames[0][0]).group(1))
         self.assertIn(f"{before + 1} PROBLEMS", frames[1][0])                                      # one more: it could not be drawn
         self.assertTrue(self.is_cpu(frames[3]))                                                    # drawn again once it works
-        self.assertFalse(self.is_cpu(frames[-1]))                                                  # and c still went back
+        self.assertFalse(self.is_cpu(frames[-1]))                                                  # and 1 still went back
 
     def test_the_status_pill_is_the_dashboards_while_the_cpu_screen_is_open(self):
         data = demo.snapshot(now=NOW)
@@ -1159,7 +1230,7 @@ class MainLoop(CpuCase):
         self.assertEqual(frames[1][0][-20:].strip(), frames[0][0][-20:].strip())
 
     def test_the_command_line_prints_the_cpu_screen_for_each_demo_os(self):
-        for os_name, note in (("windows", "LibreHardwareMonitor"), ("darwin", "thermal pressure Moderate"), ("", "coretemp")):
+        for os_name, note in (("windows", "LibreHardwareMonitor"), ("darwin", "thermal pressure Moderate"), ("", "k10temp")):
             argv = ["render.py", "--once", "--demo", "--view", "cpu", "--cols", "120", "--rows", "33", "--sort", "mem"]
             argv += ["--demo-os", os_name] if os_name else []
             out = io.StringIO()
@@ -1258,7 +1329,7 @@ class Hostile(CpuCase):
         body = render.slides(FakeSampler().sample(), cont, net, 225, 48, boot, base, mode="overview")[-1][3]
         frame = render.frame(("CPU", 1, 2, body), 1, 2, 225, 50, [], keys=False)
         self.check_frame(frame, 225, 50)
-        self.assertIn(self.SHOWN, render.ANSI.sub("", frame))
+        self.assertIn(self.SHOWN, ansi.ANSI.sub("", frame))
 
     def test_the_renderer_cleans_what_it_is_handed_whatever_the_producer_did(self):
         d = self.data()

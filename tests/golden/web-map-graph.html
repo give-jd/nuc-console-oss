@@ -1,0 +1,523 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-POZyRtBy609jBf/yxVNdBIlG/SAfAeb5mS/XT9dQSWU=' -->
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · map · nuc-console</title>
+<style>html{background:#0d1117}body{margin:0;padding:12px;color:#c9d1d9;font:14px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}pre{margin:0;overflow-x:auto}.r{color:#ff7b72}.g{color:#3fb950}.y{color:#d29922}.b{color:#58a6ff}.m{color:#bc8cff}.c{color:#39c5cf}.w{color:#f0f6fc}.d{color:#6e7681}.k{color:#0d1117}.B{font-weight:700}.bR{background:#da3633}.bY{background:#d29922}.rv{background:#c9d1d9;color:#0d1117}footer{position:sticky;bottom:0;margin-top:10px;padding:8px 0;background:#0d1117;border-top:1px solid #30363d;color:#6e7681;font:12px sans-serif}a{color:#58a6ff}@media(max-width:700px){body{font-size:10px}}.hd{display:flex;justify-content:space-between;gap:2ch;white-space:pre;padding:0 1ch}.hd>span:first-child{overflow:hidden;text-overflow:ellipsis}.lg{margin:8px 0 2px;color:#8b949e}.nt{margin:2px 0;color:#8b949e}.n{color:#c9d1d9}.mp{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 28px;margin-top:8px}.tree{min-width:0}.ro{display:grid;grid-template-columns:auto minmax(0,1fr);padding:0 4px;border-radius:3px;scroll-margin:30vh 0}.ro:hover{background:#161b22}.ro:target{outline:1px solid #30363d}.sel,.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.tr{white-space:pre;color:#6e7681}.bd{white-space:pre-wrap;overflow-wrap:anywhere}.tg{display:inline-block;width:1.6em;text-align:center;text-decoration:none}a.lb{text-decoration:none}a.lb:hover{text-decoration:underline}.dp{align-self:start;border:1px solid #30363d;border-radius:6px;padding:8px 12px;scroll-margin:8px}.dh{display:flex;justify-content:space-between;gap:2ch;margin-bottom:6px;font-weight:700}.dp table{border-collapse:collapse;width:100%}.dp th{text-align:left;font-weight:400;color:#8b949e;padding:1px 2ch 1px 0;vertical-align:top;white-space:nowrap}.dp td{padding:1px 0;overflow-wrap:anywhere}.dp th.in{padding-left:2ch}.dp tr.top td{font-weight:700}.dl{display:none}@media(min-width:1000px){.mp.two{grid-template-columns:minmax(0,1fr) minmax(340px,40%)}.dp{position:sticky;top:8px;max-height:calc(100vh - 80px);overflow:auto}}@media(max-width:999px){.mp.two .dl{display:inline}}.mv{display:inline-flex;vertical-align:middle;border:1px solid #30363d;border-radius:4px;overflow:hidden}.mv>*{padding:0 7px;line-height:18px}.mv>*+*{border-left:1px solid #30363d}.mv>b{background:#1f6feb40;color:#f0f6fc;font-weight:600}.mv>a{text-decoration:none}.mv>a:hover{background:#161b22}.gv{overflow:auto;max-height:calc(100vh - 140px);border:1px solid #21262d;border-radius:6px;min-width:0}#gsvg{display:block;height:auto;margin:0 auto}.ge line,.ll{fill:none;stroke:#484f58;stroke-width:1}.e.seen,.ll.seen{stroke:#c9d1d9;stroke-width:1.6}.e.declared,.ll.declared{stroke:#8b949e;stroke-width:1.4;stroke-dasharray:6 4}.e.possible,.ll.possible{stroke:#6e7681;stroke-width:1.5;stroke-dasharray:1 4;stroke-linecap:round}.e.bind,.ll.bind{stroke:#30363d}.e.reach,.ll.reach{stroke:#3d444d;stroke-width:1.2}.e.bad,.ll.bad{stroke:#da3633}.e.nb{stroke-width:2.2}.gv:has(.n.sel) .e:not(.nb){opacity:.2}.mk.seen{fill:#c9d1d9}.mk.declared{fill:#8b949e}.mk.possible{fill:#6e7681}@supports (fill:context-stroke){.mk path{fill:context-stroke}}.dh{flex-wrap:wrap}.n circle,.ln circle{stroke:#0d1117;stroke-width:1.5}.n.ok circle,.ln.ok circle{fill:#3fb950}.n.warn circle,.ln.warn circle{fill:#d29922}.n.err circle,.ln.err circle{fill:#ff7b72}.n.info circle,.ln.info circle{fill:#8b949e}.n.down circle,.ln.down circle{fill:#0d1117;stroke:#ff7b72;stroke-width:2.5}.n.unknown circle,.ln.unknown circle{fill:#0d1117;stroke:#d29922;stroke-width:2.5}.n.k-ext.info circle,.ln.ext circle{fill:#0d1117;stroke:#8b949e}.n.k-root circle{stroke:#c9d1d9;stroke-width:2}.n.k-stack circle{stroke:#8b949e;stroke-dasharray:3 2}.n text.ls{text-anchor:start}.n text.le{text-anchor:end}.n text{font:11px sans-serif;fill:#c9d1d9;text-anchor:middle;paint-order:stroke;stroke:#0d1117;stroke-width:3px;stroke-linejoin:round}.n.k-root text{font-weight:700;font-size:12px}.n:hover circle{stroke:#58a6ff;stroke-width:2.5}.n:hover text{fill:#f0f6fc}.n.sel circle{stroke:#58a6ff;stroke-width:3.5}.n.sel text{fill:#f0f6fc;font-weight:700}.n.dim{opacity:.35}.lk{vertical-align:middle;overflow:visible}@media(max-width:999px){.lg .dl{display:inline}}.gv.js #gsvg{cursor:grab}#gsvg.drag{cursor:grabbing}#gsvg.hov .n:not(.hv){opacity:.3}#gsvg.hov .e:not(.hv){opacity:.12}.e.hv{stroke-width:2.2}.n.pin circle{stroke:#f0f6fc;stroke-dasharray:2 2}body{font-size:14.0px}#gsvg{width:100%;max-height:calc(100vh - 150px)}</style>
+<div class="hd w bR B">
+<span> demo-host │ MAP │ 14:13:20</span>
+<span>✖ 6 PROBLEMS </span>
+</div>
+<div class="lg">27 nodes · 14 links · <span class="r">7 need attention</span> │ <svg class="lk" viewBox="0 0 30 10" width="30" height="10" aria-hidden="true">
+<line class="ll seen" x1="1" y1="5" x2="27" y2="5" marker-end="url(#ah-seen)"/>
+</svg> seen  <svg class="lk" viewBox="0 0 30 10" width="30" height="10" aria-hidden="true">
+<line class="ll declared" x1="1" y1="5" x2="27" y2="5" marker-end="url(#ah-declared)"/>
+</svg> declared  <svg class="lk" viewBox="0 0 30 10" width="30" height="10" aria-hidden="true">
+<line class="ll possible" x1="1" y1="5" x2="27" y2="5" marker-end="url(#ah-possible)"/>
+</svg> same network  <svg class="lk" viewBox="0 0 30 10" width="30" height="10" aria-hidden="true">
+<line class="ll reach" x1="1" y1="5" x2="29" y2="5"/>
+</svg> zone → port → service  <svg class="lk" viewBox="0 0 30 10" width="30" height="10" aria-hidden="true">
+<line class="ll reach bad" x1="1" y1="5" x2="29" y2="5"/>
+</svg> leads to a problem │ <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln ok">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> ok  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln warn">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> attention  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln err">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> failing  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln down">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> ✖ down  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln unknown">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> ? unknown  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln info">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> info  <svg class="lk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+<g class="ln info ext">
+<circle cx="7" cy="7" r="5"/>
+</g>
+</svg> remote address · a node: its details</div>
+<div class="nt">· connections sampled every 30 s, remembered 24 h (watching since 1h)</div>
+<main class="mp">
+<div class="gv" id="gv" data-refresh="2" data-paused="0" data-state="/?view=map&amp;as=graph">
+<svg id="gsvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" data-w="1000" data-h="700">
+<defs>
+<marker id="ah-seen" class="mk seen" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+<path d="M0,0L10,5L0,10z"/>
+</marker>
+<marker id="ah-declared" class="mk declared" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+<path d="M0,0L10,5L0,10z"/>
+</marker>
+<marker id="ah-possible" class="mk possible" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+<path d="M0,0L10,5L0,10z"/>
+</marker>
+</defs>
+<g id="gvp">
+<g class="ge">
+<line class="e bind" data-a="393c9dd934" data-b="48bdfd28c5" x1="455.8" y1="437.9" x2="588.6" y2="352.4"/>
+<line class="e bind" data-a="3cad4171e4" data-b="48bdfd28c5" x1="687.2" y1="356.9" x2="605.5" y2="348.4"/>
+<line class="e bind" data-a="450891e3b8" data-b="e1a52a983f" x1="736.9" y1="142.3" x2="845.3" y2="188.1"/>
+<line class="e bind" data-a="689afdc34f" data-b="a3c0156211" x1="378.4" y1="91.2" x2="209.1" y2="143.1"/>
+<line class="e bind" data-a="72e335f199" data-b="d6a18868a0" x1="152.4" y1="403.4" x2="119.6" y2="281.1"/>
+<line class="e bind" data-a="8a7bb90e3f" data-b="4b337ca18d" x1="230.4" y1="602.5" x2="288.6" y2="626.8"/>
+<line class="e bind" data-a="92ccffbff8" data-b="3128ce7887" x1="337.5" y1="589.9" x2="369.5" y2="616.9"/>
+<line class="e reach" data-a="93ed95f8e5" data-b="393c9dd934" x1="299.3" y1="494.7" x2="441" y2="445.1"/>
+<line class="e reach" data-a="93ed95f8e5" data-b="72e335f199" x1="267.5" y1="490.4" x2="161.4" y2="416.1"/>
+<line class="e reach" data-a="93ed95f8e5" data-b="8a7bb90e3f" x1="273" y1="516.1" x2="227.1" y2="592.2"/>
+<line class="e reach" data-a="93ed95f8e5" data-b="92ccffbff8" x1="291.3" y1="516.3" x2="327" y2="577.4"/>
+<line class="e reach" data-a="f22f98b733" data-b="450891e3b8" x1="566.5" y1="109.5" x2="721.2" y2="137.6"/>
+<line class="e possible" data-a="a3c0156211" data-b="d6a18868a0" x1="194.7" y1="154" x2="124.4" y2="261.1" marker-end="url(#ah-possible)"/>
+<line class="e possible" data-a="df8385b028" data-b="d6a18868a0" x1="100.5" y1="223.2" x2="112.9" y2="259.7" marker-end="url(#ah-possible)"/>
+<line class="e declared" data-a="881afd34cb" data-b="d6a18868a0" x1="114" y1="172.5" x2="116.8" y2="259" marker-end="url(#ah-declared)"/>
+<line class="e seen" data-a="126905e3ba" data-b="a3c0156211" x1="165.3" y1="76.8" x2="193.9" y2="133.8" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="3128ce7887" data-b="4b337ca18d" x1="367.6" y1="623.1" x2="308.4" y2="628.8" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="48bdfd28c5" data-b="c3e8ee1ea6" x1="604.2" y1="342.7" x2="690.6" y2="290.4" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="881afd34cb" data-b="47448b7811" x1="108.1" y1="156" x2="77" y2="115.4" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="9fcaa05261" data-b="e1a52a983f" x1="881" y1="283.4" x2="856.5" y2="203.1" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="a3c0156211" data-b="881afd34cb" x1="190.6" y1="147.8" x2="126.6" y2="160.7" marker-end="url(#ah-seen)"/>
+<line class="e seen" data-a="d01d5dfc04" data-b="48bdfd28c5" x1="634.9" y1="248.3" x2="601.1" y2="335.1" marker-end="url(#ah-seen)"/>
+<line class="e reach bad" data-a="9b8010b9d8" data-b="3cad4171e4" x1="679.3" y1="387" x2="691.4" y2="365"/>
+<line class="e bind bad" data-a="a00f5b734c" data-b="bfa33258b4" x1="420.9" y1="108.2" x2="255" y2="146.8"/>
+<line class="e reach bad" data-a="f22f98b733" data-b="689afdc34f" x1="530.9" y1="104.4" x2="394.5" y2="89.6"/>
+<line class="e reach bad" data-a="f22f98b733" data-b="a00f5b734c" x1="530.8" y1="106.3" x2="437.2" y2="106.4"/>
+<line class="e possible" data-a="a3c0156211" data-b="bfa33258b4" x1="209.5" y1="146.6" x2="232.1" y2="148.1" marker-end="url(#ah-possible)"/>
+<line class="e declared bad" data-a="df8385b028" data-b="bfa33258b4" x1="105.4" y1="212" x2="233.3" y2="154.6" marker-end="url(#ah-declared)"/>
+<line class="e seen bad" data-a="6cc6668e85" data-b="bfa33258b4" x1="291.3" y1="99.7" x2="254.9" y2="139" marker-end="url(#ah-seen)"/>
+<line class="e seen bad" data-a="881afd34cb" data-b="bfa33258b4" x1="122.8" y1="162.3" x2="232.2" y2="150.5" marker-end="url(#ah-seen)"/>
+</g>
+<g class="gn">
+<a class="n info k-ext" id="n-126905e3ba" data-k="126905e3ba" href="/?view=map&amp;as=graph&amp;sel=126905e3ba">
+<circle cx="161.8" cy="70" r="7.6"/>
+<text class="lb" x="161.8" y="89.6">100.64.0.2</text>
+<title>100.64.0.2 · tailnet · laptop</title>
+</a>
+<a class="n ok k-ct" id="n-3128ce7887" data-k="3128ce7887" href="/?view=map&amp;as=graph&amp;sel=3128ce7887">
+<circle cx="375.8" cy="622.3" r="8.3"/>
+<text class="lb" x="375.8" y="642.5">blog-app-1</text>
+<title>blog-app-1 · container · blog</title>
+</a>
+<a class="n info k-port" id="n-393c9dd934" data-k="393c9dd934" href="/?view=map&amp;as=graph&amp;sel=393c9dd934">
+<circle cx="448.8" cy="442.3" r="8.3"/>
+<text class="lb" x="448.8" y="462.6">:5678/tcp</text>
+<title>:5678/tcp</title>
+</a>
+<a class="n info k-port" id="n-450891e3b8" data-k="450891e3b8" href="/?view=map&amp;as=graph&amp;sel=450891e3b8">
+<circle cx="729.3" cy="139.1" r="8.3"/>
+<text class="lb" x="729.3" y="159.3">:22/tcp</text>
+<title>:22/tcp · LAN only 192.168.0.0/24</title>
+</a>
+<a class="n info k-ext" id="n-47448b7811" data-k="47448b7811" href="/?view=map&amp;as=graph&amp;sel=47448b7811">
+<circle cx="70" cy="106.2" r="7.6"/>
+<text class="lb" x="70" y="125.8">198.51.100.25</text>
+<title>198.51.100.25 · Internet</title>
+</a>
+<a class="n ok k-proc" id="n-48bdfd28c5" data-k="48bdfd28c5" href="/?view=map&amp;as=graph&amp;sel=48bdfd28c5">
+<circle cx="596.3" cy="347.4" r="9.2"/>
+<text class="lb" x="596.3" y="368.6">node</text>
+<title>node · n8n.service</title>
+</a>
+<a class="n ok k-ct" id="n-4b337ca18d" data-k="4b337ca18d" href="/?view=map&amp;as=graph&amp;sel=4b337ca18d">
+<circle cx="296.2" cy="630" r="8.3"/>
+<text class="lb" x="296.2" y="650.3">blog-db-1</text>
+<title>blog-db-1 · postgres · blog</title>
+</a>
+<a class="n info k-ext" id="n-6cc6668e85" data-k="6cc6668e85" href="/?view=map&amp;as=graph&amp;sel=6cc6668e85">
+<circle cx="296.5" cy="94.2" r="7.6"/>
+<text class="lb" x="296.5" y="113.8">192.168.0.50</text>
+<title>192.168.0.50 · LAN</title>
+</a>
+<a class="n info k-port" id="n-72e335f199" data-k="72e335f199" href="/?view=map&amp;as=graph&amp;sel=72e335f199">
+<circle cx="154.6" cy="411.3" r="8.3"/>
+<text class="lb" x="154.6" y="431.6">:6379/tcp</text>
+<title>:6379/tcp</title>
+</a>
+<a class="n ok k-ct" id="n-881afd34cb" data-k="881afd34cb" href="/?view=map&amp;as=graph&amp;sel=881afd34cb">
+<circle cx="113.7" cy="163.3" r="9.2"/>
+<text class="lb" x="113.7" y="184.5">shop-api-1</text>
+<title>shop-api-1 · container · shop</title>
+</a>
+<a class="n info k-port" id="n-8a7bb90e3f" data-k="8a7bb90e3f" href="/?view=map&amp;as=graph&amp;sel=8a7bb90e3f">
+<circle cx="222.8" cy="599.3" r="8.3"/>
+<text class="lb" x="222.8" y="619.6">:5433/tcp</text>
+<title>:5433/tcp</title>
+</a>
+<a class="n info k-port" id="n-92ccffbff8" data-k="92ccffbff8" href="/?view=map&amp;as=graph&amp;sel=92ccffbff8">
+<circle cx="331.1" cy="584.6" r="8.3"/>
+<text class="lb" x="331.1" y="604.8">:8081/tcp</text>
+<title>:8081/tcp</title>
+</a>
+<a class="n info k-ext" id="n-9fcaa05261" data-k="9fcaa05261" href="/?view=map&amp;as=graph&amp;sel=9fcaa05261">
+<circle cx="883.2" cy="290.7" r="7.6"/>
+<text class="lb" x="883.2" y="310.3">192.168.0.20</text>
+<title>192.168.0.20 · LAN</title>
+</a>
+<a class="n ok k-ct" id="n-a3c0156211" data-k="a3c0156211" href="/?view=map&amp;as=graph&amp;sel=a3c0156211">
+<circle cx="200" cy="145.9" r="9.6"/>
+<text class="lb" x="200" y="167.5">shop-web-1</text>
+<title>shop-web-1 · container · shop</title>
+</a>
+<a class="n info k-ext" id="n-c3e8ee1ea6" data-k="c3e8ee1ea6" href="/?view=map&amp;as=graph&amp;sel=c3e8ee1ea6">
+<circle cx="700.5" cy="284.4" r="7.6"/>
+<text class="lb" x="700.5" y="304">198.51.100.80</text>
+<title>198.51.100.80 · Internet</title>
+</a>
+<a class="n ok k-proc" id="n-d01d5dfc04" data-k="d01d5dfc04" href="/?view=map&amp;as=graph&amp;sel=d01d5dfc04">
+<circle cx="637.6" cy="241.2" r="7.6"/>
+<text class="lb" x="637.6" y="260.8">tailscaled</text>
+<title>tailscaled · tailscaled.service</title>
+</a>
+<a class="n ok k-ct" id="n-d6a18868a0" data-k="d6a18868a0" href="/?view=map&amp;as=graph&amp;sel=d6a18868a0">
+<circle cx="117.2" cy="272.2" r="9.2"/>
+<text class="lb" x="117.2" y="293.4">cache-1</text>
+<title>cache-1 · redis</title>
+</a>
+<a class="n ok k-proc" id="n-e1a52a983f" data-k="e1a52a983f" href="/?view=map&amp;as=graph&amp;sel=e1a52a983f">
+<circle cx="852.9" cy="191.4" r="8.3"/>
+<text class="lb" x="852.9" y="211.6">sshd</text>
+<title>sshd · ssh.service</title>
+</a>
+<a class="n info k-root" id="n-93ed95f8e5" data-k="93ed95f8e5" href="/?view=map&amp;as=graph&amp;sel=93ed95f8e5">
+<circle cx="282.3" cy="500.7" r="18"/>
+<text class="lb" x="282.3" y="530.7">LOCAL</text>
+<title>LOCAL · this machine only</title>
+</a>
+<a class="n err k-port" id="n-3cad4171e4" data-k="3cad4171e4" href="/?view=map&amp;as=graph&amp;sel=3cad4171e4">
+<circle cx="695.4" cy="357.8" r="8.3"/>
+<text class="lb" x="695.4" y="378">:8444/tcp</text>
+<title>:8444/tcp · FUNNEL: public</title>
+</a>
+<a class="n warn k-port" id="n-689afdc34f" data-k="689afdc34f" href="/?view=map&amp;as=graph&amp;sel=689afdc34f">
+<circle cx="386.3" cy="88.7" r="8.3"/>
+<text class="lb" x="386.3" y="109">:8080/tcp</text>
+<title>:8080/tcp · docker: bypasses ufw</title>
+</a>
+<a class="n err k-port" id="n-a00f5b734c" data-k="a00f5b734c" href="/?view=map&amp;as=graph&amp;sel=a00f5b734c">
+<circle cx="428.9" cy="106.4" r="8.3"/>
+<text class="lb" x="428.9" y="126.6">:5432/tcp</text>
+<title>:5432/tcp · docker: bypasses ufw</title>
+</a>
+<a class="n warn k-ct" id="n-bfa33258b4" data-k="bfa33258b4" href="/?view=map&amp;as=graph&amp;sel=bfa33258b4">
+<circle cx="245.7" cy="149" r="9.6"/>
+<text class="lb" x="245.7" y="134.4">shop-db-1</text>
+<title>shop-db-1 · postgres · shop</title>
+</a>
+<a class="n down k-webapp" id="n-dc49cb39a3" data-k="dc49cb39a3" href="/?view=map&amp;as=graph&amp;sel=dc49cb39a3">
+<circle cx="930" cy="350" r="6"/>
+<text class="lb" x="930" y="368">✖ admin-console</text>
+<title>admin-console · web app · expected on :9443</title>
+</a>
+<a class="n down k-ct" id="n-df8385b028" data-k="df8385b028" href="/?view=map&amp;as=graph&amp;sel=df8385b028">
+<circle cx="97.8" cy="215.4" r="8.3"/>
+<text class="lb" x="97.8" y="235.7">✖ worker-1</text>
+<title>worker-1 · container · shop</title>
+</a>
+<a class="n err k-root" id="n-9b8010b9d8" data-k="9b8010b9d8" href="/?view=map&amp;as=graph&amp;sel=9b8010b9d8">
+<circle cx="670.7" cy="402.8" r="18"/>
+<text class="lb" x="670.7" y="432.8">INTERNET</text>
+<title>INTERNET · reachable from the Internet (Tailscale Funnel)</title>
+</a>
+<a class="n err k-root" id="n-f22f98b733" data-k="f22f98b733" href="/?view=map&amp;as=graph&amp;sel=f22f98b733">
+<circle cx="548.8" cy="106.3" r="18"/>
+<text class="lb" x="548.8" y="136.3">LAN</text>
+<title>LAN · open on the LAN (and on the tailnet)</title>
+</a>
+</g>
+</g>
+</svg>
+</div>
+</main>
+<footer>
+<a href="/?">dashboard</a> · <span class="mv">
+<a href="/?view=map">tree</a>
+<b>graph</b>
+</span> · <a href="/?view=map&amp;as=graph&amp;only=1">problems only</a> · remote addresses <span class="mv">
+<b>on</b>
+<a href="/?view=map&amp;as=graph&amp;ext=0">off</a>
+</span> · stacks <span class="mv">
+<a href="/?view=map&amp;as=graph&amp;stacks=1">on</a>
+<b>off</b>
+</span> · zoom <a href="/?view=map&amp;as=graph&amp;z=80">−</a> 100% <a href="/?view=map&amp;as=graph&amp;z=125">+</a> · <a href="/?view=map&amp;as=graph&amp;pause=1">pause</a> · text <a href="/?view=map&amp;as=graph&amp;zoom=90">A−</a> 100% <a href="/?view=map&amp;as=graph&amp;zoom=110">A+</a> · refresh every <a href="/?view=map&amp;as=graph&amp;refresh=1">−</a> 2s <a href="/?view=map&amp;as=graph&amp;refresh=3">+</a> · read-only · 14:13:20</footer>
+<script>// nuc-console graph view (src/graphjs.py): drag the nodes, zoom and pan the MAP's graph. It reads the SVG the server
+// drew and changes only coordinates, a transform and class names: no markup, no network, nothing loaded.
+// Classes it sets, for the server's CSS:
+//   #gv.js       the script runs
+//   #gsvg.drag   a node drag, a pan or a pinch is in progress (cursor)
+//   #gsvg.hov    a node is hovered or focused: dim what is not .hv
+//   .hv          on a.n and line.e: the hovered or focused node, its neighbours and the edges touching it
+//   a.n.pin      a node placed by hand: it keeps its place (double-click it to let it go)
+// Mouse: drag a node or the background, wheel or pinch to zoom, double-click the background to reset the view.
+// Keys: + and - zoom, 0 resets the view, the arrows pan.
+(function main() {
+  "use strict";
+  if (!document.getElementById("gvp") && document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const gv = document.getElementById("gv"), svg = document.getElementById("gsvg"), vp = document.getElementById("gvp");
+  if (!gv || !svg || !vp || !svg.getScreenCTM) return;
+  const MIN_S = 0.2, MAX_S = 5, CLICK_PX = 4, QUIET_MS = 8000, KEY = "nuc-graph:" + (gv.getAttribute("data-state") || "");
+  const ARROWS = new Map([["ArrowLeft", [60, 0]], ["ArrowRight", [-60, 0]], ["ArrowUp", [0, 60]], ["ArrowDown", [0, -60]]]);
+  const nodes = [], edges = [], byKey = new Map(), byEl = new Map(), ptrs = new Map();
+  const period = Number(gv.getAttribute("data-refresh")) * 1000, due = Date.now() + Math.max(period, 1000);
+  const live = gv.getAttribute("data-paused") !== "1" && period > 0;
+  let s = 1, tx = 0, ty = 0;         // the view: translate(tx,ty) scale(s) on #gvp, in the viewBox's units
+  let alpha = 0, raf = 0, cell = 1;  // the simulation: its heat, its animation frame, the size of its grid's cells
+  let drag = null, swallow = 0, hov = null, clickT = 0, gs = 1, last = 0, timer = 0;
+  const num = (el, name) => parseFloat(el.getAttribute(name));
+  const put = (el, name, v) => el.setAttribute(name, v.toFixed(1));
+  const ok = (v, lo = -1e5, hi = 1e5) => typeof v === "number" && v >= lo && v <= hi;
+  const touch = () => { last = Date.now(); };
+  const nodeOf = t => (t && t.closest && byEl.get(t.closest("a.n"))) || null;
+  const mode = on => svg.classList.toggle("drag", on);
+
+  svg.querySelectorAll("a.n[data-k]").forEach(el => {
+    const c = el.querySelector("circle"), k = el.getAttribute("data-k");
+    if (!c || byKey.has(k)) return;
+    const x = num(c, "cx"), y = num(c, "cy"), r = num(c, "r") || 0;
+    let t = el.querySelector("text");
+    const ox = t ? num(t, "x") - x : 0, oy = t ? num(t, "y") - y : 0;  // the label keeps its place under the circle
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (!Number.isFinite(ox) || !Number.isFinite(oy)) t = null;
+    const n = {i: nodes.length, k, el, c, t, ox, oy, r, x, y, x0: x, y0: y, px: x, py: y, vx: 0, vy: 0,
+      pin: false, wk: -1, deg: 0, adj: [], sp: 2 * r + 30};  // sp: the room it wants around itself; wk: see wake()
+    nodes.push(n); byKey.set(k, n); byEl.set(el, n);
+  });
+  svg.querySelectorAll("line.e[data-a][data-b]").forEach(el => {
+    const a = byKey.get(el.getAttribute("data-a")), b = byKey.get(el.getAttribute("data-b"));
+    if (!a || !b || a === b) return;
+    const e = {el, a, b, gap: b.r + (el.hasAttribute("marker-end") ? 4 : 0)};  // as the server drew it: room for an arrowhead
+    edges.push(e); a.adj.push(e); b.adj.push(e); a.deg++; b.deg++;
+  });
+
+  function near(fn) {  // fn(a, b, dx, dy) for the pairs of nodes in the same or adjacent cells of a grid (cell >= every sp)
+    const grid = new Map(), at = (gx, gy) => gx + ":" + gy;
+    for (const n of nodes) {
+      n.gx = Math.floor(n.x / cell); n.gy = Math.floor(n.y / cell);
+      if (!grid.has(at(n.gx, n.gy))) grid.set(at(n.gx, n.gy), []);
+      grid.get(at(n.gx, n.gy)).push(n);
+    }
+    for (const a of nodes) for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      for (const b of grid.get(at(a.gx + i, a.gy + j)) || []) if (b.i > a.i) fn(a, b, b.x - a.x, b.y - a.y);
+    }
+  }
+  function rest() {  // what is on the page is the state of rest: springs at their length, no more room than there is
+    for (const e of edges) {
+      e.len = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y);
+      e.k = 1 / Math.min(e.a.deg, e.b.deg); e.bias = e.a.deg / (e.a.deg + e.b.deg);
+    }
+    for (const n of nodes) cell = Math.max(cell, n.sp);
+    near((a, b, dx, dy) => { const d = Math.hypot(dx, dy); a.sp = Math.min(a.sp, d); b.sp = Math.min(b.sp, d); });
+  }
+  function tick() {  // one frame: springs along the edges, room between the nodes, friction; still nodes stay put
+    const still = n => n.pin || n.wk < 0;
+    for (const e of edges) {
+      const a = e.a, b = e.b, w = still(a) ? 1 : still(b) ? 0 : e.bias;
+      if (still(a) && still(b)) continue;
+      let dx = b.x + b.vx - a.x - a.vx, dy = b.y + b.vy - a.y - a.vy;
+      const d = Math.hypot(dx, dy) || 1, f = (d - e.len) / d * alpha * e.k;
+      dx *= f; dy *= f;
+      b.vx -= dx * w; b.vy -= dy * w; a.vx += dx * (1 - w); a.vy += dy * (1 - w);
+    }
+    near((a, b, dx, dy) => {
+      const c = (a.sp + b.sp) / 2, d2 = dx * dx + dy * dy, w = still(a) ? 1 : still(b) ? 0 : 0.5;
+      if (d2 >= c * c || (still(a) && still(b))) return;
+      if (!d2) dx = 0.1;
+      const d = Math.sqrt(d2) || 0.1, f = (c - d) / d * alpha * 0.3;
+      b.vx += dx * f * w; b.vy += dy * f * w; a.vx -= dx * f * (1 - w); a.vy -= dy * f * (1 - w);
+    });
+    for (const n of nodes) {
+      if (still(n)) { n.vx = n.vy = 0; continue; }
+      n.vx *= 0.6; n.vy *= 0.6; n.x += n.vx; n.y += n.vy;
+    }
+    draw();
+    alpha *= 0.955;  // at rest again in about a second and a half
+    raf = alpha > 0.02 ? requestAnimationFrame(tick) : 0;
+    if (!raf) { for (const n of nodes) n.wk = -1; save(); }
+  }
+  function wake(n) {  // n and the nodes up to 2 edges away move (wk: edges left); the rest of the graph holds them in place
+    for (const todo = [[n, 2]]; todo.length;) {
+      const [m, h] = todo.pop();
+      if (m.wk >= h) continue;
+      m.wk = h;
+      if (h) for (const e of m.adj) todo.push([e.a === m ? e.b : e.a, h - 1]);
+    }
+    alpha = 1;
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  function draw() {  // only what moved: circles, labels, and the lines touching them
+    const moved = new Set();
+    for (const n of nodes) {
+      if (Math.abs(n.x - n.px) + Math.abs(n.y - n.py) < 0.05) continue;
+      n.px = n.x; n.py = n.y; moved.add(n);
+      put(n.c, "cx", n.x); put(n.c, "cy", n.y);
+      if (n.t) { put(n.t, "x", n.x + n.ox); put(n.t, "y", n.y + n.oy); }
+    }
+    for (const e of edges) {
+      if (!moved.has(e.a) && !moved.has(e.b)) continue;
+      const a = e.a, b = e.b, dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), u = d > a.r + e.gap ? 1 / d : 0;
+      put(e.el, "x1", a.x + dx * u * a.r); put(e.el, "y1", a.y + dy * u * a.r);  // from circle to circle, as the server does
+      put(e.el, "x2", b.x - dx * u * e.gap); put(e.el, "y2", b.y - dy * u * e.gap);
+    }
+  }
+
+  function view() { vp.setAttribute("transform", "translate(" + tx.toFixed(2) + "," + ty.toFixed(2) + ") scale(" + s.toFixed(4) + ")"); }
+  function ctm() { const m = svg.getScreenCTM(); return m && m.a && m.d ? m : null; }  // viewBox units -> screen pixels
+  function toWorld(x, y) { const m = ctm(); return m && [((x - m.e) / m.a - tx) / s, ((y - m.f) / m.d - ty) / s]; }
+  function zoomAt(x, y, f) {  // the point under (x, y) stays there
+    const m = ctm(), ns = Math.min(MAX_S, Math.max(MIN_S, s * f));
+    if (!m) return;
+    const u = (x - m.e) / m.a, v = (y - m.f) / m.d;
+    tx = u - (u - tx) * ns / s; ty = v - (v - ty) * ns / s; s = ns; view();
+  }
+  function panBy(dx, dy) { const m = ctm(); if (m) { tx += dx / m.a; ty += dy / m.d; view(); } }
+  function reset() { s = 1; tx = ty = 0; view(); }
+  function box() {  // the part of the graph's box that is on the screen
+    const b = gv.getBoundingClientRect();
+    return [Math.max(b.left, 0), Math.max(b.top, 0), Math.min(b.right, innerWidth), Math.min(b.bottom, innerHeight)];
+  }
+  function reveal(n) {  // a node reached with the keyboard comes into sight
+    const m = ctm(), b = box();
+    if (!m) return;
+    const x = (n.x * s + tx) * m.a + m.e, y = (n.y * s + ty) * m.d + m.f;
+    if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) panBy((b[0] + b[2]) / 2 - x, (b[1] + b[3]) / 2 - y);
+  }
+  function pin(n, on) { n.pin = on; n.el.classList.toggle("pin", on); }
+  function hover(n) {  // n, its neighbours and its edges get .hv, the svg .hov; null clears
+    if (n === hov) return;
+    for (const [h, on] of [[hov, false], [n, true]]) {  // the old one off, then the new one on: they may share neighbours
+      if (!h) continue;
+      h.el.classList.toggle("hv", on);
+      for (const e of h.adj) for (const el of [e.el, e.a.el, e.b.el]) el.classList.toggle("hv", on);
+    }
+    hov = n; svg.classList.toggle("hov", !!n);
+  }
+
+  function save() {  // the view, and the nodes that are not drawn where the server put them (pinned, or moved along)
+    const p = {};
+    for (const n of nodes) if (n.pin || n.px !== n.x0 || n.py !== n.y0) p[n.k] = [+n.px.toFixed(1), +n.py.toFixed(1), n.pin ? 1 : 0];
+    try { sessionStorage.setItem(KEY, JSON.stringify({v: [s, tx, ty], p})); } catch (err) { /* storage off or full */ }
+  }
+  function restore() {  // only for nodes still on the page, only sane numbers
+    let st = null;
+    try { st = JSON.parse(sessionStorage.getItem(KEY)); } catch (err) { return; }
+    const v = st && st.v, p = st && st.p;
+    if (Array.isArray(v) && ok(v[0], MIN_S, MAX_S) && ok(v[1]) && ok(v[2])) [s, tx, ty] = v;
+    if (p && typeof p === "object") {
+      for (const k of Object.keys(p)) {
+        const n = byKey.get(k), q = p[k];
+        if (n && Array.isArray(q) && ok(q[0]) && ok(q[1])) { n.x = q[0]; n.y = q[1]; pin(n, q[2] === 1); }
+      }
+    }
+  }
+  function plan() {  // the page's refresh: when due, but not during an interaction nor within 8 s of one, never while hidden
+    clearTimeout(timer);
+    if (!live || document.hidden) return;
+    const now = Date.now(), at = Math.max(due, last + QUIET_MS, drag || raf ? now + 1000 : 0);
+    if (at > now) timer = setTimeout(plan, at - now);
+    else { save(); location.reload(); }
+  }
+
+  function mid() { const [p, q] = ptrs.values(); return {x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, d: Math.hypot(p.x - q.x, p.y - q.y)}; }
+  function start(id, x, y, n, moved) {  // a press: on a node it drags the node, elsewhere it pans the view
+    const w = n && toWorld(x, y);
+    drag = {id, x, y, tx, ty, moved, n: w ? n : null, ox: w ? n.x - w[0] : 0, oy: w ? n.y - w[1] : 0};
+  }
+  svg.addEventListener("pointerdown", e => {
+    if (e.button > 0) return;  // the main button, a finger, a pen
+    if (e.isPrimary) ptrs.clear();
+    ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+    swallow = 0; touch();
+    if (ptrs.size === 1) start(e.pointerId, e.clientX, e.clientY, nodeOf(e.target), false);
+    else if (ptrs.size === 2) { drag = {pinch: mid(), moved: true}; mode(true); }
+  });
+  window.addEventListener("pointermove", e => {
+    const p = ptrs.get(e.pointerId);
+    if (!p || !drag) return;
+    p.x = e.clientX; p.y = e.clientY; touch();
+    if (drag.pinch) {  // two fingers: the midpoint pans, the distance zooms
+      const g = mid(), o = drag.pinch;
+      panBy(g.x - o.x, g.y - o.y);
+      if (o.d > 0 && g.d > 0) zoomAt(g.x, g.y, g.d / o.d);
+      drag.pinch = g;
+    } else if (e.pointerId === drag.id && (drag.moved || Math.hypot(p.x - drag.x, p.y - drag.y) >= CLICK_PX)) {
+      if (!drag.moved) {  // it is no longer a click
+        drag.moved = true; mode(true);
+        try { svg.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is gone */ }
+      }
+      const w = toWorld(p.x, p.y), m = ctm();
+      if (drag.n && w) { drag.n.x = w[0] + drag.ox; drag.n.y = w[1] + drag.oy; pin(drag.n, true); wake(drag.n); }
+      if (!drag.n && m) { tx = drag.tx + (p.x - drag.x) / m.a; ty = drag.ty + (p.y - drag.y) / m.d; view(); }
+    }
+  });
+  function up(e) {
+    if (!ptrs.delete(e.pointerId) || !drag) return;
+    touch();
+    if (ptrs.size === 1 && drag.pinch) { const [[id, p]] = ptrs; start(id, p.x, p.y, null, true); }  // one finger left: it pans
+    if (ptrs.size) return;
+    if (drag.moved) {
+      swallow = Date.now() + 500;  // the click that ends a drag does not follow the link
+      if (drag.n) wake(drag.n);
+      hover(e.pointerType === "mouse" ? nodeOf(document.elementFromPoint(e.clientX, e.clientY)) : null);
+    }
+    drag = null; mode(false);
+  }
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+  window.addEventListener("click", e => {
+    if (Date.now() < swallow) { swallow = 0; e.preventDefault(); e.stopPropagation(); return; }
+    const n = nodeOf(e.target), href = n && n.el.getAttribute("href");
+    if (!href || !n.pin || e.detail < 1 || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault(); clearTimeout(clickT);  // a pinned node waits for a second click: a double-click lets it go
+    if (e.detail > 1) { pin(n, false); wake(n); save(); } else clickT = setTimeout(() => { save(); location.assign(href); }, 300);
+  }, true);
+  svg.addEventListener("dblclick", e => { if (!nodeOf(e.target)) { e.preventDefault(); reset(); } });
+  svg.addEventListener("dragstart", e => e.preventDefault());
+  svg.addEventListener("wheel", e => {  // the wheel, and a trackpad's pinch (ctrl + wheel)
+    const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    e.preventDefault(); touch();
+    zoomAt(e.clientX, e.clientY, Math.exp(-Math.max(-200, Math.min(200, d)) * (e.ctrlKey ? 0.01 : 0.002)));
+  }, {passive: false});
+  svg.addEventListener("gesturestart", e => { e.preventDefault(); gs = 1; });
+  svg.addEventListener("gesturechange", e => {  // Safari's trackpad pinch (a touch screen's goes through the pointers)
+    e.preventDefault();
+    if (!(e.scale > 0)) return;
+    if (!ptrs.size) { touch(); zoomAt(e.clientX, e.clientY, e.scale / gs); }
+    gs = e.scale;
+  });
+  svg.addEventListener("pointerover", e => { const n = nodeOf(e.target); if (n && !(drag && drag.moved)) { hover(n); touch(); } });
+  svg.addEventListener("pointerout", e => { if (hov && !(drag && drag.moved) && !hov.el.contains(e.relatedTarget)) hover(null); });
+  svg.addEventListener("focusin", e => { const n = nodeOf(e.target); if (n) { hover(n); touch(); if (!drag) reveal(n); } });
+  svg.addEventListener("focusout", () => hover(null));
+  document.addEventListener("keydown", e => {  // only when nothing else wants the keys: focus on the page or in the graph
+    const t = e.target, k = e.key, zoomBy = f => { const b = box(); zoomAt((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, f); };
+    if (e.ctrlKey || e.metaKey || e.altKey || !t || !(t === document.body || t === document.documentElement || gv.contains(t))) return;
+    if (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName) || t.isContentEditable) return;
+    if (k === "+" || k === "=") zoomBy(1.25);
+    else if (k === "-" || k === "_") zoomBy(0.8);
+    else if (k === "0") reset();
+    else if (ARROWS.has(k)) panBy(ARROWS.get(k)[0], ARROWS.get(k)[1]);
+    else return;
+    e.preventDefault(); touch();
+  });
+  window.addEventListener("pagehide", save);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) save(); else plan(); });
+
+  rest(); restore(); draw(); view();  // the springs' lengths and room are the server's, whatever was restored
+  gv.classList.add("js");
+  svg.style.touchAction = "none";  // fingers drag and pinch the graph, not the page
+  svg.style.userSelect = svg.style.webkitUserSelect = "none";
+  plan();
+})();
+</script>
+</html>

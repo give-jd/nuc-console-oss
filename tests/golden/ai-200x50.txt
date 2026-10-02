@@ -1,0 +1,50 @@
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  4 Health  [7m[5 AI][27m │ 14:13:20                                                                                                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+[36m──[0m[1;36m AI [0m [90mwhat this machine can run[0m[90m · [0m[90m12 models[0m[90m · [0m[32m✔ 10 fit[0m  [36m◐ 2 gpu+cpu[0m [36m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[0m[K
+ [1;32m● ON      [0m on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1[0m[0m[0m[K
+ [90mfolder[0m /var/lib/nuc-console/ai[90m · 4.0 GB downloaded · 412.0 GB free on that disk[0m[0m[0m[0m[K
+[36m──[0m[1;36m HARDWARE [0m[36m──────────────────────────────────────────────────────────────────────────────[0m[90m  linux x86_64[0m[0m     [36m──[0m[1;36m STATUS [0m[36m──────────────────────────────────────────────────────────────────────────────[0m[0m  [0m[0m[K
+ [90mCPU  [0m [1mAMD Ryzen 7 5800X[0m[90m · 8 cores / 16 threads[0m[90m · AVX2[0m[0m[0m                                                        [90madvisor  [0m [32m✔ on[0m[90m  (turned on from the AI page or screen)[0m[0m[0m                                   [0m[0m[K
+ [90mRAM  [0m [32m██████[0m[90m░░░░░░░░░░░░░[0m  21.0 GB free of 31.2 GB[0m[0m                                                           [90mendpoint [0m http://127.0.0.1:8080/v1[0m[0m                                                       [0m[0m[K
+ [90mGPU  [0m [1mNVIDIA GeForce RTX 3060[0m[90m · CUDA[0m  [32m██[0m[90m░░░░░░░░░░░░░░░░░[0m  11.0 GB free of 12.0 GB[0m[0m                           [90mserver   [0m [32m✔ answering[0m[90m · 1 model: qwen3-4b[0m[0m[0m                                                [0m[0m[K
+                                                                                                              [90mmodel    [0m [36m●[0m [1mqwen3-4b[0m[90m  in the catalog[0m[0m[0m                                                     [0m[0m[K
+                                                                                                              [90mruntime  [0m [32m✔ installed[0m[90m (0.10.6)[0m[0m[0m                                                           [0m[0m[K
+                                                                                                              [90mfiles    [0m [90m/var/lib/nuc-console/ai[0m[0m[0m                                                        [0m[0m[K
+[36m──[0m[1;36m MODELS [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  best first[0m[0m[0m[K
+[90m      model               params          size    needs   verdict      est tok/s  notes[0m[0m[0m[K
+      OpenAI gpt-oss 20B  [90m21B-A3.6B  [0m  11.8 GB  12.5 GB  [1;46;30m ◐ GPU+CPU  [0m  36-66      [90mfast for its size (MoE, 3.6B active); reasoning effort is a setting[0m[0m[0m[0m[K
+      Qwen3 30B-A3B       [90m30.5B-A3.3B[0m  18.2 GB  19.3 GB  [1;46;30m ◐ GPU+CPU  [0m  19-37      [90mfast on CPU (MoE: only 3.3B parameters work per token)[0m[0m[0m[0m[K
+[7m ★    Phi-4 14B           14.7B         8.9 GB   9.8 GB   ✔ FITS GPU   17-28      strong at reasoning and code; short context (16k)                                                                    [0m[0m[0m[K
+      Qwen3 14B           [90m14.8B      [0m   8.8 GB   9.7 GB  [1;42;30m ✔ FITS GPU [0m  17-28      [90mthinking mode: /no_think turns it off[0m[0m[0m[0m[K
+      Qwen3 8B            [90m8.2B       [0m   4.9 GB   5.8 GB  [1;42;30m ✔ FITS GPU [0m  31-51      [90mthinking mode: /no_think turns it off[0m[0m[0m[0m[K
+      IBM Granite 3.3 8B  [90m8.2B       [0m   4.9 GB   5.8 GB  [1;42;30m ✔ FITS GPU [0m  31-51      [90mlong context (128k); tuned for business tasks[0m[0m[0m[0m[K
+      Phi-4-mini 3.8B     [90m3.8B       [0m   2.4 GB   3.3 GB  [1;42;30m ✔ FITS GPU [0m  61-102     [90msmall and good at reasoning; long context[0m[0m[0m[0m[K
+  [32m✓[0m[36m●[0m  Qwen3 4B            [90m4B         [0m   2.4 GB   3.3 GB  [1;42;30m ✔ FITS GPU [0m  61-102     [90mthe default of nuc-console-ai: good advice in about 4 GB[0m[0m[0m[0m[K
+      SmolLM3 3B          [90m3.1B       [0m   1.9 GB   2.7 GB  [1;42;30m ✔ FITS GPU [0m  81-135     [90msmall, multilingual, long context[0m[0m[0m[0m[K
+      IBM Granite 3.3 2B  [90m2.5B       [0m   1.6 GB   2.5 GB  [1;42;30m ✔ FITS GPU [0m  96-160     [90mvery small; fine for short advice[0m[0m[0m[0m[K
+  [32m✓[0m   Qwen3 1.7B          [90m1.7B       [0m   1.1 GB   1.8 GB  [1;42;30m ✔ FITS GPU [0m  140-233    [90mruns anywhere; thinking mode: /no_think[0m[0m[0m[0m[K
+      Qwen3 0.6B          [90m0.6B       [0m   400 MB   1.1 GB  [1;42;30m ✔ FITS GPU [0m  384-640    [90ma toy: too small to give reliable advice[0m[0m[0m[0m[K
+ [33m★[0m[90m recommended[0m  ·  [32m✓[0m[90m installed[0m  ·  [36m●[0m[90m active[0m  ·  [90mtok/s: rough estimate[0m[0m[0m[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m model 3/12  ↑↓: move  Enter: details  e: on/off  u: use  x: del  X: all  c: cancel  1-5: screens  Esc: back  ?: help[0m[0m[0m

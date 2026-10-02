@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. The project is small on purpose: **Python standard library only, one file per process, no build step.**
+Thanks for helping. The project is small on purpose: **Python standard library only, one entry script per process, no build step.** The modules an entry script imports are flat files in `src/` (the installers copy `src/*.py`): add one as a new file next to the others, never a package or a folder. [docs/DESIGN.md](docs/DESIGN.md#code-layout) says which module holds what.
 
 ## Development
 
@@ -13,12 +13,19 @@ python3 src/render.py --once --demo --demo-os windows --cols 200 --rows 50   # t
 python3 src/render.py --once --demo --view ai --cols 200 --rows 50           # the AI screen: three invented machines (--demo-os windows|darwin for the others)
 python3 src/render.py --once --demo --view ai --select qwen3-8b --details    # the details of one model: why, licence, the commands
 python3 src/web.py --demo --port 8796                                        # the web view with the AI page's buttons, simulated: nothing is downloaded or started
+python3 -m unittest tests.test_golden            # every screen and page, byte for byte (see "Golden outputs and the render benchmark")
+python3 tools/bench_render.py                    # the CPU a frame costs, per view and size (--json, --compare before.json)
 shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
+python3 tools/browser_check.py --out shots      # the web shell in a real headless Chrome/Chromium: every view, theme and density, scripts on and off, the wall page (--quick, --only TEXT, --chrome PATH or $CHROME)
 ```
 
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
 - Never add a dependency. If you need one, the answer is almost certainly a stdlib function or fewer features.
 - Keep Python 3.8 compatibility (no `match`, no `X | Y` types, no `str.removeprefix`).
+- Colours: a colour that means a state (fine, attention, problem, unknown, a note) is a token of `src/ui.py`, drawn with `ui.sgr(token)` (`ansi.py` does it for the primitives); a raw SGR code is for what means nothing but itself. Every state also has a symbol: colour is never the only signal.
+- Cards and KPIs: a section of the overview is a card, registered with `cards.register(id, title, feature, builder)` (the ids are `nuc_config.SECTIONS`; `render.py` registers every card, in the order of the screen); its state comes from the problems that belong to it (`cards.PROBLEM_CARDS`: a new problem id goes there). A KPI is a builder decorated with `@cards.kpi(id)` in `src/cards.py`, plus its id in `prefs.KPI_IDS`, its label in `cards.KPI_LABELS` and its code in `prefs.KPI_CODES`. A value that cannot be read is state `unknown` (`?`), never `ok`: `ui.Kpi` and `ui.Bar` enforce it, and the components never take a value without a state.
+- Writing or changing a card of the overview: the builder is in `src/cards.py`, as `@native(id, title, feature) def x_card(ctx, k, caps)` returning `ui.Card` built of components (`Msg`, `Line`, `Table` with `Col(w=, gap=, prio=)`, `Wrap`, `More`...), no ANSI and no `render` import. Cut lists with `caps.lim(items, n, id)`, show a `More` only for what was really hidden, give a `Wrap` `max_lines=None` when `caps.opened(id)`, and read the clock from `ctx.now`/`_now(ctx)`. The caps of a frame (`cards.Caps`: `full`, and the `expand` and `trunc` sets) belong to the layout, `render.page_overview`: there are no globals, and a name moved to another module is imported from there, never through `render`. A test reads a card as text with `tests/cardlines.py` (`card_lines(builder, ctx, w, k)`). A change that must not alter what is drawn is proved by `python3 -m unittest tests.test_golden` passing without regenerating (leading spaces that are coloured belong inside the `Span`; a column's `w` pads, it never clips, so trim in the builder as the old line did), and `python3 tools/bench_render.py --compare before.json` (a baseline taken before the change) has to stay under 1.2. When the old block's layout does not fit `Col(w=, gap=)` (a colour over a whole row, an indent, a header drawn bold, a note cut with an ellipsis), the console-only fields say it and the web ignores them: `Table(indent=, head_line=, titled=, fill=)`, `Col(align="c", clip=)`, `Line(clip=)`, `More(indent=)`; a name the console cuts goes in `Span(text, full=whole_name)`, and what only the web has room for (a problem's id, why and fix) in a field the console does not draw. Add the card to `tests/test_components_render.py`.
+- Configuration: read it through `nuc_config.current()`, the one dict of the process (`render.CFG` is that object); only code that needs the file read again calls `nuc_config.load()`.
 - Platform code lives in `collect_darwin.py` / `collect_windows.py` (collector), `hostinfo.py` / `winapi.py` (renderer metrics):
   parsers are pure functions with fixtures, so they are tested on every OS; the classes `OnWindows` / `OnMacOS` in
   `tests/test_platforms.py` exercise the real system calls on their own OS. Text output of system tools is localised on Windows:
@@ -37,13 +44,55 @@ shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{acce
   Origin/Referer, 4 KB, ids from the catalog, no JavaScript, the CSP) are in `docs/WEB.md`; a new button follows them and gets a test in `WebSecurity`. `--demo` simulates every action.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
-- JavaScript: the web view has none except `src/graphjs.py` (the MAP's graph view). Keep it that way; `tests/test_graphjs.py` lists
-  what that script may not do (build markup, eval, network, globals...). Its hash goes into the page's CSP automatically.
-- Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`. The MAP screen: `--view map` (with `--expand all|fit|N`, `--select TEXT`, `--details`, `--only`). The CPU screen: `--view cpu` (with `--sort cpu|mem|time|pid|user`, `--select NAME|PID`, `--details`). The HEALTH screen: `--view health` (with `--period 1|7|30`, `--select TEXT`, `--details`; `--demo-health little|none` for a machine with 5 hours of history or none). The AI screen: `--view ai` (with `--select TEXT`, `--details`; the demo has an NVIDIA box, a small Windows laptop and an Apple-silicon Mac). `--demo-os windows|darwin` for their data.
+- JavaScript: the web view's scripts are first-party, inline and pinned by hash: the shell's four in `src/webjs.py` (partial refresh, keys,
+  preferences, layout editor) and the MAP's graph view in `src/graphjs.py`; no library, no build, no external script. Every page works
+  without them. `tests/jsrules.py` lists what a script may not do (build markup with `innerHTML`, eval, string timers, network APIs other
+  than the one documented fetch, `document.cookie`, the `style` attribute...) and the DOM contract each one may touch;
+  `tests/test_graphjs.py` adds the graph's own rules. A page's CSP lists exactly the hashes of the scripts it carries, automatically.
+- The browser check (`tools/browser_check.py`, the `browser` job of `tests.yml`): it starts `src/web.py --demo` on a free port and loads every page of the shell in the Chrome or Chromium it finds (`--chrome PATH`, `$CHROME`, or the usual names and paths; as root it adds `--no-sandbox`): each view in each theme and density, with the scripts on (the DOM is the one after they ran) and with them removed by a small proxy, and the wall page. It fails on a CSP or Trusted Types violation, a script error or a page without its top bar, `main` or view block, and `--out DIR` keeps a screenshot per page (about 3 minutes for the whole matrix; `--quick` and `--only TEXT` for a part). A new view or block of the shell gets its landmark in `VIEW_LANDMARKS` and its entry in `VIEWS`; the pure parts are tested in `tests/test_browser_check.py`, and the script is stdlib only like the rest: no browser driver, no npm.
+- Test layouts at several sizes: `--cols 79 --rows 24`, `120x33`, `200x50`, `226x50`. The MAP screen: `--view map` (with `--expand all|fit|N`, `--select TEXT`, `--details`, `--only`). The CPU screen: `--view cpu` (with `--sort cpu|mem|time|pid|user`, `--select NAME|PID`, `--details`). The HEALTH screen: `--view health` (with `--period 1|7|30`, `--select TEXT`, `--details`; `--demo-health little|none` for a machine with 5 hours of history or none). The AI screen: `--view ai` (with `--select TEXT`, `--details`; the demo has an NVIDIA box, a small Windows laptop and an Apple-silicon Mac). `--demo-os windows|darwin` for their data. `--view start`: the screen `[ui] start_view` opens at. `[ui]` on the console (theme, density, layout) is tried with a `[ui]` section in a `config.ini` (`NUC_CONSOLE_CONFIG=...`) and `NO_COLOR=1`; `tests/golden.py` has a case for each.
+
+## Golden outputs and the render benchmark
+
+`tests/golden/` holds what every screen writes, byte for byte, so that a refactor that is meant to change nothing can prove it. The console files are
+`render.py --once --demo --color` raw (the ANSI colours and the `ESC[K CR LF` that ends each line of a frame included): the overview at 79x24, 120x33,
+200x50 and 226x50 with `[dashboard] spacing` 0 and 1, `--demo-os windows` and `darwin`, the rotating pages and the Details pages, the MAP, CPU, HEALTH
+and AI screens (sorted, with a selection and its details), and the rotation with those screens in it. The web files are the pages `web.Server` builds:
+the dashboard (compact, `full=1`, `rotate=1`), CPU, the MAP as a tree and as a graph, HEALTH and AI, one tag per line outside `<pre>`.
+`python3 -m unittest tests.test_golden` (about 2 s) compares each case and prints the first lines of the diff of the ones that differ.
+
+`tests/golden.py` renders them in a `FrozenWorld`: a clock that stands still (UTC, whatever `TZ` says), the host name `demo-host`, the default
+configuration (not the `config.ini` of the machine), the commands the advice names in their Linux words, and the AI page's engine (the demo's, on a
+temporary folder, with a fixed CSRF token). The host's readings are the demo's own (`demo.sampler_data`): only the clock moves them, and it stands still. The files are therefore the same on Linux, macOS and Windows, on any number of CPUs and on every
+Python from 3.8 (the world also adds floats the old way and gives the graph's layout an exact `abs()`, because Python 3.12 and the C libraries of the
+three systems do not round alike). If the renderer starts to read something else from the machine, fake it there (or make the demo supply it), or the test fails somewhere else.
+A golden test that passes on your machine and fails on one OS in CI has found a dependency on that OS: fix the code, not the file.
+
+When a change is meant to alter what is drawn, regenerate and read the result:
+
+```bash
+NUC_GOLDEN_UPDATE=1 python3 -m unittest tests.test_golden   # rewrites the files that differ, deletes those no case owns
+git diff tests/golden                                        # this is the change the user will see: review it before you commit it
+```
+
+Commit the regenerated files with the code and say in the message why they changed; the reviewer reads the diff too. Never regenerate just to turn a
+red test green. A new screen, size or option is a new case in `_cases()` of `tests/golden.py`. The files are `-text` in `.gitattributes` (a frame ends its
+lines with CR LF on purpose): do not let an editor or a checkout convert them.
+
+`tools/bench_render.py` times the same renders: the CPU milliseconds one frame costs (`time.process_time`, the fastest of a few batches) for the overview
+at the four sizes, MAP, CPU, HEALTH, AI and the web pages. The console redraws every second or two on a machine that is meant to idle, so a refactor stays
+within 1.2 times of the baseline:
+
+```bash
+python3 tools/bench_render.py --json > before.json    # on the commit before your change
+python3 tools/bench_render.py --compare before.json   # after it: the ratios; exit status 1 if one view is more than 1.2 times slower
+```
+
+Compare runs on one machine and one Python, one after the other: the figures do not travel, and `before.json` is not committed.
 
 ## Most wanted
 
-1. **Translations.** All on-screen strings are English and live in `src/render.py`. A small translation layer (a dict of message keys, `NUC_CONSOLE_LANG` / `[dashboard] language`) would let other languages be added without touching the layout code. Keep strings within the widths the tables allot them, and discuss the approach in an issue first.
+1. **Translations.** All on-screen strings are English and live in `src/render.py`, with the console primitives in `src/ansi.py`, the text helpers and the colour tokens in `src/ui.py` and the notes of the exposure rows in `src/exposure.py`. A small translation layer (a dict of message keys, `NUC_CONSOLE_LANG` / `[dashboard] language`) would let other languages be added without touching the layout code. Keep strings within the widths the tables allot them, and discuss the approach in an issue first.
 2. nftables-native and firewalld support in the exposure logic; macOS `pf` rules; verifying macOS code signatures for the Application Firewall.
 3. Other container runtimes (podman).
 4. More sensors (AMD/ARM thermal, macOS, Windows), multiple NVMe.
@@ -179,12 +228,14 @@ release must fill them, from the sources, never from memory or from a web page. 
 python3 src/render.py --once --demo --color --cols 226 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · overview, 3-column layout (demo data)" > docs/img/overview.svg
 python3 src/render.py --once --demo --color --cols 120 --rows 40 | python3 tools/ansi2svg.py --title "nuc-console · 120×40 console, single column (demo data)" > docs/img/compact.svg
 python3 src/render.py --once --demo --color --view map --expand fit --select shop-api --details --cols 200 --rows 46 | python3 tools/ansi2svg.py --title "nuc-console · MAP: who reaches what, and what is behind it (demo data)" > docs/img/map.svg
-# the CPU screen (docs/img/cpu.png) the same way: http://127.0.0.1:8799/?view=cpu&sel=<a pid>&pause=1, window 1760x940
-# the HEALTH page (docs/img/health.png): http://127.0.0.1:8799/?view=health&sel=mem-leak%3Anode&pause=1, window 1760x840
-# the AI page (docs/img/ai.png): the demo web view shows the invented machines and simulates the buttons:
-#   python3 src/web.py --demo --port 8796 & PID=$!   # then window 1760x900: http://127.0.0.1:8796/?view=ai&pause=1 ; kill $PID
-# the graph view is a browser page: run the demo web view and take a screenshot with any Chromium-based browser
-python3 src/web.py --demo --port 8799 &   # then:
-chromium --headless --hide-scrollbars --window-size=1600,1000 --screenshot=docs/img/graph.png "http://127.0.0.1:8799/?view=map&as=graph&sel=<key of shop-api-1>"
-kill %1
+# the web view's screenshots are the shell (the default web interface), dark theme (ui=1.td), paused (pause=1), demo data:
+python3 src/web.py --demo --port 8799 & PID=$!
+#   docs/img/web.png     window 1760x1100  http://127.0.0.1:8799/?ui=1.td&pause=1
+#   docs/img/cpu.png     window 1760x940   http://127.0.0.1:8799/?ui=1.td&view=cpu&sel=<a pid>&pause=1
+#   docs/img/health.png  window 1760x840   http://127.0.0.1:8799/?ui=1.td&view=health&sel=mem-leak%3Anode&pause=1
+#   docs/img/ai.png      window 1760x900   http://127.0.0.1:8799/?ui=1.td&view=ai&pause=1   (the demo simulates the buttons: nothing is downloaded or started)
+#   docs/img/graph.png   window 1600x1000  http://127.0.0.1:8799/?ui=1.td&view=map&as=graph&pause=1&sel=<key of shop-api-1>
+chromium --headless --hide-scrollbars --force-dark-mode --window-size=1760,1100 --screenshot=docs/img/web.png "http://127.0.0.1:8799/?ui=1.td&pause=1"
+# (any Chromium-based browser or a script driving one; the scripts of the page need about a second to run before the shot)
+kill $PID
 ```

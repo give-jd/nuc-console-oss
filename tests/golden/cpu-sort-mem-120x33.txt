@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+[36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
+ [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mx86_64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M[0m[0m[K
+ [90mgovernor [0mschedutil/acpi-cpufreq  ·  [90mclock [0m2200-4850 MHz (base 3800)[0m[0m[K
+ [90mup [0m5d 0h  ·  [90mload [0m0.82 0.64 0.51  ·  [90mctxt [0m18.3k/s  ·  [90mintr [0m6.1k/s  ·  [90mrunning [0m2  ·  [90mblocked [0m0[0m[0m[K
+ [1mALL[0m [32m█[0m[90m░░░░░░░░░░░░░[0m   6.5%  [32muser[0m 4.4  [31msys[0m 1.7  nice 0.2  [90miowait[0m 0.1  irq 0.1  steal 0.0  idle 93.4[0m[0m[K
+  0 [32m█[0m[90m░░░░░░░░░░░░░[0m   6% 4.41G[0m   1 [90m░░░░░░░░░░░░░░[0m   0% 4.39G[0m   2 [31m█[0m[90m░░░░░░░░░░░░░[0m   5% 3.89G[0m   3 [90m░░░░░░░░░░░░░░[0m   2% 3.86G[0m[0m[0m[K
+  4 [32m██████[0m[31m███[0m[90m░░░░░[0m  65% 4.59G[0m   5 [90m░░░░░░░░░░░░░░[0m   2% 4.55G[0m   6 [90m░░░░░░░░░░░░░░[0m   2% 3.57G[0m   7 [90m░░░░░░░░░░░░░░[0m   3% 3.56G[0m[0m[0m[K
+  8 [90m░░░░░░░░░░░░░░[0m   0% 4.01G[0m   9 [90m░░░░░░░░░░░░░░[0m   1% 4.06G[0m  10 [90m░░░░░░░░░░░░░░[0m   3% 3.83G[0m  11 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 3.82G[0m[0m[0m[K
+ 12 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 4.50G[0m  13 [90m░░░░░░░░░░░░░░[0m   1% 4.47G[0m  14 [31m█[0m[90m░░░░░░░░░░░░░[0m   4% 3.72G[0m  15 [90m░░░░░░░░░░░░░░[0m   0% 3.70G[0m[0m[0m[K
+[36m──[0m[1;36m TEMPERATURES [0m[36m─────────────────────────────────────────────────────────────────────────────────────[0m[90m  source k10temp[0m[0m[0m[K
+ [90mPKG[0m   [32m█████████████████████████████[0m[90m░░░░░░░░░░░[0m 72°C/100°C   [90mhigh[0m 90°C  [90mcrit[0m 100°C[0m[0m[K
+ [90mhottest core [0m?   ·   [90mthrottled [0m?[0m[0m[K
+ [90msensors[0m Tctl 72°C  ·  Tccd1 66°C[0m[0m[K
+[36m──[0m[1;36m PROCESSES [0m[36m─────────────────────────────────────────[0m[90m  41 total · 3 running · 279 threads · 2 unreadable · by memory[0m[0m[0m[K
+ [1;36m  PID[0m [1;36mUSER     [0m [1;36mS[0m [1;36m NI[0m [1;36mTHR[0m [1;36m CPU%[0m [1;33mMEM%▼[0m [1;33m   RSS[0m [1;36m    TIME[0m [1;36mNAME[0m[0m[0m[K
+[7m  2350 alice     S   0  52  62.5   7.2   2.2G 13:56:50 java                                                            [0m[0m[0m[K
+  2210 alice     [32mR[0m  10  18 [31m296.1[0m   2.0   640M  2:32:00 ffmpeg[0m[0m[K
+  1610 1000      [32mR[0m   0  11 [33m 96.4[0m   1.3   412M  5:03:53 node[0m[0m[K
+  1590 999       [32mR[0m   0   1  22.6   0.4   140M  40:10.0 postgres[0m[0m[K
+   901 root      S   0  24   1.5   0.3    98M  1:13:22 dockerd[0m[0m[K
+  1520 999       S   0   1   0.3   0.2    58M   5:01.0 postgres[0m[0m[K
+   812 root      S   0  18   0.8   0.2    52M  50:10.2 containerd[0m[0m[K
+   412 root      S   0   1   0.2   0.2    48M   2:13.0 systemd-journal[0m[0m[K
+[36m──[0m[1;36m PROCESS 2350 [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  java[0m[0m[0m[K
+ [90mparent   [0m1  systemd[0m                                        [90mCPU      [0m62.5 %  (100 % = one core)[0m[0m[0m[K
+ [90muser     [0malice[0m                                             [90mmemory   [0m7.2 %  2.2G resident[0m[0m[0m[K
+ [90mstate    [0mS  sleeping[0m                                       [90mCPU time [0m13:56:50[0m[0m[0m[K
+ [90mthreads  [0m52[0m                                                [90mstarted  [0m2026-09-16 14:23:20 (120 h ago)[0m[0m[0m[K
+ [90mnice     [0m0[0m                                                 [90mchildren [0m0[0m[0m[0m[K
+ [90mpriority [0m20[0m[0m[0m[K
+[90m row 1/40  ↑↓: move  Enter: details  P cpu  [0m[1;7mM mem[0m[90m  T time  N pid  U user  1-5: screens  Esc: back  ?: help[0m[0m[0m

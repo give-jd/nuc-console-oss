@@ -1,0 +1,33 @@
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  [7m[4 Health][27m  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+[36m──[0m[1;36m HEALTH [0m [90mlast 24 hours[0m[90m · [0m[31m✖ 1 err[0m  [33m! 4 warn[0m  [90m· 1 info[0m [36m─────────────────────────────────────────[0m [7m d:24h [0m [90m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
+[90m  · memory trends need a period of at least 3 days[0m[0m[0m[0m[K
+[36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
+[7m  ✖ ERR   Out of memory: shop-worker-1  shop-worker-1 was hit by an out-of-memory event 1 time in the last 24 hours (… [0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRestarting: shop-worker-1[0m  [90mshop-worker-1 restarted 9 times within 24 hours (9 in total) and exited with an …[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mDisk filling up: /data[0m  [90m/data is 83% full, growing 4.1 GB/day: full in about 12 days.[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mKeeps the CPU busy: chrome[0m  [90mchrome used over 80% of one core for 6 hours in the last 24 hours (peak 143%, b…[0m[0m[0m[0m[K
+ [1;43;30m ! WARN [0m [1mRunning hot[0m  [90m2 hours at or above the temperature limit (90 C) in the last 24 hours (about 2.0 h/day, max 91…[0m[0m[0m[0m[K
+ [90m · INFO [0m [1mNoisy log: dockerd[0m  [90mdockerd logged one message 2631 times in the last 24 hours (about 2631 a day): "level=<…[0m[0m[0m[0m[K
+[36m──[0m[1;36m TOP CPU [0m[36m───────────────[0m[90m  share of CPU time · per hour[0m[0m[0m     [36m──[0m[1;36m EVENTS [0m[36m──────────────[0m[90m  by kind · subject ×times, last[0m[0m[0m  [0m[0m[K
+ chrome          [36m████████[0m[90m[0m  31%  avg 62%   [36m▄█▆█▄█▆█▅▅▇▇▅█[0m[0m[0m      [31mout of memory [0m shop-worker-1 ×1 [90m2 h ago[0m[0m[0m[0m                  [0m[0m[K
+ node            [36m████[0m[90m░░░░[0m  14%  avg 28%   [36m▅▅▇▄▇▅▅█▄██▆▄▇[0m[0m[0m      [33mcrash         [0m chrome ×1 [90m30 h ago[0m  ·  snapd ×1 [90m4 d ago[0m[0m[0m[0m   [0m[0m[K
+ dockerd         [36m██[0m[90m░░░░░░[0m   6%  avg 12%   [36m▅▆▇█▅▆▆█▆▇▄▆▆▆[0m[0m[0m      [33mservice failed[0m snapd.service ×1 [90m4 d ago[0m[0m[0m[0m                  [0m[0m[K
+[90m … +3 more[0m[0m[0m                                                    [33mrestart       [0m shop-worker-1 ×4 [90m2 h ago[0m[0m[0m[0m                  [0m[0m[K
+[0m                                                              [33mexit error    [0m shop-worker-1 ×1 [90m2 h ago[0m[0m[0m[0m                  [0m[0m[K
+[36m──[0m[1;36m TOP MEMORY [0m[36m──────────────────────────[0m[90m  RSS · per hour[0m[0m[0m      [90mthrottle      [0m host ×1 [90m27 h ago[0m[0m[0m[0m                          [0m[0m[K
+ chrome          avg 2.4G   max 3.9G   [36m████▇█▇▇▇██▇██[0m[0m[0m         [90mlogin failed  [0m sshd ×172 [90m72 min ago[0m[0m[0m[0m                      [0m[0m[K
+ node            avg 1.3G   max 1.9G   [36m▇███▇█▇██▇▇█▇█[0m[0m[0m        [0m                                                          [0m[0m[K
+ postgres        avg 922M   max 1.1G   [36m███▇██▇█▇█████[0m[0m[0m        [36m──[0m[1;36m NOISY / NEW LOGS [0m[36m────────────[0m[90m  messages in the period[0m[0m[0m  [0m[0m[K
+[90m … +3 more[0m[0m[0m                                                      2.6k      dockerd  [90mlevel=<v> msg=<str> error=<str>[0m[0m[0m     [0m[0m[K
+[0m                                                                 288      cron     [90m(<str>) CMD (<path>)[0m[0m[0m                [0m[0m[K
+[36m──[0m[1;36m THERMAL [0m[36m────[0m[90m  hours at or above the temperature limit[0m[0m[0m         172      sshd     [90mFailed password for <str> from <ip>…[0m[0m[0m[0m[0m[K
+ [33m2 h hot[0m[90m  ·  max 91 °C[0m[0m[0m                                       [90m … +3 more[0m[0m[0m                                                [0m[0m[K
+ [90mwhen hot: [0mchrome 38%  ·  node 17%  ·  shop-worker-1 8%[0m[0m[0m      [0m                                                          [0m[0m[K
+[0m                                                             [36m──[0m[1;36m DISKS [0m[36m────[0m[90m  used · days to full at the current growth[0m[0m[0m  [0m[0m[K
+[36m──[0m[1;36m BOOTS [0m[36m────────────────────────────────────[0m[90m  boot time[0m[0m[0m      /data     [33m███████████████████[0m[90m░░░░[0m  83%  [33mfull in 12 d[0m[0m[0m     [0m[0m[K
+ [36m▃▄▄▃▄▄▄█[0m  [90mlast 58 s · median 23 s · 8 boots[0m[0m[0m                  /         [32m█████████[0m[90m░░░░░░░░░░░░░░[0m  38%  [90mno trend[0m[0m[0m         [0m[0m[K
+                                                              /boot/efi [32m█[0m[90m░░░░░░░░░░░░░░░░░░░░░░[0m   6%  [90mno trend[0m[0m[0m         [0m[0m[K
+[K
+[K
+[90m finding 1/6  ↑↓: move  Enter: details  d/w/m: period  1-5: screens  Esc: back  ?: help[0m[0m[0m
