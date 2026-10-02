@@ -546,7 +546,7 @@ def _kpi_cpu(ctx):
     if not cores:
         return _unk("cpu")
     mean = sum(cores) / len(cores)
-    return _k("cpu", f"{mean * 100:.0f}", "%", _level(mean), f"{len(cores)} cores")
+    return _k("cpu", f"{mean * 100:.0f}", "%", _level(mean), ui.plural(len(cores), "thread"))
 
 
 @kpi("ram")

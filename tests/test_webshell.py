@@ -143,11 +143,12 @@ class Shell(unittest.TestCase):
                 if inside:
                     n += 1
                     unit.assertIn(tag, webjs.FRAG_TAGS, tag)
+                    allowed = {x.lower() for x in webjs.FRAG_ATTRS}  # the parser reports attribute names in lower case
                     for k in a:
-                        unit.assertIn(k, webjs.FRAG_ATTRS, (tag, k))
+                        unit.assertIn(k, allowed, (tag, k))
                     if "href" in a:
                         unit.assertTrue(a["href"].startswith(("/?", "#")), a["href"])
-                if tag not in ("polyline", "br", "hr", "input", "line", "circle", "path", "rect"):
+                if tag not in ("polyline", "br", "hr", "input", "line", "circle", "path", "rect", "col"):
                     depth.append(1) if inside else None
 
             def handle_endtag(self, tag):
@@ -317,7 +318,72 @@ class Shell(unittest.TestCase):
         self.assertIn("@container app", css)
         legacy = webcss.themed("".join(webcss.LEGACY_SOURCES))
         self.assertEqual(webcss.HEX.findall(legacy), [], "a colour of htmlview's palette that webcss.REMAP does not map")
+        # no colour literal outside the token blocks: everything else says var(--...)
+        outside = css
+        for table in list(webcss.THEME_TABLES.values()) + [webcss.DARK]:
+            outside = outside.replace(webcss.decls(table), "")
+        self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", outside), [], "a colour outside the token blocks")
         self.assertNotIn("http", css.replace("http-equiv", ""))  # nothing loads from anywhere
+
+    def test_a_native_card_is_html_and_a_raw_card_is_a_pre(self):
+        import cards
+        found = 0
+        for cid in prefs.CARDS:
+            m = re.search(r'<article class="[^"]*"[^>]*data-card="%s".*?</article>' % cid, self.body, re.S)
+            self.assertIsNotNone(m, cid)
+            native = cid in cards.NATIVE
+            self.assertEqual('class="tty"' in m.group(0), not native, cid)
+            if native:
+                found += 1
+                self.assertNotIn("<pre", m.group(0), cid)
+                self.assertTrue(re.search(r'class="(tbl|ln|msg|kv|wrap|grp)', m.group(0)), cid)
+        self.assertGreaterEqual(found, 4)
+
+    def test_the_cpu_key_figure_counts_threads(self):
+        self.assertIn("16 threads", self.body)
+        self.assertNotIn("16 cores", self.body)
+
+    def test_the_wall_cuts_long_lists_and_says_so(self):
+        import ui
+        t = ui.Table([ui.Col("a", "A")], [ui.Row(["x%d" % i]) for i in range(6)])
+        out = web.wall_trim([t, ui.More(2, "more"), ui.Msg("info", "x")])
+        self.assertEqual(len(out[0].rows), web.WALL_ROWS)
+        self.assertEqual((out[1].n, len(out)), (5, 3))
+        short = [ui.Table([ui.Col("a", "A")], [ui.Row(["x"])])]
+        self.assertIs(web.wall_trim(short), short)
+
+    def test_the_components_markup_is_inside_the_fragment_allowlist(self):
+        import htmlview
+        import ui
+        node = ui.Card("t", "T", "n", "ok", [
+            ui.Line([ui.Span("a", "ok", bold=True), ui.Bar(.5, "5"), ui.Spark([1, 2, 3])]), ui.Msg("warn", "m"),
+            ui.KV([("k", "v")]), ui.Table([ui.Col("a", "A", prio=1), ui.Col("b", "B", "r", num=True)],
+                                          [ui.Row(["x", "1"], href="/?x=1")], groups=[("g", 0)]),
+            ui.Wrap(["a", "b"], max_lines=1), ui.More(2, "more"), ui.Group([ui.Pill("p", "ok")], "t"),
+            ui.Tree([(1, "n", "ok")]), ui.Details("s", [ui.Msg("info", "i")]), ui.Kpi("cpu", "CPU", "1", "%", "ok")])
+        seen = []
+        unit = self
+
+        class W(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                seen.append(tag)
+                unit.assertIn(tag, webjs.FRAG_TAGS, tag)
+                for k, _ in attrs:
+                    unit.assertIn(k, {x.lower() for x in webjs.FRAG_ATTRS}, (tag, k))
+        W().feed(htmlview.html(node))
+        self.assertGreater(len(seen), 30)
+
+    def test_every_class_the_components_emit_is_styled(self):
+        import htmlview
+        import ui
+        node = ui.Card("t", "T", "n", "ok", [ui.Msg("ok", "m"), ui.Notice("warn", "m"), ui.KV([("k", "v")]), ui.Wrap(["a"]), ui.More(1),
+                                             ui.Group([], "t"), ui.Pill("p", "warn"), ui.Tree([(0, "a", "ok")]), ui.Details("s"),
+                                             ui.Table([ui.Col("a", "A", prio=3)], [ui.Row(["x"], tone="err")], groups=[("g", 0)]),
+                                             ui.Line([ui.Span("a", "banner_ok", True, True), ui.Bar(.9, "9"), ui.Spark([1, 2])])])
+        used = set(c for cl in re.findall(r'class="([^"]*)"', htmlview.html(node)) for c in cl.split())
+        css = webcss.CSS
+        for c in used - {"card", "s1", "st-ok", "state", "bg", "fg", "c-a", "tbl"}:  # the article and its header are the shell's own (card_article)
+            self.assertIn("." + c, css, c)
 
     # ---- the settings page
     def test_the_settings_page_has_appearance_export_and_about(self):

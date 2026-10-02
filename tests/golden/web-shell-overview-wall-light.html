@@ -1,6 +1,6 @@
 <!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none' -->
 <!doctype html>
-<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<html lang="en" data-theme="light" data-density="wall" class="z100 shift-1" data-prefs-src="url">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -10,23 +10,23 @@
 <link rel="stylesheet" href="/s/app.97a234b5.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="c04f169b2e">
+<header class="topbar" data-card="__top" data-rev="9b27a458ee">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
-<a href="/?app=1" data-key="1" aria-current="page">
+<a href="/?app=1&amp;ui=1.tl.dw" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
-<a href="/?app=1&amp;view=map" data-key="2">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;view=map" data-key="2">
 <kbd>2</kbd>Map <span class="badge">7</span>
 </a>
-<a href="/?app=1&amp;view=cpu" data-key="3">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
-<a href="/?app=1&amp;view=health" data-key="4">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;view=health" data-key="4">
 <kbd>4</kbd>Health <span class="badge">
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;view=ai" data-key="5">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -34,7 +34,7 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+<a class="ib" href="/?app=1&amp;ui=1.tl.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
 <div class="kpiblock" data-card="__kpis" data-rev="439277b829">
@@ -94,8 +94,8 @@
 </div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
-<main class="grid" data-refresh="2" data-frag="/?app=1&amp;frag=1">
-<article class="card s2 st-err" data-card="attention" data-rev="8631d8a2fa" id="c-attention" data-state="err">
+<main class="grid" data-refresh="2" data-frag="/?app=1&amp;ui=1.tl.dw&amp;frag=1">
+<article class="card s2 st-err" data-card="attention" data-rev="1a1365cec5" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -107,30 +107,22 @@
    <span class="y">!</span> 1 container exited with an error
    <span class="y">!</span> 2 errors in this boot&#x27;s journal
    <span class="y">!</span> 1 Docker port bypassing ufw (DOCKER-USER empty)
-   <span class="y">!</span> 1 service public on the Internet (Funnel :8444)</pre>
+<span class="d">   … +1 more</span></pre>
+<p class="more">
+<a href="/?app=1&amp;ui=1.tl.dw&amp;card=attention">… the whole card</a>
+</p>
 </div>
 </article>
-<article class="card s2 st-err" data-card="exposure" data-rev="b9178aa1fd" id="c-exposure" data-state="err">
+<article class="card s2 st-err" data-card="exposure" data-rev="341350bb66" id="c-exposure" data-state="err">
 <div class="ch">
 <h3>EXPOSURE</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0">   Internet <span class="r B">1</span>    LAN <span class="y">3</span>    Tailscale 4    Local 4        <span class="r">⚠ 1 DB/broker open on LAN</span>
-<span class="d">   ● open   ◐ filtered by source   ? unknown (treated as open)   · no</span>
-
-<span class="B">   PORT     SERVICE                            LOC   LAN    TS   NET    NOTE</span>
-
-<span class="B">   Reachable from the Internet (Tailscale Funnel)</span><span class="d">  (1)</span>
-    8444/t  funnel /webhook → 127.0.0.1:5678   <span class="d">·</span>     <span class="d">·</span>     <span class="y">●</span>     <span class="r B">●</span>    <span class="r">beyond config.ini: …</span>
-
-<span class="B">   Open on the LAN (and on Tailscale)</span><span class="d">  (3)</span>
-    5432/t <span class="r">⚠</span>shop-db-1                          <span class="w">●</span>     <span class="r">●</span>     <span class="r">●</span>     <span class="d">·</span>    <span class="r">beyond config.ini: …</span>
-    8080/t  shop-web-1                         <span class="w">●</span>     <span class="y">●</span>     <span class="y">●</span>     <span class="d">·</span>    <span class="d">expected: LAN · dec…</span>
-      22/t  sshd                               <span class="w">●</span>     <span class="c">◐</span>     <span class="y">●</span>     <span class="d">·</span>    <span class="d">LAN only 192.168.0.…</span>
-
-<span class="B">   This machine only</span><span class="d">  (4)</span>
-     5433 blog-db-1  ·  5678 node  ·  6379 cache-1  ·  8081 blog-app-1</pre>
+<pre class="tty" tabindex="0"> Internet <span class="r B">1</span>   LAN 3   tailnet only 0   local only 4   <span class="r">⚠ 1 DB/broker on LAN</span>
+ <span class="r B">●</span> 8444/t funnel /webhook → 127.0.0.1:5678/webhook  <span class="r">public on the Internet</span>
+   <span class="r">beyond config.ini: tailnet</span>
+ <span class="r">⚠5432 shop-db-1</span> <span class="r">beyond config.ini: local</span>  ·  8080 shop-web-1 <span class="d">expected: LAN</span>  ·  22 sshd</pre>
 </div>
 </article>
 <article class="card s1 st-err" data-card="databases" data-rev="17c513f66f" id="c-databases" data-state="err">
@@ -151,7 +143,7 @@
         <span class="d">no external client seen in 6</span></pre>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="firewall" data-rev="a1273d62b9" id="c-firewall" data-state="warn">
+<article class="card s1 st-warn" data-card="firewall" data-rev="4748540381" id="c-firewall" data-state="warn">
 <div class="ch">
 <h3>FIREWALL</h3>
 <span class="chip st-warn">! warn</span>
@@ -159,20 +151,8 @@
 <div class="cb">
 <pre class="tty" tabindex="0">   <span class="g">✔</span> ufw active
    <span class="y">!</span> DOCKER-USER empty: ports published by containers bypass ufw
-
-   <span class="d">ufw          </span>in deny  ·  out allow  ·  fwd deny   log: on (low)
-   <span class="d">iptables     </span>INPUT DROP (5 rules)   FORWARD DROP (0 rules)
-   <span class="d">tailscale    </span><span class="g">ts-input accepts tailscale0</span>
-   <span class="d">fail2ban     </span>sshd: 2 ban  198.51.100.7 198.51.100.9
-   <span class="d">drop 1h      </span>41
-   <span class="d">  ports      </span>23×25  445×16
-   <span class="d">  sources    </span>198.51.100.9×30  198.51.100.44×11
-
-<span class="B">   UFW INBOUND RULES (3)</span>
-<span class="B">   TO                          ACTION        FROM</span>
-   22/tcp                      ALLOW IN      192.168.0.0/24
-   Anywhere on tailscale0      ALLOW IN      Anywhere
-<span class="y">   41641/udp                   ALLOW IN      Anywhere</span></pre>
+   INPUT DROP · FORWARD DROP   <span class="g">ts-input ✔</span>
+   fail2ban sshd:2   drop 1h 41</pre>
 </div>
 </article>
 <article class="card s1 st-warn" data-card="containers" data-rev="b574be6745" id="c-containers" data-state="warn">
@@ -190,29 +170,14 @@
      <span class="g">●</span> cache</pre>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="boot" data-rev="7b85a62447" id="c-boot" data-state="warn">
+<article class="card s1 st-warn" data-card="boot" data-rev="c76ea29e20" id="c-boot" data-state="warn">
 <div class="ch">
 <h3>BOOT</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="cb">
-<pre class="tty" tabindex="0">   boot finished in <span class="B">58.4s</span>   kernel 6.8.0-demo   up 5d 0h
-   <span class="m">███</span><span class="b">█</span><span class="c">█</span><span class="y">█</span><span class="g">█████████████████████████████</span>
-   <span class="m">■</span> firmware 5.1s  <span class="b">■</span> loader 2.0s
-   <span class="c">■</span> kernel 1.2s  <span class="y">■</span> initrd 1.1s
-   <span class="g">■</span> userspace 49.0s
-
-<span class="c">──</span><span class="c B"> SLOWEST UNITS </span><span class="c">──</span><span class="d">  activation time: not all of them block boot</span>
-
-   systemd-networkd-wait-online.service   <span class="c">████████████████████</span>  <span class="y">33.5s</span>
-   docker.service                         <span class="c">████</span><span class="d">░░░░░░░░░░░░░░░░</span>  <span class="y">6.2s</span>
-   snapd.service                          <span class="c">███</span><span class="d">░░░░░░░░░░░░░░░░░</span>  4.8s
-   cloud-init.service                     <span class="c">██</span><span class="d">░░░░░░░░░░░░░░░░░░</span>  3.9s
-
-<span class="c">──</span><span class="c B"> BOOT JOURNAL </span><span class="c">─────</span><span class="d">  warning and worse</span>
-
-   <span class="r">2</span> errors   <span class="y">9</span> warning
-   <span class="y">●</span> kernel                        4×  <span class="d">example warning</span></pre>
+<pre class="tty" tabindex="0"> finished in <span class="B">58.4s</span>   <span class="g">✔ 0 failed units</span>
+ slowest: <span class="d">systemd-networkd-wait-online 33.5s</span></pre>
 </div>
 </article>
 <article class="card s1 st-warn" data-card="tailscale" data-rev="5aa95e2591" id="c-tailscale" data-state="warn">
@@ -278,7 +243,7 @@
  <span class="y">●</span> node     5678         <span class="d">local only</span>    <span class="d">not declared</span></pre>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="system" data-rev="b551fa9d36" id="c-system" data-state="ok">
+<article class="card s1 st-ok" data-card="system" data-rev="ddd4b4dde4" id="c-system" data-state="ok">
 <div class="ch">
 <h3>SYSTEM</h3>
 <span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
@@ -297,17 +262,7 @@
   8 <span class="d">░░░░░░░░░</span>   3%    9 <span class="d">░░░░░░░░░</span>   2%  
  10 <span class="d">░░░░░░░░░</span>   2%   11 <span class="d">░░░░░░░░░</span>   1%  
  12 <span class="g">█</span><span class="d">░░░░░░░░</span>   6%   13 <span class="d">░░░░░░░░░</span>   1%  
- 14 <span class="d">░░░░░░░░░</span>   2%   15 <span class="d">░░░░░░░░░</span>   1%  
-
-<span class="B"> HEAVIEST CONTAINERS (RAM)</span>
- shop-api-1                         520M   <span class="g">████████████████████</span>
- shop-db-1                          410M   <span class="g">████████████████</span><span class="d">░░░░</span>
- shop-web-1                         310M   <span class="g">████████████</span><span class="d">░░░░░░░░</span>
- blog-db-1                          260M   <span class="g">██████████</span><span class="d">░░░░░░░░░░</span>
- blog-app-1                         150M   <span class="g">██████</span><span class="d">░░░░░░░░░░░░░░</span></pre>
-<p class="more">
-<a href="/?app=1&amp;card=system">… the whole card</a>
-</p>
+ 14 <span class="d">░░░░░░░░░</span>   2%   15 <span class="d">░░░░░░░░░</span>   1%  </pre>
 </div>
 </article>
 <article class="card s1 st-ok" data-card="network_traffic" data-rev="67e3517dab" id="c-network_traffic" data-state="ok">
@@ -479,15 +434,15 @@
 </div>
 </article>
 </main>
-<footer class="foot">refresh every <a href="/?refresh=1&amp;app=1">−</a> 2s <a href="/?refresh=3&amp;app=1">+</a>
+<footer class="foot">refresh every <a href="/?refresh=1&amp;app=1&amp;ui=1.tl.dw">−</a> 2s <a href="/?refresh=3&amp;app=1&amp;ui=1.tl.dw">+</a>
 <span class="dot">·</span>
-<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?app=1&amp;pause=1">pause</a>
-<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1">A−</a> 100% <a href="/?zoom=110&amp;app=1">A+</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?app=1&amp;ui=1.tl.dw&amp;pause=1">pause</a>
+<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1&amp;ui=1.tl.dw">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;ui=1.tl.dw">A+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1">high contrast</a>
+<span class="grp">theme: <a class="lnk" data-set data-theme="auto" href="/?set=ta&amp;back=app%3D1%26ui%3D1.tl.dw">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26ui%3D1.tl.dw">dark</a> <span class="lnk" aria-current="true">light</span> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26ui%3D1.tl.dw">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1">compact</a>
+<span class="grp">density: <span class="lnk" aria-current="true">wall</span> <a class="lnk" data-set data-density="desk" href="/?set=dk&amp;back=app%3D1%26ui%3D1.tl.dw">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26ui%3D1.tl.dw">compact</a>
 </span>
 <span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>

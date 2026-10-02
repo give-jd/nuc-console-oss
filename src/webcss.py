@@ -180,7 +180,7 @@ a.kpi:hover{border-color:var(--line-2)}
 
 GRID = """
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:var(--gap);align-items:start;padding:0 var(--pad) var(--pad)}
-.card{grid-column:span 3;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;scroll-margin-top:5em}
+.card{grid-column:span 3;min-width:0;container:card / inline-size;background:var(--surface);border:1px solid var(--line);border-radius:8px;scroll-margin-top:5em}
 .card.s1{grid-column:span 3}.card.s2{grid-column:span 6}.card.s3{grid-column:span 9}.card.s4{grid-column:span 12}
 @container app (max-width:84.3em){
   .grid{grid-template-columns:repeat(6,minmax(0,1fr))}
@@ -202,9 +202,12 @@ GRID = """
 .chip.st-ok{background:var(--ok-bg);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
 .chip.st-unknown{background:var(--warn-bg);color:var(--warn);border:1px dashed var(--warn)}
 .chip.st-info{background:var(--surface-2);color:var(--muted);border-color:var(--line-2)}
-.cb{padding:.7em var(--pad) .8em;min-width:0}
+.cb{padding:.7em var(--pad) .8em;min-width:0;overflow-x:auto}
 .cb>*+*{margin-top:.65em}
-.cb pre,pre.tty{margin:0;overflow-x:auto;font:.86em/1.3 var(--mono);font-variant-ligatures:none;white-space:pre;color:var(--fg)}
+.cb pre,pre.tty{margin:0;overflow-x:auto;font:.86em/1.3 var(--mono);font-variant-ligatures:none;white-space:pre;color:var(--fg);scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;
+background:linear-gradient(to right,var(--surface) 30%,transparent) left center/1.6em 100% no-repeat local,linear-gradient(to left,var(--surface) 30%,transparent) right center/1.6em 100% no-repeat local,
+linear-gradient(to right,var(--line-2),transparent) left center/.5em 100% no-repeat scroll,linear-gradient(to left,var(--line-2),transparent) right center/.5em 100% no-repeat scroll}
+.cb pre::-webkit-scrollbar{height:.5em}.cb pre::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px}
 .more{color:var(--muted);font-size:.88em}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0}
 .view{padding:0 var(--pad) var(--pad);min-width:0}
@@ -221,12 +224,6 @@ table{border-collapse:collapse;width:100%}
 .tbl-w{overflow-x:auto;max-width:100%}
 .mx th,.pt th,.mt th{font:600 .7em var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-align:left;padding:.3em .5em;border-bottom:1px solid var(--line);white-space:nowrap}
 .mx td,.pt td,.mt td{padding:.32em .5em;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent);vertical-align:baseline}
-.bar{display:block;height:.55em;border-radius:2px;background:color-mix(in srgb,var(--fg) 13%,transparent);overflow:hidden}
-.bar>i{display:block;height:100%;background:var(--bar)}
-.bar.warn>i{background:var(--warn)}.bar.err>i{background:var(--err)}
-.bar.w5>i{width:5%}.bar.w10>i{width:10%}.bar.w15>i{width:15%}.bar.w20>i{width:20%}.bar.w25>i{width:25%}.bar.w30>i{width:30%}.bar.w35>i{width:35%}
-.bar.w40>i{width:40%}.bar.w45>i{width:45%}.bar.w50>i{width:50%}.bar.w55>i{width:55%}.bar.w60>i{width:60%}.bar.w65>i{width:65%}.bar.w70>i{width:70%}
-.bar.w75>i{width:75%}.bar.w80>i{width:80%}.bar.w85>i{width:85%}.bar.w90>i{width:90%}.bar.w95>i{width:95%}.bar.w100>i{width:100%}
 .tag{font:600 .74em var(--mono);padding:.08em .5em;border-radius:3px;border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
 .tag.err{background:var(--err-bg);color:var(--err);border-color:color-mix(in srgb,var(--err) 50%,transparent)}
 .tag.warn{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
@@ -280,6 +277,78 @@ SETTINGS = """
 .about dt{color:var(--muted)}
 .about dd{margin:0;min-width:0;overflow-wrap:anywhere;line-height:1.6}
 @container app (max-width:45.7em){.kchk{grid-template-columns:minmax(0,1fr)}.about{grid-template-columns:minmax(0,1fr);gap:.1em}.about dd{margin-bottom:.6em}}
+"""
+
+# the components htmlview.html draws (ui.Span/Line/Table/KV/Msg/Wrap/More/Group/Pill/Tree/Details/Bar/Spark): every class it emits is here.
+# Tones are t-<token>; a state is st-<state> or lv-<level>. Columns carry p1..p3 (ui.Col.prio): a bigger number is dropped sooner, by the
+# width of the card (container queries on the card, not on the page). The classes r / b / n of these elements share their names with the ANSI
+# colours (.r red, .b blue): the ANSI text lives in a <pre>, and the rules for it are repeated there with a higher weight.
+COMPONENTS = """
+.cb p{margin:0}
+.cb .ln{overflow-wrap:anywhere}
+.t-ok{color:var(--ok)}.t-warn{color:var(--warn)}.t-err{color:var(--err)}.t-unknown{color:var(--warn)}.t-info,.t-muted,.t-neutral{color:var(--muted)}
+.t-accent{color:var(--accent)}.t-accent-strong{color:var(--accent);font-weight:700}.t-err-strong{color:var(--err);font-weight:700}.t-strong{color:var(--fg-strong);font-weight:700}
+.t-banner-ok{background:var(--ok-bg);color:var(--ok);font-weight:700;padding:0 .4em;border-radius:3px}
+.t-banner-err{background:var(--err-solid);color:var(--on-solid);font-weight:700;padding:0 .4em;border-radius:3px}
+.t-banner-warn{background:var(--warn-bg);color:var(--warn);font-weight:700;padding:0 .4em;border-radius:3px}
+.t-sel{background:var(--accent-bg);color:var(--fg-strong)}
+.cb span.b{color:inherit;font-weight:700}.cb pre span.b{color:var(--accent);font-weight:400}
+.cb span.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.cb span.n{font-family:var(--mono);font-variant-numeric:tabular-nums;color:inherit}
+.st-unknown{color:var(--warn)}span.st-unknown{text-decoration:underline dashed;text-underline-offset:.2em;text-decoration-thickness:1px}
+.msg{display:grid;grid-template-columns:1.4em minmax(0,1fr);gap:.4em;align-items:baseline;overflow-wrap:anywhere}
+.msg .sym{align-self:start}
+.msg.lv-ok .sym{color:var(--ok)}.msg.lv-warn .sym{color:var(--warn)}.msg.lv-err .sym{color:var(--err)}.msg.lv-info{color:var(--muted)}
+.msg.lv-warn,.msg.lv-err{color:var(--fg-strong)}
+.msg.notice{padding:.45em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2)}
+.msg.notice.lv-warn{border-color:color-mix(in srgb,var(--warn) 50%,transparent);background:var(--warn-bg)}
+.msg.notice.lv-err{border-color:color-mix(in srgb,var(--err) 50%,transparent);background:var(--err-bg)}
+dl.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.2em .8em;margin:0;font-size:.92em}
+dl.kv dt{color:var(--muted)}dl.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+table.tbl{font-size:.9em}
+table.tbl th{font:600 .72em var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-align:left;padding:.3em .5em;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tbl td{padding:.32em .5em;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent);vertical-align:baseline}
+table.tbl tbody tr:last-child td{border-bottom:0}
+table.tbl th:first-child,table.tbl td:first-child{padding-left:0}
+table.tbl th:last-child,table.tbl td:last-child{padding-right:0}
+.cb td.r,.cb th.r{color:inherit;text-align:right}
+.cb th.r{color:var(--muted)}
+td.n,th.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.n,td.r{white-space:nowrap}
+table.tbl td svg{vertical-align:middle}
+table.tbl tr.grp th{padding-top:.8em;font:600 .86em var(--sans);letter-spacing:0;text-transform:none;color:var(--fg-strong);border-bottom:1px solid var(--line-2)}
+table.tbl tr.t-err td{background:var(--err-bg)}
+table.tbl tr.t-warn td{background:var(--warn-bg)}
+table.tbl td a{color:var(--accent)}
+svg.bar{display:inline-block;width:min(100%,6.5em);height:.6em;vertical-align:middle;margin-right:.5em;border-radius:2px;overflow:hidden}
+svg.bar .bg{fill:color-mix(in srgb,var(--fg) 13%,transparent)}
+svg.bar .fg{fill:var(--bar)}
+svg.bar.st-warn .fg{fill:var(--warn)}svg.bar.st-err .fg{fill:var(--err)}svg.bar.st-ok .fg{fill:var(--ok)}
+svg.spark{display:inline-block;width:4.5em;height:1.1em;vertical-align:middle;overflow:visible}
+svg.spark polyline{fill:none;stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+ul.wrap,ul.tree{list-style:none;margin:0;padding:0}
+ul.wrap{display:flex;flex-wrap:wrap;gap:.2em 1em}
+ul.tree li{padding:.1em 0;overflow-wrap:anywhere}
+ul.tree li[data-depth="1"]{padding-left:1.4em}ul.tree li[data-depth="2"]{padding-left:2.8em}ul.tree li[data-depth="3"]{padding-left:4.2em}
+section.grp>h3{margin:0 0 .4em;font:650 .7em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-bottom:.3em;border-bottom:1px solid var(--line)}
+section.grp>*+*{margin-top:.5em}
+.pill{display:inline-block;font:700 .78em/1.5 var(--mono);padding:.05em .7em;border-radius:99px;border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.pill.st-ok{background:var(--ok-bg);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.pill.st-warn,.pill.st-unknown{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.pill.st-err,.pill.st-down{background:var(--err-bg);color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,transparent)}
+details.more>summary,details.dt>summary{cursor:pointer;width:fit-content;border-radius:3px}
+details.more>summary{color:var(--muted)}
+details.more>summary:hover{color:var(--accent)}
+details.more p{margin-top:.3em}
+details.dt{border-top:1px dashed var(--line-2);padding-top:.5em}
+details.dt>summary{color:var(--accent);font-size:.92em}
+details.dt[open]>summary{margin-bottom:.5em}
+details.dt>*+*{margin-top:.5em}
+.cb .grp .ln+.ln{margin-top:.2em}
+@container card (max-width:40em){th.p3,td.p3{display:none}}
+@container card (max-width:30em){th.p2,td.p2{display:none}}
+@container card (max-width:22em){th.p1,td.p1{display:none}}
+html[data-density="wall"] details.dt{display:none}
 """
 
 # the ANSI text of the cards that are not built of components yet (htmlview.to_html: <span class="g B">): the colours of the theme
@@ -356,7 +425,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, COMPONENTS, ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()
