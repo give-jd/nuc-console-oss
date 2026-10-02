@@ -6,6 +6,11 @@ console has always written, so drawing through sgr() changes nothing on screen. 
 formatters) hold no colour and no clock: they are what every screen and the exposure model share, so none of them has to
 import render.py for it.
 
+The components (Span, Line, Card, Kpi, Table, ...) at the end are the model every screen is built from: plain data with __slots__, no
+drawing. A renderer (ansi.py for the console, htmlview.py for the web) turns them into its own text. A component that shows a value
+carries a state ('ok', 'warn', 'err', 'down', 'unknown', 'info'); a value that could not be read is 'unknown' and drawn as '?', never as
+fine. Text that came from the machine is cleaned (safe()) when the component is built.
+
 Nothing here reads the configuration, the clock or the host.
 """
 import math
@@ -77,6 +82,8 @@ CSS_THEMES = {
         "rv_bg": "#ffffff", "rv_fg": "#000000",
     },
 }
+
+THERMAL_WARN, THERMAL_ERR = 0.8, 0.9  # fractions of the maximum a sensor declares (sysfs temp*_max): where a temperature warns / errs
 
 # ---- text helpers: no colour, no clock, no host -------------------------------------------------------------------------
 
@@ -183,3 +190,246 @@ def hnum(x, default=0.0):
 def hcount(n):
     n = hnum(n)
     return f"{n:.0f}" if n < 1000 else f"{n / 1000:.1f}k" if n < 10000 else f"{n / 1000:.0f}k" if n < 1e6 else f"{n / 1e6:.1f}M"
+
+
+# ---- components: what a screen is made of ---------------------------------------------------------------------------------
+# Plain classes with __slots__ (a frame builds hundreds), equal when their fields are. The constructors clean what the machine wrote
+# and refuse what has no meaning (a state that does not exist); they hold no colour: a tone is a token of TOKENS, a state is one of STATES.
+
+STATES = ("ok", "warn", "err", "down", "unknown", "info")
+SYMBOLS = {"ok": "✔", "warn": "!", "err": "✖", "down": "✖", "unknown": "?", "info": "·"}  # the mark that goes with a state besides its colour
+LEVELS = ("ok", "warn", "err", "info")  # what a Msg / Notice says (the console's msg())
+_SEVERITY = {"ok": 0, "info": 0, "unknown": 1, "warn": 2, "err": 3, "down": 3}
+
+
+def check_state(state):
+    """state, when it is one of STATES; ValueError otherwise (there is no default: a value without a state does not exist)."""
+    if state not in STATES:
+        raise ValueError(f"unknown state {state!r}: one of {', '.join(STATES)}")
+    return state
+
+
+def worst(states):
+    """The most serious of some states ('ok' for none): err and down, then warn, then unknown, then ok and info."""
+    best = "ok"
+    for s in states:
+        if _SEVERITY[check_state(s)] > _SEVERITY[best]:
+            best = s
+    return best
+
+
+class _Component(object):
+    __slots__ = ()
+
+    def _fields(self):
+        return tuple(getattr(self, n) for n in self.__slots__)
+
+    def __eq__(self, other):
+        return type(other) is type(self) and self._fields() == other._fields()
+
+    __hash__ = None
+
+    def __repr__(self):
+        return "%s(%s)" % (type(self).__name__, ", ".join("%s=%r" % (n, getattr(self, n)) for n in self.__slots__))
+
+
+def _text(x):
+    return safe("" if x is None else x)
+
+
+def _tone(tone):
+    if tone is not None and tone not in TOKENS:
+        raise ValueError(f"unknown tone {tone!r}")
+    return tone
+
+
+def _inline(x):
+    return x if isinstance(x, (Span, Line)) else Span(x)
+
+
+class Span(_Component):
+    """A piece of text: its tone (a token of TOKENS, or None for the surface's own colour), bold, mono (a number or a path)."""
+    __slots__ = ("text", "tone", "bold", "mono")
+
+    def __init__(self, text, tone=None, bold=False, mono=False):
+        self.text, self.tone, self.bold, self.mono = _text(text), _tone(tone), bool(bold), bool(mono)
+
+
+class Line(_Component):
+    """One line of Spans (strings are made Spans)."""
+    __slots__ = ("spans",)
+
+    def __init__(self, spans=()):
+        self.spans = [x if isinstance(x, Span) else Span(x) for x in ([spans] if isinstance(spans, (str, Span)) else spans)]
+
+    @property
+    def text(self):
+        return "".join(s.text for s in self.spans)
+
+
+class Raw(_Component):
+    """The lines of a block drawn the old way, ANSI included: what a card holds until it is built of components. A console draws them
+    as they are; they carry no state of their own (the Card around them does)."""
+    __slots__ = ("lines",)
+
+    def __init__(self, lines=()):
+        self.lines = list(lines)
+
+
+class More(_Component):
+    """'... +N more': what a card left out, and where all of it is (href: a web page, None on the console, which has its Details pages)."""
+    __slots__ = ("n", "what", "href")
+
+    def __init__(self, n, what="more", href=None):
+        self.n, self.what, self.href = max(0, int(n)), _text(what), href
+
+    @property
+    def text(self):
+        return f"… +{self.n} {self.what}"
+
+
+class Card(_Component):
+    """One section of the overview: id (one of nuc_config.SECTIONS), title, note (the title's remark), state, body (components),
+    more (a More, when it left items out), size (columns wide on the web, 1-4) and truncated (it hid items on the console)."""
+    __slots__ = ("id", "title", "note", "state", "body", "more", "size", "truncated")
+
+    def __init__(self, id, title, note, state, body, more=None, size=1, truncated=False):
+        self.id, self.title, self.note, self.state = id, _text(title), _text(note), check_state(state)
+        self.body, self.more, self.truncated = list(body), more, bool(truncated)
+        self.size = size if isinstance(size, int) and not isinstance(size, bool) and 1 <= size <= 4 else 1
+
+    @property
+    def lines(self):
+        """The ANSI lines of the Raw parts of the body, in order (what a console that has not been taught the other components draws)."""
+        return [x for part in self.body if isinstance(part, Raw) for x in part.lines]
+
+
+class Kpi(_Component):
+    """One figure of the row under the header: label, value and unit as text, its state and the symbol that goes with it. A value that
+    is not known is state 'unknown' and value '?' (whatever was passed), never fine. spark: a series of numbers, or None."""
+    __slots__ = ("id", "label", "value", "unit", "state", "symbol", "hint", "spark")
+
+    def __init__(self, id, label, value, unit, state, symbol=None, hint="", spark=None):
+        self.id, self.label, self.state = id, _text(label), check_state(state)
+        self.value, self.unit = ("?", "") if state == "unknown" else (_text(value), _text(unit))
+        self.symbol = SYMBOLS[state] if symbol is None else _text(symbol)
+        self.hint = _text(hint)
+        self.spark = None if spark is None else Spark(spark)
+
+
+class Col(_Component):
+    """A column of a Table: key, label, align ('l' | 'r'), prio (0 = never dropped; a bigger number is dropped sooner when the room is
+    short), num (the cells are numbers: mono, aligned)."""
+    __slots__ = ("key", "label", "align", "prio", "num")
+
+    def __init__(self, key, label, align="l", prio=0, num=False):
+        self.key, self.label, self.align, self.prio, self.num = key, _text(label), "r" if align == "r" else "l", int(prio), bool(num)
+
+
+class Row(_Component):
+    """A row of a Table: one cell per column (Span, Line or str), a tone for the whole row, a stable key, a link."""
+    __slots__ = ("cells", "tone", "key", "href")
+
+    def __init__(self, cells, tone=None, key=None, href=None):
+        self.cells = [_inline(c) for c in cells]
+        self.tone, self.key, self.href = _tone(tone), key, href
+
+
+class Table(_Component):
+    """cols [Col], rows [Row] (one cell per column), groups: None or [(label, first row index)]: the rows from there on belong to it."""
+    __slots__ = ("cols", "rows", "groups")
+
+    def __init__(self, cols, rows=(), groups=None):
+        self.cols, self.rows = list(cols), list(rows)
+        for r in self.rows:
+            if len(r.cells) != len(self.cols):
+                raise ValueError(f"a row has {len(r.cells)} cells for {len(self.cols)} columns")
+        self.groups = None if groups is None else [(_text(label), int(i)) for label, i in groups]
+
+
+class KV(_Component):
+    """Labels and values: pairs of (label, Span / Line / str) and the label column's width on the console."""
+    __slots__ = ("pairs", "lw")
+
+    def __init__(self, pairs=(), lw=13):
+        self.pairs = [(_text(k), _inline(v)) for k, v in pairs]
+        self.lw = int(lw)
+
+
+class Bar(_Component):
+    """A fraction of a whole (0..1): its state is read off the thresholds (warn, err), and a fraction that is None (it could not be
+    read) is state 'unknown' with the text '?': never an empty bar that looks fine."""
+    __slots__ = ("frac", "value_text", "warn", "err")
+
+    def __init__(self, frac, value_text="", warn=0.7, err=0.9):
+        f = num(frac)
+        self.frac = None if f is None else min(max(f, 0.0), 1.0)
+        self.value_text = "?" if self.frac is None else _text(value_text)
+        self.warn, self.err = warn, err
+
+    @property
+    def state(self):
+        return "unknown" if self.frac is None else "ok" if self.frac < self.warn else "warn" if self.frac < self.err else "err"
+
+
+class Spark(_Component):
+    """A series of numbers, oldest first; what is not a finite number is dropped."""
+    __slots__ = ("values",)
+
+    def __init__(self, values=()):
+        self.values = [v for v in (num(x) for x in values) if v is not None]
+
+
+class Pill(_Component):
+    """A short label with a state: 'ALL OK', 'N PROBLEMS'."""
+    __slots__ = ("text", "state")
+
+    def __init__(self, text, state):
+        self.text, self.state = _text(text), check_state(state)
+
+
+class Msg(_Component):
+    """A status line: level 'ok' | 'warn' | 'err' | 'info' (the symbol goes with it) and its text."""
+    __slots__ = ("level", "text")
+
+    def __init__(self, level, text):
+        if level not in LEVELS:
+            raise ValueError(f"unknown level {level!r}: one of {', '.join(LEVELS)}")
+        self.level, self.text = level, _text(text)
+
+
+class Notice(Msg):
+    """A message about the screen, not about a thing in it (stale data, a lock): the shape of a Msg."""
+    __slots__ = ()
+
+
+class Wrap(_Component):
+    """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one)."""
+    __slots__ = ("items", "sep", "max_lines")
+
+    def __init__(self, items=(), sep="  ·  ", max_lines=None):
+        self.items, self.sep, self.max_lines = [_inline(x) for x in items], sep, max_lines
+
+
+class Group(_Component):
+    """Children drawn together under an optional title."""
+    __slots__ = ("children", "title")
+
+    def __init__(self, children=(), title=""):
+        self.children, self.title = list(children), _text(title)
+
+
+class Tree(_Component):
+    """Rows of (depth, Span / Line / str, state): a tree as a list, each node with its state."""
+    __slots__ = ("rows",)
+
+    def __init__(self, rows=()):
+        self.rows = [(int(d), _inline(x), check_state(s)) for d, x, s in rows]
+
+
+class Details(_Component):
+    """A part that is folded until asked for: summary (Line / Span / str) and body (components)."""
+    __slots__ = ("summary", "body", "open")
+
+    def __init__(self, summary, body=(), open=False):
+        self.summary, self.body, self.open = _inline(summary), list(body), bool(open)

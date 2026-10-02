@@ -115,7 +115,7 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
 
 
 THROTTLE_WINDOW_S = 60
-THERMAL_WARN, THERMAL_ERR = 0.8, 0.9  # fractions of the maximum declared by the sensor (sysfs temp*_max)
+THERMAL_WARN, THERMAL_ERR = ui.THERMAL_WARN, ui.THERMAL_ERR  # fractions of the maximum declared by the sensor (sysfs temp*_max)
 
 
 def read_file(path):
