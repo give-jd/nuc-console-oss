@@ -147,3 +147,154 @@ def kiosk_page(screen, cols, rows, refresh, title):
            f"font-size:{font};line-height:1.2;white-space:pre}}" + PALETTE)
     return (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta http-equiv="refresh" content="{int(refresh)}">'
             f"<title>{html.escape(title)} · nuc-console</title><style>{css}</style><pre>{to_html(screen.replace(chr(13), ''))}</pre></html>")
+
+
+# ======================================================================================================================================
+# The components as HTML: html(node)
+# ======================================================================================================================================
+# The web's drawing of the ui components (ui.py): semantic HTML with classes, no inline style and no script. Every text is escaped; a
+# class is built only from a token or a state (letters, digits and '-'), a link only when it is a path, a query or http(s).
+#
+#   tone     t-ok t-warn t-err t-unknown t-info t-muted t-accent t-strong ...   (a token of ui.TOKENS, '_' written '-')
+#   state    st-ok st-warn st-err st-down st-unknown st-info                    (a card, a Pill, a Kpi, a Bar, a table row's cell)
+#   level    lv-ok lv-warn lv-err lv-info                                       (a Msg)
+#   b, mono  bold text, a number or a path
+#   n        a cell of numbers (<td class="n">), r right-aligned, p<N> a column that goes sooner the bigger N is (container queries)
+#   card     <article class="card st-warn s2" data-card="id"> with <header><h2>, the note and the state's word
+#
+# A Bar and a Spark are SVG with attributes (viewBox, width, points): the CSS colours them by the state class of the element. A More is a
+# <details>. The console's widths (Col.w, Bar.w) are not the web's: the CSS sizes the columns and the bars.
+#
+# The module's `html` name was the standard library module until this function took it: its escape() and unescape() are kept on it, so that
+# `html.escape(...)` in the code above and in the shell keeps working.
+
+import ui  # noqa: E402 - the components this section draws
+
+_stdhtml = html
+_SAFE_CLASS = re.compile(r"[^a-z0-9-]")
+_SAFE_HREF = re.compile(r"^(?:/(?!/)|[?#]|https?://)[^\s\\\"'<>]*$")  # a path, a query, an anchor or http(s): not //host, not a backslash
+
+
+def _e(text):
+    return _stdhtml.escape(ui.safe(text), quote=True)  # control characters are '?' too: escaping alone leaves an ESC in a data- attribute
+
+
+def _cls(*names):
+    """A class attribute from names ('' and None are left out; anything but a-z 0-9 and '-' is turned into '-')."""
+    out = [_SAFE_CLASS.sub("-", str(n).lower().replace("_", "-")) for n in names if n]
+    return f' class="{" ".join(out)}"' if out else ""
+
+
+def _href(url):
+    return str(url) if url and _SAFE_HREF.match(str(url)) else None
+
+
+def _span(span):
+    names = [("t-" + span.tone) if span.tone else "", "b" if span.bold else "", "mono" if span.mono else ""]
+    return f"<span{_cls(*names)}>{_e(span.text)}</span>" if any(names) else _e(span.text)
+
+
+_SPARK_W, _SPARK_H = 80, 16
+_BAR_W, _BAR_H = 100, 8
+
+
+def _bar_svg(b):
+    if b.frac is None:
+        return '<span class="st-unknown" role="img" aria-label="unknown">?</span>'
+    pct = round(b.frac * 100)
+    svg = (f'<svg{_cls("bar", "st-" + b.state)} viewBox="0 0 {_BAR_W} {_BAR_H}" width="{_BAR_W}" height="{_BAR_H}" role="img" '
+           f'aria-label="{pct}%" preserveAspectRatio="none"><rect class="bg" x="0" y="0" width="{_BAR_W}" height="{_BAR_H}"/>'
+           f'<rect class="fg" x="0" y="0" width="{round(b.frac * _BAR_W, 1):g}" height="{_BAR_H}"/></svg>')
+    return svg + (f'<span class="n">{_e(b.value_text)}</span>' if b.value_text else "")
+
+
+def _spark_svg(sp):
+    vals = sp.values
+    if not vals:
+        return f'<svg class="spark" viewBox="0 0 {_SPARK_W} {_SPARK_H}" width="{_SPARK_W}" height="{_SPARK_H}" role="img" aria-label="no data"></svg>'
+    top = max(max(vals), sp.floor, 1e-9)
+    step = _SPARK_W / max(len(vals) - 1, 1)
+    pts = " ".join(f"{i * step:.1f},{_SPARK_H - 1 - v / top * (_SPARK_H - 2):.1f}" for i, v in enumerate(vals))
+    return (f'<svg class="spark" viewBox="0 0 {_SPARK_W} {_SPARK_H}" width="{_SPARK_W}" height="{_SPARK_H}" role="img" aria-label="trend">'
+            f'<polyline fill="none" points="{pts}"/></svg>')
+
+
+def _inline(x):
+    """A Span, a Line, a Bar or a Spark as markup that sits in a line or a cell."""
+    if isinstance(x, ui.Span):
+        return _span(x)
+    if isinstance(x, ui.Line):
+        return "".join(_inline(p) for p in x.spans)
+    if isinstance(x, ui.Bar):
+        return _bar_svg(x)
+    if isinstance(x, ui.Spark):
+        return _spark_svg(x)
+    return '<span class="st-unknown">?</span>'
+
+
+def _table(t):
+    heads = "".join(f'<th{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")} scope="col">'
+                    f"{_e(c.label)}</th>" for c in t.cols)
+    marks = {i: label for label, i in (t.groups or ())}
+    body = []
+    for i, r in enumerate(t.rows):
+        if i in marks:
+            body.append(f'<tr class="grp"><th colspan="{len(t.cols)}" scope="rowgroup">{_e(marks[i])}</th></tr>')
+        link = _href(r.href)
+        cells = []
+        for j, (c, cell) in enumerate(zip(t.cols, r.cells)):
+            inner = _inline(cell)
+            if j == 0 and link:
+                inner = f'<a href="{_e(link)}">{inner}</a>'
+            cells.append(f'<td{_cls("r" if c.align == "r" else "", "n" if c.num else "", ("p%d" % c.prio) if c.prio else "")}>{inner}</td>')
+        key = f' data-key="{_e(r.key)}"' if r.key is not None else ""
+        body.append(f'<tr{_cls("t-" + r.tone if r.tone else "")}{key}>{"".join(cells)}</tr>')
+    colgroup = "<colgroup>" + "".join(f"<col{_cls('c-' + c.key)}>" for c in t.cols) + "</colgroup>"
+    return f'<table class="tbl">{colgroup}<thead><tr>{heads}</tr></thead><tbody>{"".join(body)}</tbody></table>'
+
+
+def html(node):
+    """The markup of a component (a Card is an <article>; anything that is not a component is drawn '?')."""
+    if isinstance(node, ui.Raw):
+        return f'<pre class="raw">{to_html(chr(10).join(node.lines))}</pre>'
+    if isinstance(node, ui.Card):
+        head = (f'<header><h2>{_e(node.title)}</h2>' + (f'<span class="note">{_e(node.note)}</span>' if node.note else "")
+                + f'<span{_cls("state", "st-" + node.state)}>{_e(ui.SYMBOLS[node.state])} {_e(node.state)}</span></header>')
+        attrs = f' data-card="{_e(node.id)}"' + (" data-truncated" if node.truncated else "")
+        return f'<article{_cls("card", "st-" + node.state, "s%d" % node.size)} id="card-{_e(node.id)}"{attrs}>{head}{"".join(html(p) for p in node.body)}</article>'
+    if isinstance(node, (ui.Span, ui.Line, ui.Bar, ui.Spark)):
+        return f'<p class="ln">{_inline(node)}</p>'
+    if isinstance(node, ui.Msg):  # a Notice too
+        notice = isinstance(node, ui.Notice)
+        role = ' role="status"' if notice else ""
+        return (f'<p{_cls("msg", "notice" if notice else "", "lv-" + node.level)}{role}>'
+                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span> {_e(node.text)}</p>')
+    if isinstance(node, ui.KV):
+        return '<dl class="kv">' + "".join(f"<dt>{_e(k)}</dt><dd>{_inline(v)}</dd>" for k, v in node.pairs) + "</dl>"
+    if isinstance(node, ui.Table):
+        return _table(node)
+    if isinstance(node, ui.Wrap):
+        lm = f' data-max-lines="{int(node.max_lines)}"' if node.max_lines else ""
+        return f'<ul class="wrap"{lm}>' + "".join(f"<li>{_inline(x)}</li>" for x in node.items) + "</ul>"
+    if isinstance(node, ui.More):
+        link = _href(node.href)
+        return (f'<details class="more"><summary>{_e(node.text)}</summary>'
+                + (f'<p><a href="{_e(link)}">show all</a></p>' if link else "") + "</details>")
+    if isinstance(node, ui.Group):
+        return ('<section class="grp">' + (f"<h3>{_e(node.title)}</h3>" if node.title else "") + "".join(html(c) for c in node.children) + "</section>")
+    if isinstance(node, ui.Pill):
+        return f'<span{_cls("pill", "st-" + node.state)}>{_e(ui.SYMBOLS[node.state])} {_e(node.text)}</span>'
+    if isinstance(node, ui.Kpi):
+        spark = _spark_svg(node.spark) if node.spark is not None else ""
+        return (f'<div{_cls("kpi", "st-" + node.state)} data-kpi="{_e(node.id)}" title="{_e(node.hint)}"><span class="sym">{_e(node.symbol)}</span>'
+                f'<span class="lbl">{_e(node.label)}</span><span class="n">{_e(node.value)}</span><span class="unit">{_e(node.unit)}</span>{spark}</div>')
+    if isinstance(node, ui.Tree):
+        return ('<ul class="tree">' + "".join(f'<li{_cls("st-" + st)} data-depth="{int(d)}"><span class="sym">{_e(ui.SYMBOLS[st])}</span> {_inline(x)}</li>'
+                                              for d, x, st in node.rows) + "</ul>")
+    if isinstance(node, ui.Details):
+        return (f'<details class="dt"{" open" if node.open else ""}><summary>{_inline(node.summary)}</summary>'
+                + "".join(html(c) for c in node.body) + "</details>")
+    return '<span class="st-unknown">?</span>'
+
+
+html.escape, html.unescape = _stdhtml.escape, _stdhtml.unescape

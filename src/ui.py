@@ -244,7 +244,8 @@ def _tone(tone):
 
 
 def _inline(x):
-    return x if isinstance(x, (Span, Line)) else Span(x)
+    """What fits in a line or a table cell: a Span, a Line, a Bar or a Spark; anything else is text."""
+    return x if isinstance(x, (Span, Line, Bar, Spark)) else Span(x)
 
 
 class Span(_Component):
@@ -256,15 +257,16 @@ class Span(_Component):
 
 
 class Line(_Component):
-    """One line of Spans (strings are made Spans)."""
+    """One line of Spans (strings are made Spans); a Bar or a Spark may sit in it between the text."""
     __slots__ = ("spans",)
 
     def __init__(self, spans=()):
-        self.spans = [x if isinstance(x, Span) else Span(x) for x in ([spans] if isinstance(spans, (str, Span)) else spans)]
+        self.spans = [x if isinstance(x, (Span, Bar, Spark)) else Span(x)
+                      for x in ([spans] if isinstance(spans, (str, Span, Bar, Spark)) else spans)]
 
     @property
     def text(self):
-        return "".join(s.text for s in self.spans)
+        return "".join(getattr(s, "text", "") for s in self.spans)
 
 
 class Raw(_Component):
@@ -319,11 +321,13 @@ class Kpi(_Component):
 
 class Col(_Component):
     """A column of a Table: key, label, align ('l' | 'r'), prio (0 = never dropped; a bigger number is dropped sooner when the room is
-    short), num (the cells are numbers: mono, aligned)."""
-    __slots__ = ("key", "label", "align", "prio", "num")
+    short), num (the cells are numbers: mono, aligned). w and gap are the console's: w is the columns the cell is padded to (None: the
+    text as it is, no padding), gap the spaces after the column. The web ignores both."""
+    __slots__ = ("key", "label", "align", "prio", "num", "w", "gap")
 
-    def __init__(self, key, label, align="l", prio=0, num=False):
+    def __init__(self, key, label, align="l", prio=0, num=False, w=None, gap=1):
         self.key, self.label, self.align, self.prio, self.num = key, _text(label), "r" if align == "r" else "l", int(prio), bool(num)
+        self.w, self.gap = None if w is None else int(w), int(gap)
 
 
 class Row(_Component):
@@ -336,10 +340,12 @@ class Row(_Component):
 
 
 class Table(_Component):
-    """cols [Col], rows [Row] (one cell per column), groups: None or [(label, first row index)]: the rows from there on belong to it."""
-    __slots__ = ("cols", "rows", "groups")
+    """cols [Col], rows [Row] (one cell per column), groups: None or [(label, first row index)]: the rows from there on belong to it.
+    head: the console draws the labels as a first row (the web always has them in <thead>)."""
+    __slots__ = ("cols", "rows", "groups", "head")
 
-    def __init__(self, cols, rows=(), groups=None):
+    def __init__(self, cols, rows=(), groups=None, head=False):
+        self.head = bool(head)
         self.cols, self.rows = list(cols), list(rows)
         for r in self.rows:
             if len(r.cells) != len(self.cols):
@@ -358,10 +364,12 @@ class KV(_Component):
 
 class Bar(_Component):
     """A fraction of a whole (0..1): its state is read off the thresholds (warn, err), and a fraction that is None (it could not be
-    read) is state 'unknown' with the text '?': never an empty bar that looks fine."""
-    __slots__ = ("frac", "value_text", "warn", "err")
+    read) is state 'unknown' with the text '?': never an empty bar that looks fine. w: the console's width in columns (the web sizes it
+    in CSS)."""
+    __slots__ = ("frac", "value_text", "warn", "err", "w")
 
-    def __init__(self, frac, value_text="", warn=0.7, err=0.9):
+    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10):
+        self.w = max(1, int(w))
         f = num(frac)
         self.frac = None if f is None else min(max(f, 0.0), 1.0)
         self.value_text = "?" if self.frac is None else _text(value_text)
@@ -373,11 +381,13 @@ class Bar(_Component):
 
 
 class Spark(_Component):
-    """A series of numbers, oldest first; what is not a finite number is dropped."""
-    __slots__ = ("values",)
+    """A series of numbers, oldest first; what is not a finite number is dropped. w: the last w values the console draws; floor: the
+    top of the scale is never below it, so that noise is not blown up (the default is a rate in bytes per second)."""
+    __slots__ = ("values", "w", "floor")
 
-    def __init__(self, values=()):
+    def __init__(self, values=(), w=8, floor=1024):
         self.values = [v for v in (num(x) for x in values) if v is not None]
+        self.w, self.floor = max(1, int(w)), floor
 
 
 class Pill(_Component):
@@ -404,11 +414,11 @@ class Notice(Msg):
 
 
 class Wrap(_Component):
-    """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one)."""
-    __slots__ = ("items", "sep", "max_lines")
+    """Items that flow over several lines without being split (max_lines: then '... +N' ends the last one; indent: the console's)."""
+    __slots__ = ("items", "sep", "max_lines", "indent")
 
-    def __init__(self, items=(), sep="  ·  ", max_lines=None):
-        self.items, self.sep, self.max_lines = [_inline(x) for x in items], sep, max_lines
+    def __init__(self, items=(), sep="  ·  ", max_lines=None, indent=1):
+        self.items, self.sep, self.max_lines, self.indent = [_inline(x) for x in items], sep, max_lines, int(indent)
 
 
 class Group(_Component):

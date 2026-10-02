@@ -6,8 +6,9 @@ here with register(); build() asks it for a ui.Card at a detail level k and reme
 The KPIs are figures read off the same Ctx; a source that is missing makes the KPI 'unknown' ('?'), never fine.
 
 Nothing here draws, reads a file or knows the size of a screen (a card's builder is told its width through Caps). The drawing of
-each section is still the console's (render.py registers builders that return a ui.Raw of the lines it has always drawn), so that the
-console and the web pages stay what they were while the sections are rebuilt out of components one by one.
+each section is still the console's, except for the native cards below (@native: data to components, drawn by ansi.card_lines and
+htmlview.html); render.py registers builders that return a ui.Raw of the lines it has always drawn for the others, so that the console
+and the web pages stay what they were while the sections are rebuilt out of components one by one.
 
 How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of render.problems_raw, and the cards they belong to):
 
@@ -30,11 +31,13 @@ card whose source is missing is 'unknown' whatever the problems say (the problem
 nothing to show on purpose (docker not installed, no filesystems) is 'info'; else 'ok'. A problem list that does not say which problem is
 which (a plain list of (severity, text)) leaves every card but attention 'unknown' as soon as it is not empty: nothing is invented.
 """
+import time
+
 import nuc_config
 import prefs
 import ui
 from exposure import expose_apply, expose_over_items, exposure_rows, group_of, is_private_addr, os_of
-from ui import Card, Kpi, Raw
+from ui import Bar, Card, Col, Kpi, Line, More, Msg, Raw, Row, Span, Spark, Table, Wrap
 
 
 # ---- Caps: what a card may show -----------------------------------------------------------------------------------------------
@@ -240,6 +243,186 @@ def build(id, ctx, k, caps):
         hit = ctx.memo[key] = (card, added)
     caps.trunc.update(hit[1])
     return hit[0]
+
+
+# ---- the cards built of components --------------------------------------------------------------------------------------------
+# A native card is data -> components: the builder reads the Ctx, honours the detail level k and the caps (caps.lim, caps.opened) and
+# returns a ui.Card whose body is Span / Line / Msg / Table / Wrap / More..., with no colour and no column arithmetic beyond the widths
+# of the columns. The console draws it with ansi.card_lines (title, then body), the web with htmlview.html. NATIVE holds them: the
+# registration order of CARDS is the sections' (render.py registers each id in turn, from here when the card is native, else a Raw one).
+
+NET_STALE_S = 120    # the net collector's data older than this is stale (seconds)
+BOOT_STALE_S = 900   # the boot collector's
+NATIVE = {}          # id -> (title, feature, builder): what register() takes
+
+
+def native(id, title, feature):
+    """Decorator: a card builder fn(ctx, k, caps) -> ui.Card. The decorated function is the builder as it is (an error in it is for the
+    caller); what is registered is the same builder wrapped so that a broken one becomes the card's title and an 'err' message, never an
+    empty screen."""
+    def deco(fn):
+        def guarded(ctx, k, caps):
+            try:
+                return fn(ctx, k, caps)
+            except Exception as e:  # noqa: BLE001 - a broken card must not empty the screen
+                return Card(id, title, "", card_state(id, ctx), [Msg("err", ui.safe(repr(e))[:60])])
+        NATIVE[id] = (title, feature, guarded)
+        return fn
+    return deco
+
+
+def _now(ctx):
+    return ctx.now if ui.num(ctx.now) is not None else time.time()
+
+
+def is_absent(d, key):
+    """True if the collector recorded that the tool for that section is not installed (not an error)."""
+    return isinstance(d, dict) and key in (d.get("absent") or [])
+
+
+def is_disabled(d, key):
+    """True if the section was switched off in config.ini (the collector skipped it on purpose)."""
+    return isinstance(d, dict) and key in (d.get("disabled") or [])
+
+
+def unavail(d, key, prefix="unavailable"):
+    """The message of a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
+    if is_disabled(d, key):
+        return Msg("info", "disabled in config.ini")
+    if isinstance(d, dict) and key in (d.get("unsupported") or []):
+        return Msg("info", "not available on this OS")
+    if isinstance(d, dict) and key in (d.get("notes") or {}):
+        return Msg("info", ui.safe(d["notes"][key])[:70])
+    if is_absent(d, key):
+        return Msg("info", "not installed on this machine")
+    return Msg("warn", f"{prefix}: " + ui.safe(((d or {}).get("errors") or {}).get(key, "collector needs updating"))[:60])
+
+
+def _frac(part, whole):
+    """part/whole, or None when either is not a number or the whole is nothing: a bar that could not be read is '?'."""
+    part, whole = ui.num(part), ui.num(whole)
+    return part / whole if part is not None and whole else None
+
+
+def _native_card(id, ctx, note, body, hidden=None):
+    """The Card: the title of the registry, the state of the frame. hidden: the More the card shows (kept on the card for a page that
+    links to all of it)."""
+    return Card(id, NATIVE[id][0], note, card_state(id, ctx), body, more=hidden)
+
+
+@native("disks", "DISKS", "disks")
+def disks_card(ctx, k, caps):
+    s = ctx.s if isinstance(ctx.s, dict) else {}
+    fs = s.get("fs")
+    if not fs:
+        return _native_card("disks", ctx, "", [Msg("info" if fs == [] else "warn", "no filesystems" if fs == [] else "unavailable")])
+    bw = max(8, min(30, caps.width - 42))
+    shown = caps.lim(fs, 5, "disks")
+    rows = [Row([Span(ui.safe(f["mount"])[:14]), Bar(_frac(f["used"], f["total"]), f"{ui.human(f['used'])}/{ui.human(f['total'])}", w=bw)])
+            for f in shown]
+    body = [Table([Col("mount", "Mount", w=14), Col("usage", "Used", num=True)], rows)]
+    more = More(len(fs) - len(shown), "more") if len(fs) > len(shown) else None
+    return _native_card("disks", ctx, "", body + ([more] if more else []), more)
+
+
+@native("docker_disk", "DOCKER · DISK", "docker_disk")
+def docker_disk_card(ctx, k, caps):
+    boot, now = ctx.boot, _now(ctx)
+    note = f"stale data ({ui.fmt_ago(now - boot['ts'])} old)" if boot and now - boot.get("ts", now) > BOOT_STALE_S else ""
+    df = (boot or {}).get("docker_df")
+    if df is None:
+        return _native_card("docker_disk", ctx, note, [unavail(boot, "docker_df")])
+    body = []
+    if df["rows"]:
+        cols = [Col("type", "Type", w=14, gap=0), Col("count", "Count", "r", num=True, w=4), Col("active", "In use", gap=2),
+                Col("size", "Size", num=True, w=9), Col("unused", "Unused")]
+        body.append(Table(cols, [Row([r["type"], str(r["count"]), f"({r['active']} in use)", r["size"], f"unused {r['reclaimable']}"])
+                                 for r in df["rows"]]))
+    dang = df.get("dangling_images")
+    if dang is not None:
+        body.append(Line([Span(f" dangling images: {dang['count']} ({ui.human(dang['bytes']) if dang['bytes'] else '0B'}): safe to prune",
+                               "warn" if dang["bytes"] else "muted")]))
+    if df.get("volumes_unused"):
+        anon = df.get("volumes_unused_anonymous") or 0
+        body.append(Line([Span(f" {df['volumes_unused']} unused volumes ({anon} anonymous): may hold data, check before pruning", "warn")]))
+    body.append(Line([Span(" unused = no container uses it; tagged images can be re-pulled", "muted")]))
+    return _native_card("docker_disk", ctx, note, body)
+
+
+@native("sessions", "SESSIONS", "sessions")
+def sessions_card(ctx, k, caps):
+    s = ctx.s if isinstance(ctx.s, dict) else {}
+    sess = s.get("sessions")
+    if sess is None:
+        return _native_card("sessions", ctx, "", [Msg("warn", "unavailable")])
+    remote = [ip for ip in sess["ssh"] if not is_private_addr(ip)]
+    body = [Line([f" {ui.plural(len(sess['local']), 'user session')}   ssh: ",
+                  Span(f"{len(sess['ssh'])} connected", "err" if remote else "ok") if sess["ssh"] else Span("none", "muted")])]
+    shown = caps.lim(sess["ssh"], 4, "sessions")
+    for ip in shown:
+        far = ip in remote
+        body.append(Line([" ", Span("✖" if far else "●", "err" if far else "ok"), f" ssh from {ip}  ",
+                          Span("address NOT local or Tailscale", "err") if far else Span("LAN or Tailscale", "muted")]))
+    more = More(len(sess["ssh"]) - len(shown), "more ssh clients") if len(sess["ssh"]) > len(shown) else None
+    if more:
+        body.append(more)
+    for key, label in (("rdp", "remote desktop"), ("vnc", "screen sharing")):  # Windows RDP, macOS Screen Sharing
+        peers = sess.get(key) or []
+        if peers:
+            far = any(not is_private_addr(ip) for ip in peers)
+            body.append(Line([" ", Span("✖" if far else "●", "err" if far else "ok"), f" {label} from {', '.join(peers[:3])}",
+                              Span("  address NOT local or Tailscale", "err") if far else Span("  LAN or Tailscale", "muted")]))
+    ttys = sorted({x["tty"] for x in sess["local"] if x["tty"]})
+    if ttys:
+        body.append(Wrap(ttys, sep=" ", max_lines=None if caps.opened("sessions") else 1, indent=1))
+    return _native_card("sessions", ctx, "", body, more)
+
+
+@native("tailscale", "TAILSCALE", "tailscale")
+def tailscale_card(ctx, k, caps):
+    net = ctx.net
+    ts = (net or {}).get("ts_peers")
+    if ts is None:
+        return _native_card("tailscale", ctx, "", [unavail(net, "ts_peers")])
+    peers, me = ts["peers"], ts["self"]
+    online, now = sum(p["online"] for p in peers), _now(ctx)
+    stale = now - net.get("ts", now) > NET_STALE_S
+    note = (f"{ui.safe(me['name'])} · {online}/{len(peers)} nodes online" + (" · exit node" if me["exit_option"] else "")
+            + (f" · stale data ({ui.fmt_ago(now - net['ts'])} old)" if stale else ""))
+    shown = caps.lim(peers, 8, "tailscale")
+    rows = []
+    for p in shown:
+        if p["online"]:
+            state = [Span("online ", "ok"), Span("direct" if p["direct"] else f"via relay {p['relay']}", "muted")]
+        else:
+            state = [Span("offline · " + (f"seen {ui.fmt_ago(now - p['last_seen'])} ago" if p["last_seen"] else "never seen"), "muted")]
+        if p["exit"]:
+            state.append(Span("  exit node in use", "warn"))
+        rows.append(Row([Span("●" if p["online"] else "○", "ok" if p["online"] else "muted"), ui.safe(p["name"])[:18], ui.safe(p["os"])[:8],
+                         Line(state)]))
+    cols = [Col("dot", "", w=1), Col("name", "Node", w=18), Col("os", "OS", prio=2, w=8), Col("state", "State")]
+    more = More(len(peers) - len(shown), "nodes") if len(peers) > len(shown) else None
+    return _native_card("tailscale", ctx, note, [Table(cols, rows)] + ([more] if more else []), more)
+
+
+@native("network_traffic", "NETWORK TRAFFIC", "network_traffic")
+def network_traffic_card(ctx, k, caps):
+    s = ctx.s if isinstance(ctx.s, dict) else {}
+    nets, note = s.get("net"), "↓ received · ↑ sent"
+    if not nets:
+        return _native_card("network_traffic", ctx, note, [Msg("info", "no interfaces")])
+    sw = 12 if caps.width >= 100 else 8  # a shorter sparkline in a narrow column: the line must not be cut
+    ranked = sorted(nets.items(), key=lambda kv: -(kv[1]["rx_tot"] + kv[1]["tx_tot"]))
+    shown = caps.lim(ranked, 5, "network_traffic")
+    rows = []
+    for name, v in shown:
+        rows.append(Row([ui.safe(name)[:11], Line([Span("↓", "ok"), " ", ui.fmt_rate(v["rx"])]), Spark(v["hist_rx"], sw),
+                         Line([Span("↑", "accent"), " ", ui.fmt_rate(v["tx"])]), Spark(v["hist_tx"], sw),
+                         Span(f" ↓{ui.human(v['rx_tot'])} ↑{ui.human(v['tx_tot'])}", "muted")]))
+    cols = [Col("iface", "Interface", w=11), Col("rx", "Received", num=True, w=12, gap=0), Col("rx_hist", "", gap=1),
+            Col("tx", "Sent", num=True, w=12, gap=0), Col("tx_hist", "", gap=0), Col("total", "Total", prio=0)]
+    more = More(len(nets) - len(shown), "more") if len(nets) > len(shown) else None
+    return _native_card("network_traffic", ctx, note, [Table(cols, rows)] + ([more] if more else []), more)
 
 
 # ---- the KPIs -----------------------------------------------------------------------------------------------------------------
