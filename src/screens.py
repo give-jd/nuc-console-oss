@@ -2060,6 +2060,9 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
     job = snap.get("job")
     if state == "working" and job and job.get("phase") == "downloading" and job.get("total"):
         out.append(Line([Bar(job["done"] / job["total"], f"{job['pct']}%", w=AI_BAR, tone="accent")]))
+    elif state == "working" and job:  # no total yet (or a step that has none): a moving bar and what is known; the status text says what it does
+        got = job.get("done") or 0
+        out.append(Line([Bar(None, f"{ai_mb(got / 2 ** 20)} so far" if got else "", w=AI_BAR, tone="accent", busy=True)]))
     if not snap["locked"] and state == "off":
         said = ai_choice_line(ch, rows)
         if said is not None:
@@ -2078,6 +2081,8 @@ def ai_chat_nodes(snap, chat, acts):
     """The chat under the switch: what was asked and answered (chat: the Qa of the exchanges, oldest first, built by the page from the engine's
     history), the question box, 'advice now', and why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
     c = snap["chat"]
+    if acts is None and not chat:
+        return []  # a page that only shows, with nothing asked yet: no heading over nothing
     ready = dd(snap.get("switch")).get("on") and snap["state"][0] != "working"
     asleep = not ready or bool(c["busy"])
     out = [Head("CHAT", "ask the model about this machine (it reads this machine's history; AI, check before acting)")] + list(chat)
@@ -2095,8 +2100,8 @@ def ai_models_web(rows, snap, sel, acts, links, windows):
     Badge, the button that uses it, the legend; and the details of the selected one (a Spec with its buttons, and the link that closes it)."""
     if not rows:
         return [Group([Head("MODELS", "best first"), Msg("info", "the catalog lists no model")])]
-    cols = [Col("name", "Model"), Col("params", "Params", prio=2), Col("size", "Size", "r", 1, True), Col("need", "Needs", "r", 0, True), Col("verdict", "Verdict"),
-            Col("tok", "Est tok/s", "r", 3, True), Col("notes", "Notes", prio=3)]
+    cols = [Col("name", "Model"), Col("params", "Params", prio=2, wprio=2), Col("size", "Size", "r", 1, True, wprio=2), Col("need", "Needs", "r", 0, True, wprio=2),
+            Col("verdict", "Verdict"), Col("tok", "Est tok/s", "r", 3, True, wprio=3), Col("notes", "Notes", prio=3, wprio=3)]
     if acts is not None:
         cols.append(Col("use", ""))
     body = []

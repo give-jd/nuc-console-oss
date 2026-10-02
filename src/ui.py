@@ -425,14 +425,15 @@ class Bar(_Component):
     """A fraction of a whole (0..1): its state is read off the thresholds (warn, err), and a fraction that is None (it could not be
     read) is state 'unknown' with the text '?': never an empty bar that looks fine. w: the console's width in columns (the web sizes it
     in CSS). tone: a token that colours the fill whatever the fraction is (a share of a total, not a level); None follows the state."""
-    __slots__ = ("frac", "value_text", "warn", "err", "w", "tone")
+    __slots__ = ("frac", "value_text", "warn", "err", "w", "tone", "busy")
 
-    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10, tone=None):
+    def __init__(self, frac, value_text="", warn=0.7, err=0.9, w=10, tone=None, busy=False):
+        self.busy = bool(busy) and num(frac) is None  # busy: the web draws a moving bar for work whose total is not known (frac None); never a level
         self.tone = _tone(tone)  # None: the colour follows the state; a token: a bar that is not a level (the slowest units, a share)
         self.w = max(1, int(w))
         f = num(frac)
         self.frac = None if f is None else min(max(f, 0.0), 1.0)
-        self.value_text = "?" if self.frac is None else _text(value_text)
+        self.value_text = "?" if self.frac is None and not self.busy else _text(value_text)
         self.warn, self.err = warn, err
 
     @property
