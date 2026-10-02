@@ -116,7 +116,7 @@ class Model(unittest.TestCase):
         self.assertIn("no history yet", nodes[-1].text)
 
     def test_the_key_actions_moved_with_the_view(self):
-        self.assertIs(render.HealthView, screens.HealthView)
+        self.assertIs(screens.HealthView, screens.HealthView)
         hv, fl = screens.HealthView(7), [{"id": "a"}, {"id": "b"}]
         self.assertEqual(screens.health_key(hv, "d", fl), "period")
         self.assertEqual(hv.days, 1)

@@ -33,12 +33,12 @@ class Clock(object):
 
 class Case(unittest.TestCase):
     def setUp(self):
-        self.saved = (render.time, demo.time, render.DEMO, render.DEMO_OS, render.SENSORS, render.FULL)
+        self.saved = (render.time, demo.time, render.DEMO, render.DEMO_OS, render.SENSORS)
         render.time = demo.time = Clock
         render.SENSORS = "/nonexistent/sensors.json"
 
     def tearDown(self):
-        render.time, demo.time, render.DEMO, render.DEMO_OS, render.SENSORS, render.FULL = self.saved
+        render.time, demo.time, render.DEMO, render.DEMO_OS, render.SENSORS = self.saved
 
     def data(self, os_name=None):
         render.DEMO, render.DEMO_OS = True, os_name
@@ -99,10 +99,6 @@ class Model(Case):
         text = [ansi.ANSI.sub("", x) for x in ansi.render(table, 200)[0]]
         row = next(x for x in text if x.split()[:1] == [str(pid)])
         self.assertGreaterEqual(row.split()[1:10].count("?"), 5)
-
-    def test_imports_and_the_old_names(self):
-        for name in ("CpuView", "cpu_rows", "cpu_sync", "cpu_key", "cpu_select", "CPU_SORTS", "CPU_SORT_KEYS", "CPU_PANE_W"):
-            self.assertIs(getattr(render, name) if name != "CpuView" else render.CpuView.__mro__[1], getattr(screens, name))
 
 
 def _walk(node):

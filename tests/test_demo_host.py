@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the host's config.ini
 import demo  # noqa: E402
 import render  # noqa: E402
+import ui  # noqa: E402
+import cards  # noqa: E402
+import ansi  # noqa: E402
 
 NOW = 1_790_000_000
 GIB = 2 ** 30
@@ -144,7 +147,7 @@ def types_ns(**kw):
 
 def system_block(out):
     """The lines of the overview's SYSTEM block (header to the line before the next section's), ANSI stripped."""
-    lines = [render.ANSI.sub("", x) for x in out.split("\n")]
+    lines = [ansi.ANSI.sub("", x) for x in out.split("\n")]
     i = next(k for k, x in enumerate(lines) if x.startswith("── SYSTEM"))
     j = next((k for k in range(i + 1, len(lines)) if lines[k].startswith("── ")), len(lines))
     return [x.rstrip() for x in lines[i:j]]
@@ -158,7 +161,7 @@ class TheOverview(DemoHost):
 
     def test_it_shows_the_demo_machine_not_the_host(self):
         with self.on(SMALL):
-            wide = render.ANSI.sub("", self.once(["--cols", "226", "--rows", "50"]))        # 3 columns: the blocks sit side by side
+            wide = ansi.ANSI.sub("", self.once(["--cols", "226", "--rows", "50"]))        # 3 columns: the blocks sit side by side
             small = system_block(self.once(["--cols", "120", "--rows", "33"]))
         self.assertRegex(small[0], r"── SYSTEM ─+  up 5d 0h · load 0\.82 0\.64 0\.51$")
         for want in ("10.2G/31.2G   cache 4.8G", "180.0G/480.0G", "72°C/100°C", "44°C/85°C", "6%   16 threads"):
@@ -190,7 +193,7 @@ class TheOverview(DemoHost):
                 def page():
                     render.DEMO, render.DEMO_OS = True, os_name
                     return render.render_screens(None, cols - 1, rows, mode="rotate")[0]
-                out = render.ANSI.sub("", self.assertSame(page, f"{os_name} {cols}x{rows}"))
+                out = ansi.ANSI.sub("", self.assertSame(page, f"{os_name} {cols}x{rows}"))
                 self.assertIn({None: "up 5d 0h", "windows": "up 1d 2h", "darwin": "up 2d 6h"}[os_name], out)
                 self.assertIn("RAM", out)
 
@@ -257,10 +260,10 @@ class TheSamplerOfTheDemo(unittest.TestCase):
         self.assertEqual(len(sm["cpu"]), 16)                                                 # 8 cores, 16 threads
         self.assertAlmostEqual(sum(sm["cpu"].values()) / len(sm["cpu"]), 0.0625)
         self.assertEqual(max(sm["cpu"].values()), 0.62)
-        self.assertEqual((render.human(sm["mem"]["MemTotal"] - sm["mem"]["MemAvailable"]), render.human(sm["mem"]["MemTotal"]),
-                          render.human(sm["mem"]["Cached"])), ("10.2G", "31.2G", "4.8G"))
+        self.assertEqual((ui.human(sm["mem"]["MemTotal"] - sm["mem"]["MemAvailable"]), ui.human(sm["mem"]["MemTotal"]),
+                          ui.human(sm["mem"]["Cached"])), ("10.2G", "31.2G", "4.8G"))
         self.assertEqual(sm["disk_root"], (180 * GIB, 480 * GIB, "/"))
-        self.assertEqual(render.up_load_note(sm["uptime"], sm["load"]), "up 5d 0h · load 0.82 0.64 0.51")
+        self.assertEqual(cards.up_load_note(sm["uptime"], sm["load"]), "up 5d 0h · load 0.82 0.64 0.51")
 
     def test_each_os_has_its_own_machine(self):
         win, mac = demo.sampler_data("windows", NOW), demo.sampler_data("darwin", NOW)
@@ -298,7 +301,7 @@ class TheSamplerOfTheDemo(unittest.TestCase):
 
 def facts(text, **patterns):
     """{name: the groups of the first match of its regex in `text` (ANSI stripped), None if it does not match}."""
-    text = render.ANSI.sub("", text)
+    text = ansi.ANSI.sub("", text)
     out = {}
     for name, rx in patterns.items():
         m = re.search(rx, text, re.M)
@@ -356,7 +359,7 @@ class OneMachine(DemoHost):
                 self.assertEqual(int(h["boot"][2]), len(m["boot"]["before"]) + 1, what)
             else:
                 self.assertIsNone(o["boot"], what)
-                self.assertIn("no boot times recorded", render.ANSI.sub("", health), what)
+                self.assertIn("no boot times recorded", ansi.ANSI.sub("", health), what)
             self.assertEqual(h["slower"] is not None, os_name == "linux", what)           # only the Linux demo story has the slow boot
             if h["slower"]:
                 self.assertEqual((int(h["slower"][0]), int(h["slower"][3])), (58, 23))      # 58 s, 2.5x the median of 23 s
@@ -366,8 +369,8 @@ class OneMachine(DemoHost):
     def test_the_temperatures_the_thermal_history_and_the_disks_agree(self):
         lin = demo.machine("linux")
         overview, cpu, ai, health = self.screens("linux")
-        self.assertIn("72°C/100°C", render.ANSI.sub("", overview))                           # the TEMP bar ...
-        self.assertRegex(render.ANSI.sub("", cpu), r"PKG +█+░* 72°C/100°C +high 90°C +crit 100°C")   # ... and the CPU screen's package, with its limits
+        self.assertIn("72°C/100°C", ansi.ANSI.sub("", overview))                           # the TEMP bar ...
+        self.assertRegex(ansi.ANSI.sub("", cpu), r"PKG +█+░* 72°C/100°C +high 90°C +crit 100°C")   # ... and the CPU screen's package, with its limits
         rep = demo.health_report(None, 7, NOW)
         self.assertGreaterEqual(rep["thermal"]["max"], lin["temp"]["high"])                  # the hot hours were over the 90 C limit, now it is at 72
         self.assertGreater(rep["thermal"]["max"], lin["temp"]["cpu"])

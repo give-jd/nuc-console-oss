@@ -29,6 +29,7 @@ import urllib.request
 
 import nuc_config
 import render
+import ui
 
 API_HOST = "api.telegram.org"  # the only host this program talks to
 METHODS = ("getMe", "getUpdates", "sendMessage")  # the only API methods it can call; the service uses two (see SendOnly)
@@ -89,7 +90,7 @@ And your @username (Telegram: Settings > Username): only that person can pair wi
 
 def clean(s, limit=0):
     """One line of plain text: control and direction characters out, white space collapsed, optionally cut."""
-    s = " ".join(LINE_CHARS.sub("", render.CTRL.sub(" ", str(s))).split())
+    s = " ".join(LINE_CHARS.sub("", ui.CTRL.sub(" ", str(s))).split())
     return s[:limit] if limit else s
 
 
@@ -456,7 +457,7 @@ def format_message(host, new, gone=(), detail="titles", started=None, held=False
     Titles only (the catalogue's own words) unless detail = full, which adds the problem's text."""
     lines = ["nuc-console · " + host]
     if started is not None:
-        lines.append("Monitoring started: " + ("no open problems" if not started else render.plural(started, "open problem")))
+        lines.append("Monitoring started: " + ("no open problems" if not started else ui.plural(started, "open problem")))
     if held:
         lines.append(f"Changes held back by the limit of {MAX_PER_HOUR} messages an hour:")
     new, gone, changed = list(new), list(gone), []
@@ -830,7 +831,7 @@ def setup(term, make_transport, d=None, clock=time.time, sleep=time.sleep, wait=
         term.say()
         term.say("Open this link on your phone and press Start:")
         term.say(f"  https://t.me/{bot}?start={code}")
-        term.say(f"Waiting up to {render.plural(max(1, wait // 60), 'minute')} for it (Ctrl+C to cancel)...")
+        term.say(f"Waiting up to {ui.plural(max(1, wait // 60), 'minute')} for it (Ctrl+C to cancel)...")
         chat = pair(tg, code, user, clock, sleep, wait)
         if chat is None:
             term.say("Nobody pressed Start in time: nothing was paired. The token is saved: run --setup again.")

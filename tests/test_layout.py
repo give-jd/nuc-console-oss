@@ -1,5 +1,5 @@
 """The code layout: one configuration dict per process, and the flat modules render.py's pieces were moved to
-(ui.py, ansi.py, exposure.py): what each holds, and that render.py's re-exports are the very same objects."""
+(ui.py, ansi.py, exposure.py): what each holds, and what they import."""
 import ast
 import os
 import re
@@ -162,15 +162,7 @@ class TextHelpers(unittest.TestCase):
 
 
 class Moved(unittest.TestCase):
-    """render.py keeps the old names (tests, tools and notify.py/htmlview.py use them) and they are the same objects."""
-
-    def test_render_reexports_what_moved(self):
-        for name in ("ANSI", "SPARK", "bar", "c", "cc", "cell", "clip", "columns", "fit_join", "kv", "msg", "msg_wrap", "pad", "section",
-                     "sparkline", "vlen"):
-            self.assertIs(getattr(render, name), getattr(ansi, name), name)
-        for name in ("CTRL", "fmt_ago", "fmt_cputime", "fmt_dur", "fmt_k", "fmt_min", "fmt_rate", "fmt_size", "hclean", "hcount", "hnum",
-                     "human", "num", "plural", "qf", "safe"):
-            self.assertIs(getattr(render, name), getattr(ui, name), name)
+    """ui.py and ansi.py are the primitives: they import nothing of ours but each other."""
 
     def test_ui_and_ansi_import_nothing_of_ours_but_each_other(self):
         std = {"math", "re", "unicodedata"}
@@ -178,19 +170,8 @@ class Moved(unittest.TestCase):
         self.assertEqual(imports_of("ansi"), {"re", "textwrap", "ui"})
 
 
-EXPOSURE_NAMES = ("CELL", "DOCKER_PROXIES", "EXPOSE_LABEL", "EXPOSED_RANK", "EXPOSURE_SECTIONS", "GROUPS", "INFRA_PROCS", "PRIVATE_NETS",
-                  "REACH_ORDER", "SENSITIVE", "SHARED_UDP", "TS4", "TS6", "baseline_diff", "bind_scope", "docker_verdict", "expose_apply",
-                  "expose_cts", "expose_note", "expose_over", "expose_over_items", "expose_policy", "expose_unmatched", "exposure_keys",
-                  "exposure_partial", "exposure_rows", "fw_verdict", "group_of", "is_private_addr", "name_change", "new_ports", "os_of",
-                  "rule_match", "webapp_rows")
-
-
 class ExposureModule(unittest.TestCase):
     """exposure.py is the model alone: it reads the configuration through nuc_config.current() and imports nothing of render.py."""
-
-    def test_the_old_names_are_the_same_objects(self):
-        for name in EXPOSURE_NAMES:
-            self.assertIs(getattr(render, name), getattr(exposure, name), name)
 
     def test_the_model_does_not_import_the_renderer(self):
         self.assertEqual(imports_of("exposure"), {"ipaddress", "re", "nuc_config", "ui"})

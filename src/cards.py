@@ -5,10 +5,9 @@ here with register(); build() asks it for a ui.Card at a detail level k and reme
 (render.page_overview), which tries every level and lifts the caps one section after the other, never builds the same card twice.
 The KPIs are figures read off the same Ctx; a source that is missing makes the KPI 'unknown' ('?'), never fine.
 
-Nothing here draws, reads a file or knows the size of a screen (a card's builder is told its width through Caps). The drawing of
-each section is still the console's, except for the native cards below (@native: data to components, drawn by ansi.card_lines and
-htmlview.html); render.py registers builders that return a ui.Raw of the lines it has always drawn for the others, so that the console
-and the web pages stay what they were while the sections are rebuilt out of components one by one.
+Nothing here draws, reads a file or knows the size of a screen (a card's builder is told its width through Caps). Every section is a
+native card below (@native: data to components, drawn by ansi.card_lines and htmlview.html); render.py registers them in the order of the
+screen. A card made of ui.Raw lines (raw_card) is still drawn by both renderers.
 
 How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of render.problems_raw, and the cards they belong to):
 
@@ -45,15 +44,15 @@ from ui import Bar, Card, Col, Flow, Grid, Group, Head, Indent, Kpi, Line, More,
 # ---- Caps: what a card may show -----------------------------------------------------------------------------------------------
 
 class Caps(object):
-    """What the layout lets a card show, in place of render's FULL / TRUNC / EXPAND globals (which still work: render builds a Caps
-    around them, sharing the same sets). width: the columns the card is drawn in; full: nothing is capped (the detail pages, the web's
+    """What the layout lets a card show. width: the columns the card is drawn in; full: nothing is capped (the detail pages, the web's
     full view); expand: the sections whose caps are lifted because the free space allows it; trunc: where a card says which sections
-    hid items ('... +N more'), the Details pages show them in full."""
+    hid items ('... +N more'), the Details pages show them in full. The layout (render.page_overview) owns the two sets and shares them
+    with every Caps it makes."""
     __slots__ = ("width", "full", "expand", "trunc")
 
     def __init__(self, width=0, full=False, expand=None, trunc=None):
         self.width, self.full = width, bool(full)
-        self.expand = set() if expand is None else expand  # not copied: render passes its own sets
+        self.expand = set() if expand is None else expand  # not copied: the layout passes its own sets
         self.trunc = set() if trunc is None else trunc
 
     def opened(self, section):
@@ -61,7 +60,7 @@ class Caps(object):
         return self.full or section in self.expand
 
     def lim(self, seq, n, section):
-        """seq[:n] unless the section is open; remembers that it hid items (render.lim, with this Caps' sets)."""
+        """seq[:n] unless the section is open; remembers that it hid items (in this Caps' trunc)."""
         if self.opened(section) or len(seq) <= n:
             return seq
         self.trunc.add(section)
@@ -431,7 +430,7 @@ def network_traffic_card(ctx, k, caps):
 # (PR 14.) The same lines the console has always drawn for these sections, as components: the Bars carry their values, the cores are a
 # Grid of Bars, a container stack is a Group of a header and a Wrap of chips (a Span with the state's tone and symbol), the databases a
 # NoteTable (a row each, the 'in use now' and 'external clients' facts under it as a Flow), the boot a Timeline and Tables. The figures
-# that more than one of them read (up/load, RAM, the container's name) are here, and render.py keeps its old names for them.
+# that more than one of them read (up/load, RAM, the container's name) are here.
 
 BOOT_LABELS = {  # the same BOOT blocks speak of systemd units, Windows services or launchd daemons depending on who wrote boot.json
     "linux": {"failed_one": "failed systemd unit", "failed_short": "failed unit", "journal_in": " in this boot's journal",

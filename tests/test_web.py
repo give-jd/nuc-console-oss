@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import ansi  # noqa: E402
 import web  # noqa: E402
 
 TOKEN = "t" * 24
@@ -231,7 +232,7 @@ class Web(unittest.TestCase):
         self.assertIn("calc(98vw /", big)                                                            # the text fills the width
         self.assertIn("console 133x", big)                                                           # bigger text = fewer columns
         self.assertIn("console 267x", small)
-        names = lambda page: set(re.findall(r"── ([A-Z][A-Z ·]+?) ─", render.ANSI.sub("", html.unescape(re.sub("<[^>]+>", "", page)))))  # noqa: E731
+        names = lambda page: set(re.findall(r"── ([A-Z][A-Z ·]+?) ─", ansi.ANSI.sub("", html.unescape(re.sub("<[^>]+>", "", page)))))  # noqa: E731
         _, _, huge = get(self.open, "/?fit=1&zoom=200")
         self.assertEqual(names(huge), names(small))                                                  # zooming in never loses a section
         self.assertIn("NETWORK TRAFFIC", names(huge))

@@ -17,6 +17,7 @@ import ansi  # noqa: E402
 import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
 import ui  # noqa: E402
 from test_map_console import FakeSampler, MapCase, Proxy, Stop, overview_stub  # noqa: E402
 
@@ -33,7 +34,7 @@ class Exit(Exception):
 
 
 def plain(lines):
-    return [render.ANSI.sub("", x) for x in lines]
+    return [ansi.ANSI.sub("", x) for x in lines]
 
 
 class KeyTable(unittest.TestCase):
@@ -104,7 +105,7 @@ class Overlay(unittest.TestCase):
     def test_the_box_goes_over_the_middle_and_the_rest_stays(self):
         lines = ["\x1b[1m" + "a" * 10 + "\x1b[0m" + "b" * 10 for _ in range(5)]
         out = ansi.overlay(lines, ["XXXX", "YYYY"], 20)
-        text = [render.ANSI.sub("", x) for x in out]
+        text = [ansi.ANSI.sub("", x) for x in out]
         self.assertEqual(text[0], "a" * 10 + "b" * 10)
         self.assertEqual(text[1], "a" * 8 + "XXXX" + "b" * 8)
         self.assertEqual(text[2], "a" * 8 + "YYYY" + "b" * 8)
@@ -115,23 +116,23 @@ class Overlay(unittest.TestCase):
 
     def test_the_colour_in_force_carries_over_to_what_is_right_of_the_box(self):
         out = ansi.overlay(["\x1b[31m" + "r" * 20 + "\x1b[0m"], ["BB"], 20)
-        self.assertEqual(render.ANSI.sub("", out[0]), "r" * 9 + "BB" + "r" * 9)
+        self.assertEqual(ansi.ANSI.sub("", out[0]), "r" * 9 + "BB" + "r" * 9)
         self.assertIn("\x1b[31m" + "r" * 9, out[0].split("BB")[1])
 
     def test_a_short_line_keeps_its_length_a_tall_box_is_cut_and_a_wide_one_too(self):
         out = ansi.overlay(["ab", ""], ["XXXXXX"], 10)
-        self.assertEqual(render.ANSI.sub("", out[0]), "ab" + "XXXXXX")                     # centred at column 2 of 10
-        self.assertEqual(render.ANSI.sub("", out[1]), "")
-        self.assertEqual(render.ANSI.sub("", ansi.overlay(["abc"], ["1", "2", "3"], 3)[0]), "a1c")
+        self.assertEqual(ansi.ANSI.sub("", out[0]), "ab" + "XXXXXX")                     # centred at column 2 of 10
+        self.assertEqual(ansi.ANSI.sub("", out[1]), "")
+        self.assertEqual(ansi.ANSI.sub("", ansi.overlay(["abc"], ["1", "2", "3"], 3)[0]), "a1c")
         self.assertEqual(len(ansi.overlay(["abc", "def"], ["1", "2", "3"], 3)), 2)
-        self.assertEqual(render.ANSI.sub("", ansi.overlay(["abcd"], ["123456"], 4)[0]), "1234")
+        self.assertEqual(ansi.ANSI.sub("", ansi.overlay(["abcd"], ["123456"], 4)[0]), "1234")
 
 
 class Footers(MapCase):
     """Every screen's footer fits every width, offers the way back and the help, and shortens by priority."""
 
     def test_every_footer_fits_every_width(self):
-        mv, cv, hv, av = render.MapView(now=1), render.CpuView(now=1), render.HealthView(now=1), render.AiView(now=1)
+        mv, cv, hv, av = screens.MapView(now=1), render.CpuView(now=1), screens.HealthView(now=1), screens.AiView(now=1)
         for cols in WIDTHS + (60, 40, 24, 12):
             for w in (cols, cols - 1):
                 feet = {"map": render.map_footer(mv, 21, w, True), "cpu": render.cpu_footer(cv, 40, w), "health": render.health_footer(hv, 10, w),
@@ -141,59 +142,59 @@ class Footers(MapCase):
                         feet[f"overview {n} {details} {keys}"] = render.frame((details, 1, 1, ["x"]), 0, n, w, 24, [], keys=keys, hint=hint
                                                                            ).split("\r\n")[-1]
                 for name, f in feet.items():
-                    self.assertLessEqual(len(render.ANSI.sub("", f)), w, (name, w))
+                    self.assertLessEqual(len(ansi.ANSI.sub("", f)), w, (name, w))
 
     def test_the_way_out_and_the_help_stay_when_there_is_room_and_the_way_out_is_the_last_to_go(self):
-        mv, cv, hv, av = render.MapView(now=1), render.CpuView(now=1), render.HealthView(now=1), render.AiView(now=1)
+        mv, cv, hv, av = screens.MapView(now=1), render.CpuView(now=1), screens.HealthView(now=1), screens.AiView(now=1)
         for name, foot in (("map", lambda w: render.map_footer(mv, 21, w)), ("cpu", lambda w: render.cpu_footer(cv, 40, w)),
                            ("health", lambda w: render.health_footer(hv, 10, w)), ("ai", lambda w: render.ai_footer(av, 12, w, {"locked": False}))):
             for w in WIDTHS:
-                text = render.ANSI.sub("", foot(w))
+                text = ansi.ANSI.sub("", foot(w))
                 self.assertIn("Esc: back", text, (name, w))
                 self.assertIn("?: help", text, (name, w))
                 self.assertIn("1-5: screens", text, (name, w)) if w >= 120 else None
-            narrow = render.ANSI.sub("", foot(40))
+            narrow = ansi.ANSI.sub("", foot(40))
             self.assertIn("Esc: back", narrow, name)
             self.assertNotIn("PgUp", narrow)
 
     def test_the_footers_name_the_keys_of_the_table(self):
-        mv, cv, hv, av = render.MapView(now=1), render.CpuView(now=1), render.HealthView(now=1), render.AiView(now=1)
-        got = {"map": render.ANSI.sub("", render.map_footer(mv, 21, 226)), "cpu": render.ANSI.sub("", render.cpu_footer(cv, 40, 226)),
-               "health": render.ANSI.sub("", render.health_footer(hv, 10, 226)),
-               "ai": render.ANSI.sub("", render.ai_footer(av, 12, 226, {"locked": False}))}
+        mv, cv, hv, av = screens.MapView(now=1), render.CpuView(now=1), screens.HealthView(now=1), screens.AiView(now=1)
+        got = {"map": ansi.ANSI.sub("", render.map_footer(mv, 21, 226)), "cpu": ansi.ANSI.sub("", render.cpu_footer(cv, 40, 226)),
+               "health": ansi.ANSI.sub("", render.health_footer(hv, 10, 226)),
+               "ai": ansi.ANSI.sub("", render.ai_footer(av, 12, 226, {"locked": False}))}
         want = {"map": ("↑↓: move", "←→: close/open", "Enter: details", "e/c: expand/collapse all", "p: problems only"),
                 "cpu": ("↑↓: move", "Enter: details", "sort: P cpu"), "health": ("↑↓: move", "d/w/m: 24h/7d/30d", "Enter: details"),
                 "ai": ("↑↓: move", "e: AI on/off", "u: use model", "x: delete", "X: delete all", "c: cancel", "Enter: details")}
         for scope, texts in want.items():
             for t in texts:
                 self.assertIn(t, got[scope], scope)
-        locked = render.ANSI.sub("", render.ai_footer(av, 12, 226, {"locked": True}))
+        locked = ansi.ANSI.sub("", render.ai_footer(av, 12, 226, {"locked": True}))
         for t in ("e: AI on/off", "x: delete", "c: cancel"):
             self.assertNotIn(t, locked)                                                    # [ai] web_actions = no: the keys that act are not offered
 
     def test_the_overview_footer_offers_what_exists(self):
         slide = ("Overview", 1, 3, ["x"])
-        foot = lambda **kw: render.ANSI.sub("", render.frame(slide, 0, 3, 199, 24, [], **kw)).split("\r\n")[-1]  # noqa: E731
+        foot = lambda **kw: ansi.ANSI.sub("", render.frame(slide, 0, 3, 199, 24, [], **kw)).split("\r\n")[-1]  # noqa: E731
         self.assertEqual(foot(keys=True), " screen 1/3   ←→: slide   1-5: screens   ?: help   console 200x24")
         self.assertEqual(foot(keys=False), " screen 1/3   console 200x24")
         self.assertNotIn("jump to page", foot(keys=True))                                  # there is no such page: the slides are ←→
-        self.assertEqual(render.ANSI.sub("", render.frame(slide, 0, 1, 199, 24, [], keys=True)).split("\r\n")[-1],
+        self.assertEqual(ansi.ANSI.sub("", render.frame(slide, 0, 1, 199, 24, [], keys=True)).split("\r\n")[-1],
                          " single screen   1-5: screens   ?: help   console 200x24")      # one screen: nothing to move through
         nuc_config.PORTABLE, old = "/x", nuc_config.PORTABLE
         try:
             self.assertEqual(foot(keys=True), " screen 1/3   ←→: slide   1-5: screens   q: quit   ?: help   console 200x24")
         finally:
             nuc_config.PORTABLE = old
-        det = render.ANSI.sub("", render.frame(("Details", 1, 1, ["x"]), 1, 3, 226, 24, [], keys=True)).split("\r\n")[-1]
+        det = ansi.ANSI.sub("", render.frame(("Details", 1, 1, ["x"]), 1, 3, 226, 24, [], keys=True)).split("\r\n")[-1]
         self.assertIn("details: everything the overview cut ('… +N more')", det)
-        self.assertEqual(render.ANSI.sub("", render.frame(slide, 0, 3, 120, 24, [], keys=True, hint="HINT")).split("\r\n")[-1].count("HINT"), 1)
+        self.assertEqual(ansi.ANSI.sub("", render.frame(slide, 0, 3, 120, 24, [], keys=True, hint="HINT")).split("\r\n")[-1].count("HINT"), 1)
 
     def test_the_footer_does_not_name_a_screen_that_is_off(self):
         render.CFG["features"]["health"] = False
         slide = ("Overview", 1, 1, ["x"])
-        self.assertIn("1-3 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True)))
-        self.assertIn("1-3 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True, mapkey=True)))
-        self.assertIn("1 2 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True, cpukey=False)))
+        self.assertIn("1-3 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True)))
+        self.assertIn("1-3 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True, mapkey=True)))
+        self.assertIn("1 2 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 200, 24, [], keys=True, cpukey=False)))
 
 
 class Handlers(MapCase):
@@ -209,14 +210,14 @@ class Handlers(MapCase):
         results = {}
         for r in (x for x in ui.KEYMAP if x.scope in ("map", "list")):
             for k in r.keys:
-                mv = render.MapView(now=1)
+                mv = screens.MapView(now=1)
                 rs = graph.rows(G, mv.st)
-                render.map_sync(mv, rs)
-                render.map_key(mv, "down", rs)
-                render.map_key(mv, "right", rs)
+                screens.map_sync(mv, rs)
+                screens.map_key(mv, "down", rs)
+                screens.map_key(mv, "right", rs)
                 rs = graph.rows(G, mv.st)
                 before = (mv.idx, mv.details, set(mv.st.open), mv.st.all, mv.st.only)
-                act = render.map_key(mv, k, rs, 5)
+                act = screens.map_key(mv, k, rs, 5)
                 after = (mv.idx, mv.details, set(mv.st.open), mv.st.all, mv.st.only)
                 results[(r.action, k)] = (act, before != after)
         for (action, k), (act, changed) in results.items():
@@ -232,66 +233,66 @@ class Handlers(MapCase):
         self.assertEqual({a for a, _k in results}, {"move", "page", "details", "close", "open", "expand", "collapse", "problems"})
 
     def test_cpu(self):
-        rows = render.cpu_rows(PROCS)
+        rows = screens.cpu_rows(PROCS)
         for k in ("p", "m", "t", "n", "u", "P", "M", "T", "N", "U"):
             cv = render.CpuView(now=1)
             cv.sort = "pid" if k.lower() == "n" else "cpu" if k.lower() != "p" else "mem"
-            self.assertEqual(render.cpu_key(cv, k, rows), "rows", k)
-            self.assertEqual(cv.sort, render.CPU_SORT_KEYS[k.lower()], k)
+            self.assertEqual(screens.cpu_key(cv, k, rows), "rows", k)
+            self.assertEqual(cv.sort, screens.CPU_SORT_KEYS[k.lower()], k)
         for k in ("down", "j"):
             cv = render.CpuView(now=1)
-            render.cpu_key(cv, k, rows)
+            screens.cpu_key(cv, k, rows)
             self.assertEqual(cv.idx, 1, k)
         for k in ("pgdn", "end"):
             cv = render.CpuView(now=1)
-            render.cpu_key(cv, k, rows, 3)
+            screens.cpu_key(cv, k, rows, 3)
             self.assertEqual(cv.idx, 3 if k == "pgdn" else len(rows) - 1, k)
         cv = render.CpuView(now=1)
         for k in ("enter", "space"):
-            render.cpu_key(cv, k, rows)
+            screens.cpu_key(cv, k, rows)
             self.assertTrue(cv.details, k)
-            render.cpu_key(cv, k, rows)
+            screens.cpu_key(cv, k, rows)
             self.assertFalse(cv.details, k)
 
     def test_health(self):
         fl = [{"id": f"f{i}"} for i in range(6)]
         for k, days in (("d", 1), ("w", 7), ("m", 30)):
-            hv = render.HealthView(days=7 if days != 7 else 30, now=1)
-            self.assertEqual(render.health_key(hv, k, fl), "period", k)
+            hv = screens.HealthView(days=7 if days != 7 else 30, now=1)
+            self.assertEqual(screens.health_key(hv, k, fl), "period", k)
             self.assertEqual(hv.days, days)
         for k in ("1", "7", "3"):  # the digits are the screens: they are not periods
-            hv = render.HealthView(now=1)
-            self.assertEqual((render.health_key(hv, k, fl), hv.days), ("", 7), k)
+            hv = screens.HealthView(now=1)
+            self.assertEqual((screens.health_key(hv, k, fl), hv.days), ("", 7), k)
 
     def test_ai(self):
         rows = [{"id": f"m{i}", "name": f"M{i}", "rec": i == 2, "installed": True} for i in range(5)]
         for k, act in (("e", "toggle"), ("u", "use"), ("x", "delete"), ("X", "delete-all"), ("c", "cancel")):
-            av = render.AiView(now=1)
-            self.assertEqual(render.ai_key(av, k, rows), act, k)
-        av = render.AiView(now=1)
+            av = screens.AiView(now=1)
+            self.assertEqual(screens.ai_key(av, k, rows), act, k)
+        av = screens.AiView(now=1)
         av.confirm = ("delete", "m1", "Delete?")                                         # a question: y does it, any other key is no
-        self.assertEqual(render.ai_key(av, "y", rows), "yes")
+        self.assertEqual(screens.ai_key(av, "y", rows), "yes")
         for k in ("n", "esc", "q", "1", "?", "tab", "e", "x"):
             av.confirm = ("delete", "m1", "Delete?")
-            self.assertEqual(render.ai_key(av, k, rows), "", k)
+            self.assertEqual(screens.ai_key(av, k, rows), "", k)
             self.assertIsNone(av.confirm, k)
 
     def test_the_keys_of_every_screen_are_not_theirs(self):
         G = self.graph()
-        rows, fl, mrows = render.cpu_rows(PROCS), [{"id": "f0"}], graph.rows(G)
+        rows, fl, mrows = screens.cpu_rows(PROCS), [{"id": "f0"}], graph.rows(G)
         airows = [{"id": "m0", "name": "M", "rec": True, "installed": True}]
         for k in ("tab", "btab", "1", "2", "3", "4", "5", "?", "r", "Z"):
-            self.assertEqual(render.map_key(render.MapView(now=1), k, mrows), "", k)
-            self.assertEqual(render.cpu_key(render.CpuView(now=1), k, rows), "", k)
-            self.assertEqual(render.health_key(render.HealthView(now=1), k, fl), "", k)
-            self.assertEqual(render.ai_key(render.AiView(now=1), k, airows), "", k)
+            self.assertEqual(screens.map_key(screens.MapView(now=1), k, mrows), "", k)
+            self.assertEqual(screens.cpu_key(render.CpuView(now=1), k, rows), "", k)
+            self.assertEqual(screens.health_key(screens.HealthView(now=1), k, fl), "", k)
+            self.assertEqual(screens.ai_key(screens.AiView(now=1), k, airows), "", k)
 
     def test_esc_closes_the_details_pane_first_on_every_list(self):
         G = self.graph()
-        mv, cv, hv, av = render.MapView(now=1), render.CpuView(now=1), render.HealthView(now=1), render.AiView(now=1)
-        calls = ((mv, lambda v, k: render.map_key(v, k, graph.rows(G))), (cv, lambda v, k: render.cpu_key(v, k, render.cpu_rows(PROCS))),
-                 (hv, lambda v, k: render.health_key(v, k, [{"id": "f"}])),
-                 (av, lambda v, k: render.ai_key(v, k, [{"id": "m", "name": "M", "rec": True, "installed": True}])))
+        mv, cv, hv, av = screens.MapView(now=1), render.CpuView(now=1), screens.HealthView(now=1), screens.AiView(now=1)
+        calls = ((mv, lambda v, k: screens.map_key(v, k, graph.rows(G))), (cv, lambda v, k: screens.cpu_key(v, k, screens.cpu_rows(PROCS))),
+                 (hv, lambda v, k: screens.health_key(v, k, [{"id": "f"}])),
+                 (av, lambda v, k: screens.ai_key(v, k, [{"id": "m", "name": "M", "rec": True, "installed": True}])))
         for key in ("esc", "q"):
             for v, call in calls:
                 v.details = True
@@ -331,8 +332,8 @@ class Dispatch(MapCase):
     # -- the stubbed screens: a frame with the real footer, so that the keys have something to show
     def cpu_screen(self, d, pb, cv, w, h):
         self.calls["cpu"].append(self.now)
-        rows = render.cpu_rows(d["procs"]["procs"], cv.sort)
-        render.cpu_sync(cv, rows)
+        rows = screens.cpu_rows(d["procs"]["procs"], cv.sort)
+        screens.cpu_sync(cv, rows)
         cv.page = 4
         return render.frame(("CPU", 1, 1, [f"CPU sort={cv.sort} row={cv.idx} details={cv.details}"]), 0, 1, w, h, pb,
                             foot=render.cpu_footer(cv, len(rows), w)), rows
@@ -343,7 +344,7 @@ class Dispatch(MapCase):
 
     def health_screen(self, data, pb, hv, w, h):
         fl = [{"id": f"f{i}"} for i in range(6)]
-        render.health_sync(hv, fl)
+        screens.health_sync(hv, fl)
         hv.rows = 4
         return render.frame(("Health", 1, 1, [f"HEALTH days={hv.days} row={hv.idx} details={hv.details}"]), 0, 1, w, h, pb,
                             foot=render.health_footer(hv, len(fl), w)), fl
@@ -354,7 +355,7 @@ class Dispatch(MapCase):
 
     def ai_screen(self, data, pb, av, w, h, wait=0.0):
         rows = [{"id": f"m{i}", "name": f"M{i}", "rec": i == 2, "installed": True} for i in range(5)]
-        render.ai_sync(av, rows)
+        screens.ai_sync(av, rows)
         av.rows = 4
         return render.frame(("AI", 1, 1, [f"AI row={av.idx} details={av.details}"]), 0, 1, w, h, pb,
                             foot=render.ai_footer(av, len(rows), w, {"locked": False})), rows
@@ -534,14 +535,14 @@ class Dispatch(MapCase):
 
     def test_the_help_box_follows_the_features_and_the_install_kind(self):
         nuc_config.PORTABLE = ""
-        box = "\n".join(render.ANSI.sub("", x) for x in render.help_box("overview", 80, 24, lambda f: f != "ai"))
+        box = "\n".join(ansi.ANSI.sub("", x) for x in render.help_box("overview", 80, 24, lambda f: f != "ai"))
         self.assertNotIn("open the AI screen", box)
         self.assertIn("open the Health screen (as 4)", box)
         self.assertNotIn("quit", box)                                                   # an installed monitor does not quit
         self.assertIn("1-4", box)
-        box = "\n".join(render.ANSI.sub("", x) for x in render.help_box("overview", 80, 24, lambda f: True, portable=True))
+        box = "\n".join(ansi.ANSI.sub("", x) for x in render.help_box("overview", 80, 24, lambda f: True, portable=True))
         self.assertRegex(box, r"q\s+quit")
-        box = "\n".join(render.ANSI.sub("", x) for x in render.help_box("map", 80, 24, lambda f: True, paused=True))
+        box = "\n".join(ansi.ANSI.sub("", x) for x in render.help_box("map", 80, 24, lambda f: True, paused=True))
         self.assertIn("resume the redraw", box)
         self.assertRegex(box, r"q\s+like Esc")
 
@@ -582,7 +583,7 @@ class Dispatch(MapCase):
         frames = self.run_main([b"2", b"Z", b"3"])
         self.assertIn("paused", frames[2][0])
         self.assertNotIn("paused", frames[3][0])
-        frames = self.run_main([b"2", b"Z", render.MAP_IDLE_S + 5])
+        frames = self.run_main([b"2", b"Z", screens.MAP_IDLE_S + 5])
         self.assertEqual(self.shown(frames)[-1], "overview")
         self.assertNotIn("paused", frames[-1][0])
 
@@ -613,15 +614,15 @@ class Dispatch(MapCase):
 
     def test_an_idle_screen_goes_back_to_the_start_view_not_to_the_rotation(self):
         self.start_view("health")
-        frames = self.run_main([b"2", render.MAP_IDLE_S + 5, 1])
+        frames = self.run_main([b"2", screens.MAP_IDLE_S + 5, 1])
         self.assertEqual(self.shown(frames), ["health", "map", "health", "health"])
         self.assertEqual(self.shown(self.run_main([render.HEALTH_IDLE_S + 5, 1])), ["health", "health", "health"])  # idle on the start itself: a fresh one
         render.CFG["ui"].pop("start_view")
-        frames = self.run_main([b"2", render.MAP_IDLE_S + 5, 1])
+        frames = self.run_main([b"2", screens.MAP_IDLE_S + 5, 1])
         self.assertEqual(self.shown(frames), ["overview", "map", "overview", "overview"])  # no start_view: the rotation, as it was
 
     def test_new_view_opens_one_screen_and_only_that_one(self):
-        for name, cls in (("map", render.MapView), ("cpu", render.CpuView), ("health", render.HealthView), ("ai", render.AiView)):
+        for name, cls in (("map", screens.MapView), ("cpu", render.CpuView), ("health", screens.HealthView), ("ai", screens.AiView)):
             got = render.new_view(name, 123.0)
             self.assertEqual([type(x) is cls if x is not None else None for x in got].count(True), 1)
             view = next(x for x in got if x is not None)

@@ -16,6 +16,7 @@ import demo  # noqa: E402
 import graph  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
 import screens  # noqa: E402
 import ui  # noqa: E402
 import webjs  # noqa: E402
@@ -81,7 +82,7 @@ class Model(unittest.TestCase):
         G = demo_graph()
         rs = graph.rows(G, graph.State(all=True))
         down = next(r for r in rs if G["nodes"][r["node"]]["state"] == "down")
-        text = SGR.sub("", render.map_row(G, down))
+        text = SGR.sub("", cardlines.map_row(G, down))
         self.assertIn("\u2716 " + G["nodes"][down["node"]]["label"], text)  # a symbol besides the colour
         self.assertRegex(text, r"^(\u2502  |   )*(\u251c|\u2514)\u2500 ")  # the tree glyphs come first
 
@@ -117,9 +118,9 @@ class Model(unittest.TestCase):
         self.assertIn("nothing to show yet", htmlview.html(web[-1]))
 
     def test_the_keys_moved_with_the_view(self):
-        self.assertIs(render.MapView, screens.MapView)
-        self.assertIs(render.map_key, screens.map_key)
-        self.assertEqual((render.MAP_PANE_W, render.MAP_IDLE_S), (screens.MAP_PANE_W, screens.MAP_IDLE_S))
+        self.assertIs(screens.MapView, screens.MapView)
+        self.assertIs(screens.map_key, screens.map_key)
+        self.assertEqual((screens.MAP_PANE_W, screens.MAP_IDLE_S), (screens.MAP_PANE_W, screens.MAP_IDLE_S))
         G = demo_graph()
         mv = screens.MapView(NOW)
         rs = graph.rows(G, mv.st)

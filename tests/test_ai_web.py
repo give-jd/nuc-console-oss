@@ -23,6 +23,7 @@ import aiweb  # noqa: E402
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
 import web  # noqa: E402
 
 ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)
@@ -183,7 +184,7 @@ class AiPage(unittest.TestCase):
         self.assertEqual(len({r[0] for r in rs}), 12)                        # one anchor per model
         for i, sel, href, name, par, label, cls, marks in rs:                # the browser stays on the clicked row; the id is in the URL
             self.assertTrue(href.endswith("#m-%d" % i), href)
-            self.assertIn(params(href)["sel"], {r["id"] for r in render.ai_rows(render.ai_data()["cat"])})
+            self.assertIn(params(href)["sel"], {r["id"] for r in screens.ai_rows(render.ai_data()["cat"])})
         self.assertEqual({r[5] for r in rs}, {"◐ GPU+CPU", "✔ FITS GPU"})    # a symbol besides the colour
         self.assertEqual([r[7] for r in rs if r[7]], ["★", "✓●", "✓"])      # recommended, installed and active, installed
         self.assertNotIn("DETAILS", txt)                                     # nothing selected: no panel
@@ -269,7 +270,7 @@ class AiPage(unittest.TestCase):
             render.DEMO_OS = os_name
             render._AI.clear()
             self.srv.cache.clear()
-            ids = [r["id"] for r in render.ai_rows(render.ai_data()["cat"])]
+            ids = [r["id"] for r in screens.ai_rows(render.ai_data()["cat"])]
             self.assertEqual(len(ids), 12)
             for mid in ids:
                 with self.subTest(os=os_name, model=mid):
@@ -318,7 +319,7 @@ class AiPage(unittest.TestCase):
         self.assertEqual(q("view=ai")["view"], "ai")
         self.assertEqual(q("view=ai&sel=qwen3-4b")["sel"], "qwen3-4b")       # any text: the page checks it against the catalog
         self.assertEqual(len(q("view=ai&sel=" + "a" * 5000)["sel"]), web.AI_SEL_MAX)
-        self.assertEqual(web.AI_SEL_MAX, render.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
+        self.assertEqual(web.AI_SEL_MAX, screens.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
         self.assertEqual(q("view=map&sel=qwen3-4b")["sel"], "")              # the map's sel stays ten hex digits
         self.assertEqual(q("view=cpu&sel=qwen3-4b")["sel"], "")
         self.assertEqual(q("sel=qwen3-4b")["sel"], "")
@@ -410,7 +411,7 @@ class AiPage(unittest.TestCase):
     def test_html_and_control_characters_in_the_catalog_are_inert(self):
         cat, status = self.hostile()
         self.seed(cat, status)
-        evil_id = render.ai_rows(cat)[0]["id"]
+        evil_id = screens.ai_rows(cat)[0]["id"]
         for path in ("/?view=ai", "/?view=ai&cols=100", "/?view=ai&cols=200", "/?view=ai&sel=" + quote(evil_id, safe=""), "/?view=ai&sel=qwen3-30b-a3b"):
             body = self.page(path)
             self.assertEqual(re.findall(r"<script|<img|<iframe|<svg|<object|<embed|<b>", body, re.I), [], path)

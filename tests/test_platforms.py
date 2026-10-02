@@ -20,6 +20,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the host's config.ini
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpers (cardlines.py)
 import collect_darwin as cmac  # noqa: E402
 import collect_windows as cwin  # noqa: E402
 import collector  # noqa: E402
@@ -31,10 +32,13 @@ import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import procs  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
+import exposure  # noqa: E402
+import ansi  # noqa: E402
 import winapi  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-TEXT = lambda lines: render.ANSI.sub("", "\n".join(lines))  # noqa: E731
+TEXT = lambda lines: ansi.ANSI.sub("", "\n".join(lines))  # noqa: E731
 render.CFG["details"] = False
 
 
@@ -436,11 +440,11 @@ class NativeRenderer(unittest.TestCase):
 
     def test_exposure_uses_the_collector_verdicts(self):
         cont, net, boot, _ = self.snap("windows")
-        rows = {(r["port"], r["proto"]): r for r in render.exposure_rows(net, cont)}
+        rows = {(r["port"], r["proto"]): r for r in exposure.exposure_rows(net, cont)}
         self.assertEqual((rows[(22, "tcp")]["lan"], rows[(22, "tcp")]["ts"]), (1, 1))
         self.assertEqual(rows[(8080, "tcp")]["name"], "shop-web-1")                                 # Docker Desktop backend -> container
         self.assertTrue(rows[(5432, "tcp")]["warn"])                                                # DB open on the LAN
-        self.assertEqual(render.group_of(rows[(445, "tcp")]), "LOCALE")                             # blocked: LAN and tailnet both
+        self.assertEqual(exposure.group_of(rows[(445, "tcp")]), "LOCALE")                             # blocked: LAN and tailnet both
         self.assertEqual(rows[(3389, "tcp")]["lan"], 2)
         self.assertEqual(rows[(7680, "tcp")]["lan"], 3)
         self.assertFalse(any("bypass" in r["note"] for r in rows.values()))                         # no DOCKER-USER on Windows
@@ -448,24 +452,24 @@ class NativeRenderer(unittest.TestCase):
     def test_ipv4_and_ipv6_sockets_merge_to_the_most_exposed(self):
         net = {"os": "windows", "listeners": [lst(80, "web", fw=["blocked", "x"]), lst(80, "web", addr="::", fw=["open", "rule y"])],
                "firewall": {"kind": "windows"}}
-        r = render.exposure_rows(net, None)[0]
+        r = exposure.exposure_rows(net, None)[0]
         self.assertEqual((r["lan"], r["note"]), (1, "rule y"))
 
     def test_shared_discovery_ports_and_desktop_noise(self):
         cont, net, _, _ = self.snap("windows")
         mdns = lambda *procs: [lst(5353, p, proto="udp", fw=["open", 'rule "mDNS" (Private)']) for p in procs]  # noqa: E731
-        base = {"ts": 0, "ports": render.exposure_keys(dict(net, listeners=net["listeners"] + mdns("msedge")), cont)}
+        base = {"ts": 0, "ports": exposure.exposure_keys(dict(net, listeners=net["listeners"] + mdns("msedge")), cont)}
         for procs in (("chrome",), ("chrome", "msedge"), ("msedge", "chrome")):                   # whoever holds it: no alarm
             now = dict(net, listeners=net["listeners"] + mdns(*procs))
-            self.assertEqual(render.new_ports(now, cont, base), {}, procs)
+            self.assertEqual(exposure.new_ports(now, cont, base), {}, procs)
         legacy = {"ts": 0, "ports": dict(base["ports"], **{"5353/u:LAN": {"name": "msedge", "lan": 1}})}  # recorded before the stable name
-        self.assertEqual(render.new_ports(dict(net, listeners=net["listeners"] + mdns("chrome")), cont, legacy), {})
-        row = next(r for r in render.exposure_rows(dict(net, listeners=net["listeners"] + mdns("msedge", "chrome")), cont) if r["port"] == 5353)
+        self.assertEqual(exposure.new_ports(dict(net, listeners=net["listeners"] + mdns("chrome")), cont, legacy), {})
+        row = next(r for r in exposure.exposure_rows(dict(net, listeners=net["listeners"] + mdns("msedge", "chrome")), cont) if r["port"] == 5353)
         self.assertEqual(row["name"], "mDNS (chrome, msedge)")
         desk = dict(net, listeners=net["listeners"] + [lst(53325, "Code", addr="127.0.0.1", fw=["open", "local"])])
-        self.assertNotIn("Code", [r["name"] for r in render.webapp_rows(desk, cont)])               # local desktop apps are noise
+        self.assertNotIn("Code", [r["name"] for r in exposure.webapp_rows(desk, cont)])               # local desktop apps are noise
         relay = dict(net, listeners=[lst(38261, "wslrelay", addr="127.0.0.1", fw=["open", "local"])])
-        self.assertEqual(next(r["name"] for r in render.exposure_rows(relay, cont) if r["port"] == 38261), "wslrelay")  # WSL, not a container
+        self.assertEqual(next(r["name"] for r in exposure.exposure_rows(relay, cont) if r["port"] == 38261), "wslrelay")  # WSL, not a container
         why = cwin.fw_verdict(fw([rule("Wi-Fi Direct Spooler Use (In)", pr=256, svc="TermService", g="@FirewallAPI.dll,-36851")]),
                               {"proto": "tcp", "port": 49674, "pid": 900, "path": r"C:\Windows\System32\svchost.exe"}, {"termservice": {900}}, ENV)
         self.assertEqual(why, ("unknown", 'rule "Wi-Fi Direct Spooler Use (In)" not understood (Private)'))
@@ -494,27 +498,27 @@ class NativeRenderer(unittest.TestCase):
         self.assertIn("WHAT LETS PORTS IN", fw_text)
         self.assertIn('rule "OpenSSH SSH Server (sshd)" (Private)', fw_text)
         self.assertNotIn("ufw", fw_text)
-        self.assertIn("listening ports let in", TEXT(render.ov_firewall(net, 100, 2)))
+        self.assertIn("listening ports let in", TEXT(cardlines.ov_firewall(net, 100, 2)))
         _, mnet, _, _ = self.snap("darwin")
         self.assertIn("macOS firewall on · stealth", TEXT(render.firewall_block(mnet, 120)))
-        self.assertIn("OFF", TEXT(render.fw_status_lines(dict(mnet, firewall=dict(mnet["firewall"], state=0)))))
-        capped = TEXT(render.native_fw_details(net, 120, max_rules=1))
+        self.assertIn("OFF", TEXT(cardlines.fw_status_lines(dict(mnet, firewall=dict(mnet["firewall"], state=0)))))
+        capped = TEXT(cardlines.native_fw_details(net, 120, max_rules=1))
         self.assertIn("… +2 more", capped)
 
     def test_boot_and_sessions_labels(self):
         _, _, wboot, _ = self.snap("windows")
         self.assertIn("FAILED SERVICES", TEXT(render.boot_block_fallite(wboot, 90)))
         self.assertIn("SYSTEM EVENT LOG", TEXT(render.boot_block_journal(wboot, 90, 3)))
-        self.assertIn("events 3 err", TEXT(render.ov_boot(wboot, 100, 2)))
+        self.assertIn("events 3 err", TEXT(cardlines.ov_boot(wboot, 100, 2)))
         _, _, mboot, _ = self.snap("darwin")
-        full = TEXT(render.ov_boot(mboot, 100, -2))
+        full = TEXT(cardlines.ov_boot(mboot, 100, -2))
         self.assertNotIn("SLOWEST UNITS", full)                                                     # unsupported: left out
         self.assertNotIn("SYSTEM LOG", full)
         self.assertIn("not available on this OS", TEXT(render.boot_block_avvio(mboot, 100, 90)))
         page = TEXT(render.page_boot(mboot, 120, 60))
         self.assertNotIn("SLOWEST UNITS", page)
         sess = {"local": [{"user": "alice", "tty": "Console"}], "ssh": [], "rdp": ["203.0.113.9"]}
-        t = TEXT(render.ov_sessioni({"sessions": sess}, 90, 0))
+        t = TEXT(cardlines.ov_sessioni({"sessions": sess}, 90, 0))
         self.assertIn("remote desktop from 203.0.113.9", t)
         self.assertIn("NOT local", t)
 
@@ -526,17 +530,17 @@ class NativeRenderer(unittest.TestCase):
                 with self.subTest(os=os_name, size=(w, h)):
                     lines = render.page_overview(sm, cont, net, boot, w, h - 2, baseline=base)
                     self.assertNotIn("Traceback", TEXT(lines))
-                    self.assertFalse([ln for ln in lines if render.vlen(ln) > w])
+                    self.assertFalse([ln for ln in lines if ansi.vlen(ln) > w])
                     self.assertFalse(re.search(r"\w+(Error|Exception)\(", TEXT(lines)))  # no block replaced by its exception
 
     def test_baseline_with_native_data(self):
         cont, net, _, base = self.snap("windows")
-        keys = render.exposure_keys(net, cont)
+        keys = exposure.exposure_keys(net, cont)
         self.assertIn("22/t:LAN", keys)
         self.assertNotIn("445/t:LAN", keys)                                                          # blocked: not exposed
-        self.assertEqual(render.new_ports(net, cont, base), {})
+        self.assertEqual(exposure.new_ports(net, cont, base), {})
         newer = dict(net, listeners=net["listeners"] + [lst(9999, "evil", fw=["open", 'rule "x" (Private)'])])
-        self.assertEqual(render.new_ports(newer, cont, base), {"9999/t:LAN": "NEW"})
+        self.assertEqual(exposure.new_ports(newer, cont, base), {"9999/t:LAN": "NEW"})
 
     def test_expose_with_native_data(self):
         import socket
@@ -599,7 +603,7 @@ class Kiosk(unittest.TestCase):
         self.assertIn("--user-data-dir=C:\\p", edge)                                                # never the user's own profile
         self.assertEqual(render.browser_command("/usr/bin/firefox", "file:///x.html", "/p"), ["/usr/bin/firefox", "--new-window", "file:///x.html"])
         for n in (1, 3):  # the footer says how to get out, and never runs past the screen
-            foot = render.ANSI.sub("", render.frame(("Overview", 1, 1, []), 0, n, 99, 10, keys=False, hint=render.KIOSK_HINT).split("\r\n")[-1])
+            foot = ansi.ANSI.sub("", render.frame(("Overview", 1, 1, []), 0, n, 99, 10, keys=False, hint=render.KIOSK_HINT).split("\r\n")[-1])
             self.assertIn("closes", foot)
             self.assertLessEqual(len(foot), 99)
         self.assertIsNone(render.find_browser("none"))
@@ -873,7 +877,7 @@ class Kiosk(unittest.TestCase):
         render.socket.gethostname = lambda: "sjc22-be107-89b7b6f4-ed34-423a-8d4e-79a8cba66531-BAC22B2659BA.local"
         try:
             for w in (79, 100, 120, 200):
-                head = render.ANSI.sub("", render.frame(("System", 1, 1, []), 0, 1, w, 10, pb=[(2, "x")]).split("\r\n")[0])
+                head = ansi.ANSI.sub("", render.frame(("System", 1, 1, []), 0, 1, w, 10, pb=[(2, "x")]).split("\r\n")[0])
                 self.assertIn("✖ 1 PROBLEMS", head, w)
                 self.assertIn("sjc22-", head)
                 self.assertEqual("…" in head, w < 160)                                               # cut only when it does not fit
@@ -1201,7 +1205,7 @@ class OnWindows(unittest.TestCase):
         f = cwin.powershell(collector.run, cwin.PS_FIREWALL)
         self.assertIn("profiles", f)
         out = cwin.listeners(f)
-        self.assertTrue(all(x["fw"][0] in render.CELL for x in out))
+        self.assertTrue(all(x["fw"][0] in exposure.CELL for x in out))
 
     def test_history_event_log_reader(self):
         got = cwin.parse_events(cwin.powershell(collector.run, cwin.events_script({}), timeout=120))

@@ -37,6 +37,8 @@ import aiweb  # noqa: E402
 import aisetup  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 import web  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
@@ -1676,21 +1678,21 @@ class ConsoleKeys(WebBase):
     def view(self):
         render._AI.clear()
         data = render.ai_data()
-        rows = render.ai_rows(data["cat"])
-        av = render.AiView()
-        render.ai_sync(av, rows)
+        rows = screens.ai_rows(data["cat"])
+        av = screens.AiView()
+        screens.ai_sync(av, rows)
         return data, av, rows
 
     def press(self, av, rows, key):
         """What main() does with a key: ai_key, then ai_do for an action."""
-        act = render.ai_key(av, key, rows)
+        act = screens.ai_key(av, key, rows)
         if act and act != "back":
             render.ai_do(av, act, rows)
         return act
 
     def screen(self, av, data, cols=120, rows=33):
         s, _r = render.ai_screen(data, [], av, cols - 1, rows)
-        return render.ANSI.sub("", s)
+        return ansi.ANSI.sub("", s)
 
     def select(self, av, rows, name):
         av.idx = next(i for i, r in enumerate(rows) if r["id"] == name)
@@ -1735,7 +1737,7 @@ class ConsoleKeys(WebBase):
             self.press(av, rows, "e")
             self.assertEqual(av.confirm[:2], ("on", "tiny"))
             total = len(self.rt_bytes) + len(self.MODEL_BYTES["tiny"])
-            self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % render.ai_mb(total / 2 ** 20))
+            self.assertEqual(av.confirm[2], "Turn AI on with Tiny test model (%s to download)?" % screens.ai_mb(total / 2 ** 20))
             self.assertIn("Turn AI on with Tiny test model", self.screen(av, data).splitlines()[-1])
             self.assertEqual(self.httpd.requests, [], "nothing is fetched before the y")
             self.assertEqual(self.press(av, rows, "n"), "")

@@ -6,7 +6,6 @@ in a full-screen browser (see kiosk()); host metrics come from hostinfo.py inste
 """
 import collections
 import glob
-import ipaddress
 import json
 import os
 import re
@@ -21,26 +20,21 @@ import threading
 import time
 
 import cards  # same directory: the card registry and the KPI model
-import ansi  # same directory: the overlay of the help
+import ansi  # same directory: the console's drawing of the components
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
 import procs
 import ui
-import screens  # same directory: the full screens' view-models (HEALTH: HealthView, the components of the screen)
-# the console primitives (ansi.py) and the text helpers (ui.py) moved out of this file; render.py draws with them, and tests,
-# tools and the other modules (notify.py, htmlview.py) still reach them as render.X, so the names stay here until the cleanup PR
-from ansi import ANSI, SPARK, bar, c, cc, cell, clip, columns, fit_join, hbucket, hspark, kv, msg, msg_wrap, pad, section, sparkline, vlen  # noqa: F401
-from ansi import scroll as map_scroll  # noqa: F401 - the lists' scroll position (ansi.scroll)
-from ui import (CTRL, fmt_ago, fmt_cputime, fmt_dur, fmt_k, fmt_min, fmt_rate, fmt_size, hclean, hcount, hnum, human, num,  # noqa: F401
-                plural, qf, safe)
-# the exposure model (exposure.py) moved out of this file; render.py draws it and works out the problems from it. Moved; kept for tests
-# and tools until the cleanup PR
-from exposure import (CELL, DOCKER_PROXIES, EXPOSE_LABEL, EXPOSED_RANK, EXPOSURE_SECTIONS, GROUPS, INFRA_PROCS, PRIVATE_NETS,  # noqa: F401
-                      REACH_ORDER, SENSITIVE, SHARED_UDP, TS4, TS6, baseline_diff, bind_scope, docker_verdict, expose_apply, expose_cts,
-                      expose_note, expose_over, expose_over_items, expose_policy, expose_unmatched, exposure_keys, exposure_partial,
-                      exposure_rows, fw_verdict, group_of, is_private_addr, name_change, new_ports, os_of, rule_match, webapp_rows)
+import screens  # same directory: the full screens' view-models and the components of each screen
+from ansi import ANSI, bar, c, cc, clip, columns, kv, msg, msg_wrap, pad, section, vlen
+from ui import dd, dget, fmt_ago, hclean, hnum, human, idict, num, plural, safe
+from screens import (CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS, HEALTH_DAYS, HEALTH_NONE, MAP_IDLE_S, AiView, HealthView, MapView,
+                     ai_key, ai_mb, ai_rows, ai_select, ai_sync, cpu_key, cpu_rows, cpu_select, cpu_sync, health_findings, health_key,
+                     health_nothing, health_select, health_sync, map_key, map_layout, map_select, map_sync, map_view)
+from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
+                      exposure_rows, new_ports, os_of)
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -83,23 +77,10 @@ ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_secon
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
                               ("Boot", on("boot"))) if ok)
-FULL = False   # True while the detail pages / full view are built: no section hides items
-TRUNC = set()  # sections that hid items in the last overview ("… +N more"): the detail pages show them in full
-EXPAND = set()  # sections whose caps are lifted because the free space allows it (see page_overview)
 
 
-def lim(seq, n, section):
-    """seq[:n] unless FULL; remembers that `section` hides items so the detail pages can show everything."""
-    if FULL or section in EXPAND or len(seq) <= n:
-        return seq
-    TRUNC.add(section)
-    return seq[:n]
-
-
-def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
+def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     """Compact list over several lines without splitting items; beyond max_lines the last line ends with '… +N'."""
-    if FULL or (section and section in EXPAND):
-        max_lines = None
     rows, cur = [], []
     for it in items:
         if cur and indent + vlen(sep.join(cur)) + len(sep) + vlen(it) > w:
@@ -110,8 +91,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
     rows = [r for r in rows if r]
     if not max_lines or len(rows) <= max_lines:
         return [" " * indent + sep.join(r) for r in rows]
-    if section:
-        TRUNC.add(section)
     rows, hidden = rows[:max_lines], sum(len(r) for r in rows[max_lines:])
     while len(rows[-1]) > 1 and indent + vlen(sep.join(rows[-1])) + 8 > w:  # 8 = "  … +NNN"
         rows[-1].pop()
@@ -120,7 +99,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None, section=None):
 
 
 THROTTLE_WINDOW_S = 60
-THERMAL_WARN, THERMAL_ERR = ui.THERMAL_WARN, ui.THERMAL_ERR  # fractions of the maximum declared by the sensor (sysfs temp*_max)
 
 
 def read_file(path):
@@ -379,12 +357,6 @@ def read_load():
     return [] if load is None else load if len(load) == 3 else None
 
 
-fmt_up, fmt_load, up_load_note = cards.fmt_up, cards.fmt_load, cards.up_load_note  # the figures of the SYSTEM card (cards.py)
-
-
-ram_figures, disk_figures = cards.ram_figures, cards.disk_figures  # (cards.py)
-
-
 def swap_figures(m):
     """(used, total) bytes of the swap from a Sampler's "mem": None when there is no swap (or no figures)."""
     try:
@@ -392,9 +364,6 @@ def swap_figures(m):
         return (total - free, total) if total else None
     except (KeyError, TypeError):
         return None
-
-
-is_absent, is_disabled = cards.is_absent, cards.is_disabled  # the collectors' notes about a section (cards.py reads them too)
 
 
 def unavail_msg(d, key, prefix="unavailable"):
@@ -419,10 +388,10 @@ def thermal_lines(th, bw, maxw=None):
 
 
 def page_sistema(s, w, cont=None):
-    m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
-    lines = [f" up {fmt_up(up)}" + (f"   load {fmt_load(load)}" if load != [] else ""), ""]
+    m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), cards.disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
+    lines = [f" up {cards.fmt_up(up)}" + (f"   load {cards.fmt_load(load)}" if load != [] else ""), ""]
     bw = max(10, min(60, w - 40))
-    ram, swap = ram_figures(m), swap_figures(m)
+    ram, swap = cards.ram_figures(m), swap_figures(m)
     lines.append(f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}  cache {human(m.get('Cached'))}" if ram
                  else f" RAM   {c(33, '?')}")
     if swap:
@@ -507,10 +476,6 @@ def containers_block(data, w, now=None):
     return lines + columns([(cols[0], cw), (cols[1], cw)], w)
 
 
-page_container = containers_block  # historical name used by the tests
-
-
-NET_STALE_S, BOOT_STALE_S = cards.NET_STALE_S, cards.BOOT_STALE_S  # the collectors' data older than this is stale (seconds)
 NAMEW = 36
 NCOL3 = 225  # from this width the single screen uses three columns
 NET_SKIP = ("lo", "veth", "br-")  # container virtual interfaces: noise
@@ -519,25 +484,16 @@ REAL_FS = ("ext4", "ext3", "xfs", "btrfs", "vfat", "f2fs", "zfs", "ntfs3", "exfa
 BOOT_WINDOW_S = 900  # a container started within 15 min of boot "started with the boot"
 
 
-fs = ui.fmt_s
-
-
-BOOT_COLORS = ansi.STAGE_COLORS  # the boot stages' colours (ansi.py draws the Timeline)
-
-
-boot_labels, unsupported, BOOT_LABELS = cards.boot_labels, cards.unsupported, cards.BOOT_LABELS  # (cards.py)
-
-
 def boot_block_avvio(b, up, w):
     return [section("BOOT", w)] + _lines_of(cards.boot_start_parts(b, up, w), w)[0]
 
 
 def boot_block_lente(b, w, k):
-    return _lines_of(cards.boot_slowest_parts(b, cards.Caps(w, FULL, EXPAND, TRUNC), k), w)[0]
+    return _lines_of(cards.boot_slowest_parts(b, cards.Caps(w), k), w)[0]
 
 
 def boot_block_fallite(b, w):
-    lines = [section(boot_labels(b)["failed_title"], w), ""]
+    lines = [section(cards.boot_labels(b)["failed_title"], w), ""]
     f = b.get("failed")
     if f is None:
         return lines + [unavail_msg(b, "failed")]
@@ -545,14 +501,14 @@ def boot_block_fallite(b, w):
 
 
 def boot_block_servizi(b, w, k):
-    lines = [section(boot_labels(b)["enabled_title"], w), ""]
+    lines = [section(cards.boot_labels(b)["enabled_title"], w), ""]
     en = b.get("enabled")
     if en is None:
         return lines + [unavail_msg(b, "enabled")]
     act = [e for e in en if e["state"] == "active"]
     off = [e for e in en if e["state"] != "active"]
     lines.append(f"   {len(en)} enabled   {c(32, f'{len(act)} active')}   {len(off)} inactive (often one-shots already done)")
-    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k, section="boot")
+    lines += wrap_items([c(90, e["unit"].replace(".service", "")) for e in act], w, indent=5, max_lines=k)
     fail = [e for e in off if e["state"] == "failed"]
     if fail:
         lines += [msg("err", safe(e["unit"]) + " failed") for e in fail]
@@ -575,7 +531,7 @@ def boot_block_container(b, w, k, now):
 
 
 def boot_block_journal(b, w, k):
-    return _lines_of(cards.boot_journal_parts(b, cards.Caps(w, FULL, EXPAND, TRUNC), k, w), w)[0]
+    return _lines_of(cards.boot_journal_parts(b, cards.Caps(w), k, w), w)[0]
 
 
 def tight(lines):
@@ -592,13 +548,13 @@ def page_boot(b, w, body_h, now=None):
     now = now or time.time()
     if b is None:
         return ["", msg("err", "boot collector not running: no state in " + BOOT_STATE)]
-    head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > BOOT_STALE_S else []
+    head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > cards.BOOT_STALE_S else []
     up = now - b.get("btime", now)
     wide = w >= WIDE
     # a single page: if it does not fit the height the lists shrink (k), then it splits like the others
     # macOS/Windows: the blocks their collector has no data for are left out, not shown empty
-    slow = (lambda bw, k: []) if unsupported(b, "blame") else (lambda bw, k: boot_block_lente(b, bw, k) + [""])
-    jour = (lambda bw, k: []) if unsupported(b, "journal") else (lambda bw, k: [""] + boot_block_journal(b, bw, k))
+    slow = (lambda bw, k: []) if cards.unsupported(b, "blame") else (lambda bw, k: boot_block_lente(b, bw, k) + [""])
+    jour = (lambda bw, k: []) if cards.unsupported(b, "journal") else (lambda bw, k: [""] + boot_block_journal(b, bw, k))
     for k in (10, 8, 6, 4, 3):
         if wide:
             lw, rw = int(w * 0.5), w - int(w * 0.5) - 3
@@ -634,7 +590,7 @@ def accept_baseline(if_missing=False, path=None, now=None):
         print("baseline already present: left untouched")
         return 0
     net, cont = load_json(NET_STATE), load_containers()
-    if (not isinstance(net, dict) or now - net.get("ts", 0) > NET_STALE_S or exposure_partial(net)
+    if (not isinstance(net, dict) or now - net.get("ts", 0) > cards.NET_STALE_S or exposure_partial(net)
             or cont is None or now - cont.get("ts", 0) > STALE_S):
         print("network/container state missing, stale or incomplete: baseline not created", file=sys.stderr)
         return 1
@@ -709,10 +665,10 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         for label, key in (("CPU", "cpu"), ("NVMe", "nvme")):
             if key in thermal:
                 t, mx = thermal[key]
-                if t >= THERMAL_ERR * mx:
-                    out.append((2, f"{label} at {t:.0f}°C: above the {THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
-                elif t >= THERMAL_WARN * mx:
-                    out.append((1, f"{label} at {t:.0f}°C: above the {THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
+                if t >= ui.THERMAL_ERR * mx:
+                    out.append((2, f"{label} at {t:.0f}°C: above the {ui.THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
+                elif t >= ui.THERMAL_WARN * mx:
+                    out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
             out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
     if not on("boot"):
@@ -720,7 +676,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     elif boot is None:
         out.append((1, "boot collector not running", "collector-boot"))
     elif boot:
-        lbl = boot_labels(boot)
+        lbl = cards.boot_labels(boot)
         if boot.get("failed"):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
@@ -728,14 +684,14 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
-    if now - net.get("ts", 0) > NET_STALE_S:
+    if now - net.get("ts", 0) > cards.NET_STALE_S:
         out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)", "stale-net"))
     if net.get("errors"):
         out.append((1, "network sections not collected: " + ", ".join(net["errors"]), "net-sections"))
     ufw, fw = net.get("ufw"), net.get("firewall")
     if os_of(net) != "linux":  # the OS firewall (Windows Firewall, macOS Application Firewall) instead of ufw
         name = (fw or {}).get("name") or "firewall"
-        if fw is None and is_disabled(net, "firewall"):
+        if fw is None and cards.is_disabled(net, "firewall"):
             pass
         elif fw is None:
             out.append((2, "firewall state unreadable: LAN exposure unknown", "firewall-unreadable"))
@@ -745,9 +701,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                 out.append((2, f"{name} off{where}: listening services are reachable from the LAN", "firewall-off"))
             if fw.get("policy"):
                 out.append((1, f"{name} has rules from Group Policy: they are not read", "firewall-policy"))
-    elif ufw is None and is_disabled(net, "ufw"):
+    elif ufw is None and cards.is_disabled(net, "ufw"):
         pass  # firewall switched off in config.ini: the user's choice, not an alarm
-    elif ufw is None and is_absent(net, "ufw"):
+    elif ufw is None and cards.is_absent(net, "ufw"):
         out.append((1, "ufw not installed: LAN filtering cannot be verified", "ufw-missing"))
     elif ufw is None:
         out.append((2, "ufw unreadable", "ufw-unreadable"))
@@ -762,12 +718,12 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
         else:
             new, gone, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
-            for k, v in lim(list(new.items()), 3, "attention"):
+            for k, v in list(new.items())[:3]:
                 port, _, group = k.partition(":")
                 out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})", "port-new"))
-            if len(new) > 3 and not FULL:
+            if len(new) > 3:
                 out.append((3, f"… and {len(new) - 3} more new exposed ports", "port-new"))
-            for k, why in lim(list(changed.items()), 3, "attention"):
+            for k, why in list(changed.items())[:3]:
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
                 out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
@@ -992,7 +948,7 @@ def accept_problem(pid, reason="", forget=False, path=None, now=None, records=No
         if pid in NOT_ACCEPTABLE:
             print(f"port changes are accepted with the baseline: {ACCEPT_CMD} (no --problem)", file=sys.stderr)
             return 2
-        reason = CTRL.sub(" ", reason).strip()
+        reason = ui.CTRL.sub(" ", reason).strip()
         if not reason:
             print(f"--reason is required: write why this is acceptable (it is shown in `{PROBLEMS_CMD}`)", file=sys.stderr)
             return 2
@@ -1092,33 +1048,15 @@ def _block(card_id, title, body, w):
 
 
 def exposure_block(net, cont, w, new=None):
-    """The whole exposure matrix (the Network page, and the overview when there is room), within the FULL / EXPAND / TRUNC globals."""
+    """The whole exposure matrix (the Network page, and the overview when there is room)."""
     ctx = cards.Ctx(net=net, cont=cont, new=new, cfg=CFG)
     rows = expose_apply(exposure_rows(net, cont), net, cont)
-    return _block("exposure", "EXPOSURE", cards.exposure_full(ctx, cards.Caps(w, FULL, EXPAND, TRUNC), rows), w)
-
-
-def native_fw_lines(net):
-    """macOS/Windows: the status line of the OS firewall (Windows Firewall per network profile, macOS Application Firewall)."""
-    return [x for n in cards._fw_native_status(net) for x in ansi.render(n, 80)[0]]
-
-
-def native_fw_details(net, w, max_rules=None):
-    """macOS/Windows FIREWALL body: the configuration in a few lines, then which rule or setting opens each listening port."""
-    return [x for n in cards.fw_native_details(net, cards.Caps(w, FULL, EXPAND, TRUNC), max_rules) for x in ansi.render(n, w)[0]]
-
-
-def fw_status_lines(net):
-    """The two most important status lines: ufw and DOCKER-USER (macOS/Windows: the OS firewall)."""
-    return [x for n in cards.fw_status(net) for x in ansi.render(n, 80)[0]]
-
-
-short_default = cards.short_default
+    return _block("exposure", "EXPOSURE", cards.exposure_full(ctx, cards.Caps(w), rows), w)
 
 
 def firewall_block(net, w, max_rules=None):
     """The whole firewall block: status, configuration, rules (max_rules: how many, None for all of them)."""
-    return _block("firewall", "FIREWALL", cards.firewall_full(net, cards.Caps(w, FULL, EXPAND, TRUNC), max_rules), w)
+    return _block("firewall", "FIREWALL", cards.firewall_full(net, cards.Caps(w), max_rules), w)
 
 
 def page_rete(net, cont, w, now=None, baseline=False):
@@ -1135,7 +1073,7 @@ def page_rete(net, cont, w, now=None, baseline=False):
                                               else [msg("ok", "no problems detected")]) + [""]
 
     if net.get("listeners") is None:  # without the port list "LAN 0" would look like "nothing exposed"
-        if is_absent(net, "listeners"):
+        if cards.is_absent(net, "listeners"):
             return head + ["", msg("warn", "EXPOSURE unavailable: `ss` is missing (iproute2 package)")] + [""] + firewall_block(net, w)
         return head + ["", msg("err", "EXPOSURE unavailable: "
                                  + safe((net.get("errors") or {}).get("listeners", "?")))] \
@@ -1147,115 +1085,10 @@ def page_rete(net, cont, w, now=None, baseline=False):
     return head + exposure_block(net, cont, w, new) + ["", ""] + firewall_block(net, w)
 
 
-short_name, ct_ok, fmt_db_port = cards.short_name, cards.ct_ok, cards.fmt_db_port  # (cards.py)
-
-
-def stack_lines(cont, w, cap):
-    """For each stack: a header with counts and RAM, then its services with a status dot."""
-    lines, hid = _lines_of(cards.stack_parts(cont, cap, cards.Caps(w, FULL, EXPAND, TRUNC)), w)
-    if hid:
-        TRUNC.add("containers")
-    return lines
-
-
-def ov_sistema(s, w, k, cont=None):
-    return _native_lines(cards.system_card, cards.Ctx(s=s, cont=cont, cfg=CFG), w, k)
-
-
-def ov_container(cont, w, k):
-    return _native_lines(cards.containers_card, cards.Ctx(cont=cont, cfg=CFG), w, k)
-
-
-def ov_database(net, cont, w, k):
-    return _native_lines(cards.databases_card, cards.Ctx(net=net, cont=cont, cfg=CFG), w, k)
-
-
-def ov_esposizione(net, cont, w, k, new=None):
-    return _native_lines(cards.exposure_card, cards.Ctx(net=net, cont=cont, new=new, cfg=CFG), w, k)
-
-
-def ov_firewall(net, w, k):
-    return _native_lines(cards.firewall_card, cards.Ctx(net=net, cfg=CFG), w, k)
-
-
-def ov_boot(b, w, k, now=None):
-    return _native_lines(cards.boot_card, cards.Ctx(boot=b, now=now, cfg=CFG), w, k)
-
-
-def _native_lines(builder, ctx, w, k):
-    """The console lines of a card built of components (cards.py), for the callers that want the section as it was drawn: the card is
-    built within the FULL / EXPAND / TRUNC globals and drawn by ansi.card_lines; an error is the caller's (safe_block's)."""
-    card = builder(ctx, k, cards.Caps(w, FULL, EXPAND, TRUNC))
-    lines, hid = ansi.card_lines(card, w)
-    if hid:
-        TRUNC.add(card.id)
-    return lines
-
-
-def ov_traffico(s, w, k):
-    return _native_lines(cards.network_traffic_card, cards.Ctx(s=s, cfg=CFG), w, k)
-
-
-def ov_sessioni(s, w, k):
-    return _native_lines(cards.sessions_card, cards.Ctx(s=s, cfg=CFG), w, k)
-
-
-def ov_tailscale(net, w, k):
-    return _native_lines(cards.tailscale_card, cards.Ctx(net=net, cfg=CFG), w, k)
-
-
-def ov_webapp(net, cont, w, k):
-    return _native_lines(cards.webapps_card, cards.Ctx(net=net, cont=cont, cfg=CFG), w, k)
-
-
-def ov_docker(boot, w, k):
-    return _native_lines(cards.docker_disk_card, cards.Ctx(boot=boot, cfg=CFG), w, k)
-
-
-def ov_dischi(s, w, k):
-    return _native_lines(cards.disks_card, cards.Ctx(s=s, cfg=CFG), w, k)
-
-
-def safe_block(fn, title, width, *a):
-    try:
-        return fn(*a)
-    except Exception as e:  # noqa: BLE001 - a broken block must not empty the screen
-        return [section(title, width), msg("err", safe(repr(e))[:60])]
-
-
-def ov_attention(pb, bw, k):
-    return _native_lines(cards.attention_card, cards.Ctx(problems=pb, cfg=CFG), bw, k)
-
-
-# The overview's sections as cards (cards.py): each builder returns the card with the lines this file has always drawn for it (ui.Raw)
-# and the state its problems give it, so the console is what it was while a section is rebuilt out of components.
-# (id, title, feature, lines(ctx, k, caps)); the width a card is drawn in is caps.width
-OV_CARDS = (
-    ("attention", None, None, None),  # the cards built of components (cards.NATIVE): their builders are in cards.py
-    ("exposure", None, None, None),
-    ("webapps", None, None, None),
-    ("firewall", None, None, None),
-    ("system", None, None, None),
-    ("containers", None, None, None),
-    ("databases", None, None, None),
-    ("boot", None, None, None),
-    ("network_traffic", None, None, None),
-    ("sessions", None, None, None),
-    ("tailscale", None, None, None),
-    ("docker_disk", None, None, None),
-    ("disks", None, None, None),
-)
-
-
-def _overview_builder(id, lines):
-    return lambda x, k, cp: cards.raw_card(id, x, lines(x, k, cp))
-
-
-for _id, _title, _feature, _lines in OV_CARDS:
-    if _id in cards.NATIVE:
-        cards.register(_id, *cards.NATIVE[_id][:2], cards.NATIVE[_id][2])
-    else:
-        cards.register(_id, _title, _feature, _overview_builder(_id, _lines))
+# The overview's sections are cards (cards.py), registered in the order of the screen; every builder is in cards.py (cards.NATIVE).
+for _id in ("attention", "exposure", "webapps", "firewall", "system", "containers", "databases", "boot", "network_traffic", "sessions",
+            "tailscale", "docker_disk", "disks"):
+    cards.register(_id, *cards.NATIVE[_id][:2], cards.NATIVE[_id][2])
 
 
 def pack(blocks, ncol, cw, w, body_h, gap):
@@ -1286,27 +1119,27 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides().
     `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
     in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
-    global FULL
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
     ctx = cards.Ctx(s=s, cont=cont, net=net, boot=boot, problems=pb, cfg=CFG, now=now, baseline=baseline, new=new)  # this frame's data and memo
-    caps_at = lambda width: cards.Caps(width, FULL, EXPAND, TRUNC)  # noqa: E731 - the globals, seen as the Caps the registry asks for
+    lifted, trunc = set(), set()  # the sections whose caps are lifted because the free space allows it; the ones that hid items ("… +N more")
+    caps_at = lambda width, full=False: cards.Caps(width, full, lifted, trunc)  # noqa: E731 - what the registry asks for
 
     ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
     cw = (w - 3 * (ncol - 1)) // ncol
 
-    def card_block(n, k, c_):
-        """The lines of card n at level k in a column c_ wide: its title and body drawn by ansi.card_lines (a Raw card's lines as they are),
+    def card_block(n, k, c_, full=False):
+        """The lines of card n at level k in a column c_ wide: its title and body drawn by ansi.card_lines,
         remembered for the frame by what changes them; a card that hid items tells the Details pages."""
-        caps = caps_at(c_)
+        caps = caps_at(c_, full)
         card = cards.build(n, ctx, k, caps)
         lines, hid = ctx.once(("lines", n, k) + caps.key(n), lambda: ansi.card_lines(card, c_))
         if hid:
-            TRUNC.add(n)
+            trunc.add(n)
         return list(lines)
 
-    def make_cand(k):
+    def make_cand(k, full=False):
         """(card id, block) per section at detail level k: a section switched off in config.ini does not appear. The card comes from the
         registry (cards.build), which remembers it for this frame: the levels and expand() ask for the same card again and again."""
         have = {"attention", "exposure", "firewall", "system", "containers"}
@@ -1316,17 +1149,12 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
             have |= {"network_traffic", "sessions", "tailscale", "docker_disk", "disks"}
         # the order is fixed (config.ini [dashboard] sections, or [ui] layout / order: card_order), never decided by which block happens to fit where
         def lines_of(n, c_):
-            return mark_title(card_block(n, k, c_), cards.build(n, ctx, k, caps_at(c_)).state)  # the card's state in front of its title, when it is not fine
+            return mark_title(card_block(n, k, c_, full), cards.build(n, ctx, k, caps_at(c_, full)).state)  # the card's state in front of its title, when it is not fine
         return [(n, lambda c_, n=n: lines_of(n, c_)) for n in card_order(ctx, CFG["sections"]) if n in have and cards.enabled(n, CFG)]
 
-    def detail_pages(trunc):
+    def detail_pages(hid):
         """The sections that hid items ("… +N more"), built in full at the richest level and laid out page by page."""
-        global FULL
-        FULL = True
-        try:
-            blocks = [fn(cw) for n, fn in make_cand(-2) if n in trunc]
-        finally:
-            FULL = False
+        blocks = [fn(cw) for n, fn in make_cand(-2, True) if n in hid]
         pages, cols, ci = [], [[] for _ in range(ncol)], 0
         flush = lambda: pages.append(columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else list(cols[0]))
         for lines in blocks:
@@ -1346,11 +1174,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         return pages
 
     if scroll:
-        FULL = True
-        try:
-            pre = [fn(cw) for _, fn in make_cand(-2)]
-        finally:
-            FULL = False
+        pre = [fn(cw) for _, fn in make_cand(-2, True)]
         blocks = [(lambda c_, lines=lines: lines) for lines in pre]
         # the shortest column height that holds every section in the fixed order: the columns come out even
         lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
@@ -1368,7 +1192,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     if ui_cfg().get("density") == "wall":  # a wall display is read from afar: it starts at level 0, without the two richest levels (-2, -1)
         levels = levels[2:]
     for i, (k, spaced) in enumerate(levels):
-        TRUNC.clear()  # only what the level that is finally shown hides counts
+        trunc.clear()  # only what the level that is finally shown hides counts
         blocks = [fn for _, fn in make_cand(k)]
         last = i == len(levels) - 1
         lines = pack(blocks, ncol, cw, w, 10 ** 6 if last else body_h, [""] if spaced else [])  # last level: no limit (the page splits)
@@ -1380,36 +1204,36 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
                 def expand(first_lines):
                     ls = first_lines
                     try:
-                        for name in [n for n, _ in make_cand(k) if n in set(TRUNC)]:
-                            EXPAND.add(name)
-                            TRUNC.clear()
+                        for name in [n for n, _ in make_cand(k) if n in set(trunc)]:
+                            lifted.add(name)
+                            trunc.clear()
                             try_lines = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
                             if try_lines is None:
-                                EXPAND.discard(name)
+                                lifted.discard(name)
                             else:
                                 ls = try_lines
-                        TRUNC.clear()
+                        trunc.clear()
                         ls = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else []) or ls
-                        return ls, set(TRUNC)
+                        return ls, set(trunc)
                     finally:
-                        EXPAND.clear()
-                        TRUNC.clear()
+                        lifted.clear()
+                        trunc.clear()
                 lines, left = expand(lines)
                 if left and spacing_on():
                     saved_spacing = CFG["spacing"]
                     CFG["spacing"] = 0
                     try:
-                        TRUNC.clear()
+                        trunc.clear()
                         tight = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
                         tight_lines, tight_left = expand(tight) if tight is not None else (None, left)
                     finally:
                         CFG["spacing"] = saved_spacing
                     if tight_lines is not None and len(tight_left) < len(left):
                         lines, left = tight_lines, tight_left
-                TRUNC.clear()
-                TRUNC.update(left)
-            if details is not None and CFG["details"] and TRUNC:
-                details.extend(detail_pages(set(TRUNC)))
+                trunc.clear()
+                trunc.update(left)
+            if details is not None and CFG["details"] and trunc:
+                details.extend(detail_pages(set(trunc)))
             return lines  # the last level has a 10**6 limit: we always return here
 
 
@@ -1731,30 +1555,8 @@ def map_graph(smp=None):
 
 
 # ---- MAP screen: graph.py's tree drawn on the console, moved through with the keyboard ------------------------------------
-# The screen's model (MapView, its keys, the tree, the details, the layout) moved to screens.py as components that ansi.render draws; what stays here is
-# what needs this process (the footer's enabled keys, the frame, the producers). Moved; kept for tests and tools until the cleanup PR.
-from screens import (MAP_IDLE_S, MAP_PANE_W, MapView, map_key, map_layout, map_parent, map_select, map_sync, map_view)  # noqa: E402,F401
-
-
-def map_title(G, w, only=False):
-    """The Map's heading line (title, figures, legend), w columns wide. Moved (screens.map_title); kept for tests and tools."""
-    return ansi.render(screens.map_title(G, only), w)[0][0]
-
-
-def map_row(G, row):
-    """One tree row as an ANSI string, not cut. Moved (screens.map_branch); kept for tests and tools."""
-    b = screens.map_branch(G, row)
-    return (ansi.style(b.prefix, "muted") if b.prefix else "") + ansi.inline(b.mark) + " " + ansi.inline(b.body)
-
-
-def map_pane(G, nid, w, h):
-    """Everything known about a node, w columns, h lines at most. Moved (screens.map_props); kept for tests and tools."""
-    return ansi.render(screens.map_props(G, nid, h), w)[0]
-
-
-def map_lines(G, rs, w, h, cursor_key=None, details=None, top=None, only=False):
-    """The Map body as ANSI lines (title and legend, notes, tree, details pane): the console, --once, the rotation slide."""
-    return map_view(G, rs, w, h, cursor_key, details, top, only)[0]
+# The screen's model (MapView, its keys, the tree, the details, the layout) is in screens.py as components that ansi.render draws; what is
+# here is what needs this process (the footer's enabled keys, the frame, the producers).
 
 
 def map_footer(mv, n, w, truncated=False):
@@ -1777,7 +1579,7 @@ def map_screen(G, pb, mv, w, h):
 def map_slide(cont, net, boot, baseline, w, body_h):
     """The Map among the rotating pages ([dashboard] map_in_rotation): no cursor, opened level by level while it fits."""
     G = graph.build(cont, net, boot, CFG["webapps"], baseline=baseline, expose=CFG["expose"])
-    return map_lines(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)
+    return map_view(G, graph.rows(G, graph.State(open=graph.fit_open(G, map_layout(G, w, body_h)[1]))), w, body_h)[0]
 
 
 def map_once(argv, w, h):
@@ -1807,13 +1609,6 @@ def map_once(argv, w, h):
 SENSORS = os.environ.get("NUC_CONSOLE_SENSORS", os.path.join(nuc_config.RUN_DIR, "sensors.json"))  # written by the macOS/Windows collector
 SENSORS_STALE_S = 60  # an older sensors.json is not "now": it is ignored, and the screen says so
 CPU_IDLE_S = MAP_IDLE_S  # left alone this long, the CPU screen gives the monitor back to the rotation
-# the CPU screen's constants and the helpers for what a producer hands over moved out of this file (screens.py, ui.py). Moved; kept for tests
-# and tools until the cleanup PR
-from screens import (CPU_CELL_MAX_BAR, CPU_CELL_MIN_BAR, CPU_PANE_W, CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS,  # noqa: E402,F401
-                     CPU_STATES, cpu_rows, cpu_select, cpu_sync, cpu_key)
-from ui import dd, dget, idict  # noqa: E402,F401
-import screens  # noqa: E402 - the view-models of the full screens
-
 
 
 def cpu_os():
@@ -1917,7 +1712,7 @@ class CpuFeed(object):
 
 
 class CpuView(screens.CpuView):
-    """The interactive CPU screen's state (screens.CpuView, with the data source of this process). Moved; kept for tests and tools."""
+    """The interactive CPU screen's state (screens.CpuView, with the data source of this process)."""
 
     def __init__(self, now=None):
         screens.CpuView.__init__(self, CpuFeed(), now or time.time())
@@ -1939,20 +1734,10 @@ def cpu_topology(ids):
     return _TOPO[key]
 
 
-def cpu_core_of(d, ids):
-    """screens.cpu_core_of with this machine's topology. Moved; kept for tests and tools."""
-    return screens.cpu_core_of(d, ids, cpu_topology)
-
-
-def cpu_core_temps(d, ids):
-    """screens.cpu_core_temps with this machine's topology. Moved; kept for tests and tools."""
-    return screens.cpu_core_temps(d, ids, cpu_topology)
-
-
-def cpu_ctx(full=None):
-    """What the CPU screen needs of this process (screens.CpuCtx): whose machine it describes, the topology, whether nothing is cut (full:
-    default, as the detail pages are being built), the clock."""
-    return screens.CpuCtx(cpu_os(), cpu_topology, FULL if full is None else full, time)
+def cpu_ctx(full=False):
+    """What the CPU screen needs of this process (screens.CpuCtx): whose machine it describes, the topology, whether nothing is cut (full),
+    the clock."""
+    return screens.CpuCtx(cpu_os(), cpu_topology, full, time)
 
 
 def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
@@ -2110,15 +1895,9 @@ def once(argv):
 
 # ---- HEALTH screen: health.py's report (the history over days and weeks) on the console, moved through with the keyboard ------
 
-# Moved to screens.py (the HEALTH view-model); kept for tests and tools
-from screens import (HEALTH_DAYS, HEALTH_KEYS, HEALTH_NONE, HEALTH_PANE_W, KIND_LABEL, KIND_ORDER, LEVEL_PILL, HealthView, hfact,  # noqa: E402,F401
-                     health_details, health_findings, health_key, health_level, health_nothing, health_select, health_sync, hrows, hwhen)
+# The view-model of the screen is in screens.py; this file reads the report and runs the loop.
 HEALTH_TTL = 60          # the report is computed at most this often per period, whatever the number of keys or requests
 HEALTH_IDLE_S = 600      # the screen left alone this long gives the monitor back to the rotation (nobody may be at the keyboard)
-def hago(ts):
-    return screens.hago(ts, time.time())
-
-
 DEMO_HEALTH = ""         # --demo-health little|none: the demo with 5 hours of history, or none (demo.HEALTH_VARIANTS)
 _HEALTH, _HEALTH_LOCK = {}, threading.Lock()
 
@@ -2235,41 +2014,13 @@ def hansi(line):
     return "".join(x if re.fullmatch(r"\x1b\[[0-9;]*m", x) else hclean(x) for x in re.split(r"(\x1b\[[0-9;]*m)", str(line)))
 
 
-def hmsg(level, text, w):
-    """msg() as one or more lines: it wraps at w instead of running off the screen (the no-history message is long)."""
-    rows = textwrap.wrap(hclean(text), max(10, w - 5)) or [""]
-    return [msg(level, rows[0])] + ["     " + x for x in rows[1:]]
-
-
-def hsec(title, w, note=""):
-    """section() that drops its note rather than overflowing a narrow column."""
-    return section(title, w, note if len(note) + len(title) + 10 <= w else "")
-
-
-def hbar(frac, w):
-    n = round(min(max(frac, 0.0), 1.0) * w)
-    return c(36, "█" * n) + c(90, "░" * (w - n))
-
-
-def hjoin(items, w, lead="", sep="  ·  "):
-    """lead + items (ANSI strings) joined by sep; the ones that do not fit are counted: '… +N'. At least one is always kept (clipped)."""
-    keep = list(items)
-    while len(keep) > 1 and vlen(lead + sep.join(keep)) + (8 if len(keep) < len(items) else 0) > w:
-        keep.pop()
-    more = len(items) - len(keep)
-    return clip(lead + sep.join(keep) + (c(90, f"  … +{more}") if more else ""), w)
-
-
-hcut = ansi.cut_to  # lines as at most n lines: the last one says how many were left out
-
-
 def health_find_row(f, w):
     """A finding on one line (not cut to w): level pill, title, the text as far as it fits."""
     return ansi.finding_text(screens.health_finding(f, False, False, False), w)
 
 
 def health_title(R, w, days, fl, selector=True):
-    """The title line of the screen at w columns (screens.health_title drawn by ansi): kept for the classic web page and the rotation."""
+    """The title line of the screen at w columns (screens.health_title drawn by ansi)."""
     return ansi.render(screens.health_title(R, days, fl, selector), w)[0][0]
 
 
@@ -2370,36 +2121,8 @@ def health_once(argv, w, h):
 # Everything in it is data (a model's name comes from a catalog file, a GPU's from a driver): text goes through hclean(), numbers through
 # num(), a value that is missing is drawn as "?". The screen runs nothing and downloads nothing: it shows the commands to type.
 
-# The screen's view-model moved to screens.py (the AI block: the model rows, the view and its keys, every piece drawn as components); what is
-# left here reads the world (the catalog, the engine, the probe of the model server) and runs the live loop. Moved; kept for tests and tools
-# until the cleanup PR
-from screens import (AI_ACTIONS, AI_BACKEND, AI_ID_MAX, AI_NAME_MIN, AI_PANE_W, AI_UNKNOWN, AI_VERDICT, AiView, ai_cpu_name, ai_details,  # noqa: E402,F401
-                     ai_id, ai_key, ai_layout, ai_mb, ai_params, ai_rows, ai_select, ai_sync, ai_tok, ai_where)
-aisetup_size = screens.ai_size
-
-
-def _ai_lines(nodes, w):
-    return ansi.render(ui.Group(nodes), w)[0]
-
-
-def ai_title(rows, w):
-    return ansi.render(screens.ai_title(rows, w), w)[0][0]
-
-
-def ai_hw_lines(hw, w, k=0):
-    return _ai_lines(screens.ai_hw_nodes(hw, w, k), w)
-
-
-def ai_status_lines(st, cat, ids, w, k=0):
-    return _ai_lines(screens.ai_status_nodes(st, cat, ids, w, k), w)
-
-
-def ai_work_lines(st, cat, av, w, k=0):
-    return _ai_lines(screens.ai_work_nodes(st, cat, av, w, k), w)
-
-
-def ai_legend(w):
-    return ansi.render(screens.ai_legend(w), w)[0][0]
+# The screen's view-model is in screens.py (the AI block: the model rows, the view and its keys, every piece drawn as components); what is
+# here reads the world (the catalog, the engine, the probe of the model server) and runs the live loop.
 
 
 def ai_body(data, st, av, rows, w, h):
@@ -2600,7 +2323,7 @@ def ai_do(av, act, rows):
             if not used and not any(r["installed"] for r in rows):
                 av.msg = ("warn", "nothing is downloaded: nothing to delete")
                 return None
-            av.confirm = ("delete-all", None, f"Delete the runtime and every downloaded model ({aisetup_size(used)})?")
+            av.confirm = ("delete-all", None, f"Delete the runtime and every downloaded model ({screens.ai_size(used)})?")
     except Exception as e:  # noqa: BLE001 - the screen goes on
         av.msg = ("err", "the AI engine could not do that: " + hclean(repr(e), 120))
     return None

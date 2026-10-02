@@ -21,10 +21,14 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import aiweb  # noqa: E402
 import demo  # noqa: E402
 import render  # noqa: E402
+import cardlines  # noqa: E402
+import screens  # noqa: E402
+import ansi  # noqa: E402
 
 NOW = 1_790_000_000
 SIZES = ((79, 24), (120, 33), (200, 50), (226, 50))       # console sizes (--cols --rows): the layout gets cols - 1, as in once()
@@ -150,7 +154,7 @@ class AiCase(unittest.TestCase):
         the renderer's own colours and line ends. -> the lines, ANSI stripped."""
         rows = screen.split(LINE)
         self.assertEqual(len(rows), h, what)
-        out = [render.ANSI.sub("", x) for x in rows]
+        out = [ansi.ANSI.sub("", x) for x in rows]
         for x in out:
             self.assertLessEqual(len(x), w, (what, x))
         self.assertIsNone(CONTROL.search(SGR.sub("", "".join(rows))), what)
@@ -163,13 +167,13 @@ class AiCase(unittest.TestCase):
 
     def frame_of(self, cols, rows, av=None):
         """One frame of the seeded catalog, drawn from ai_screen() (no Sampler, no host state, whatever render.DEMO says): its lines, ANSI stripped."""
-        s, _ = render.ai_screen(render.ai_data(), [], av or render.AiView(now=NOW), cols - 1, rows)
+        s, _ = render.ai_screen(render.ai_data(), [], av or screens.AiView(now=NOW), cols - 1, rows)
         return self.check_frame(s, cols - 1, rows)
 
     def view(self, cat=None, **kw):
         """An AiView and the rows of a catalog (the hand-made one by default)."""
-        rows = render.ai_rows(catalog() if cat is None else cat)
-        av = render.AiView(now=NOW)
+        rows = screens.ai_rows(catalog() if cat is None else cat)
+        av = screens.AiView(now=NOW)
         for k, v in kw.items():
             setattr(av, k, v)
         return av, rows
@@ -177,9 +181,9 @@ class AiCase(unittest.TestCase):
     def press(self, av, rows, keys):
         """Keys as the console loop hands them to ai_key. -> what ai_key returned for each. After every key the cursor is on one model."""
         acts = []
-        render.ai_sync(av, rows)                                                         # what ai_screen() does before every key
+        screens.ai_sync(av, rows)                                                         # what ai_screen() does before every key
         for k in keys:
-            acts.append(render.ai_key(av, k, rows))
+            acts.append(screens.ai_key(av, k, rows))
             if rows:
                 self.assertTrue(0 <= av.idx < len(rows), (k, av.idx, len(rows)))
                 self.assertEqual(av.cur, rows[av.idx]["id"], k)
@@ -190,7 +194,7 @@ class Rows(AiCase):
     """ai_rows(): the catalog's models as plain rows, best first."""
 
     def test_the_models_come_best_first_and_carry_what_the_screen_draws(self):
-        rows = render.ai_rows(catalog(lambda c: c["models"].reverse()))
+        rows = screens.ai_rows(catalog(lambda c: c["models"].reverse()))
         self.assertEqual([r["id"] for r in rows], ["m-gpu", "m-part", "m-ram", "m-slow", "m-no"])      # by rank, whatever the order of the file
         gpu, part, ram, slow, no = rows
         self.assertEqual((gpu["verdict"], part["verdict"], ram["verdict"], slow["verdict"], no["verdict"]), ("gpu", "partial", "ram", "slow", "no"))
@@ -203,7 +207,7 @@ class Rows(AiCase):
         self.assertIsNone(no["tok"])
 
     def test_a_model_without_rank_goes_last_in_the_catalogs_order(self):
-        rows = render.ai_rows(catalog(lambda c: c["models"].extend([model("z-1", rank=None), model("z-2", rank=None)])))
+        rows = screens.ai_rows(catalog(lambda c: c["models"].extend([model("z-1", rank=None), model("z-2", rank=None)])))
         self.assertEqual([r["id"] for r in rows][-2:], ["z-1", "z-2"])
         self.assertEqual(len(rows), 7)
 
@@ -213,30 +217,30 @@ class Rows(AiCase):
             m.pop("approx_mb")
             m["size"] = 2 * 2 ** 30                                                                      # the pinned manifest: bytes
             c["models"].append(m)
-        self.assertEqual(next(r for r in render.ai_rows(catalog(pinned)) if r["id"] == "pinned")["size_mb"], 2048.0)
+        self.assertEqual(next(r for r in screens.ai_rows(catalog(pinned)) if r["id"] == "pinned")["size_mb"], 2048.0)
 
     def test_numbers_and_names_in_words(self):
-        self.assertEqual([render.ai_mb(x) for x in (400, 1024, 5017, 12288, 130000, None, "x", float("nan"))],
+        self.assertEqual([screens.ai_mb(x) for x in (400, 1024, 5017, 12288, 130000, None, "x", float("nan"))],
                          ["400 MB", "1.0 GB", "4.9 GB", "12.0 GB", "127 GB", "?", "?", "?"])
-        self.assertEqual([render.ai_params(*x) for x in ((8.2, None), (30.5, 3.3), (0.6, 0), (None, 3), ("x", None))], ["8.2B", "30.5B-A3.3B", "0.6B", "?", "?"])
-        self.assertEqual([render.ai_tok(x) for x in ((40.0, 70.0), (140.0, 233.0), (2.5, 4.0), (5.0, 5.0), (0.4, 0.6), None)], ["40-70", "140-233", "2.5-4", "5", "0.4-0.6", "-"])
+        self.assertEqual([screens.ai_params(*x) for x in ((8.2, None), (30.5, 3.3), (0.6, 0), (None, 3), ("x", None))], ["8.2B", "30.5B-A3.3B", "0.6B", "?", "?"])
+        self.assertEqual([screens.ai_tok(x) for x in ((40.0, 70.0), (140.0, 233.0), (2.5, 4.0), (5.0, 5.0), (0.4, 0.6), None)], ["40-70", "140-233", "2.5-4", "5", "0.4-0.6", "-"])
 
     def test_an_empty_or_odd_catalog_is_no_rows_not_an_error(self):
         for cat in (None, {}, [], "x", {"models": None}, {"models": "no"}, {"models": [None, 3, "x", {}, {"id": 5}, {"id": ""}, {"id": "  "}]}):
-            self.assertEqual(render.ai_rows(cat), [], cat)
+            self.assertEqual(screens.ai_rows(cat), [], cat)
 
     def test_two_models_with_one_id_are_one_row(self):
-        rows = render.ai_rows(catalog(lambda c: c["models"].append(model("m-gpu", name="Other"))))
+        rows = screens.ai_rows(catalog(lambda c: c["models"].append(model("m-gpu", name="Other"))))
         self.assertEqual([r["id"] for r in rows].count("m-gpu"), 1)
         self.assertEqual(rows[0]["name"], "Alpha GPU")                                                   # the first one
 
     def test_ids_are_cut_and_cleaned(self):
-        rows = render.ai_rows(catalog(lambda c: c["models"].append(model("x" * 200 + EVIL, rank=9))))
+        rows = screens.ai_rows(catalog(lambda c: c["models"].append(model("x" * 200 + EVIL, rank=9))))
         mine = rows[-1]["id"]
-        self.assertEqual(len(mine), render.AI_ID_MAX)
+        self.assertEqual(len(mine), screens.AI_ID_MAX)
         self.assertEqual(mine, "x" * 63 + "…")
-        self.assertEqual(render.ai_rows(catalog(lambda c: c["models"].append(model("a\x1bb\x9bc", rank=9))))[-1]["id"], "a?b?c")
-        self.assertIsNone(CONTROL.search("".join(r["id"] for r in render.ai_rows(catalog(lambda c: c["models"].append(model("e" + EVIL, rank=9)))))))
+        self.assertEqual(screens.ai_rows(catalog(lambda c: c["models"].append(model("a\x1bb\x9bc", rank=9))))[-1]["id"], "a?b?c")
+        self.assertIsNone(CONTROL.search("".join(r["id"] for r in screens.ai_rows(catalog(lambda c: c["models"].append(model("e" + EVIL, rank=9)))))))
 
 
 class Navigation(AiCase):
@@ -244,12 +248,12 @@ class Navigation(AiCase):
 
     def test_the_cursor_starts_on_the_recommended_model(self):
         av, rows = self.view(catalog(lambda c: c.update(recommended="m-slow")))
-        self.assertEqual(render.ai_sync(av, rows), 3)
+        self.assertEqual(screens.ai_sync(av, rows), 3)
         self.assertEqual(av.cur, "m-slow")
         av2, rows2 = self.view(catalog(lambda c: c.update(recommended=None)))
-        self.assertEqual(render.ai_sync(av2, rows2), 0)                                                # none recommended: the first
+        self.assertEqual(screens.ai_sync(av2, rows2), 0)                                                # none recommended: the first
         av3, none = self.view({})
-        self.assertEqual((render.ai_sync(av3, none), av3.cur), (0, None))
+        self.assertEqual((screens.ai_sync(av3, none), av3.cur), (0, None))
 
     def test_up_and_down_move_and_stop_at_the_ends(self):
         av, rows = self.view()
@@ -290,11 +294,11 @@ class Navigation(AiCase):
         self.press(av, rows, ["down", "down"])
         before = (av.idx, av.details)
         for key in ("esc", "q"):
-            self.assertEqual(render.ai_key(av, key, rows), "back")
-        self.assertEqual(render.ai_key(av, "a", rows), "")  # a is the overview's letter now
+            self.assertEqual(screens.ai_key(av, key, rows), "back")
+        self.assertEqual(screens.ai_key(av, "a", rows), "")  # a is the overview's letter now
         self.assertEqual((av.idx, av.details), before)
-        render.ai_key(av, "enter", rows)
-        self.assertEqual([render.ai_key(av, "esc", rows), av.details, render.ai_key(av, "esc", rows)], ["", False, "back"])  # details first
+        screens.ai_key(av, "enter", rows)
+        self.assertEqual([screens.ai_key(av, "esc", rows), av.details, screens.ai_key(av, "esc", rows)], ["", False, "back"])  # details first
 
     def test_the_keys_that_act_are_named_for_ai_do_and_move_nothing(self):
         av, rows = self.view()
@@ -302,22 +306,22 @@ class Navigation(AiCase):
         before = (av.idx, av.cur, av.details)
         self.assertEqual(self.press(av, rows, ["e", "u", "x", "X", "c"]), ["toggle", "use", "delete", "delete-all", "cancel"])
         self.assertEqual((av.idx, av.cur, av.details), before)
-        self.assertEqual({k: r.action for r in render.ui.KEYMAP if r.scope == "ai" and r.action in render.AI_ACTIONS for k in r.keys},
+        self.assertEqual({k: r.action for r in render.ui.KEYMAP if r.scope == "ai" and r.action in screens.AI_ACTIONS for k in r.keys},
                          {"e": "toggle", "u": "use", "x": "delete", "X": "delete-all", "c": "cancel"})
 
     def test_a_question_that_waits_takes_y_and_any_other_key_is_no(self):
         av, rows = self.view()
         av.confirm = ("delete", "m-gpu", "Delete the files of Qwen3? ")
-        self.assertEqual(render.ai_key(av, "y", rows), "yes")
+        self.assertEqual(screens.ai_key(av, "y", rows), "yes")
         self.assertEqual(av.confirm, ("delete", "m-gpu", "Delete the files of Qwen3? "), "ai_do answers it")
         for key in ("n", "esc", "q", "a", "x", "enter", "down", "z"):
             av.confirm = ("delete", "m-gpu", "?")
             before = (av.idx, av.details)
-            self.assertEqual(render.ai_key(av, key, rows), "", key)
+            self.assertEqual(screens.ai_key(av, key, rows), "", key)
             self.assertIsNone(av.confirm, key)
             self.assertEqual((av.idx, av.details), before, "the question is not a key press for the list")
         av.confirm = ("on", "m-ram", "?")
-        self.assertEqual(render.ai_key(av, "Y", rows), "yes")
+        self.assertEqual(screens.ai_key(av, "Y", rows), "yes")
 
     def test_other_keys_do_nothing(self):
         av, rows = self.view()
@@ -333,8 +337,8 @@ class Navigation(AiCase):
         av, rows = self.view()
         self.press(av, rows, ["home", "down", "down"])
         self.assertEqual(av.cur, "m-ram")
-        rows2 = render.ai_rows(catalog(lambda c: c["models"].insert(0, model("m-new", rank=0))))
-        self.assertEqual(render.ai_sync(av, rows2), 3)                                                 # one more above it: the cursor moved with its model
+        rows2 = screens.ai_rows(catalog(lambda c: c["models"].insert(0, model("m-new", rank=0))))
+        self.assertEqual(screens.ai_sync(av, rows2), 3)                                                 # one more above it: the cursor moved with its model
         self.assertEqual(av.cur, "m-ram")
 
     def test_the_cursor_stays_in_place_when_its_model_disappears(self):
@@ -342,20 +346,20 @@ class Navigation(AiCase):
         self.press(av, rows, ["home", "down", "down", "down"])
         self.assertEqual(av.cur, "m-slow")
         rows2 = [r for r in rows if r["id"] != "m-slow"]
-        self.assertEqual(render.ai_sync(av, rows2), 3)                                                 # the same place, on what moved up into it
+        self.assertEqual(screens.ai_sync(av, rows2), 3)                                                 # the same place, on what moved up into it
         self.assertEqual(av.cur, "m-no")
-        self.assertEqual(render.ai_sync(av, rows2[:2]), 1)                                             # fewer than that: the last one
-        self.assertEqual(render.ai_sync(av, []), 0)
+        self.assertEqual(screens.ai_sync(av, rows2[:2]), 1)                                             # fewer than that: the last one
+        self.assertEqual(screens.ai_sync(av, []), 0)
         self.assertIsNone(av.cur)
 
     def test_select_finds_by_id_or_name_in_any_case(self):
         av, rows = self.view()
-        self.assertTrue(render.ai_select(rows, av, "DELTA"))
+        self.assertTrue(screens.ai_select(rows, av, "DELTA"))
         self.assertEqual(av.cur, "m-slow")
-        self.assertTrue(render.ai_select(rows, av, "m-part"))
+        self.assertTrue(screens.ai_select(rows, av, "m-part"))
         self.assertEqual(av.idx, 1)
-        self.assertFalse(render.ai_select(rows, av, "nothing like this"))
-        self.assertFalse(render.ai_select(rows, av, "  "))
+        self.assertFalse(screens.ai_select(rows, av, "nothing like this"))
+        self.assertFalse(screens.ai_select(rows, av, "  "))
         self.assertEqual(av.cur, "m-part")                                                             # no match: the cursor stays
 
     def test_the_cursor_row_is_always_on_screen(self):
@@ -367,11 +371,11 @@ class Navigation(AiCase):
                 with self.subTest(size=(cols, rows), step=step):
                     frame, _ = render.ai_screen(render.ai_data(), [], av, cols - 1, rows)
                     out = self.check_frame(frame, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x]
+                    chosen = [ansi.ANSI.sub("", x) for x in frame.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x]
                     self.assertEqual(len(chosen), 1)                                                   # exactly one highlighted model ...
                     self.assertIn(rs[av.idx]["name"], chosen[0])                                       # ... the selected one
                     self.assertRegex(out[-1], r"model %d/%d" % (av.idx + 1, len(rs)))
-                render.ai_key(av, "down", rs)
+                screens.ai_key(av, "down", rs)
             self.assertEqual(av.idx, len(rs) - 1)
 
 
@@ -397,7 +401,7 @@ class Once(AiCase):
                 for rows in (5, 10, 14, 20, 40, 80):
                     for details in (False, True):
                         with self.subTest(os=os_name, size=(cols, rows), details=details):
-                            av = render.AiView(now=NOW)
+                            av = screens.AiView(now=NOW)
                             av.details = details
                             frame, _ = render.ai_screen(data, [], av, cols - 1, rows)
                             self.check_frame(frame, cols - 1, rows)
@@ -406,7 +410,7 @@ class Once(AiCase):
         for os_name in OSES:
             render.DEMO_OS = os_name
             render._AI.clear()
-            for r in render.ai_rows(render.ai_data()["cat"]):
+            for r in screens.ai_rows(render.ai_data()["cat"]):
                 for cols, rows in SIZES:
                     with self.subTest(os=os_name, model=r["id"], size=(cols, rows)):
                         s, lines = self.screen(["--select", r["id"], "--details"], cols, rows)
@@ -461,7 +465,7 @@ class Once(AiCase):
     def test_the_hardware_in_odd_shapes(self):
         def lines(change, w=100, k=0):
             cat = catalog(change)
-            return [render.ANSI.sub("", x) for x in render.ai_hw_lines(cat["hw"], w, k)]
+            return [ansi.ANSI.sub("", x) for x in cardlines.ai_hw_lines(cat["hw"], w, k)]
 
         def no_gpu(c):
             c["hw"] = dict(c["hw"], gpus=[])
@@ -492,9 +496,9 @@ class Once(AiCase):
         for k in range(4):                                                                              # every level fits its width
             for w in (20, 40, 78, 119):
                 self.assertFalse([x for x in lines(many, w, k) if len(x) > w], (k, w))
-        self.assertEqual(render.ai_cpu_name("Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz"), "Intel Core i7-10750H")
-        self.assertEqual(render.ai_cpu_name("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X")
-        self.assertEqual(render.ai_cpu_name("Apple M2"), "Apple M2")
+        self.assertEqual(screens.ai_cpu_name("Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz"), "Intel Core i7-10750H")
+        self.assertEqual(screens.ai_cpu_name("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X")
+        self.assertEqual(screens.ai_cpu_name("Apple M2"), "Apple M2")
 
     def test_the_models_table_follows_the_width(self):
         txt = {c: "\n".join(self.screen([], c, 50)[1]) for c, _ in SIZES}
@@ -594,22 +598,22 @@ class Once(AiCase):
             s, lines = self.screen(opts, cols, rows)
             txt = "\n".join(lines)
             self.assertIn("sudo nuc-console-ai setup phi-4" if "phi-4" in opts else "not pinned yet", txt, (opts, cols, rows))
-        title, items = render.ai_details(render.ai_rows(catalog())[0])
+        title, items = screens.ai_details(screens.ai_rows(catalog())[0])
         labels = [k for k, _, _ in items]
         self.assertEqual(labels[:5], ["verdict", "why", "speed", "state", "install"])
         self.assertLess(labels.index("install"), labels.index("needs"))
         self.assertLess(labels.index("install"), labels.index("licence"))
 
     def test_where_the_model_would_run_in_words(self):
-        rows = {r["id"]: r for r in render.ai_rows(catalog())}
-        self.assertEqual(render.ai_where(rows["m-gpu"]), "all 36 layers on the GPU")
-        self.assertEqual(render.ai_where(rows["m-part"]), "12 of 36 layers on the GPU, the rest in RAM")
-        self.assertEqual(render.ai_where(rows["m-ram"]), "the CPU, from RAM")
-        self.assertEqual(render.ai_where(rows["m-slow"]), "the CPU, from RAM")
-        self.assertEqual(render.ai_where(rows["m-no"]), "-")
+        rows = {r["id"]: r for r in screens.ai_rows(catalog())}
+        self.assertEqual(screens.ai_where(rows["m-gpu"]), "all 36 layers on the GPU")
+        self.assertEqual(screens.ai_where(rows["m-part"]), "12 of 36 layers on the GPU, the rest in RAM")
+        self.assertEqual(screens.ai_where(rows["m-ram"]), "the CPU, from RAM")
+        self.assertEqual(screens.ai_where(rows["m-slow"]), "the CPU, from RAM")
+        self.assertEqual(screens.ai_where(rows["m-no"]), "-")
         gpu = dict(rows["m-gpu"], gpu_layers=None)                                                       # a catalog without the layers: still "all on the GPU"
-        self.assertEqual(render.ai_where(gpu), "all on the GPU")
-        self.assertEqual(render.ai_where(dict(rows["m-part"], layers=None)), "12 layers on the GPU, the rest in RAM")
+        self.assertEqual(screens.ai_where(gpu), "all on the GPU")
+        self.assertEqual(screens.ai_where(dict(rows["m-part"], layers=None)), "12 layers on the GPU, the rest in RAM")
 
     def test_windows_commands_say_where_to_run_them(self):
         def change(c):
@@ -629,7 +633,7 @@ class Once(AiCase):
         txt = "\n".join(lines)
         self.assertIn("needs 9.7 GB, the NVIDIA GeForce RTX 3060 Ti has 6.8 GB free: 26 of 40 layers", txt)   # (the pane wraps it)
         self.assertIn("rest (3.4 GB) in RAM", txt)
-        why = next(v for k, v, _ in render.ai_details(next(r for r in render.ai_rows(render.ai_data()["cat"]) if r["id"] == "qwen3-14b"))[1] if k == "why")
+        why = next(v for k, v, _ in screens.ai_details(next(r for r in screens.ai_rows(render.ai_data()["cat"]) if r["id"] == "qwen3-14b"))[1] if k == "why")
         self.assertEqual(why, "needs 9.7 GB, the NVIDIA GeForce RTX 3060 Ti has 6.8 GB free: 26 of 40 layers on the GPU, the rest (3.4 GB) in RAM")
         self.assertIn("about 5-10 tokens/s (a rough estimate, not a promise)", txt)
         self.assertIn("9.7 GB of memory: the file (8.8 GB), the context and the runtime", txt)
@@ -725,13 +729,13 @@ class DataSource(AiCase):
         data = render.ai_data()
         self.assertEqual(len(self.catalogs), 2)
         self.assertEqual((data["msg"], data["err"]), ("", False))
-        self.assertEqual(len(render.ai_rows(data["cat"])), 5)
+        self.assertEqual(len(screens.ai_rows(data["cat"])), 5)
 
     def test_keys_and_frames_never_ask_for_the_catalog_again(self):
         av, rows = self.view()
         for _ in range(3):
             for k in ("down", "enter", "up", "enter", "end", "home"):
-                render.ai_key(av, k, rows)
+                screens.ai_key(av, k, rows)
                 render.ai_screen(render.ai_data(), [], av, 119, 33)
         self.assertEqual(len(self.catalogs), 1)
 
@@ -739,7 +743,7 @@ class DataSource(AiCase):
         render.DEMO = True
         data = render.ai_data()
         self.assertEqual(self.catalogs, [])                                                              # the demo machine, whatever is installed
-        self.assertEqual(len(render.ai_rows(data["cat"])), 12)
+        self.assertEqual(len(screens.ai_rows(data["cat"])), 12)
         render.DEMO_OS = "darwin"                                                                        # another machine: its own catalog
         self.assertEqual(render.ai_data()["cat"]["hw"]["os"], "darwin")
 
@@ -765,7 +769,7 @@ class DataSource(AiCase):
         self.assertIsNotNone(render.ai_data()["cat"])                                                    # the next ttl tries again
 
     def screen_of(self, data, cols=120, rows=33):
-        s, _ = render.ai_screen(data, [], render.AiView(now=NOW), cols - 1, rows)
+        s, _ = render.ai_screen(data, [], screens.AiView(now=NOW), cols - 1, rows)
         return s, self.check_frame(s, cols - 1, rows)
 
     def test_a_missing_module_or_function_costs_the_screen_not_the_dashboard(self):
@@ -954,26 +958,26 @@ class Probe(AiCase):
 class Footer(AiCase):
     def test_the_overview_offers_the_ai_screen_when_there_is_a_keyboard_and_the_feature_is_on(self):
         slide = ("Overview", 1, 1, ["x"])
-        on = render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
+        on = ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True))
         self.assertIn("1-5: screens   ?: help   console", on)                                              # 5 is the AI screen
-        self.assertNotIn("screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
-        self.assertIn("1-4: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, aikey=False)))
-        self.assertIn("1 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, aikey=True)))
+        self.assertNotIn("screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False)))   # the web page: no keys
+        self.assertIn("1-4: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True, aikey=False)))
+        self.assertIn("1 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=False, aikey=True)))
         render.CFG["features"]["ai"] = False
-        self.assertIn("1-4: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        self.assertIn("1-4: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
         render.CFG["features"]["ai"] = True
         render.CFG["features"]["health"] = False
-        self.assertIn("1-3 5: screens", render.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
-        two = render.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
+        self.assertIn("1-3 5: screens", ansi.ANSI.sub("", render.frame(slide, 0, 1, 119, 33, [], keys=True)))
+        two = ansi.ANSI.sub("", render.frame(("Overview", 1, 2, ["x"]), 0, 2, 79, 24, [], keys=True)).split("\r\n")[-1]
         self.assertLessEqual(len(two), 79)
-        one = render.ANSI.sub("", render.frame(slide, 0, 1, 79, 24, [], keys=True)).split("\r\n")[-1]
+        one = ansi.ANSI.sub("", render.frame(slide, 0, 1, 79, 24, [], keys=True)).split("\r\n")[-1]
         self.assertIn("console 80x24", one)                                                              # and it fits the narrowest footer
 
     def test_the_ai_footer_gives_up_keys_from_the_least_needed_when_narrow(self):
-        av = render.AiView(now=NOW)
+        av = screens.AiView(now=NOW)
         seen = []
         for w in (200, 100, 78, 60, 40, 24, 12):
-            text = render.ANSI.sub("", render.ai_footer(av, 12, w))
+            text = ansi.ANSI.sub("", render.ai_footer(av, 12, w))
             seen.append(text)
             self.assertLessEqual(len(text), w)
         self.assertIn("PgUp/PgDn/Home/End: page", seen[0])
@@ -982,8 +986,8 @@ class Footer(AiCase):
         self.assertIn("Esc: back", seen[4])
         self.assertIn("model 1/12", seen[0])
         av.details = True
-        self.assertIn("Enter: hide details", render.ANSI.sub("", render.ai_footer(av, 12, 200)))
-        self.assertIn("no models", render.ANSI.sub("", render.ai_footer(av, 0, 140)))
+        self.assertIn("Enter: hide details", ansi.ANSI.sub("", render.ai_footer(av, 12, 200)))
+        self.assertIn("no models", ansi.ANSI.sub("", render.ai_footer(av, 0, 140)))
 
 
 class MainLoop(AiCase):
@@ -1084,7 +1088,7 @@ class MainLoop(AiCase):
         self.assertTrue(seen and seen[-1] == 100, "it was downloaded, with progress")
         self.assertIn("● ON", "\n".join(ai[3]))
         self.assertIn("is in use", "\n".join(ai[3]))
-        self.assertEqual(eng.snapshot()["server"]["model"], next(m["id"] for m in render.ai_rows(eng.demo_catalog(None)) if "Qwen3 14B" in m["name"]))
+        self.assertEqual(eng.snapshot()["server"]["model"], next(m["id"] for m in screens.ai_rows(eng.demo_catalog(None)) if "Qwen3 14B" in m["name"]))
 
     def test_x_asks_first_and_y_deletes_any_other_key_does_not(self):
         eng = self.engine()
@@ -1256,16 +1260,16 @@ class Hostile(AiCase):
     def test_every_size_and_cursor_position_of_a_hostile_catalog(self):
         cat = self.hostile()
         self.seed(cat)
-        rows = render.ai_rows(cat)
+        rows = screens.ai_rows(cat)
         for cols, rs in SIZES + ((40, 10), (110, 24), (140, 40), (300, 80)):
-            av = render.AiView(now=NOW)
+            av = screens.AiView(now=NOW)
             for details in (False, True):
                 av.details = details
                 for i in range(len(rows)):
                     with self.subTest(size=(cols, rs), details=details, model=i):
                         frame, _ = render.ai_screen(render.ai_data(), [], av, cols - 1, rs)
                         self.check_frame(frame, cols - 1, rs)
-                    render.ai_key(av, "down", rows)
+                    screens.ai_key(av, "down", rows)
 
     def test_a_catalog_of_the_wrong_shape_is_an_empty_screen_not_a_crash(self):
         for bad in ({}, {"hw": None, "models": None}, {"hw": [], "models": [None]}, {"hw": {"gpus": "no", "notes": "no", "cpu": 3, "ram": []}, "runtime": 5},
@@ -1277,11 +1281,11 @@ class Hostile(AiCase):
                     self.screen(opts, cols, rows)
 
     def test_the_text_helpers_clean_what_they_are_given(self):
-        self.assertEqual(render.ai_id(None), None)
-        self.assertEqual(render.ai_id(5), None)
-        self.assertEqual(render.ai_id("  "), None)
-        self.assertEqual(render.ai_id("a\x00b"), "a?b")
-        self.assertEqual(render.ai_id("x" * 100), "x" * 63 + "…")
+        self.assertEqual(screens.ai_id(None), None)
+        self.assertEqual(screens.ai_id(5), None)
+        self.assertEqual(screens.ai_id("  "), None)
+        self.assertEqual(screens.ai_id("a\x00b"), "a?b")
+        self.assertEqual(screens.ai_id("x" * 100), "x" * 63 + "…")
 
 
 class Advisor(AiCase):
@@ -1315,7 +1319,7 @@ class Advisor(AiCase):
 
     def test_the_cached_answer_is_the_block_and_the_model_is_never_asked(self):
         lines = render.health_extra_lines(self.rep, 100)
-        plain = [render.ANSI.sub("", x) for x in lines]
+        plain = [ansi.ANSI.sub("", x) for x in lines]
         self.assertLessEqual(len(lines), render.ADVICE_LINES)
         self.assertEqual(plain[0], " ADVICE (AI, qwen3-4b) — check before acting")                       # who wrote it, and the warning
         self.assertEqual(plain[1], " 1. restart shop-worker-1 with a memory limit [oom:shop-worker-1]")
@@ -1329,14 +1333,14 @@ class Advisor(AiCase):
     def test_nothing_cached_yet_is_a_hint_how_to_ask(self):
         self.cached = None
         lines = render.health_extra_lines(self.rep, 100)
-        plain = " ".join(render.ANSI.sub("", x).strip() for x in lines)
+        plain = " ".join(ansi.ANSI.sub("", x).strip() for x in lines)
         self.assertIn("no advice yet: nuc-console-ask --advise asks the local model", plain)
         self.assertLessEqual(len(lines), 3)
         self.assertTrue(all(ESC + "[90m" in x for x in lines))
 
     def test_an_error_result_is_shown_as_the_advisor_words_it(self):
         self.cached = {"error": "the model server is busy" + ESC + "[2J", "busy": True}
-        plain = " ".join(render.ANSI.sub("", x) for x in render.health_extra_lines(self.rep, 100))
+        plain = " ".join(ansi.ANSI.sub("", x) for x in render.health_extra_lines(self.rep, 100))
         self.assertIn("ADVICE (AI) — not available: the model server is busy", plain)
         self.assertNotIn(ESC + "[2J", plain)
 
@@ -1363,7 +1367,7 @@ class Advisor(AiCase):
         for w in (30, 78, 119, 199):
             render._ADVICE.clear()
             lines = render.health_extra_lines(self.rep, w)
-            plain = "".join(render.ANSI.sub("", x) for x in lines)
+            plain = "".join(ansi.ANSI.sub("", x) for x in lines)
             self.assertIsNone(CONTROL.search(SGR.sub("", "".join(lines))), w)
             for bad in (ESC, BEL, CSI8, "\u202e", CJK):
                 self.assertNotIn(bad, SGR.sub("", "".join(lines)))
@@ -1375,7 +1379,7 @@ class Advisor(AiCase):
         for cols, rows in SIZES:
             with self.subTest(size=(cols, rows)):
                 s = render.health_once(["render.py", "--once", "--view", "health"], cols - 1, rows)
-                lines = [render.ANSI.sub("", x) for x in s.split(LINE)]
+                lines = [ansi.ANSI.sub("", x) for x in s.split(LINE)]
                 self.assertEqual(len(lines), rows)
                 self.assertTrue(all(len(x) <= cols - 1 for x in lines))
                 txt = "\n".join(lines)
