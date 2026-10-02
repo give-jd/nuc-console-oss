@@ -1,4 +1,4 @@
-<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; script-src 'sha256-A3Gpbgcp+f5SXdMWaQM002Hm/UpECkRmKlNK5v34mvs=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; script-src 'sha256-Hbp7ri3Sjc1Awh0yg6tweaeEgOdO5T4ri1dpceIfpF4=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
 <html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
 <head>
@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>demo-host · ai · nuc-console</title>
-<link rel="stylesheet" href="/s/app.5eed8378.css">
+<link rel="stylesheet" href="/s/app.beb9092b.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="78a50561ef">
@@ -760,7 +760,8 @@
 // Classes it sets on <html>, for the server's CSS:
 //   stale    the numbers on the page are old (the #stale banner says since when)
 //   paused   the refresh is paused with the [data-pause] toggle
-// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
+// (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -792,7 +793,11 @@
   function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
     dead = true;
     show("updating the page");
-    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+    setTimeout(again, Math.max(0, 15000 - performance.now()));
+  }
+  function again() {  // a reload that keeps a kiosk wall where it was scrolled to (the next page restores it)
+    try { if (kiosk()) sessionStorage.setItem("nuc-wall-y", String(Math.round(window.scrollY))); } catch (err) { /* storage off */ }
+    location.reload();
   }
   function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
     const a = document.activeElement, sel = window.getSelection();
@@ -903,7 +908,11 @@
   if (!paused) plan(period);
   if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
     setTimeout(turn, spin);
-    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+    setTimeout(again, 600000 - Date.now() % 600000 + 2000);
+    const nav = performance.getEntriesByType("navigation")[0];  // only a reload gives the place back: a fresh visit starts at the top
+    let y = 0;
+    try { y = nav && nav.type === "reload" && kiosk() ? Number(sessionStorage.getItem("nuc-wall-y")) || 0 : 0; } catch (err) { y = 0; }
+    if (y > 0) window.scrollTo({top: y, behavior: "instant"});
   }
 })();
 </script>

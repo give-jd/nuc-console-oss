@@ -111,7 +111,7 @@ CAPS = [
     ("append", r"\.append\(", 3, {"builder"}),
     ("textContent", r"\btextContent\b", 99, {"refresh", "prefs", "builder"}),
     ("localStorage", r"\blocalStorage\b", 99, {"prefs"}),
-    ("sessionStorage", r"\bsessionStorage\b", 99, {"graph"}),
+    ("sessionStorage", r"\bsessionStorage\b", 99, {"graph", "refresh"}),
     ("navigator", r"\bnavigator\b", 2, {"prefs"}),
     ("clipboard.writeText", r"\bclipboard\.writeText\(", 1, {"prefs"}),
     ("trustedTypes", r"\btrustedTypes\b", 2, {"refresh"}),
@@ -145,11 +145,11 @@ POLICIES = {
         ban_extra=(("removeAttribute", r"removeAttribute"),)),
     # the web shell's scripts (src/webjs.py; the DOM contract is its docstring)
     "refresh": Policy(
-        "refresh", 11 * 1024, 160, ids={"stale"},
+        "refresh", 12 * 1024, 175, ids={"stale"},
         selectors={"main", "summary", "[data-pause]", "[data-k]", "[data-card]", "details[data-k]", "input, textarea", "form"},
         attrs_read=REFRESH_ATTRS_READ, attrs_write={"data-paused", "aria-pressed"}, classes_set={"stale", "paused"},
         events={"DOMContentLoaded", "click", "visibilitychange", "online", "pointerdown", "keydown", "wheel"},
-        location={"reload"}),
+        location={"reload"}, storage={"sessionStorage": (2, {"setItem", "getItem"})}),
     "keys": Policy(
         "keys", 3584, 60, selectors={"a[data-key], button[data-key]", "[data-row]", "[data-grab]", "#help:target", "a[href]"},
         attrs_read={"data-key", "aria-disabled", "tabindex"}, events={"DOMContentLoaded", "keydown"}),

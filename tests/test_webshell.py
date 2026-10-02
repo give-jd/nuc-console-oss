@@ -91,7 +91,7 @@ class Shell(unittest.TestCase):
             if "data-card" in a:
                 self.assertTrue(re.fullmatch(r"[0-9a-f]{10}", a["data-rev"]))
         for t, a, _ in self.tree.find("article"):
-            self.assertRegex(a["class"], r"^card s[1-4] st-(ok|warn|err|down|unknown|info)$")
+            self.assertRegex(a["class"], r"^card s[1-4] st-(ok|warn|err|down|unknown|info)( r\d+)?$")
 
     def test_main_carries_the_refresh_contract(self):
         (_, a, _), = self.tree.find("main")
@@ -191,6 +191,41 @@ class Shell(unittest.TestCase):
         self.assertEqual([a["data-card"] for t, a, _ in Tree(body).tags if "data-card" in a and not a["data-card"].startswith("__")], ["exposure"])
         self.assertIn("overview", body)
         self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the classic page
+
+    def test_the_overview_packs_densely_and_the_editor_and_a_single_card_do_not(self):
+        import htmlview
+        cards_ = re.findall(r'<article[^>]*class="(card [^"]*)"', self.body)
+        self.assertTrue(cards_)
+        for c in cards_:  # every card of the overview says how many rows it spans, within the styled range
+            n = int(re.search(r"\br(\d+)\b", c).group(1))
+            self.assertTrue(1 <= n <= webcss.ROW_MAX, c)
+            self.assertTrue(n == 1 or ".card.r%d{grid-row:span %d}" % (n, n) in webcss.CSS, c)
+        self.assertIn("main.grid:not([data-edit]){grid-auto-flow:row dense", webcss.CSS)
+        self.assertEqual(htmlview.ROW_MAX, webcss.ROW_MAX)
+        edit = get(self.srv, "/?app=1&edit=1")[2]
+        self.assertTrue(re.search(r'<article[^>]*class="card ', edit))
+        self.assertNotRegex(edit, r'<article[^>]*class="card [^"]*\br\d+\b')
+        full = get(self.srv, "/?card=exposure")[2]
+        self.assertNotRegex(re.search(r'<article[^>]*>', full).group(0), r"\br\d+\b")
+
+    def test_a_narrow_window_does_not_span_rows(self):
+        css = webcss.CSS
+        narrow = css[css.index("@container app (max-width:45.7em){\n  .grid"):]
+        self.assertIn("main.grid:not([data-edit]) .card[class]{grid-row:auto}", narrow.split(".card:target")[0])
+
+    def test_the_estimate_grows_with_the_body_and_stays_in_range(self):
+        import htmlview
+        few = htmlview.est_rows("<p class=\"ln\">one line</p>", 1)
+        many = htmlview.est_rows("".join("<p class=\"ln\">line %d</p>" % i for i in range(30)), 1)
+        table = htmlview.est_rows("<table>" + "<tr><td>a</td><td>b</td></tr>" * 10 + "</table>", 1)
+        self.assertLess(few, table)
+        self.assertGreater(many, few * 5)
+        long_text = "<p>" + "word " * 200 + "</p>"
+        self.assertGreater(htmlview.est_rows(long_text, 1), htmlview.est_rows(long_text, 4))  # wider: fewer lines
+        self.assertEqual(htmlview.est_rows("<p>x</p>" * 5000, 1), htmlview.ROW_MAX)
+        self.assertGreaterEqual(htmlview.est_rows("", 1), 1)
+        hidden = '<details class="fix"><summary>fix</summary>' + "<p>how</p>" * 20 + "</details>"
+        self.assertLess(htmlview.est_rows(hidden, 1, wall=True), htmlview.est_rows(hidden, 1))  # the wall hides it
 
     def test_pause_stops_the_reload(self):
         _, _, body = get(self.srv, "/?app=1&pause=1")

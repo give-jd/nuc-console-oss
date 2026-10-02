@@ -93,8 +93,13 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
   Map's problems, the Health findings and the AI), the clock, `?` (the keys, `#help`, shown by the browser's `:target`) and ⚙ (the settings).
 - **Key figures** under it (`[ui] kpis`, the settings page): one tile each, a link to its card; a source that cannot be read is `?`, never green.
   A banner says so when a collector is not running.
-- **Overview**: a grid of cards (12 / 6 / 1 columns by the window's width), in the order of `[ui] order` (by severity, or fixed) and the layout. A
-  card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
+- **Overview**: a grid of cards (12 / 6 / 1 columns by the window's width), in the order of `[ui] order` (by severity, or fixed) and the layout.
+  The grid packs **densely**: its rows are a half em high and each card spans the rows the server estimates its height needs (the class `rN`, from the
+  lines and table rows of its body: `htmlview.est_rows`), and `grid-auto-flow: dense` lets a later card fill the hole a taller one left, so a short card
+  is not left alone beside a long one. The price is the reading order: a card may sit above one that comes earlier in the order (the order of the markup,
+  of the keyboard and of the layout is unchanged). The rows are `auto`, so an estimate that is too low makes the rows taller instead of overlapping the next
+  card, and one that is too high leaves a small hole. The layout editor (`?edit=1`) and a single card (`?card=`) are not packed: they stay in strict order.
+  On a one-column window nothing spans. A card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
   **Edit layout** (footer, and Appearance in the settings) opens the layout editor ([below](#edit-the-layout)).
 - **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The CPU, Health and AI screens are drawn natively from the components the console draws too (no `<pre>`). The AI screen (`?app=1&view=ai`): the switch as a pill with what it is doing and a progress bar for a download, the chat (the question box, each answer with "AI, check before acting", "advice now"), the hardware and the status as labelled values, the models as a table (the verdict a pill with its symbol, a **use this model** button per row, the selected one's details beside it with **delete its files**), the folder and **delete everything**, and the question that waits (**Yes** / **No**). Every button is the same POST form as on the classic page (same endpoints, field names and CSRF token) and carries `data-key` from the keymap (`e` on/off, `c` cancel, `u` use, `x` delete, `X` delete all, `y` / `n` the answers). When `[ai] web_actions = no` locks it, it shows a notice and has no form and no button. The classic page (`?app=0&view=ai`) is unchanged.
   The **CPU** page is built of components, not text: key figures, a meter per logical CPU, the temperatures, and the process table, whose column heads are
@@ -153,7 +158,10 @@ Only that combination (not the settings page, not the editor) changes the page:
   page (a click, a key or the wheel pauses it for `3 N` seconds), while paused and while the tab is hidden; with `prefers-reduced-motion` it jumps instead of gliding.
   `N` is `[dashboard] rotate_seconds` (default 15), or `&rotate=N` (3 to 600) in the URL. The partial refresh goes on while it scrolls and keeps the scroll.
 - Burn-in: the `shift-N` class of `<html>` (the top bar moves one character, three positions) changes every ten minutes on the server, and a wall page reloads itself
-  at every ten-minute mark so that the new class arrives.
+  at every ten-minute mark so that the new class arrives; the scroll position is kept across that reload (`sessionStorage`, this tab only, read back only
+  after a reload), so the wall does not start again from the top.
+- Nothing is drawn that needs a mouse: the "… the whole card" link, the "show all" link and the "fix" of a problem are gone, the "+N more" is plain text and the
+  other links of a card are plain text too.
 - The footer holds only what a wall can use: the refresh interval, `read-only`, the hint of how to close the window (`Alt+F4 closes · F11 leaves full screen`;
   macOS: `Cmd+Q`) and the time of the last update; no pause, edit, size, theme or density links.
 - Without JavaScript the `<noscript>` meta refresh still reloads the page every refresh interval; it shows the first screen (nothing scrolls; there is no server-side paging). `rotate=1` (the classic page's "take turns") does nothing here.

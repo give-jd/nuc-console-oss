@@ -35,7 +35,7 @@ Everything a script looks up is a literal selector, id or attribute name listed 
 <main data-refresh="2" data-frag="/?view=overview&frag=1" data-rotate="20" data-paused="1">
     data-refresh   seconds between polls (1..3600); absent or 0: no polling
     data-frag      the URL to poll, must start with "/?" (the page's own URL plus frag=1); anything else is refused
-    data-rotate    wall density with kiosk only: seconds between one-screen scrolls (>= 3); the page also reloads every ten minutes (the burn-in shift)
+    data-rotate    wall density with kiosk only: seconds between one-screen scrolls (>= 3); the page also reloads every ten minutes (the burn-in shift) and keeps its scroll position across that reload (sessionStorage key nuc-wall-y, read back only after a reload)
     data-paused    "1" when the page starts paused (REFRESH_JS keeps it in step when the toggle is used); the page then still has
                    data-refresh and data-frag, so that the toggle can resume it. Without data-refresh the toggle is left to the server
     data-edit      (main.grid[data-edit]) the layout editor page: REFRESH_JS does nothing there, BUILDER_JS starts
@@ -54,6 +54,7 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     data-kpi="<id>" data-depth="<n>" data-max-lines="<n>"   what the components (htmlview.html) say of a KPI, a tree row and a list; for the
                         server's CSS only (the scripts never read them, a fragment may carry them)
     data-problem="<id>" the stable id of a problem in ATTENTION (a problem, or one accepted as known); for the server's CSS only
+    class="card sN stateX rN"      (the overview's cards) rN: the grid rows the card spans (htmlview.est_rows); for the server's CSS only, the scripts never read it
     data-state="ok|warn|err|unknown"   for the server's CSS only (the scripts never read it, a fragment may carry it)
     Ids in a fragment must not reuse the ids of this contract (stale, live, help, export). `name` is only allowed on form controls.
 
@@ -154,7 +155,8 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
 // Classes it sets on <html>, for the server's CSS:
 //   stale    the numbers on the page are old (the #stale banner says since when)
 //   paused   the refresh is paused with the [data-pause] toggle
-// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds.
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
+// (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -183,7 +185,11 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
   function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
     dead = true;
     show("updating the page");
-    setTimeout(() => location.reload(), Math.max(0, 15000 - performance.now()));
+    setTimeout(again, Math.max(0, 15000 - performance.now()));
+  }
+  function again() {  // a reload that keeps a kiosk wall where it was scrolled to (the next page restores it)
+    try { if (kiosk()) sessionStorage.setItem("nuc-wall-y", String(Math.round(window.scrollY))); } catch (err) { /* storage off */ }
+    location.reload();
   }
   function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
     const a = document.activeElement, sel = window.getSelection();
@@ -294,7 +300,11 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
   if (!paused) plan(period);
   if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
     setTimeout(turn, spin);
-    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+    setTimeout(again, 600000 - Date.now() % 600000 + 2000);
+    const nav = performance.getEntriesByType("navigation")[0];  // only a reload gives the place back: a fresh visit starts at the top
+    let y = 0;
+    try { y = nav && nav.type === "reload" && kiosk() ? Number(sessionStorage.getItem("nuc-wall-y")) || 0 : 0; } catch (err) { y = 0; }
+    if (y > 0) window.scrollTo({top: y, behavior: "instant"});
   }
 })();
 """
