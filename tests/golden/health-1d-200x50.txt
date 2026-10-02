@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Health │ 14:13:20                                                                                                                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  [7m[4 Health][27m  5 AI │ 14:13:20                                                                                                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m HEALTH [0m [90mlast 24 hours[0m[90m · [0m[90msince 2026-09-05 14:00 UTC · 24 h of data[0m[90m · [0m[31m✖ 1 err[0m  [33m! 4 warn[0m  [90m· 1 info[0m [36m─────────────────────────────────────────────────────────────────────────────[0m [7m d:24h [0m [90m w:7d [0m [90m m:30d [0m[0m[0m[0m[K
 [90m  · memory trends need a period of at least 3 days[0m[0m[0m[0m[K
 [36m──[0m[1;36m FINDINGS [0m[36m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[K
@@ -24,7 +25,6 @@
  dockerd           avg 307M   max 410M   [36m▇███████████▇█[0m[0m[0m                 59  [33mNEW[0m kernel           [90mnvme nvme<n>: I/O <n> QID <n> tim…[0m[0m[0m                                                                   [0m[0m[K
  python3           avg 205M   max 512M   [36m██████▇█▇▇▇█▇█[0m[0m[0m                 37      systemd-resolved [90mUsing degraded feature set UDP in…[0m[0m[0m                                                                   [0m[0m[K
                                                                          5  [33mNEW[0m snapd            [90mcannot refresh snap <str>: <str>[0m[0m[0m                                                                     [0m[0m[K
-[K
 [K
 [K
 [K

@@ -872,11 +872,11 @@ class Kiosk(unittest.TestCase):
         saved = render.socket.gethostname
         render.socket.gethostname = lambda: "sjc22-be107-89b7b6f4-ed34-423a-8d4e-79a8cba66531-BAC22B2659BA.local"
         try:
-            for w in (79, 100, 120):
+            for w in (79, 100, 120, 200):
                 head = render.ANSI.sub("", render.frame(("System", 1, 1, []), 0, 1, w, 10, pb=[(2, "x")]).split("\r\n")[0])
                 self.assertIn("✖ 1 PROBLEMS", head, w)
                 self.assertIn("sjc22-", head)
-                self.assertEqual("…" in head, w < 110)                                               # cut only when it does not fit
+                self.assertEqual("…" in head, w < 160)                                               # cut only when it does not fit
                 self.assertLessEqual(len(head), w)
         finally:
             render.socket.gethostname = saved

@@ -37,7 +37,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
-                  "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "health_build", "health_slide", "health_extra_lines", "health_screen", "health_state")
+                  "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "health_build", "health_slide", "health_extra_lines", "health_screen", "health_state", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -96,6 +96,7 @@ class HealthCase(unittest.TestCase):
         render.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS, render.DEMO_HEALTH = True, None, ""
         cfg["features"]["health"], cfg["health_in_rotation"], cfg["map_in_rotation"] = True, False, False
         self.calls = []                                                         # the days of every health_build(): the report cache
@@ -258,7 +259,7 @@ class Navigation(HealthCase):
                 with self.subTest(size=(cols, rows), step=step):
                     frame, _ = render.health_screen(render.health_data(7), [], hv, cols - 1, rows)
                     out = self.check_frame(frame, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE) if ESC + "[7m" in x and "─" not in x]
+                    chosen = [render.ANSI.sub("", x) for x in frame.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x]
                     self.assertEqual(len(chosen), 1)                                     # exactly one highlighted finding ...
                     self.assertIn(fl[hv.idx]["title"], chosen[0])                        # ... the selected one
                     self.assertRegex(out[-1], r"finding %d/%d" % (hv.idx + 1, len(fl)))
@@ -284,7 +285,7 @@ class Once(HealthCase):
                         for opts in (["--period", str(days)], ["--period", str(days), "--details"]):
                             with self.subTest(os=os_name, variant=variant, size=(cols, rows), opts=opts):
                                 s, lines = self.screen(opts, cols, rows)
-                                self.assertIn(" │ Health │ ", lines[0])
+                                self.assertRegex(lines[0], r"\[\d[ ·](?:Health|Hlth)\]")
                                 self.assertNotIn("Traceback", s)
 
     def test_odd_sizes_never_break_the_frame(self):
@@ -388,7 +389,7 @@ class Once(HealthCase):
         self.assertIn("── TOP CPU", txt)
         s, lines = self.screen(["--select", "hog"], 200, 50)                            # a selection alone: no pane
         self.assertNotIn("DETAILS", "\n".join(lines))
-        self.assertTrue([x for x in s.split(LINE) if ESC + "[7m" in x and "─" not in x])  # the cursor is still on its row
+        self.assertTrue([x for x in s.split(LINE)[1:] if ESC + "[7m" in x and "─" not in x])  # the cursor is still on its row
         s, lines = self.screen(["--select", "nothing like this", "--details"], 120, 33)  # no match: the cursor stays on the first finding
         self.assertIn("finding 1/10", lines[-1])
 
@@ -402,7 +403,7 @@ class Once(HealthCase):
 
     def test_the_cursor_row_is_highlighted_and_the_pills_keep_their_symbols(self):
         s, lines = self.screen(["--select", "restart", "--details"], 120, 33)
-        shown = [x for x in s.split(LINE) if ESC + "[7m" in x and "FINDINGS" not in x and "d:24h" not in x and "keys" not in x and "finding" not in x]
+        shown = [x for x in s.split(LINE)[1:] if ESC + "[7m" in x and "FINDINGS" not in x and "d:24h" not in x and "keys" not in x and "finding" not in x]
         self.assertEqual(len(shown), 1)
         self.assertIn("Restarting: shop-worker-1", shown[0])
         self.assertNotIn(ESC + "[41m", shown[0].replace(ESC + "[1;41;37m", ""))        # the row is plain reverse video: no pill colour left in it
@@ -757,7 +758,7 @@ class MainLoop(HealthCase):
 
     @staticmethod
     def is_health(frame):
-        return " │ Health │ " in frame[0] and "── HEALTH " in frame[1]
+        return bool(re.search(r"\[\d[ ·](?:Health|Hlth)\]", frame[0]) and "── HEALTH " in frame[1])
 
     @staticmethod
     def at(frame):
@@ -831,7 +832,7 @@ class MainLoop(HealthCase):
             return real(smp, days)
         render.health_state = flaky
         frames, _ = self.run_main([b"h", render.REFRESH_S, b"\x1b", b"h", b"\x1b"])  # check_frame: no raw escape on screen
-        error = lambda f: " │ Health │ " in f[0] and "error on the health screen" in f[1]  # noqa: E731
+        error = lambda f: bool(re.search(r"\[\d[ ·](?:Health|Hlth)\]", f[0]) and "error on the health screen" in f[1])  # noqa: E731
         self.assertEqual([error(f) for f in frames], [False, True, False, False, False, False])
         self.assertIn("ValueError('state unreadable", frames[1][1])
         self.assertEqual(frames[1][-1].strip(), "Esc: back   1-5: screens")
@@ -851,7 +852,7 @@ class MainLoop(HealthCase):
     def test_no_history_and_a_narrow_console(self):
         render.DEMO_HEALTH = "none"
         frames, _ = self.run_main([b"h", b"\x1b[B", b"\r", b"d", b"\x1b", b"\x1b"], cols=80, rows=24)  # Esc: the details, then back
-        health = [f for f in frames if " │ Health │ " in f[0]]
+        health = [f for f in frames if re.search(r"\[\d[ ·](?:Health|Hlth)\]", f[0])]
         self.assertEqual(len(health), 5)
         for f in health:
             self.assertIn(render.HEALTH_NONE[:60], "\n".join(f))

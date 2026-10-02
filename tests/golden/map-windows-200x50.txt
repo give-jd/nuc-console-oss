@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ Map │ 14:13:20                                                                                                                                                             ✖ 5 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  [7m[2 Map][27m  3 CPU  4 Health  5 AI │ 14:13:20                                                                                                                      ✖ 5 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m5[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m5[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 18%   [32m✔[0m [90mRAM[0m 54%   [32m✔[0m [90mDisk[0m 38%   [33m?[0m [90mTemp[0m [33m?[0m[0m[K
 [36m──[0m[1;36m MAP [0m [90m34 nodes · 13 links · [0m[31m✖ 7 need attention[0m [36m────────────────────────────────────────────────────────────────────────────────────────[0m [1m━━►[0m [90mseen[0m  ╌╌► [90mdeclared[0m  [90m┄┄►[0m [90msame network[0m  [1m◄━━[0m [90mconnected to it[0m[0m[0m[0m[K
 [90m  · containers' own connections are not visible on this OS (Docker Desktop VM): declared and same-network links only[0m[0m[0m[0m[K
 [90m  · connections sampled every 30 s, remembered 24 h (watching since 1h)[0m[0m[0m[0m[K
@@ -46,5 +47,4 @@
 [36m▾[0m [1;36mOUTBOUND[0m  [90mconnections this machine opens to other hosts[0m[0m[0m[0m[K
 [90m└─ [0m[36m▾[0m [32mnode[0m  [90mhost process[0m[0m[0m[0m[K
 [90m   └─ [0m[90m·[0m [1m━━►[0m 198.51.100.80 :443  [90mInternet[0m  [90m25m ago[0m[0m[0m[0m[K
-[K
 [90m row 1/44   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   ←→: close/open   e/c: expand/collapse all   p: problems only   1-5: screens   Esc: back   ?: help[0m[0m[0m

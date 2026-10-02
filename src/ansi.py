@@ -168,3 +168,67 @@ def overlay(lines, box, w=None, top=None, left=None):
         tail, _ = _cut(line, left + bw, None)
         lines[i] = head + "\x1b[0m" + row + "\x1b[0m" + tail
     return lines
+
+
+# ---- the theme of a whole frame ------------------------------------------------------------------------------------------------
+# The screens are written with the default theme's codes (ui.sgr(token), or a raw code that means a state: 31 32 33 90 ...). A theme is
+# applied to the finished frame: every SGR sequence is looked up as the default theme's code of a token and written with the theme's
+# own code for it. A code that is no token's (a CPU bar's parts, a boot stage) goes through the theme's per-colour table.
+
+_SGR = re.compile(r"\x1b\[([0-9;]*)m")
+_COLOUR = re.compile(r"(?:3[0-7]|4[0-7]|9[0-7]|10[0-7])$")
+_PER_COLOUR = {
+    "light": {"36": "34", "96": "94", "37": "30", "97": "30", "1;36": "1;34"},
+    "hc": {"31": "1;91", "32": "1;92", "33": "1;93", "34": "1;94", "35": "1;95", "36": "1;96", "37": "1;97", "90": "37", "2": ""},
+}
+_TABLES = {}
+
+
+def _table(theme):
+    """{default code: the theme's code} for the tokens, the more common meaning first where two tokens share a code (90: muted)."""
+    t = _TABLES.get(theme)
+    if t is None:
+        t = _TABLES[theme] = {}
+        base = ui.ANSI_THEMES["default"]
+        for token in ("muted", "ok", "warn", "err", "accent", "strong", "banner_ok", "banner_err", "banner_warn", "sel", "accent_strong",
+                      "err_strong", "neutral", "unknown", "info"):
+            t.setdefault(base[token], ui.ANSI_THEMES[theme][token])
+    return t
+
+
+def _param(theme, params):
+    """The parameters of one sequence in a theme ('' = the sequence goes)."""
+    if params in ("", "0"):
+        return params
+    table = _table(theme)
+    if params in table:
+        return table[params]
+    parts, out, i = params.split(";"), [], 0
+    while i < len(parts):
+        p = parts[i]
+        if theme == "mono" and p in ("38", "48") and i + 1 < len(parts):  # 38;5;N / 38;2;R;G;B: an extended colour
+            i += 3 if parts[i + 1] == "5" else 5
+            continue
+        if theme == "mono":
+            if not _COLOUR.match(p):
+                out.append(p)
+        else:
+            out.append(_PER_COLOUR.get(theme, {}).get(p, p))
+        i += 1
+    res = []
+    for x in ";".join(out).split(";"):
+        if x and not (x == "1" and "1" in res):
+            res.append(x)
+    return ";".join(res)
+
+
+def retheme(text, theme):
+    """text (a frame, ANSI) written for the 'default' theme, in another ANSI theme of ui.ANSI_THEMES: light, hc or mono (no colour at all).
+    Sequences that end up empty are dropped; the default theme returns text as it is."""
+    if theme == "default" or theme not in ui.ANSI_THEMES:
+        return text
+
+    def one(m):
+        p = _param(theme, m.group(1))
+        return "\x1b[" + p + "m" if p or m.group(1) in ("", "0") else ""
+    return _SGR.sub(one, text)

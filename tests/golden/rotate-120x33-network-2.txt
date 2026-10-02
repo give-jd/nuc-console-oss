@@ -1,4 +1,6 @@
-[1;41;37m  demo-host │ Network & firewall 2/2 │ 14:13:20                                                          ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ [7m[1 Overview][27m  2 Map  3 CPU  4 Health  5 AI │ Network & firewall 2/2 │ 14:13:20             ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
+   [33m![0m DOCKER-USER empty: ports published by containers bypass ufw[0m[K
 [0m[K
    [90mufw          [0min deny  ·  out allow  ·  fwd deny   log: on (low)[0m[K
    [90miptables     [0mINPUT DROP (5 rules)   FORWARD DROP (0 rules)[0m[K
@@ -13,8 +15,6 @@
    22/tcp                      ALLOW IN      192.168.0.0/24[0m[K
    Anywhere on tailscale0      ALLOW IN      Anywhere[0m[K
 [33m   41641/udp                   ALLOW IN      Anywhere[0m[0m[K
-[K
-[K
 [K
 [K
 [K

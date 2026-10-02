@@ -1,5 +1,5 @@
-[1;41;37m  demo-host │ Details 2/2 │ 14:13:20                            ✖ 6 PROBLEMS  [0m[0m[K
-[36m──[0m[1;36m EXPOSURE [0m[36m────────────────────────────────────────────────────────────────[0m[0m[K
+[1;41;37m  demo-host │ [7m[1·Ov][27m │ Details 2/2 │ 14:13:20                   ✖ 6 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m [0m[31m✖[0m[1;36m EXPOSURE [0m[36m──────────────────────────────────────────────────────────────[0m[0m[K
 [0m[K
    Internet [1;31m1[0m    LAN [33m3[0m    Tailscale 4    Local 4[0m[K
    [31m⚠ 1 DB/broker open on LAN[0m[0m[K

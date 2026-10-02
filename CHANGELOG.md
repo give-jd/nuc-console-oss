@@ -177,6 +177,14 @@ is released as archives built by CI. Still Python 3.8+, standard library only.
 
 ### Changed
 
+- **The console has a tab bar, a KPI row, states on the sections and honours `[ui]`.** The first line of every console screen is now
+  ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ N PROBLEMS` (the current screen in reverse video and brackets, a screen
+  switched off left out, `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI` at 79 columns) instead of ` host │ <page> │ time`; from 30 rows up the second line is the KPI row (`[ui] kpis`
+  or the preset's), and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`). The body has one row less for it, so some screens show a line
+  less or move a block. `[ui]` is used by the console now: `theme` (`light`, `high-contrast`; `NO_COLOR` turns the colours off), `density` (`compact`, `wall`),
+  `layout` / `hidden` / `preset` / `order` for the overview's cards (without them the order is `[dashboard] sections`, as before; `order = severity` puts the worst
+  state first and a card moves only when a state changes) and `start_view` (a console with a keyboard opens at that screen; an idle screen goes back to it).
+  The web view does not read `[ui]` yet.
 - **One keymap for every console screen** (`ui.KEYMAP`: the key dispatch, every footer and the new `?` help are made from the one table; the
   README lists the keys). Breaking, compared with the keys of the screens as they were in development:
   - the Health periods are `d` / `w` / `m` (24 hours, 7 days, 30 days); `1` / `7` / `3` are no longer periods, the digits are the screens;

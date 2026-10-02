@@ -34,7 +34,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "ACCEPTED_PATH", "SENSORS", "time", "os", "sys", "signal", "shutil",
-                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "write_text_atomic")
+                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "write_text_atomic", "KPI_MIN_ROWS")
 CELL = re.compile(r"(?<![\d.])(\d{1,3})([PE]?) [█▒░]+ +(\d+)%( \d\.\d\dG)?( +\d+°C)?")
 EVIL = "x" + ESC + "[2J" + "y" + ESC + "]0;owned" + BEL + "z" + CSI8 + "31m\r\n<b>&amp;"
 
@@ -83,6 +83,7 @@ class CpuCase(unittest.TestCase):
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.SENSORS = os.path.join(self.tmp.name, "sensors.json")            # missing unless a test writes it
+        render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
         cfg["features"]["cpu"], cfg["cpu_in_rotation"] = True, False
 
@@ -378,7 +379,7 @@ class Screens(CpuCase):
                 for opts in self.OPTIONS:
                     with self.subTest(os=os_name, size=(cols, rows), opts=opts):
                         s, lines = self.once(opts, cols, rows)
-                        self.assertIn("test-host │ CPU │", lines[0].replace("demo-host", "test-host"))
+                        self.assertRegex(lines[0], r"^ *demo-host │ .*\[\d[ ·]CPU\]")
                         self.assertIn("── CPU ", lines[1])
                         self.assertRegex(lines[-1], r"\d+/\d+")
                         self.assertIn("PROCESSES", "\n".join(lines))
@@ -599,7 +600,7 @@ class Screens(CpuCase):
                     if cpu_os:
                         self.assertIn("no sensors.json", txt)
             lines = self.once([], 120, 33)[1]
-            self.assertIn("│ CPU │", lines[0])
+            self.assertRegex(lines[0], r"\[\d[ ·]CPU\]")
         render.WINDOWS = render.MACOS = False
 
     def test_no_collector_file_and_a_stale_one_are_said_on_the_screen(self):
@@ -668,11 +669,11 @@ class Sorting(CpuCase):
         for opts, pid in ((["--select", "ffmpeg"], 2210), (["--select", "FFMPEG"], 2210), (["--select", "postgres"], 1590), (["--select", "2900"], 2900),
                           (["--select", "kworker/4"], 288)):
             s, lines = self.once(opts, 200, 50)
-            reverse = [render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x]
+            reverse = [render.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x]
             self.assertEqual(len(reverse), 1, opts)
             self.assertRegex(reverse[0], r"^\s+%d " % pid)                                         # the cursor row, highlighted
         s, lines = self.once(["--select", "no such process"], 200, 50)
-        self.assertRegex([render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x][0], r"^\s+2210 ")  # not found: the first row
+        self.assertRegex([render.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x][0], r"^\s+2210 ")  # not found: the first row
         self.assertIn("1/40", lines[-1])
 
 
@@ -800,7 +801,7 @@ class Keys(CpuCase):
                 for step in list(range(n)) + list(range(n, 0, -1)):
                     self.press(cv, ["down" if step < n else "up"], d)
                     s, vis = render.cpu_screen(d, [], cv, cols - 1, rows)
-                    chosen = [render.ANSI.sub("", x) for x in s.split(LINE) if ESC + "[7m" in x]
+                    chosen = [render.ANSI.sub("", x) for x in s.split(LINE)[1:] if ESC + "[7m" in x]
                     self.assertEqual(len(chosen), 1, (cols, rows, details, step, cv.idx))
                     self.assertRegex(chosen[0], r"^\s+%d " % cv.cur)
 
@@ -912,7 +913,7 @@ class Rotation(CpuCase):
             self.assertEqual(sorted(grid_cells(txt.split("\n"))), list(range(16)) if (cols, rows) != (79, 24) else sorted(grid_cells(txt.split("\n"))))
             frame = render.frame(sl[-1], 1, len(sl), w, rows, [], keys=False)
             self.check_frame(frame, w, rows, cols)
-            self.assertIn("│ CPU │", render.ANSI.sub("", frame).split("\r\n")[0])
+            self.assertRegex(render.ANSI.sub("", frame).split("\r\n")[0], r"\[\d[ ·]CPU\]")
         sl = self.slides(119, 31)
         self.assertEqual(render.pick_slide(sl, sum(render.slide_seconds(x, len(sl)) for x in sl) - 1), 1)   # its turn comes
         self.assertEqual([x[0] for x in self.slides(119, 31, scroll=True)], ["Overview"])        # the scrolling web page: one page only
@@ -1015,7 +1016,7 @@ class Rotation(CpuCase):
         self.on_sleep = sleep
         with self.assertRaises(Stop), contextlib.redirect_stderr(io.StringIO()):
             render.kiosk_file(["render.py", "--no-browser", "--html", os.path.join(self.tmp.name, "k.html")], self.tmp.name, 120, 33)
-        shows = [" │ CPU │ " in text for text, _ in pages]
+        shows = [" │ CPU │ " in text for text, _ in pages]  # a browser page: the plain header
         self.assertEqual(shows, [False, False, True, True, False, False])
         self.assertEqual([x["proc_sampled"] for _, x in pages][:2], [0, 0])                     # nobody looks at the CPU: nothing is made or read
         self.assertEqual(pages[3][1]["proc_made"], 1)                                            # one pair for the stay on the CPU slide
@@ -1106,7 +1107,7 @@ class MainLoop(CpuCase):
 
     @staticmethod
     def is_cpu(frame):
-        return " │ CPU │ " in frame[0] and "── CPU " in frame[1]
+        return bool(re.search(r"\[\d[ ·]CPU\]", frame[0]) and "── CPU " in frame[1])
 
     @staticmethod
     def row(frame):
@@ -1128,7 +1129,7 @@ class MainLoop(CpuCase):
         self.assertGreater(self.row(frames[5]), 4)                                                # PgDn
         self.assertEqual(self.row(frames[6]), 1)                                                  # Home
         self.assertIn("by memory", "\n".join(frames[7]))                                          # M
-        self.assertNotIn("CPU", frames[8][0])                                                     # 1: back to the dashboard
+        self.assertNotRegex(frames[8][0], r"\[\d[ ·]CPU\]")                                                     # 1: back to the dashboard
         self.assertIn("overview page (stub)", "\n".join(frames[8]))
         self.assertIn("by CPU%", "\n".join(frames[9]))                                            # a new screen: the defaults again
         self.assertNotIn("── PROCESS ", "\n".join(frames[9]))
@@ -1192,7 +1193,7 @@ class MainLoop(CpuCase):
         render.DEMO = False
         self.feed((None, None, None))
         frames, _ = self.run_main([0, render.CFG["overview_seconds"] - 1, 0, 1, 1, 1])
-        shown = [f for f in frames if " │ CPU │ " in f[0]]
+        shown = [f for f in frames if re.search(r"\[\d[ ·]CPU\]", f[0])]
         self.assertTrue(shown)
         self.assertEqual(log["proc_sampled"], len(shown))                                          # one reading per CPU frame, none for the others
         self.assertEqual(log["proc_made"], 1)

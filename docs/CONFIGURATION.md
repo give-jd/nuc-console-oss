@@ -59,22 +59,22 @@ All default to `yes`. A disabled section is not drawn, raises no alarm and, for 
 
 Sections fill the columns in the given order and never back-fill, so a line more or less in one block does not move the others. Per-core CPU bars are always one per core, except on tiny consoles (the last two fitting levels).
 
-## `[ui]` — look and layout of the new interface (being built)
+## `[ui]` — look and layout of the screens
 
-> **Not in use yet.** The new interface (a web view made of cards, and a tab bar and KPI row on the console) is being built, and this section is what it will
-> read. Today the console and the web view do **not use it**: they ignore every key here (and `web = classic` keeps today's pages), so changing it has no visible
-> effect. The keys are parsed and checked already: a wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
+> **The console uses this section.** Its theme, density, card order and visibility, KPI row and first screen follow these keys (what each one does there is in
+> the table and under "On the console" below). The new web interface (a view made of cards) is still being built: the web view does **not use it yet**, and
+> `web = classic` keeps today's pages. A wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
 
 Every key is optional. A key left out, blank or wrong means the default, **except** that `hidden =` left blank means "nothing is hidden".
 
 | Key | Default | Meaning |
 |---|---|---|
 | `web` | `classic` | Which web interface is served: `classic` (today's pages) or `app` (the new one, when it exists). The switch that keeps the current pages until the new interface is finished |
-| `theme` | `auto` | `auto` (follows the browser's light or dark setting; the console keeps its usual colours), `dark`, `light` or `high-contrast` |
-| `density` | `desk` | `wall` (big text for a monitor across the room, the least detail), `desk` or `compact` (small text, the most on one screen) |
-| `start_view` | `overview` | The screen that opens first: `overview`, `map`, `cpu`, `health` or `ai` |
+| `theme` | `auto` | `auto` (follows the browser's light or dark setting; the console keeps its usual colours), `dark` (the same on the console), `light` (a light terminal background) or `high-contrast`. The `NO_COLOR` environment variable (set and not empty) turns every console colour off whatever this says |
+| `density` | `desk` | `wall` (big text for a monitor across the room, the least detail: the console starts at the third level of detail), `desk` or `compact` (small text, the most on one screen: the console draws no empty line under the section titles, as `[dashboard] spacing = 0`) |
+| `start_view` | `overview` | The screen that opens first: `overview`, `map`, `cpu`, `health` or `ai`. On the console only on one with a keyboard, and the screen where an idle one goes back to (a monitor with no keyboard always rotates) |
 | `preset` | `default` | A ready-made layout, KPIs and hidden cards, see below: `default`, `security`, `server` or `desktop`. `kpis`, `layout` and `hidden` below override the preset's own |
-| `order` | `severity` | `severity`: the cards that need attention move up. `fixed`: every card stays where `layout` puts it |
+| `order` | `severity` | `severity`: the cards that need attention move up. `fixed`: every card stays where `layout` puts it. **On the console the cards stay where they are unless you write `order = severity`** (see below) |
 | `kpis` | the preset's | The row of numbers under the title bar: up to 8 of `problems`, `internet`, `lan`, `beyond` (services past the reach you declared in `[expose]`), `db_lan`, `firewall`, `cpu`, `ram`, `disk`, `temp`, `load`, `containers`, `unhealthy`, `failed_units`, `ssh`, `tailnet`, `rx`, `tx`, `uptime`, `health`, `ai`, in the order written. One whose data is missing shows `?` |
 | `layout` | the preset's | The cards that show, in order, each `name` or `name:width`: the width is 1 to 4 columns on the web (no suffix: 1; the console ignores it). Names are the sections of `[dashboard] sections`: `attention`, `exposure`, `webapps`, `firewall`, `system`, `containers`, `databases`, `boot`, `network_traffic`, `sessions`, `tailscale`, `docker_disk`, `disks`. Cards you leave out of both `layout` and `hidden` are **appended** in their default order, so a card added by an upgrade shows up at the end. A card whose `[features]` switch is off is never drawn |
 | `hidden` | the preset's | Cards that are not shown, as in `layout`. A card in both lists is hidden |
@@ -105,8 +105,23 @@ outside 1-4 or more than 8 KPIs is reported on stderr and that item is skipped (
 The order of the `default` layout is the one of `[dashboard] sections`, so a `config.ini` that already sets it keeps its order with no `[ui]` section at all. The
 other presets bring their own order, and `[dashboard] sections` does not change them; an explicit `[ui] layout` overrides any of them.
 
+**On the console.**
+
+- *Header and KPI row.* The first line is the tab bar, ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ 6 PROBLEMS`: the current screen is in
+  reverse video and in brackets, a screen switched off in `[features]` is left out (the digits keep their meaning) and a narrow console gets
+  `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI`. Under it, from 30 rows up (or on any height when `kpis` is set), the KPI row: a symbol, a name and a value for each
+  KPI, the last ones dropped when the line is too narrow. A KPI whose data is missing shows `?`, never a reassuring value. Every screen has both lines.
+- *Section titles* carry the state of their card when it is not fine: `── ✖ EXPOSURE ──`, `── ! FIREWALL ──`, `── ? DATABASE ──`.
+- *Order and visibility of the overview's cards.* With none of `layout`, `hidden`, `preset` and `order` set, the order is `[dashboard] sections`, exactly as
+  before. With any of them, the cards are `layout` (then the ones it leaves out), without the `hidden` ones. The cards stay in that order, which is `order = fixed`;
+  **`order = severity` has to be written on the console**: the cards with the worst state come first (✖ and down, then !, then ?, then the fine ones),
+  `attention` stays on top when the layout puts it first, and the cards of one state keep their order. The order depends only on the cards' states, so a card moves
+  when its own state changes (or another's does), never because a number changed.
+- *Theme.* `light` and `high-contrast` change the colours, never the symbols or the text; `NO_COLOR` leaves bold and reverse video only.
+
 **Who wins.** For each key, the first of these that sets it: a `?ui=` value in one URL (a bookmark, a kiosk link), the `nuc_ui` cookie of that browser (set by the
-settings page of the new web interface, which also shows where every value comes from), this section, the preset, the built-in default. The server never writes
+settings page of the new web interface, which also shows where every value comes from), this section, the preset, the built-in default. The console has no
+URL and no cookie: it reads this section, then the preset, then the default. The server never writes
 the browser's choices anywhere. The settings page has an **Export** button that gives you a `[ui]` block like the one above, to paste here.
 
 ## `[display]` — the dashboard on macOS and Windows
@@ -215,7 +230,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-telegram --status [--json]` | on or off, paired or not, last message sent, last error (no root on Linux and macOS; Windows: administrator prompt) |
 | `sudo nuc-console-telegram --test` / `--forget` | send a test message / forget the token and the paired chat |
 | `python3 /opt/nuc-console/render.py --once --demo` | preview with synthetic data (add `--cols N --rows N`, `--color`; `--demo-os windows` or `darwin` for those collectors) |
-| `render.py --once --view map` / `--view cpu` / `--view health` / `--view ai` | the MAP, the CPU, the HEALTH or the AI screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`; HEALTH: `--period 1\|7\|30`, `--select TEXT`, `--details`; AI: `--select TEXT`, `--details`, `--demo-os windows\|darwin`) |
+| `render.py --once --view map` / `--view cpu` / `--view health` / `--view ai` | the MAP, the CPU, the HEALTH or the AI screen once, for a quick look over SSH (`--demo`, `--cols`, `--rows`, `--color`; MAP: `--expand all`, `--select TEXT`, `--details`; CPU: `--sort mem`, `--select PID`, `--details`; HEALTH: `--period 1\|7\|30`, `--select TEXT`, `--details`; AI: `--select TEXT`, `--details`, `--demo-os windows\|darwin`); `--view start`: the screen `[ui] start_view` opens at, and the overview without it |
 | `nuc-console-ai models` | what this machine can run: hardware and a verdict per model (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big), no root; `status` (is it installed, does it answer) also needs none. `/usr/local/sbin/nuc-console-ai` if your PATH lacks the folder |
 | `sudo nuc-console-ai setup [MODEL ...]` | download the local model server's runtime and the models you name (none: the recommended one), once, SHA-256 checked. Also `use MODEL`, `serve [--gpu-layers N] [--install-service]`, `remove [MODEL]` ([AI.md](AI.md#the-commands)) |
 | `nuc-console-ask "question"`, `nuc-console-ask advise [--days N]`, `nuc-console-ask status` | ask the local model about this machine, get advice on the HEALTH findings, check the server (read-only, no root; needs `[ai] enabled = yes`) |

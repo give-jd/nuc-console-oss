@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ CPU │ 14:13:20                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
  [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mx86_64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M[0m[0m[K
  [90mgovernor [0mschedutil/acpi-cpufreq  ·  [90mclock [0m2200-4850 MHz (base 3800)[0m[0m[K
@@ -22,7 +23,6 @@
   1180 nuc-cons+ S   0   3   1.9   0.1    38M  36:51.8 python3[0m[0m[K
    901 root      S   0  24   1.5   0.3    98M  1:13:22 dockerd[0m[0m[K
    733 root      S   0  14   1.2   0.1    46M  30:20.4 tailscaled[0m[0m[K
-  3301 alice     S   0   1   1.1   0.0     5M   0:03.2 htop[0m[0m[K
 [36m──[0m[1;36m PROCESS 1610 [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  node[0m[0m[0m[K
  [90mparent   [0m1433  containerd-shim[0m                             [90mCPU      [0m96.4 %  (100 % = one core)[0m[0m[0m[K
  [90muser     [0m1000[0m                                              [90mmemory   [0m1.3 %  412M resident[0m[0m[0m[K

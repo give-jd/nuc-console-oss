@@ -23,6 +23,7 @@ from test_map_console import FakeSampler, MapCase, Proxy, Stop, overview_stub  #
 WIDTHS = (79, 120, 200, 226)                 # console columns (the footers get one less on the Linux console, a browser page all of them)
 SCREENS = ("overview", "map", "cpu", "health", "ai")
 NAMES = {"overview": "Overview", "map": "Map", "cpu": "CPU", "health": "Health", "ai": "AI"}
+SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar on a narrow line
 PROCS = [{"pid": 100 + i, "name": f"p{i}", "user": "u", "cpu": 50.0 - i, "mem": 10.0 + i, "time": 100.0 - i} for i in range(8)]
 STUBBED = ("CpuFeed", "cpu_screen", "health_state", "health_screen", "ai_state", "ai_screen", "ai_do", "ai_busy", "slides", "map_graph")
 
@@ -406,7 +407,7 @@ class Dispatch(MapCase):
 
     def shown(self, frames):
         """The screen each frame is on, from its header."""
-        return [next((s for s in SCREENS if f" │ {NAMES[s]} │ " in f[0] or f" │ {NAMES[s]} 1/" in f[0]), "?") for f in frames]
+        return [next((s for s in SCREENS if re.search(r"\[\d[ ·](%s|%s)\]" % (NAMES[s], SHORT[s]), f[0])), "?") for f in frames]
 
     # -- the screens
     def test_the_digits_open_the_screens_from_anywhere(self):
@@ -477,7 +478,8 @@ class Dispatch(MapCase):
         frames = self.run_main([b"\x1b[C", 10, b"\x1b[C", b"\x1b[C", b"\x1b[D", b"\x1b[6~", b"\x1b[5~", b"\x1b[5~", b"1"])
         names = ["".join(f[1].split()) for f in frames]
         self.assertEqual(names, ["slidea", "slideb", "slideb", "slidec", "slidea", "slidec", "slidea", "slidec", "slideb", "slidea"])
-        self.assertTrue(all(" │ Overview 1/3" in f[0] or " │ System 2/3" in f[0] or " │ Boot 3/3" in f[0] for f in frames))
+        self.assertTrue(all(re.search(r"\[1[ ·](Overview|Ov)\]", f[0]) for f in frames))          # the overview's pages are the first tab
+        self.assertTrue(any(" │ System 2/3" in f[0] for f in frames) and any(" │ Boot 3/3" in f[0] for f in frames))  # and the page is named after it
 
     def test_a_held_slide_stays_for_hold_s_then_the_rotation_goes_on(self):
         self.three_slides()
@@ -506,7 +508,7 @@ class Dispatch(MapCase):
             self.assertEqual(len(f), 24)
             self.assertNotIn("┌─ Keys", "\n".join(frames[-1]), scope)                           # the key closed it
             self.assertEqual(self.shown(frames)[-1], scope)                                      # and did nothing else
-            self.assertIn(NAMES[scope], f[0])                                                    # the header and the footer stay visible
+            self.assertRegex(f[0], r"\[\d[ ·](%s|%s)\]" % (NAMES[scope], SHORT[scope]))                                                    # the header and the footer stay visible
             self.assertIn("?: help", f[-1])
 
     def test_a_key_that_closes_the_help_does_not_act(self):
@@ -583,6 +585,48 @@ class Dispatch(MapCase):
         frames = self.run_main([b"2", b"Z", render.MAP_IDLE_S + 5])
         self.assertEqual(self.shown(frames)[-1], "overview")
         self.assertNotIn("paused", frames[-1][0])
+
+    # -- [ui] start_view: the screen the console opens at
+    def start_view(self, name):
+        render.CFG["ui"]["start_view"] = name
+        self.addCleanup(render.CFG["ui"].pop, "start_view", None)
+
+    def test_start_view_opens_that_screen_at_the_start_when_a_keyboard_is_there(self):
+        for name in ("map", "cpu", "health", "ai"):
+            self.start_view(name)
+            frames = self.run_main([1, 1])
+            self.assertEqual(self.shown(frames), [name] * 3, name)
+        self.start_view("overview")
+        self.assertEqual(self.shown(self.run_main([1])), ["overview"] * 2)  # the default: the rotation, as it was
+
+    def test_start_view_needs_a_keyboard_and_a_feature_that_is_on(self):
+        self.start_view("map")
+        self.assertEqual(self.shown(self.run_main([1, 1], keyboard=False)), ["overview"] * 3)  # a monitor: nobody could close it
+        render.CFG["features"]["map"] = False
+        self.assertEqual(self.shown(self.run_main([1])), ["overview"] * 2)
+
+    def test_esc_leaves_the_start_view_and_the_digits_go_where_they_say(self):
+        self.start_view("health")
+        frames = self.run_main([b"\x1b", 1, b"3", b"1"])
+        self.assertEqual(self.shown(frames)[:2], ["health", "overview"])  # it is the start, not a home the console goes back to by itself
+        self.assertEqual(self.shown(frames)[-2:], ["cpu", "overview"])
+
+    def test_an_idle_screen_goes_back_to_the_start_view_not_to_the_rotation(self):
+        self.start_view("health")
+        frames = self.run_main([b"2", render.MAP_IDLE_S + 5, 1])
+        self.assertEqual(self.shown(frames), ["health", "map", "health", "health"])
+        self.assertEqual(self.shown(self.run_main([render.HEALTH_IDLE_S + 5, 1])), ["health", "health", "health"])  # idle on the start itself: a fresh one
+        render.CFG["ui"].pop("start_view")
+        frames = self.run_main([b"2", render.MAP_IDLE_S + 5, 1])
+        self.assertEqual(self.shown(frames), ["overview", "map", "overview", "overview"])  # no start_view: the rotation, as it was
+
+    def test_new_view_opens_one_screen_and_only_that_one(self):
+        for name, cls in (("map", render.MapView), ("cpu", render.CpuView), ("health", render.HealthView), ("ai", render.AiView)):
+            got = render.new_view(name, 123.0)
+            self.assertEqual([type(x) is cls if x is not None else None for x in got].count(True), 1)
+            view = next(x for x in got if x is not None)
+            self.assertEqual((view.opened, view.touched), (123.0, 123.0))
+            self.assertEqual(len([x for x in got if x is None]), 3)
 
     # -- the AI question
     def test_a_question_that_waits_is_answered_by_the_next_key_and_the_global_keys_do_not_slip_past_it(self):

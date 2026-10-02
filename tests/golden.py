@@ -20,7 +20,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   socket.gethostname, os.cpu_count, nuc_config.PORTABLE
   render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD,
           KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
-  render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO
+  render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
   aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
           web.json would go); web.Server's CSRF token (a fixed one)
 Whatever is read from the host outside the demo's data (a file, a command, the environment) has to be faked here.
@@ -154,8 +154,8 @@ class FrozenWorld(object):
     known. Everything is put back on exit: the same objects with the same contents (the tests of this repository change render.CFG in
     place and keep references to what is inside it)."""
 
-    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW):
-        self.cfg, self.mode, self.accepted, self.clock = cfg or {}, mode, accepted, Clock(now)
+    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW, env=None):
+        self.cfg, self.mode, self.accepted, self.clock, self.env = cfg or {}, mode, accepted, Clock(now), env or {}
         self._undo, self._tmp, self._server = [], None, None
 
     # -- patching, with a way back
@@ -205,6 +205,9 @@ class FrozenWorld(object):
                     self.set(mod, "math", _MATH)
                 self.set(mod, "sum", _sum)  # these two shadow the builtins in that module
                 self.set(mod, "abs", _abs)
+            self._undo.append((os.environ, None, dict(os.environ)))  # put back on exit; no NO_COLOR of the machine that renders (a case sets its own)
+            os.environ.pop("NO_COLOR", None)
+            os.environ.update(self.env)
             self.set(nuc_config, "PORTABLE", "")  # NUC_CONSOLE_HOME: the portable run words some advice and footers differently
             self.set(socket, "gethostname", lambda: HOST)  # render.demo_defaults() puts the same name on it
             self.set(os, "cpu_count", lambda: CPUS)
@@ -226,7 +229,7 @@ class FrozenWorld(object):
             self._freeze_ai()
             for name in ("DEMO", "DEMO_OS", "DEMO_HEALTH"):  # --demo and web.Server set them: put back on exit
                 self.set(render, name, getattr(render, name))
-            for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO"):
+            for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
                 if isinstance(getattr(render, name, None), dict):
                     self.scrub(getattr(render, name))
         except BaseException:
@@ -242,7 +245,7 @@ class FrozenWorld(object):
             while self._undo:
                 obj, name, old = self._undo.pop()
                 if name is None:  # a container: its contents as they were
-                    if isinstance(obj, dict):
+                    if isinstance(obj, dict) or obj is os.environ:
                         obj.clear()
                         obj.update(old)
                     else:
@@ -304,11 +307,13 @@ def web_text(html_text, csp):
 
 class Case(object):
     """One golden file. console: args are the arguments of `render.py --once --demo --color`; web: query is the query string of the page
-    (the name starts with 'web-'). cfg: changes to the configuration; mode: render.MODE; accepted: see FrozenWorld."""
-    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted")
+    (the name starts with 'web-'). cfg: changes to the configuration; mode: render.MODE; accepted: see FrozenWorld; env: environment
+    variables (NO_COLOR) the case sets."""
+    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted", "env")
 
-    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=()):
+    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=(), env=None):
         self.name, self.args, self.query, self.cfg, self.mode, self.accepted = name, tuple(args), query, cfg or {}, mode, accepted
+        self.env = env or {}
 
     @property
     def filename(self):
@@ -319,7 +324,7 @@ class Case(object):
         return os.path.join(GOLDEN_DIR, self.filename)
 
     def render(self):
-        with FrozenWorld(self.cfg, self.mode, self.accepted) as world:
+        with FrozenWorld(self.cfg, self.mode, self.accepted, env=self.env) as world:
             return world.page(self.query) if self.query is not None else world.once(self.args)
 
 
@@ -357,6 +362,18 @@ def _cases():
     # problems the user accepted as known (a line under ATTENTION), and the Telegram notifier that is on and silent
     add("overview-accepted-120x33", _size(120, 33), accepted=ACCEPTED)
     add("overview-telegram-200x50", _size(200, 50), cfg={"telegram": {"enabled": True}})
+
+    # [ui] on the console: the themes (light, high contrast, NO_COLOR = mono), the densities (compact: no air under the titles; wall: starts
+    # at the coarser level), a layout with hidden cards and the severity order, and the screen the console starts at (--view start)
+    add("ui-theme-light-120x33", _size(120, 33), cfg={"ui": {"theme": "light"}})
+    add("ui-theme-hc-120x33", _size(120, 33), cfg={"ui": {"theme": "high-contrast"}})
+    add("ui-no-color-120x33", _size(120, 33), cfg={"ui": {"theme": "light"}}, env={"NO_COLOR": "1"})
+    add("ui-density-compact-120x33", _size(120, 33), cfg={"ui": {"density": "compact"}})
+    add("ui-density-wall-226x50", _size(226, 50), cfg={"ui": {"density": "wall"}})
+    add("ui-layout-120x33", _size(120, 33), cfg={"ui": {"layout": [("system", 2), ("exposure", 2), ("attention", 1), ("webapps", 1)],
+                                                        "hidden": ["sessions", "docker_disk", "tailscale", "disks"], "kpis": ["problems", "cpu", "temp"]}})
+    add("ui-severity-120x33", _size(120, 33), cfg={"ui": {"order": "severity"}})
+    add("ui-start-health-120x33", ("--view", "start") + _size(120, 33), cfg={"ui": {"start_view": "health"}})
 
     # [dashboard] mode = rotate: one page after the other (a page that does not fit goes on to a second screen)
     for i, name in enumerate(("system", "network-1", "network-2", "boot")):

@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ AI │ 14:13:20                                                                              ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  3 CPU  4 Health  [7m[5 AI][27m │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m AI [0m [90mwhat this machine can run[0m[90m · [0m[90m12 models[0m[90m · [0m[32m✔ 10 fit[0m  [36m◐ 2 gpu+cpu[0m [36m──────────────────────────────────────────────────[0m[0m[0m[0m[K
  [1;32m● ON      [0m on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1[0m[0m[0m[K
  [90mfolder[0m /var/lib/nuc-console/ai[90m · 4.0 GB downloaded · 412.0 GB free on that disk[0m[0m[0m[0m[K
@@ -24,7 +25,6 @@
   [32m✓[0m   Qwen3 1.7B          [90m1.7B       [0m   1.1 GB   1.8 GB  [1;42;30m ✔ FITS GPU [0m  140-233    [90mruns anywhere; thinking mode: /no_th…[0m[0m[0m[0m[K
       Qwen3 0.6B          [90m0.6B       [0m   400 MB   1.1 GB  [1;42;30m ✔ FITS GPU [0m  384-640    [90ma toy: too small to give reliable ad…[0m[0m[0m[0m[K
  [33m★[0m[90m recommended[0m  ·  [32m✓[0m[90m installed[0m  ·  [36m●[0m[90m active[0m  ·  [90mtok/s: rough estimate[0m[0m[0m[0m[K
-[K
 [K
 [K
 [K

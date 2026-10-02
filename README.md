@@ -157,6 +157,17 @@ rights). Preview a macOS or Windows screen anywhere with `--demo-os darwin` / `-
 
 Full guide (VT choice, time zone, font, update, uninstall, troubleshooting): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
+### The console's header
+
+The first line is a tab bar: ` host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ 14:13:20 … ✖ 6 PROBLEMS`. The screen you are on is in reverse video and in brackets, a screen
+that is switched off is not listed, and a narrow console (79 columns) gets `[1·Ov] 2·Map 3·CPU 4·Hlth 5·AI`. From 30 rows up the second line is the KPI row: a symbol, a
+name and a value for each of problems, internet, LAN, beyond, CPU, RAM, disk and temperature (the last ones go when the line is too narrow; a value that cannot be read is `?`).
+Every screen has both lines, and a section whose card is not fine says so in its title (`── ✖ EXPOSURE ──`, `── ! FIREWALL ──`).
+
+`[ui]` in `config.ini` changes it: `theme` (`light` for a light terminal, `high-contrast`; the `NO_COLOR` variable removes every colour), `density` (`compact`: no empty lines
+under the titles; `wall`: less detail, for a monitor across the room), `kpis`, `layout` / `hidden` / `preset` / `order = severity` for the overview's cards, and `start_view`
+for the screen a console with a keyboard opens at ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#ui--look-and-layout-of-the-screens)).
+
 ### Keys on the console
 
 One keymap for every screen; `?` shows the keys of the screen you are on, and the footer is made from the same table. Digits and symbols are the same

@@ -1,4 +1,5 @@
-[1;41;37m  demo-host │ CPU │ 14:13:20                                                                             ✖ 6 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ 1 Overview  2 Map  [7m[3 CPU][27m  4 Health  5 AI │ 14:13:20                                      ✖ 6 PROBLEMS  [0m[0m[K
+ [31m✖[0m [90mProblems[0m [31m6[0m   [31m✖[0m [90mInternet[0m [31m1[0m   [33m![0m [90mLAN[0m [33m3[0m   [31m✖[0m [90mBeyond[0m [31m2[0m   [32m✔[0m [90mCPU[0m 6%   [32m✔[0m [90mRAM[0m 33%   [32m✔[0m [90mDisk[0m 38%   [32m✔[0m [90mTemp[0m 72°C[0m[K
 [36m──[0m[1;36m CPU [0m[36m──────────────────────────────────────────────────────────────────────────[0m[90m  AMD Ryzen 7 5800X 8-Core Processor[0m[0m[0m[K
  [90msockets [0m1  ·  [90mcores [0m8  ·  [90mthreads [0m16  ·  [90march [0mx86_64  ·  [90mcache [0mL1d 256K  L1i 256K  L2 4M  L3 32M[0m[0m[K
  [90mgovernor [0mschedutil/acpi-cpufreq  ·  [90mclock [0m2200-4850 MHz (base 3800)[0m[0m[K
@@ -28,6 +29,5 @@
   2290 999       S   0   5   0.6   0.0     9M   8:40.1 redis-server[0m[0m[K
    213 root      I   0   1   0.4   0.0     0B   0:51.2 kworker/u32:3-events_unbound[0m[0m[K
   1703 www-data  S   0   1   0.4   0.0    11M   3:30.4 nginx[0m[0m[K
-    14 root      S   0   1   0.3   0.0     0B   1:38.1 ksoftirqd/0[0m[0m[K
-[90m … +25 more processes[0m[0m[0m[K
+[90m … +26 more processes[0m[0m[0m[K
 [90m screen 4/5   ←→: slide   1-5: screens   ?: help   console 120x33[0m[0m
