@@ -1350,6 +1350,7 @@ def map_web(G, rs, st, sel, nid, links, limit=None, truncated=False):
         out.append(ui.Split(tree, [Group([map_props(G, nid, None, links.close)])]))
     else:
         out += tree
+    return out
 
 
 # ---- AI -------------------------------------------------------------------------------------------------------------------------
