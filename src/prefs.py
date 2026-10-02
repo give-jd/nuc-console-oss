@@ -1,7 +1,7 @@
 """Preferences of the interface: how the screens look and which cards they show (stdlib only, Python 3.8+).
 
 Pure: nothing here reads a file, the environment or the network; the config.ini dict, the cookie and the URL value are passed in.
-Nothing renders with it yet: the new web shell and the console tab bar will.
+The new web shell (web.py) renders with it; the console tab bar will.
 
 Fields (a field that is not set falls through to the next source):
   theme      auto | dark | light | high-contrast         cookie code t<a|d|l|h>

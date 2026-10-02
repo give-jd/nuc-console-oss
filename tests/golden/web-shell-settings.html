@@ -1,0 +1,294 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none' -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>demo-host · settings · nuc-console</title>
+<link rel="stylesheet" href="/s/app.a2855f02.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?app=1" data-key="1">
+<kbd>1</kbd>Overview</a>
+<a href="/?app=1&amp;view=map" data-key="2">
+<kbd>2</kbd>Map</a>
+<a href="/?app=1&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?app=1&amp;view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?app=1&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings" aria-current="page">⚙︎</a>
+</div>
+</header>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="view">
+<div class="settings">
+<section class="sec" aria-labelledby="sec-app">
+<h3 class="sech" id="sec-app">Appearance</h3>
+<div class="fs">
+<span class="lab">Theme <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Theme">
+<span aria-current="true">Auto</span>
+<a href="/?set=td&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="dark">Dark</a>
+<a href="/?set=tl&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="light">Light</a>
+<a href="/?set=th&amp;back=app%3D1%26view%3Dsettings" data-set data-theme="high-contrast">High contrast</a>
+</div>
+</div>
+<div class="fs">
+<span class="lab">Density <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Density">
+<a href="/?set=dw&amp;back=app%3D1%26view%3Dsettings" data-set data-density="wall">Wall</a>
+<span aria-current="true">Desk</span>
+<a href="/?set=dc&amp;back=app%3D1%26view%3Dsettings" data-set data-density="compact">Compact</a>
+</div>
+<p class="hintl">Wall hides the small print and cuts long lists to 3 lines; compact fits more.</p>
+</div>
+<div class="fs">
+<span class="lab">Preset <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Preset">
+<span aria-current="true">Default</span>
+<a href="/?set=ps&amp;back=app%3D1%26view%3Dsettings" data-set>Security</a>
+<a href="/?set=pv&amp;back=app%3D1%26view%3Dsettings" data-set>Server</a>
+<a href="/?set=pd&amp;back=app%3D1%26view%3Dsettings" data-set>Desktop</a>
+</div>
+<p class="hintl">A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.</p>
+</div>
+<div class="fs">
+<span class="lab">Order <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Order">
+<span aria-current="true">By severity</span>
+<a href="/?set=of&amp;back=app%3D1%26view%3Dsettings" data-set>Fixed</a>
+</div>
+<p class="hintl">By severity: what needs you comes first. Fixed: the layout&#x27;s order, nothing moves.</p>
+</div>
+<div class="fs">
+<span class="lab">Start view <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Start view">
+<span aria-current="true">Overview</span>
+<a href="/?set=vm&amp;back=app%3D1%26view%3Dsettings" data-set>Map</a>
+<a href="/?set=vc&amp;back=app%3D1%26view%3Dsettings" data-set>CPU</a>
+<a href="/?set=vh&amp;back=app%3D1%26view%3Dsettings" data-set>Health</a>
+<a href="/?set=va&amp;back=app%3D1%26view%3Dsettings" data-set>AI</a>
+</div>
+</div>
+<div class="fs">
+<span class="lab">Key figures (at most 8, shown in the order chosen) <span class="src sm">default</span>
+</span>
+<ul class="kchk">
+<li class="on">
+<a href="/?set=kin_la_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Problems</a>
+<span class="o">1</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_la_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Internet</a>
+<span class="o">2</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_be_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> LAN</a>
+<span class="o">3</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_cp_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Beyond</a>
+<span class="o">4</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> DB on LAN</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Firewall</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_rm_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> CPU</a>
+<span class="o">5</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_dk_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> RAM</a>
+<span class="o">6</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_rm_tp&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Disk</a>
+<span class="o">7</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_rm_dk&amp;back=app%3D1%26view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Temp</a>
+<span class="o">8</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Load</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Containers</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Unhealthy</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Failed units</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> SSH</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Tailnet</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Rx</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Tx</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Uptime</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> Health</span>
+</li>
+<li class="off">
+<span aria-disabled="true">
+<span class="box" aria-hidden="true">+</span> AI</span>
+</li>
+</ul>
+</div>
+<div class="fs expo">
+<span class="lab" id="exp-lab">Export</span>
+<pre id="export" tabindex="0" aria-labelledby="exp-lab">[ui]
+web = app
+theme = auto
+density = desk
+start_view = overview
+preset = default
+order = severity
+kpis = problems, internet, lan, beyond, cpu, ram, disk, temp
+layout = attention:2, exposure:2, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
+hidden =
+</pre>
+<code class="ck-v" id="cookie-v">1</code>
+<p class="hintl">Saved in this browser (the cookie above). To make it everyone's default, paste the block into config.ini.</p>
+</div>
+<div class="fs">
+<a class="lnk" data-set href="/?set=reset&amp;back=app%3D1%26view%3Dsettings">Reset to the defaults</a>
+</div>
+</section>
+<section class="sec" aria-labelledby="sec-about">
+<h3 class="sech" id="sec-about">About this machine</h3>
+<p class="sm">Read-only: this page changes nothing on the machine.</p>
+<dl class="about">
+<dt>version</dt>
+<dd>
+<b>nuc-console 1.5.0</b> <span class="sm">to update, run <code class="cmd">nuc-console-update</code> yourself: nothing here goes online</span>
+</dd>
+<dt>mode</dt>
+<dd>installed on this machine</dd>
+<dt>config</dt>
+<dd>
+<code class="cmd">/nonexistent</code> <span class="sm">no file: the defaults are in use</span>
+</dd>
+<dt>web access</dt>
+<dd>loopback only (127.0.0.1), no token</dd>
+<dt>display</dt>
+<dd>mode browser · zoom 100%</dd>
+<dt>Telegram</dt>
+<dd>off ([telegram] enabled = no)</dd>
+<dt>AI buttons</dt>
+<dd>allowed ([ai] web_actions = yes): the AI page can switch the AI on and off, ask and delete models</dd>
+</dl>
+</section>
+</div>
+</main>
+<footer class="foot">text <a href="/?zoom=90&amp;app=1&amp;view=settings">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;view=settings">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26view%3Dsettings">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26view%3Dsettings">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26view%3Dsettings">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1%26view%3Dsettings">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26view%3Dsettings">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+</body>
+</html>

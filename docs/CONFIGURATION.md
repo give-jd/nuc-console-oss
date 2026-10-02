@@ -61,9 +61,9 @@ Sections fill the columns in the given order and never back-fill, so a line more
 
 ## `[ui]` — look and layout of the new interface (being built)
 
-> **Not in use yet.** The new interface (a web view made of cards, and a tab bar and KPI row on the console) is being built, and this section is what it will
-> read. Today the console and the web view do **not use it**: they ignore every key here (and `web = classic` keeps today's pages), so changing it has no visible
-> effect. The keys are parsed and checked already: a wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
+> **Preview.** The new web interface (a shell of cards, [WEB.md](WEB.md#the-new-shell-preview-opt-in)) reads this section when you switch it on with
+> `web = app` (or `?app=1` in one URL); `web = classic`, the default, keeps today's pages and ignores every other key here. The console does not use it yet.
+> A wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
 
 Every key is optional. A key left out, blank or wrong means the default, **except** that `hidden =` left blank means "nothing is hidden".
 

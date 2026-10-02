@@ -2,8 +2,11 @@
 
 Everything is escaped; only <span class> elements with fixed class names are produced. No JavaScript, ever.
 """
+import hashlib
 import html
 import re
+
+import ui
 
 SGR = re.compile(r"\x1b\[([0-9;]*)m")
 ESC = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -147,3 +150,163 @@ def kiosk_page(screen, cols, rows, refresh, title):
            f"font-size:{font};line-height:1.2;white-space:pre}}" + PALETTE)
     return (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta http-equiv="refresh" content="{int(refresh)}">'
             f"<title>{html.escape(title)} · nuc-console</title><style>{css}</style><pre>{to_html(screen.replace(chr(13), ''))}</pre></html>")
+
+
+# ======================================================================================================================================
+# The shell (web.py shell pages; webcss.py styles them): markup builders, pure functions of the data they are given. Every control is a
+# link or a form, every text is escaped here, and what goes inside a block (data-card) uses only the tags and attributes of
+# webjs.FRAG_TAGS / FRAG_ATTRS, so that a later fragment poll can take it over. No script, no inline style.
+# ======================================================================================================================================
+STATE_WORD = {"ok": "ok", "warn": "warn", "err": "err", "down": "down", "unknown": "unknown", "info": "info"}
+
+
+def esc(text):
+    """Text or an attribute value, escaped."""
+    return html.escape(str(text), quote=True)
+
+
+def rev(*parts):
+    """The revision of a block: it changes when, and only when, the block's HTML does."""
+    h = hashlib.sha1()
+    for p in parts:
+        h.update(str(p).encode("utf-8", "replace") + b"\0")
+    return h.hexdigest()[:10]
+
+
+def state_symbol(state):
+    return f'<span class="sym s-{esc(state)}" aria-hidden="true">{esc(ui.SYMBOLS.get(state, "?"))}</span>'
+
+
+def state_chip(state):
+    """The chip of a card header: the symbol and the word, the colour only a third cue."""
+    return f'<span class="chip st-{esc(state)}">{esc(ui.SYMBOLS.get(state, "?"))} {esc(STATE_WORD.get(state, state))}</span>'
+
+
+def block(tag, card, cls, inner, extra=""):
+    """An element the page is made of: data-card says which, data-rev changes with its content (the fragment poll swaps by it)."""
+    return f'<{tag} class="{esc(cls)}" data-card="{esc(card)}" data-rev="{rev(cls, extra, inner)}"{extra}>{inner}</{tag}>'
+
+
+def tab(key, label, href, current, badge=""):
+    return (f'<a href="{esc(href)}" data-key="{esc(key)}"' + (' aria-current="page"' if current else "")
+            + f'><kbd>{esc(key)}</kbd>{esc(label)}' + (f' <span class="badge">{badge}</span>' if badge else "") + "</a>")
+
+
+def topbar(host, pill_state, pill_text, tabs, clock, help_href, settings_href, settings_current):
+    """The top bar block (data-card="__top"): host, the status pill, the tabs (already built by tab()), the clock, ? and the settings."""
+    inner = (f'<span class="host">{esc(host)}</span><span class="status {esc(pill_state)}" role="status">{esc(pill_text)}</span>'
+             f'<nav class="tabs" aria-label="Screens">{"".join(tabs)}</nav><div class="tb-r"><time class="clock">{esc(clock)}</time>'
+             f'<a class="ib" href="{esc(help_href)}" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>'
+             f'<a class="ib" href="{esc(settings_href)}" aria-label="Settings" title="Settings"'
+             + (' aria-current="page"' if settings_current else "") + ">\u2699\ufe0e</a></div>")
+    return block("header", "__top", "topbar", inner)
+
+
+def spark_svg(values):
+    """A sparkline as an SVG polyline (attributes only), None for fewer than two points."""
+    vals = [float(v) for v in values][-60:]
+    if len(vals) < 2:
+        return ""
+    lo, hi = min(vals), max(vals)
+    span = (hi - lo) or 1.0
+    pts = " ".join(f"{i * 100.0 / (len(vals) - 1):.1f},{22.0 - (v - lo) * 20.0 / span:.1f}" for i, v in enumerate(vals))
+    return f'<svg class="spk" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline points="{pts}"/></svg>'
+
+
+def kpi_tile(k, href=""):
+    """One KPI as a tile (a link to its card or view when href is given). An unknown value is '?' without a symbol, dashed."""
+    sym = "" if k.state == "unknown" else state_symbol(k.state)
+    spark = spark_svg(k.spark.values) if k.spark is not None else ""
+    value = f'<span class="kv">{sym}{esc(k.value)}' + (f'<span class="u">{esc(k.unit)}</span>' if k.unit else "") + "</span>"
+    line = f'<span class="kline">{value}{spark}</span>' if spark else value
+    tag, attrs = ("a", f' href="{esc(href)}"') if href else ("div", "")
+    return (f'<{tag} class="kpi st-{esc(k.state)}" role="listitem" data-state="{esc(k.state)}"{attrs}><span class="kl">{esc(k.label)}</span>{line}'
+            + (f'<span class="ks">{esc(k.hint)}</span>' if k.hint else "") + f"</{tag}>")
+
+
+def kpis_block(tiles, banner=""):
+    """The KPI row block (data-card="__kpis"); the banner (a collector that is not running...) goes above the tiles."""
+    return block("div", "__kpis", "kpiblock", banner + f'<div class="kpis" role="list" aria-label="Key figures">{"".join(tiles)}</div>')
+
+
+def banner(sym, bold, small=""):
+    return f'<div class="stale-banner" role="status"><span class="sym">{esc(sym)}</span> <b>{esc(bold)}</b>' + (f' <span class="sm">{small}</span>' if small else "") + "</div>"
+
+
+def card_article(card, title, note, state, size, inner, more=""):
+    """A card of the grid: width class sN, state class st-..., the header (title, note, state chip) and the body (inner is built by the caller)."""
+    body = f'<div class="ch"><h3>{esc(title)}</h3>' + (f'<span class="note">{esc(note)}</span>' if note else "") + f"{state_chip(state)}</div>"
+    body += f'<div class="cb">{inner}' + (f'<p class="more">{more}</p>' if more else "") + "</div>"
+    return block("article", card, f"card s{size} st-{state}", body, f' id="c-{esc(card)}" data-state="{esc(state)}"')
+
+
+TITLE_LINE = re.compile(r"\s*\u2500{2} (.+?) \u2500{2,}(?:  (.*))?")  # ansi.section(): '\u2500\u2500 TITLE \u2500\u2500\u2500\u2500  note'
+
+
+def plain(line):
+    return ESC.sub("", SGR.sub("", line))
+
+
+def ansi_card(lines):
+    """(the note of the section's title line, the card body) for the lines of a card that is not built of components yet (ANSI, as the console
+    draws them): the title line (the card's header says it) and the blank lines above the text are left out, the rest are colour spans in a <pre>."""
+    lines, note = [x.rstrip("\r") for x in lines], ""
+    while lines and not plain(lines[0]).strip():
+        lines.pop(0)
+    m = TITLE_LINE.fullmatch(plain(lines[0])) if lines else None
+    if m:
+        note = (m.group(2) or "").strip()
+        lines.pop(0)
+    while lines and not plain(lines[0]).strip():
+        lines.pop(0)
+    return note, '<pre class="tty">' + to_html("\n".join(lines)) + "</pre>"
+
+
+def seg(label, options):
+    """A group of links like a segmented control: options [(text, href or None, current, attrs)]. The chosen one is marked aria-current and is
+    not a link; an option with no href is shown dimmed (aria-disabled). attrs: extra attributes of a link (data-set, data-theme...)."""
+    out = []
+    for text, href, current, attrs in options:
+        if current:
+            out.append(f'<span aria-current="true">{esc(text)}</span>')
+        elif href is None:
+            out.append(f'<span aria-disabled="true">{esc(text)}</span>')
+        else:
+            out.append(f'<a href="{esc(href)}"{attrs}>{esc(text)}</a>')
+    return f'<div class="seg" role="group" aria-label="{esc(label)}">{"".join(out)}</div>'
+
+
+def keys_html(shown):
+    """'Tab/Shift+Tab', '1-5', '\u2190\u2192 PgUp/PgDn': each key in a <kbd>."""
+    return " ".join(f"<kbd>{esc(k)}</kbd>" for k in shown.split())
+
+
+def help_dialog(groups, close_href="#"):
+    """#help: the keys of the screen (ui.help_rows), shown by :target (no script): a link to #help opens it, a link to # closes it."""
+    cols = "".join(f"<section><h3>{esc(title)}</h3><dl>" + "".join(f"<dt>{keys_html(k)}</dt><dd>{esc(what)}</dd>" for k, what in items) + "</dl></section>"
+                   for title, items in groups)
+    return (f'<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title"><a class="ov-bg" href="{esc(close_href)}" '
+            f'tabindex="-1" aria-label="Close help"></a><div class="dlg"><header><h2 id="help-title">Keyboard</h2><a class="ib" href="{esc(close_href)}" '
+            f'data-key="? Escape" aria-label="Close help">\u2715</a></header><div class="keys">{cols}</div></div></section>')
+
+
+def foot(groups, updated):
+    """The footer: the groups (strings), a dot between two, and when it was drawn."""
+    return ('<footer class="foot">' + '<span class="dot">\u00b7</span>'.join(groups) + f'<span class="upd">updated {esc(updated)}</span></footer>')
+
+
+def shell_doc(title, css_href, body, theme="auto", density="desk", zoom=100, shift=0, kiosk=False, prefs_src="config", prefs="", refresh=0,
+              extra_style="", script="", paused=False):
+    """The whole page. <html> carries what the style sheet and the scripts read: data-theme, data-density, the classes zNNN and shift-N (paused when
+    the redraw is paused), data-prefs-src and data-prefs. refresh: the meta refresh of the page (0 = none); script: one inline script, if any."""
+    cls = f"z{int(zoom)} shift-{int(shift)}" + (" paused" if paused else "")
+    meta = f'<meta http-equiv="refresh" content="{int(refresh)}">' if refresh else ""
+    if meta and script:
+        meta = f"<noscript>{meta}</noscript>"  # a page with a script reloads itself: the meta is for browsers without one
+    return ('<!doctype html>'
+            f'<html lang="en" data-theme="{esc(theme)}" data-density="{esc(density)}" class="{cls}" data-prefs-src="{esc(prefs_src)}"'
+            + (f' data-prefs="{esc(prefs)}"' if prefs else "") + (" data-kiosk" if kiosk else "") + ">"
+            f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">'
+            f'{meta}<title>{esc(title)}</title><link rel="stylesheet" href="{esc(css_href)}">'
+            + (f"<style>{extra_style}</style>" if extra_style else "") + f"</head><body>{body}" + (f"<script>{script}</script>" if script else "")
+            + "</body></html>")

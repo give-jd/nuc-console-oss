@@ -81,6 +81,36 @@ Security headers, on every response: strict CSP (`default-src 'none'`), `no-stor
 `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`; the AI page differs in two, see below.
 No access log (URLs may carry a token).
 
+## The new shell (preview, opt-in)
+
+A second interface, made of cards, is served beside the classic one. It is **off by default**: the classic pages stay what they were.
+Ask for it for one URL with `?app=1`, or for every page with `[ui] web = app` in `config.ini` (`?app=0` then gives the classic page back).
+It has no script yet: every control is a link or a form, and the page reloads by `<meta refresh>` like the classic one.
+
+- **Top bar**: the host, the status pill (✔ ALL OK, ! warnings, ✖ problems, with its symbol), the five screens as tabs (keys 1–5; badges for the
+  Map's problems, the Health findings and the AI), the clock, `?` (the keys, `#help`, shown by the browser's `:target`) and ⚙ (the settings).
+- **Key figures** under it (`[ui] kpis`, the settings page): one tile each, a link to its card; a source that cannot be read is `?`, never green.
+  A banner says so when a collector is not running.
+- **Overview**: a grid of cards (12 / 6 / 1 columns by the window's width), in the order of `[ui] order` (by severity, or fixed) and the layout. A
+  card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
+- **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The AI page keeps its forms and CSRF.
+- **Footer**: refresh − / +, pause, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
+
+| Path | |
+|---|---|
+| `/?app=1` | the shell (every view above takes it: `/?view=cpu&app=1`) |
+| `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
+| `/?view=settings` | **Appearance** (theme, density, preset, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
+| `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403` |
+| `/?ui=<string>` | the same grammar for this URL only (a bookmark, a kiosk link); an invalid string is ignored |
+| `/s/app.<sha8>.css` | the style sheet (themes `dark`, `light`, `high-contrast`, `auto` by the system's own settings and contrast, forced colours; densities `wall`, `desk`, `compact`). The name carries the first 8 digits of its SHA-256: `Cache-Control: private, max-age=31536000, immutable`, `nosniff`; an unknown name or hash is `404`; the same `Host` and token checks as the pages |
+
+**The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-new-interface-being-built)
+(`1.tl.dw.pv`), at most 256 bytes; the server validates and canonicalises it on every request and ignores a value that is wrong, a field at a time.
+Only the browser keeps it: the server writes nothing for the interface. Pages vary by it (`Vary: Cookie`) and the cache key holds the canonical preferences.
+The shell's pages have the same CSP as the classic ones (`default-src 'none'`, no `script-src`) except `style-src 'self' 'unsafe-inline'`, which lets
+the page load its style sheet from `/s/`.
+
 ## The AI page's buttons
 
 `/?view=ai` is the one page with forms. They do what [AI.md](AI.md#from-the-browser-and-the-console) describes; here is how they are guarded.

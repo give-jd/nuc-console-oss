@@ -421,6 +421,9 @@ def _cases():
         add("web-" + name, query=query)
     add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # a locked page has no forms and the stricter CSP
     add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
+    # the new shell (?app=1): the overview, the settings (appearance, export, about) and the AI page inside it (forms and CSRF as on the classic page)
+    for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b")):
+        add("web-shell-" + name, query=query)
     return out
 
 

@@ -1,0 +1,400 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none' -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="refresh" content="2">
+<title>demo-host · overview · nuc-console</title>
+<link rel="stylesheet" href="/s/app.a2855f02.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="c04f169b2e">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?app=1" data-key="1" aria-current="page">
+<kbd>1</kbd>Overview</a>
+<a href="/?app=1&amp;view=map" data-key="2">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?app=1&amp;view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?app=1&amp;view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?app=1&amp;view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="efbf2be889">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 cores</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="grid" data-refresh="2" data-frag="/?app=1&amp;frag=1">
+<article class="card s2 st-err" data-card="attention" data-rev="717f71933e" id="c-attention" data-state="err">
+<div class="ch">
+<h3>ATTENTION</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<pre class="tty">   <span class="r">✖</span> 1 DB/broker open on LAN
+   <span class="r">✖</span> 2 services reach beyond config.ini: n8n :8444 Internet &gt; tailnet,
+     shop-db :5432 LAN &gt; local
+   <span class="y">!</span> 1 container exited with an error
+   <span class="y">!</span> 2 errors in this boot&#x27;s journal
+   <span class="y">!</span> 1 Docker port bypassing ufw (DOCKER-USER empty)
+   <span class="y">!</span> 1 service public on the Internet (Funnel :8444)</pre>
+</div>
+</article>
+<article class="card s2 st-err" data-card="exposure" data-rev="eac739efa5" id="c-exposure" data-state="err">
+<div class="ch">
+<h3>EXPOSURE</h3>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<pre class="tty">   Internet <span class="r B">1</span>    LAN <span class="y">3</span>    Tailscale 4    Local 4        <span class="r">⚠ 1 DB/broker open on LAN</span>
+<span class="d">   ● open   ◐ filtered by source   ? unknown (treated as open)   · no</span>
+
+<span class="B">   PORT     SERVICE                            LOC   LAN    TS   NET    NOTE</span>
+
+<span class="B">   Reachable from the Internet (Tailscale Funnel)</span><span class="d">  (1)</span>
+    8444/t  funnel /webhook → 127.0.0.1:5678   <span class="d">·</span>     <span class="d">·</span>     <span class="y">●</span>     <span class="r B">●</span>    <span class="r">beyond config.ini: …</span>
+
+<span class="B">   Open on the LAN (and on Tailscale)</span><span class="d">  (3)</span>
+    5432/t <span class="r">⚠</span>shop-db-1                          <span class="w">●</span>     <span class="r">●</span>     <span class="r">●</span>     <span class="d">·</span>    <span class="r">beyond config.ini: …</span>
+    8080/t  shop-web-1                         <span class="w">●</span>     <span class="y">●</span>     <span class="y">●</span>     <span class="d">·</span>    <span class="d">expected: LAN · dec…</span>
+      22/t  sshd                               <span class="w">●</span>     <span class="c">◐</span>     <span class="y">●</span>     <span class="d">·</span>    <span class="d">LAN only 192.168.0.…</span>
+
+<span class="B">   This machine only</span><span class="d">  (4)</span>
+     5433 blog-db-1  ·  5678 node  ·  6379 cache-1  ·  8081 blog-app-1</pre>
+</div>
+</article>
+<article class="card s1 st-err" data-card="databases" data-rev="69ed9fd9c4" id="c-databases" data-state="err">
+<div class="ch">
+<h3>DATABASE</h3>
+<span class="note">3 running · 1 exposed</span>
+<span class="chip st-err">✖ err</span>
+</div>
+<div class="cb">
+<pre class="tty"> <span class="r">●</span> <span class="B">postgres </span>shop-db-1                      *5432    <span class="r">exposed</span>
+      <span class="d">→</span> <span class="g">in use now: </span>api
+        <span class="r">external clients now: 192.16</span>
+ <span class="g">●</span> <span class="B">postgres </span>blog-db-1                      lo:5433  <span class="d">local only</span>
+      <span class="d">→</span> <span class="g">in use now: </span>app
+        <span class="d">no external client seen in 6</span>
+ <span class="g">●</span> <span class="B">redis    </span>cache-1                        lo:6379  <span class="d">local only</span>
+      <span class="d">→</span> <span class="y">no known service</span><span class="d"> (bridge: ca</span>
+        <span class="d">no external client seen in 6</span></pre>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="firewall" data-rev="a4f6208f9a" id="c-firewall" data-state="warn">
+<div class="ch">
+<h3>FIREWALL</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<pre class="tty">   <span class="g">✔</span> ufw active
+   <span class="y">!</span> DOCKER-USER empty: ports published by containers bypass ufw
+
+   <span class="d">ufw          </span>in deny  ·  out allow  ·  fwd deny   log: on (low)
+   <span class="d">iptables     </span>INPUT DROP (5 rules)   FORWARD DROP (0 rules)
+   <span class="d">tailscale    </span><span class="g">ts-input accepts tailscale0</span>
+   <span class="d">fail2ban     </span>sshd: 2 ban  198.51.100.7 198.51.100.9
+   <span class="d">drop 1h      </span>41
+   <span class="d">  ports      </span>23×25  445×16
+   <span class="d">  sources    </span>198.51.100.9×30  198.51.100.44×11
+
+<span class="B">   UFW INBOUND RULES (3)</span>
+<span class="B">   TO                          ACTION        FROM</span>
+   22/tcp                      ALLOW IN      192.168.0.0/24
+   Anywhere on tailscale0      ALLOW IN      Anywhere
+<span class="y">   41641/udp                   ALLOW IN      Anywhere</span></pre>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="containers" data-rev="4a710c6190" id="c-containers" data-state="warn">
+<div class="ch">
+<h3>CONTAINER</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<pre class="tty"> 7 containers   RAM 1.6G   <span class="g">●</span> 6 ok   <span class="r">✖ 1 stopped</span>
+ <span class="c B">▸</span> <span class="B">blog                       </span>2/2 running   RAM 410M
+     <span class="g">●</span> app   <span class="g">●</span> db
+ <span class="c B">▸</span> <span class="B">shop                       </span>3/4 running   RAM 1.2G<span class="r">   ✖ 1</span>
+     <span class="g">●</span> api   <span class="g">●</span> db   <span class="g">●</span> web   <span class="r">✖</span> worker
+ <span class="c B">▸</span> <span class="B">(no stack)                 </span>1/1 running   RAM 30M
+     <span class="g">●</span> cache</pre>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="boot" data-rev="3e9e73452f" id="c-boot" data-state="warn">
+<div class="ch">
+<h3>BOOT</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<pre class="tty">   boot finished in <span class="B">58.4s</span>   kernel 6.8.0-demo   up 5d 0h
+   <span class="m">███</span><span class="b">█</span><span class="c">█</span><span class="y">█</span><span class="g">█████████████████████████████</span>
+   <span class="m">■</span> firmware 5.1s  <span class="b">■</span> loader 2.0s
+   <span class="c">■</span> kernel 1.2s  <span class="y">■</span> initrd 1.1s
+   <span class="g">■</span> userspace 49.0s
+
+<span class="c">──</span><span class="c B"> SLOWEST UNITS </span><span class="c">──</span><span class="d">  activation time: not all of them block boot</span>
+
+   systemd-networkd-wait-online.service   <span class="c">████████████████████</span>  <span class="y">33.5s</span>
+   docker.service                         <span class="c">████</span><span class="d">░░░░░░░░░░░░░░░░</span>  <span class="y">6.2s</span>
+   snapd.service                          <span class="c">███</span><span class="d">░░░░░░░░░░░░░░░░░</span>  4.8s
+   cloud-init.service                     <span class="c">██</span><span class="d">░░░░░░░░░░░░░░░░░░</span>  3.9s
+
+<span class="c">──</span><span class="c B"> BOOT JOURNAL </span><span class="c">─────</span><span class="d">  warning and worse</span>
+
+   <span class="r">2</span> errors   <span class="y">9</span> warning
+   <span class="y">●</span> kernel                        4×  <span class="d">example warning</span></pre>
+</div>
+</article>
+<article class="card s1 st-warn" data-card="tailscale" data-rev="dff1136619" id="c-tailscale" data-state="warn">
+<div class="ch">
+<h3>TAILSCALE</h3>
+<span class="note">demo-host · 1/2 nodes online</span>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<pre class="tty"> <span class="g">●</span> laptop             linux    <span class="g">online </span><span class="d">direct</span>
+ <span class="d">○</span> phone              android  <span class="d">offline · seen 2 h ago</span></pre>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="webapps" data-rev="d7dc61a611" id="c-webapps" data-state="ok">
+<div class="ch">
+<h3>WEB APPS</h3>
+<span class="note">4 active · 1 down (expected)</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> <span class="g">●</span> shop-web 8080         <span class="y">LAN+tailnet</span>   
+ <span class="y">○</span> admin-co 9443         <span class="d">not listening</span> <span class="y">DOWN (expected)</span>
+ <span class="y">●</span> funnel / 8444         <span class="r">Internet</span>      <span class="d">not declared</span>
+ <span class="y">●</span> blog-app 8081         <span class="d">local only</span>    <span class="d">not declared</span>
+ <span class="y">●</span> node     5678         <span class="d">local only</span>    <span class="d">not declared</span></pre>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="system" data-rev="b11f362d81" id="c-system" data-state="ok">
+<div class="ch">
+<h3>SYSTEM</h3>
+<span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> RAM   <span class="g">███</span><span class="d">░░░░░</span> 10.2G/31.2G   cache 4.8G
+ DISK  <span class="g">███</span><span class="d">░░░░░</span> 180.0G/480.0G
+ TEMP  <span class="g">██████</span><span class="d">░░</span> 72°C/100°C
+ NVMe  <span class="g">████</span><span class="d">░░░░</span> 44°C/85°C   limits 68/76°C
+ CPU   <span class="g">█</span><span class="d">░░░░░░░</span> 6%   16 threads
+  0 <span class="d">░░░░░░░░░</span>   4%    1 <span class="d">░░░░░░░░░</span>   2%  
+  2 <span class="g">█</span><span class="d">░░░░░░░░</span>   6%    3 <span class="d">░░░░░░░░░</span>   1%  
+  4 <span class="g">██████</span><span class="d">░░░</span>  62%    5 <span class="d">░░░░░░░░░</span>   4%  
+  6 <span class="d">░░░░░░░░░</span>   2%    7 <span class="d">░░░░░░░░░</span>   1%  
+  8 <span class="d">░░░░░░░░░</span>   3%    9 <span class="d">░░░░░░░░░</span>   2%  
+ 10 <span class="d">░░░░░░░░░</span>   2%   11 <span class="d">░░░░░░░░░</span>   1%  
+ 12 <span class="g">█</span><span class="d">░░░░░░░░</span>   6%   13 <span class="d">░░░░░░░░░</span>   1%  
+ 14 <span class="d">░░░░░░░░░</span>   2%   15 <span class="d">░░░░░░░░░</span>   1%  
+
+<span class="B"> HEAVIEST CONTAINERS (RAM)</span>
+ shop-api-1                         520M   <span class="g">████████████████████</span>
+ shop-db-1                          410M   <span class="g">████████████████</span><span class="d">░░░░</span>
+ shop-web-1                         310M   <span class="g">████████████</span><span class="d">░░░░░░░░</span>
+ blog-db-1                          260M   <span class="g">██████████</span><span class="d">░░░░░░░░░░</span>
+ blog-app-1                         150M   <span class="g">██████</span><span class="d">░░░░░░░░░░░░░░</span></pre>
+<p class="more">
+<a href="/?app=1&amp;card=system">… the whole card</a>
+</p>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="network_traffic" data-rev="b346ad571f" id="c-network_traffic" data-state="ok">
+<div class="ch">
+<h3>NETWORK TRAFFIC</h3>
+<span class="note">↓ received · ↑ sent</span>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> eth0        <span class="g">↓</span> 1.8 MB/s  ▅▄▅▆▅▇▆█ <span class="c">↑</span> 372.4 kB/s▅▅▆▆▇▇██<span class="d"> ↓40.2G ↑6.3G</span></pre>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="sessions" data-rev="540cc0dfd0" id="c-sessions" data-state="ok">
+<div class="ch">
+<h3>SESSIONS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> 1 user session   ssh: <span class="g">1 connected</span>
+ <span class="g">●</span> ssh from 192.168.0.20  <span class="d">LAN or Tailscale</span>
+ tty1</pre>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="docker_disk" data-rev="990e3de85e" id="c-docker_disk" data-state="ok">
+<div class="ch">
+<h3>DOCKER · DISK</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> Images          14 (6 in use)  5.2GB     unused 2.1GB (40%)
+ Containers       7 (6 in use)  180MB     unused 0B (0%)
+ Local Volumes    5 (5 in use)  1.4GB     unused 0B (0%)
+<span class="d"> dangling images: 0 (0B): safe to prune</span>
+<span class="y"> 12 unused volumes (9 anonymous): may hold data, check before pruning</span>
+<span class="d"> unused = no container uses it; tagged images can be re-pulled</span></pre>
+</div>
+</article>
+<article class="card s1 st-ok" data-card="disks" data-rev="1c0e18d2af" id="c-disks" data-state="ok">
+<div class="ch">
+<h3>DISKS</h3>
+<span class="chip st-ok">✔ ok</span>
+</div>
+<div class="cb">
+<pre class="tty"> /              <span class="g">███</span><span class="d">░░░░░</span> 180.0G/480.0G
+ /data          <span class="y">███████</span><span class="d">░</span> 249.0G/300.0G</pre>
+</div>
+</article>
+</main>
+<footer class="foot">refresh every <a href="/?refresh=1&amp;app=1">−</a> 2s <a href="/?refresh=3&amp;app=1">+</a>
+<span class="dot">·</span>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?app=1&amp;pause=1">pause</a>
+<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1">A−</a> 100% <a href="/?zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Overview</h3>
+<dl>
+<dt>
+<kbd>←→</kbd> <kbd>PgUp/PgDn</kbd>
+</dt>
+<dd>previous/next slide</dd>
+<dt>
+<kbd>m</kbd>
+</dt>
+<dd>open the Map (as 2)</dd>
+<dt>
+<kbd>c</kbd>
+</dt>
+<dd>open the CPU screen (as 3)</dd>
+<dt>
+<kbd>h</kbd>
+</dt>
+<dd>open the Health screen (as 4)</dd>
+<dt>
+<kbd>a</kbd>
+</dt>
+<dd>open the AI screen (as 5)</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close the help</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+</body>
+</html>

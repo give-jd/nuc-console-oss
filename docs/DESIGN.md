@@ -155,7 +155,8 @@ read by `ansi`, `exposure` and `cards`, `exposure` by `graph` and `cards`, `grap
 | `exposure.py` | the exposure model: the rows of ports and their verdict per way in, the firewall rules read, the `[expose]` check, the web apps, the baseline comparison, and who is behind a row. No drawing, no files |
 | `prefs.py` | the preferences of the interface: the `[ui]` section, the cookie and `?ui=` grammar, the presets, which cards and KPIs show (`visible_cards`, `KPI_IDS`). Pure: nothing is read or drawn |
 | `graph.py`, `graphlayout.py`, `graphjs.py` | the MAP model (nodes, edges, the tree's rows), the positions of the graph view, the one script of the web view |
-| `htmlview.py` | ANSI to HTML (`to_html`) and the CSS of the web pages |
+| `htmlview.py` | ANSI to HTML (`to_html`), the CSS of the classic web pages, and (its "shell" section) the markup builders of the new shell: top bar, KPI tiles, cards, footer, help. Pure functions of the data they get; every control a link or a form |
+| `webcss.py` | the style sheet of the new shell as constants (installers copy only `src/*.py`): tokens per theme, densities, zoom classes, components, and the classic pages' classes with their colours turned into the variables (`themed`). Served at `/s/app.<sha8>.css` |
 | `nuc_config.py` | `config.ini`, the paths of each OS and of the portable run. `load()` reads the file; `current()` is the process's one configuration dict, loaded once (`render.CFG` is that object) |
 | `cpuinfo.py`, `procs.py`, `hostinfo.py`, `winapi.py` | the CPU and process producers, the host metrics on macOS and Windows, the Windows API calls |
 | `health.py`, `history.py` | the HEALTH findings and the history database they read |
