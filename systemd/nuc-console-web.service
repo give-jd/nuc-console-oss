@@ -1,6 +1,8 @@
 [Unit]
-Description=nuc-console web view: a read-only dashboard, and the AI page's buttons (does nothing unless [web] enabled = yes in config.ini)
+Description=nuc-console web view: a read-only dashboard, and the buttons of the AI and Telegram pages (does nothing unless [web] enabled = yes in config.ini)
 After=nuc-console-collector.service
+# the Telegram page hands its requests to the notifier: it runs with the web view (and exits 0 when [telegram] web_actions = no and it is off)
+Wants=nuc-console-notify.service
 
 [Service]
 Type=simple
@@ -11,8 +13,12 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
-# the one place it may write: the AI folder (docs/AI.md), where the AI page downloads the local model and keeps web.json. - : not an error while it is not there
+# where it may write: the AI folder (docs/AI.md), where the AI page downloads the local model and keeps web.json. - : not an error while it is not there
 ReadWritePaths=-/var/lib/nuc-console/ai
+# the Telegram page's requests to the notifier (docs/TELEGRAM.md): the inbox is 2730 nuc-console-notify:nuc-console-notify, so this group
+# lets the web view create files there and nothing else (it cannot list or read them, nor anything of the notifier's: the token is 0600)
+ReadWritePaths=-/var/lib/nuc-console-notify/inbox
+SupplementaryGroups=nuc-console-notify
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes

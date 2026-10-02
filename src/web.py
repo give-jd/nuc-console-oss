@@ -8,8 +8,9 @@ script of its own here; the shell's scripts are a later step.
 Off unless `[web] enabled = yes` in config.ini. Runs as the unprivileged user, reads the same state as the tty
 renderer and serves one HTML page (no JavaScript, except the one fixed script of the MAP's graph view, pinned by its hash
 in the Content-Security-Policy). GET only, except the forms of the AI page (`/?view=ai`): POST /ai/<action>, form-encoded, answered
-with a redirect (src/aiweb.py does the work in the background). Those forms are guarded: the same access as viewing (loopback, or the
-token), a CSRF token, Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` to lock.
+with a redirect (src/aiweb.py does the work in the background), and those of the Telegram page (`/?view=telegram`): POST /telegram/<action>
+(src/tgweb.py: pair, cancel, on, off, test). Those forms are guarded: the same access as viewing (loopback, or the token), a CSRF token,
+Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` / `[telegram] web_actions = no` to lock.
 Binding to anything but loopback requires a token (fail closed). See docs/WEB.md.
 """
 import base64
@@ -44,6 +45,7 @@ import nuc_config
 import prefs
 import render
 import screens
+import tgweb
 import ui
 import webcss
 import webjs
@@ -59,6 +61,7 @@ ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the has
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise")  # POST /ai/<action>
 AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
+TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), like a browser's: few values, bounded cache
 CACHE_MAX = 64       # rendered pages kept: map URLs have unbounded combinations, the least recently used goes first
@@ -344,7 +347,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         srv = self.server
         if u.path == "/healthz":
             return self._send(200, b"ok\n")
-        if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS:
+        if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS or u.path.startswith("/telegram/") and u.path[10:] in TG_ACTIONS:
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         if u.path != "/" and not u.path.startswith("/s/"):
             return self._send(404, b"not found\n")
@@ -361,11 +364,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._asset(u.path)
         if "set" in q:
             return self._set(q)
+        if (q.get("view") or [""])[0] == "telegram" and (q.get("open") or [""])[0] == "1":
+            return self._tg_open()
         page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
         if (q.get("frag") or [""])[0] == "1" and getattr(page, "blocks", None) is not None:  # a classic page has no blocks: it is served whole, as always
             return self._fragment(page.blocks)
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
                    extra=(("Vary", "Cookie"),))
+
+    def _tg_open(self):
+        """/?view=telegram&open=1: the t.me link of the pairing that waits for Start (a link on the page that the refresh can keep: it points
+        here). The address is the engine's own (bot name and code checked, never from the request); nothing else: back to the page."""
+        site = self.headers.get("Sec-Fetch-Site")
+        link = tgweb.engine().link() if site in (None, "same-origin", "none") else ""
+        if link and tgweb.BOT_LINK.fullmatch(link):
+            return self._send(302, extra=(("Location", link),))
+        self._send(303, extra=(("Location", "/?view=telegram"),))
 
     def _fragment(self, blocks):
         """?frag=1 on a shell page: only its blocks (what the refresh script swaps in), with an ETag of them: the same tag in If-None-Match is a 304."""
@@ -376,22 +390,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(304, extra=extra)
         self._send(200, blocks.encode(), "text/html; charset=utf-8", extra=extra)
 
-    def do_POST(self):  # noqa: N802 - the forms of the AI page, and nothing else
+    def do_POST(self):  # noqa: N802 - the forms of the AI page and of the Telegram page, and nothing else
         u = urlsplit(self.path)
-        if not u.path.startswith("/ai/") or u.query:
+        area, sep, act = u.path[1:].partition("/")
+        if not sep or area not in ("ai", "telegram") or u.query:
             return self._no()
-        act, srv = u.path[4:], self.server
-        if act not in AI_ACTIONS:
+        srv = self.server
+        if act not in (AI_ACTIONS if area == "ai" else TG_ACTIONS):
             return self._send(404, b"not found\n")
         # the same access as viewing: no token = loopback and a known Host name; a token = that token (constant time)
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
         if srv.token and not hmac.compare_digest(self._token_from({}).encode(), srv.token.encode()):
             return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
-        if not render.CFG["features"].get("ai", True):
+        if area == "ai" and not render.CFG["features"].get("ai", True):
             return self._send(404, b"the AI screen is off ([features] ai = no)\n")
-        if not advisor.web_actions_on(render.CFG):
+        if area == "ai" and not advisor.web_actions_on(render.CFG):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
+        if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
+            return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site not in ("same-origin", "none"):
@@ -414,7 +431,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not hmac.compare_digest(((form.get("csrf") or [""])[0]).encode(), srv.csrf.encode()):
             return self._send(403, b"the form is not from this page (reload the page and try again)\n")
         try:
-            where = srv.ai_action(act, form)
+            where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form)
         except BadRequest as e:
             return self._send(400, ("%s\n" % e).encode())
         self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
@@ -444,13 +461,15 @@ def view_params(q):
     report does not have), pause=1 no reload.
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
     confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel).
+    view=telegram: the Telegram page (pair this machine with your bot, switch the alerts, test); open=1 there: a redirect to the t.me link of the
+    pairing that waits (Handler._tg_open).
     edit=1: the layout editor (the shell's overview in edit mode; with app=0 or another view it is dropped).
     The shell: app=1 (0: the classic page, whatever [ui] web says), ui=<the preferences string> for this URL only (prefs.parse_cookie: an invalid one
     is dropped), view=settings (the settings page), card=<id> (one card of the overview in full), pause=1 (the overview too)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings", "telegram") else ""
     edit = not view and one("edit") == "1" and one("app") != "0"  # the layout editor: the shell's overview in edit mode (the classic page has none)
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
@@ -476,7 +495,7 @@ def view_params(q):
 
 HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card", "edit")}  # and what each view reads besides (settings: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
 
 
 def ui_oneshot(raw):
@@ -530,6 +549,8 @@ class Server(http.server.ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         render.DEMO = demo
         aiweb.configure(demo=demo)  # the engine of the AI page: the real one, or the demo's (simulated); render.ai_engine() tells it where the settings are
+        tgweb.configure(demo=demo)  # the engine of the Telegram page (pairing, requests to the notifier), the same way
+        tgweb.bind(cfg=lambda: render.CFG)
         self.smp = render.Sampler()
         self.cpu_feed = render.CpuFeed(settle=0.4)  # the CPU page's samplers (processes cost CPU): made at the first request, one for all viewers
         self.smp.sample()  # starts the background reads (sessions, disks): the first page must not say "unavailable"
@@ -620,14 +641,17 @@ class Server(http.server.ThreadingHTTPServer):
             norm = {"sel": sel, "pause": pause, "confirm": confirm, "version": aiweb.version()}
             key = ("ai", zoom, r, sel, pause, confirm, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
             return serve(key, min(r / 2, 1.0), lambda sh: self.ai_page(here, sel, pause, confirm, zoom, r, sh))  # a job's progress moves: never older than a second
+        if view == "telegram":  # the shell only (uses_shell); a pairing that waits, an answer of the notifier: a new page
+            norm = {"version": tgweb.version()}
+            return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
         return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
 
     # ---- the shell: `[ui] web = app` or ?app=1 --------------------------------------------------------------------------------------
 
     def uses_shell(self, view, app, card, edit=False):
-        """The shell is the page for ?app=1, for the settings, a single card and the layout editor (they exist only there), and for every page
+        """The shell is the page for ?app=1, for the settings, the Telegram page, a single card and the layout editor (they exist only there), and for every page
         when [ui] web = app (?app=0 asks for the classic page anyway)."""
-        return view == "settings" or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
+        return view in ("settings", "telegram") or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
 
     def shell_frame(self, r):
         """The data of a shell page (cards.Ctx), read once per half refresh interval whatever the number of viewers."""
@@ -686,8 +710,8 @@ class Server(http.server.ThreadingHTTPServer):
         note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
                                f'restart it: <code class="cmd">{html.escape(render.CMD.get("restart", ""))}</code>') if stale else ""
         top = htmlview.topbar(host, *self.shell_pill(ctx.problems), self.shell_tabs(ctx, here, view, r, feats), clock, "#help",
-                              page_url(dict(here, view="settings")), view == "settings")
-        kpis = "" if view == "settings" else htmlview.kpis_block(tiles, note)
+                              page_url(dict(here, view="settings")), view in ("settings", "telegram"))
+        kpis = "" if view in ("settings", "telegram") else htmlview.kpis_block(tiles, note)
         # the page
         r_live = int(v.wait or r) if v.live and not pause else 0  # the meta refresh (inside <noscript>: with the scripts, they poll)
         tools = "".join(f'<span class="tl">{t}</span>' for t in v.tools)
@@ -711,19 +735,21 @@ class Server(http.server.ThreadingHTTPServer):
             else:
                 blocks = ""
             main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>{inner}</main>'
-        groups = ["refresh every " + self.every(link, r) if view != "settings" and not edit and not wall else "",
+        quiet = view in ("settings", "telegram")  # pages to change things on: no refresh or pause links (the Telegram page reloads by itself only while it waits)
+        groups = ["refresh every " + self.every(link, r) if not quiet and not edit and not wall else "",
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
-                  + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" and not edit else "",
+                  + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if not quiet and not edit else "",
                   link("Done", edit=False) if edit else link("Edit layout", edit=True) if view == "" and not card else "",
                   "text " + self.sizes(link, zoom),
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
+                  "Telegram setup" if view == "telegram" else
                   "read-only · AI actions" if render.CFG["features"].get("ai", True) and advisor.web_actions_on(render.CFG) else "read-only"]
         if wall:  # nobody clicks on a wall: no pause, no layout editor, no size, theme or density links; the way out is the keyboard
             groups = [f"refreshed every {r} s", "read-only"]
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
-        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view == "settings" else "overview"
+        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view in ("settings", "telegram") else "overview"
         groups_help = (ui.help_rows("editor", feats) + ui.help_rows("global", feats, bool(nuc_config.PORTABLE))) if edit \
             else ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause)
         helps = htmlview.help_dialog(groups_help)
@@ -750,7 +776,7 @@ class Server(http.server.ThreadingHTTPServer):
         """The tabs: a link per screen with its key, a badge where there is something to say (the Map's problems, the Health findings, the AI)."""
         badges = {}
         try:
-            if feats("map") and view != "settings":
+            if feats("map") and view not in ("settings", "telegram"):
                 n = graph.counts(self.map_graph(r)[0])["problems"]
                 badges["map"] = str(n) if n else ""
             rep = ((ctx.health or {}).get("report") or {}).get("findings") if feats("health") else None
@@ -891,11 +917,11 @@ class Server(http.server.ThreadingHTTPServer):
                       f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
-        return View(f'<div class="settings">{appearance}{self.about_html()}</div>', [], vhere, False, legacy=False)
+        return View(f'<div class="settings">{appearance}{self.about_html(here)}</div>', [], vhere, False, legacy=False)
 
-    def about_html(self):
+    def about_html(self, here=None):
         """'About this machine': what the machine is and how it is set up, read-only (this page changes nothing on it)."""
-        esc, cfg = html.escape, render.CFG
+        esc, cfg, here = html.escape, render.CFG, here or {}
         code = lambda t: f'<code class="cmd">{esc(t)}</code>'  # noqa: E731
         portable = nuc_config.PORTABLE
         conf = os.environ.get("NUC_CONSOLE_CONFIG") or (os.path.join(os.path.abspath(portable), "config.ini") if portable else nuc_config.DEFAULT_PATH)
@@ -912,7 +938,7 @@ class Server(http.server.ThreadingHTTPServer):
                                                                                                ", no token" if loop else "")))
         d = cfg.get("display") or {}
         rows.append(("display", f'mode {esc(d.get("mode", "browser"))} · zoom {int(self.zoom)}%'))
-        rows.append(("Telegram", esc(self.telegram_text())))
+        rows.append(("Telegram", esc(self.telegram_text()) + ' · <a class="lnk" href="%s">Telegram page</a>' % esc(page_url(dict(here, view="telegram")))))
         locked = not advisor.web_actions_on(cfg)
         rows.append(("AI buttons", ('<span class="s-warn">locked by the admin</span> ([ai] web_actions = no): the AI page only shows' if locked else
                                     "allowed ([ai] web_actions = yes): the AI page can switch the AI on and off, ask and delete models")
@@ -924,13 +950,13 @@ class Server(http.server.ThreadingHTTPServer):
     @staticmethod
     def telegram_text():
         """The notifier as the settings say it: off, or what its status.json shows (render.telegram_state)."""
-        if not render.CFG["telegram"]["enabled"]:
+        if not render.telegram_on():
             return "off ([telegram] enabled = no)"
         if nuc_config.PORTABLE:
             return "on in config.ini, but a portable run sends no message: install nuc-console (docs/TELEGRAM.md)"
         state, why = render.telegram_state(time.time())
         return {"ok": "on, paired and sending", "unreadable": "on; this account cannot read its status",
-                "unpaired": "on, but not paired: run nuc-console-telegram --setup", "down": "on, but the notifier is not running"}.get(
+                "unpaired": "on, but not paired: pair it on the Telegram page", "down": "on, but the notifier is not running"}.get(
             state, "failing for " + why)
 
     def grid(self, here, zoom):
@@ -1223,6 +1249,25 @@ class Server(http.server.ThreadingHTTPServer):
             bar.append(html.escape(render.KIOSK_HINT))
         return doc(body, bar, refresh=not pause, tools=tools, vhere=ahere)
 
+    def telegram_page(self, here):
+        return telegram_view(self, here)
+
+    def tg_action(self, act, form):
+        """What a post of the Telegram page asked, done through the engine (a pairing runs in the background), and the address to go to next. The
+        token and the @username are checked by the engine and never echoed; the answer is the page's notice."""
+        eng = tgweb.engine()
+        one = lambda k, n=200: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        if act == "pair":
+            eng.pair(one("token", 120), one("username", 40))
+        elif act == "cancel":
+            eng.cancel()
+        else:
+            eng.request(act)
+        with self.lock:
+            self.cache.clear()  # the page that comes next shows what this did
+        back = view_params(parse_qs(one("back", 400)))
+        return page_url(dict({"view": "telegram"}, **{k: back[k] for k in HERE_KEYS})) + "#tg"
+
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).
         A model id is checked against the engine's catalog, a number against its list, a text is cleaned and cut by the engine; nothing of the
@@ -1274,6 +1319,113 @@ class Server(http.server.ThreadingHTTPServer):
         back = view_params(parse_qs(one("back", 400)))
         here = {k: back[k] for k in HERE_KEYS}
         return page_url(dict({"view": "ai", "sel": sel or (back.get("sel") if back.get("view") == "ai" else ""), "confirm": confirm}, **here)) + anchor
+
+
+def telegram_view(srv, here):
+    """The View of the Telegram page for the shell: it reloads (every 2 s) only while something runs (a pairing, an answer awaited), so that a token
+    being typed is not lost; it has forms unless it is locked, a portable run, or the notifier does not listen."""
+    there = dict(here, view="telegram")
+    try:
+        snap = tgweb.engine().snapshot()
+        body = telegram_html(snap, srv.csrf, urlsplit(page_url(there)).query, there)
+        forms = not (snap["locked"] or snap["portable"]) and snap["listening"]
+        busy = snap["busy"]
+    except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+        print("nuc-console web: telegram render error:", repr(e)[:200], file=sys.stderr)
+        body, forms, busy = '<p class="sm">the Telegram page could not be drawn (see the service log)</p>', False, False
+    return View(body, [], there, busy, forms=forms, wait=2 if busy else 0, legacy=False)
+
+
+def telegram_html(snap, csrf, back, here):
+    """The Telegram page (?view=telegram): are the alerts on and do they reach anyone, the buttons (on/off, test), what the notifier says, and the
+    pairing: the steps and the form (bot token, @username), or the link to press Start on while it waits. Every button is a form that posts to
+    /telegram/<action> with the CSRF token and the view to come back to; a locked page, a portable run and a notifier that does not listen
+    have none. snap: tgweb.Engine.snapshot(); here: the page's parameters."""
+    esc = html.escape
+    t, st, job, os_name = snap["settings"], snap["status"], snap["job"], snap["os"]
+    running = bool(job and job["state"] in tgweb.RUNNING)
+    can = not (snap["locked"] or snap["portable"]) and snap["listening"]
+    hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", csrf), ("back", back)))
+
+    def button(action, label, cls="", title="", disabled=False):
+        if not can:
+            return ""
+        return (f'<form class="f" method="post" action="/telegram/{action}">{hidden}<button class="bt {cls}" type="submit"'
+                + (f' title="{esc(title, quote=True)}"' if title else "") + (" disabled" if disabled else "") + f">{esc(label)}</button></form>")
+    cmd = lambda text: f'<code class="cmd">{esc(text)}</code>'  # noqa: E731
+    state, line = tgweb.state_of(snap)
+    pill, cls = {"on": ("ON", "g"), "off": ("OFF", "d"), "unpaired": ("NOT PAIRED", "y"), "failing": ("FAILING", "r"), "down": ("DOWN", "r")}[state]
+    busy = snap["busy"]
+    acts = []
+    if t["by"] == "config":
+        acts.append('<span class="d">on by config.ini ([telegram] enabled = yes): switch it off there</span>')
+    elif t["enabled"]:
+        acts.append(button("off", "Switch off", "off", "no more alerts; the pairing stays (the chat is told)", busy))
+    elif st.get("paired") or t["username"]:
+        acts.append(button("on", "Switch on", "on", "the ATTENTION changes go to the paired chat again", busy))
+    if st.get("paired"):
+        acts.append(button("test", "Send a test", "", "a test message to the paired chat", busy))
+    out = ['<div class="settings av" id="tg"><section class="sec" aria-labelledby="sec-tg"><h3 class="sech" id="sec-tg">Telegram alerts</h3>',
+           '<p class="hintl">New and resolved ATTENTION problems of this machine on your phone, through a Telegram bot of your own. '
+           'The machine only sends: it never reads your messages and opens no port.</p>',
+           f'<div class="controls"><span class="pl {cls} big">{pill}</span><span class="ci">{esc(line)}</span>{"".join(acts)}</div>']
+    if snap["pending"]:
+        out.append('<div class="ask"><p>asked the notifier: waiting for its answer…</p></div>')
+    note = snap["notice"]
+    if note:
+        out.append(f'<div class="ctl"><div class="note {"ok" if note["ok"] else "bad"}" role="status">{esc(note["text"])}</div></div>')
+    if snap["locked"]:
+        out.append(f'<p class="d">{esc(tgweb.LOCKED)}: {cmd(tgweb.CLI[os_name] + " --setup")}</p>')
+    elif snap["portable"]:
+        out.append(f'<p class="d">{esc(tgweb.PORTABLE)}</p>')
+    elif not snap["listening"]:
+        out.append('<p class="d">the notifier service does not take this page\'s requests now (it is not running, or it started before they were '
+                   f'allowed): start it with {cmd(tgweb.START_CMD[os_name])}, then reload this page</p>')
+    ts = lambda v: (time.strftime("%Y-%m-%d %H:%M", time.localtime(v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else "never")  # noqa: E731
+    rows = [("sends to", "@" + esc(t["username"]) if t["username"] and st.get("paired") else "nobody yet: pair it below"),
+            ("switched on", {"config": "in config.ini", "web": "on this page"}.get(t["by"], "no")),
+            ("notifier", "running, takes this page's requests" if snap["listening"] else "running" if tgweb._fresh(st, snap["now"]) else "not running"),
+            ("last sent", esc(ts(st.get("last_sent_ts")))),
+            ("last error", esc(notify_clean(st.get("last_error"))) if st.get("last_error") else "none"),
+            ("content", ("titles only" if t["detail"] == "titles" else "titles and the problems' text (names, ports)")
+             + f' ([telegram] detail = {esc(t["detail"])}), resolved problems {"too" if t["resolved"] else "not told"}')]
+    out.append('<dl class="about">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows) + "</dl></section>")
+    out.append('<section class="sec" aria-labelledby="sec-tgp" id="tg-pair"><h3 class="sech" id="sec-tgp">'
+               + ("Pair again" if st.get("paired") else "Pair it with your Telegram") + "</h3>")
+    if running:
+        out.append(f'<div class="controls"><span class="pl c big">PAIRING</span><span class="ci">{esc(tgweb.job_text(job, snap["now"]))}</span>'
+                   + (button("cancel", "Cancel", "stop", "nothing is paired") if job["state"] in ("checking", "waiting") else "") + "</div>")
+        if job["state"] == "waiting":
+            open_href = esc(page_url(dict(here, view="telegram", open="1")))
+            out.append(f'<div class="ask"><p>On the phone where you use Telegram as <b>@{esc(job["username"])}</b>, open this link and press <b>Start</b>:</p>'
+                       f'<div class="ask-b"><a class="bt on" href="{open_href}">Open in Telegram</a></div></div>'
+                       f'<p class="hintl">Or type it in the phone\'s browser: {cmd(job["link"])}. Only a Start from @{esc(job["username"])} with this code pairs; '
+                       "this page sees it by itself.</p>")
+    elif can and not busy:
+        cli = tgweb.CLI[os_name] + " --setup"
+        out.append('<ol class="hintl">'
+                   '<li>In Telegram open <b>@BotFather</b>, send <b>/newbot</b>, choose a name and a username ending in <i>bot</i>, and copy the '
+                   '<b>token</b> it gives you. It is a password: whoever has it can write as your bot.</li>'
+                   '<li>Paste it below with your own <b>@username</b> (Telegram: Settings &gt; Username): only that person can pair.</li>'
+                   '<li>Press Pair, then open the link this page shows and press <b>Start</b>.</li></ol>'
+                   f'<form class="f" method="post" action="/telegram/pair">{hidden}'
+                   '<div class="fs"><label class="lab" for="tg-token">Bot token</label>'
+                   '<input class="q" id="tg-token" type="password" name="token" maxlength="100" autocomplete="off" required placeholder="123456789:AA…"></div>'
+                   '<div class="fs"><label class="lab" for="tg-user">Your Telegram @username</label>'
+                   f'<input class="q" id="tg-user" type="text" name="username" maxlength="33" autocomplete="off" required placeholder="@your_name" value="{esc(("@" + t["username"]) if t["username"] else "", quote=True)}"></div>'
+                   '<button class="bt on" type="submit">Pair</button></form>'
+                   '<p class="hintl">The token goes to the notifier service, which keeps it where this web view cannot read it again. '
+                   + ("A new pairing replaces the old one, and the chat paired now is told. " if st.get("paired") else "")
+                   + f"The same on the machine: {cmd(cli)}.</p>")
+    elif not can:
+        out.append(f'<p class="hintl">On the machine: {cmd(tgweb.CLI[os_name] + " --setup")} (docs/TELEGRAM.md).</p>')
+    out.append("</section></div>")
+    return "".join(out)
+
+
+def notify_clean(text):
+    """A line of the notifier's status for the page: one line, no bot token, short."""
+    return render.TELEGRAM_TOKEN.sub("<token>", ui.safe(str(text)))[:160]
 
 
 def sel_index(data, sel):

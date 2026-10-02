@@ -1,7 +1,7 @@
 # Web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only.** The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and three exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
-switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too.
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only.** The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -75,7 +75,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 
-Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`), except the `POST` of the AI page's forms (below).
+Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`), except the `POST` of the AI page's and the Telegram page's forms (below).
 HEAD is answered like GET (same status, same headers, `Content-Length` included, the same token and `Host` checks), without the body.
 Security headers, on every response: strict CSP (`default-src 'none'`), `no-store`, `nosniff`, `frame-ancestors 'none'`, `no-referrer`,
 `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`; the AI page differs in two, see below.
@@ -119,6 +119,7 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
 | `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?edit=1` (`/?app=1&edit=1` when `[ui] web = classic`). Only on the overview: with `app=0` or on another view it is ignored |
 | `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
+| `/?view=telegram` | the **Telegram page** (linked from the settings' About): whether the alerts are on and reach someone, the notifier's last message and error, **Switch on** / **Switch off**, **Send a test**, and the pairing (the steps, the bot token and your @username, then the link to press Start on, with **Cancel**). Forms unless `[telegram] web_actions = no`, a portable run, or a notifier that does not take requests ([below](#the-telegram-pages-buttons)). It reloads by itself only while a pairing waits or an answer is due. `&open=1`: a redirect to the `t.me` link of the pairing that waits (the page's *Open in Telegram*), else back to the page |
 | `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403`. The layout editor's links are fields too (`euat`: move ATTENTION one place earlier; [below](#edit-the-layout)) |
 | `/?set=<field>&frag=1` | what the preferences script sends: the same cookie, but the answer is `204` (no redirect, no body) with `Set-Cookie` and `X-Nuc-Prefs: <the canonical cookie string>`, which the script keeps in `localStorage`. `<field>` may also be that whole string (`1.tl.dw`): the script sends it back, once in a while, when the browser sent no cookie. Same checks as above |
 | `<any shell page>&frag=1` | the **fragment** of that page ([below](#the-fragment-endpoint)) |
@@ -277,6 +278,30 @@ carries `csrf` (this process's random token) and `back` (the view to come back t
   `form-action 'none'`. There is still no script on the AI page, and `default-src 'none'`.
 - **The page after a post** is never an old cached one (a post clears the page cache); like every page it shows this process's state, the same for every viewer.
 
+## The Telegram page's buttons
+
+`/?view=telegram` pairs the Telegram notifier with your own bot and drives it ([TELEGRAM.md](TELEGRAM.md#from-the-web-view)). The forms follow the
+AI page's rules above, one by one: the same access as viewing, the per-process CSRF token, `Origin` / `Referer` / `Sec-Fetch-Site`, a form body of
+at most 4 KB and 20 fields, Post/Redirect/Get (`303` to `/?view=telegram#tg`), `form-action 'self'` and `Referrer-Policy: same-origin` on that page only.
+
+| POST | Fields | Does |
+|---|---|---|
+| `/telegram/pair` | `token`, `username` | checks the token's format and asks Telegram who the bot is (`getMe`), shows the link with a one-time code and waits for the Start of that @username (10 minutes, in a thread); then hands the pairing to the notifier |
+| `/telegram/cancel` | | stops the pairing that waits: nothing is paired |
+| `/telegram/on`, `/telegram/off` | | asks the notifier to switch on or off (off: the paired chat is told first; `enabled = yes` in `config.ini` cannot be switched off here) |
+| `/telegram/test` | | asks the notifier to send a test message |
+
+- **`[telegram] web_actions = no`** (default `yes`): the page shows "locked by config.ini" and has no form, a post is refused with `403`, and the notifier reads no request.
+- **The token**: checked against its format, sent to `api.telegram.org` only, never written into a page, a log, a redirect or a file of the web view, and held in
+  memory only while the pairing runs. It reaches the notifier as a request file in its inbox, which the web view's account can create but never list or read back
+  (Linux 2730 and `SupplementaryGroups=nuc-console-notify`, Windows `W` for LOCAL SERVICE); the notifier deletes it once read.
+- **Values**: a username is 5–32 letters, digits or `_`; nothing from a request reaches a path, a command line or a shell; the request files are named by the
+  engine (`r-<milliseconds>-<random>.json`, created, never replaced).
+- **`/?view=telegram&open=1`** redirects only to the engine's own link (`https://t.me/<bot>?start=<code>`, checked against a pattern), and only for a request the
+  browser does not mark cross-site; anything else goes back to the page. It exists so that the link survives the page's refresh, whose fragments may only
+  carry links of this server.
+- The answers are the notifier's (`status.json`); a notifier that does not answer within a minute is said, never guessed.
+
 ## The graph view's script
 
 The MAP's graph view carries one small inline script (`src/graphjs.py`, ~16 KB, no library) for dragging, zooming and panning. On the
@@ -296,14 +321,17 @@ classic pages it is the only script; on the shell's graph page it comes with the
 
 `config.ini` is owned by root; the web process is unprivileged. Writing it from the browser would require either a root process listening on the network
 or a privileged helper — a large jump in risk for a file you change a few times a year. Edit it over SSH, then `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web`.
-(The shell's [layout editor](#edit-the-layout) changes only the `nuc_ui` cookie of your browser, never `config.ini`; the settings page's Export block is what you paste there.)
+(The shell's [layout editor](#edit-the-layout) changes only the `nuc_ui` cookie of your browser, never `config.ini`; the settings page's Export block is what you paste there.
+The Telegram page does not write `config.ini` either: it asks the notifier, an unprivileged service, which keeps the page's choice in its own `web.json`.)
 
 ## Threat model in one paragraph
 
 The page shows your topology (ports, container names, client IPs seen on databases, and on the map which service talks to which), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.
 With a token, anyone holding the token can. It cannot change the machine, with one exception on the AI page: whoever can open it can set up the local model
 (download the pinned files into the AI folder, start the model server on 127.0.0.1, turn the advisor on and off, delete those files) and ask it questions, as the
-unprivileged web account, within the unit's sandbox; `[ai] web_actions = no` removes that. Rendering is cached for half the refresh interval per layout size.
+unprivileged web account, within the unit's sandbox; `[ai] web_actions = no` removes that. And on the Telegram page whoever can open it can pair the
+notifier with their own bot, switch it on or off and send a test; the chat paired until then is told of a new pairing and of *off*, and
+`[telegram] web_actions = no` removes that too. Rendering is cached for half the refresh interval per layout size.
 The graph view's script runs in your browser and cannot send anything anywhere (the CSP forbids connections). The shell's scripts may connect
 to this server only (`connect-src 'self'`), and the page's only way to put markup into the DOM is Trusted Types' one policy, whose input is checked against an allowlist first.
 

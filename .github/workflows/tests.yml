@@ -79,6 +79,8 @@ jobs:
       - run: |
           test -f /etc/systemd/system/nuc-console-notify.service
           [ "$(stat -c '%a %U' /var/lib/nuc-console-notify)" = "711 nuc-console-notify" ]   # its own user, not the web view's
+          [ "$(stat -c '%a %U %G' /var/lib/nuc-console-notify/inbox)" = "2730 nuc-console-notify nuc-console-notify" ]   # the web page's requests: its group may only add files
+          ! sudo -u nuc-console ls /var/lib/nuc-console-notify/inbox 2>/dev/null   # the web view's account cannot list it
           rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
           nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
           state=$(systemctl is-failed nuc-console-notify || true); echo "nuc-console-notify: $state"; [ "$state" != failed ]
@@ -117,6 +119,7 @@ jobs:
           test -f /Library/LaunchDaemons/com.nuc-console.notify.plist
           sudo launchctl print system/com.nuc-console.notify > /dev/null
           [ "$(stat -f '%Lp %Su' /var/lib/nuc-console-notify)" = "711 _nuc-console" ]
+          [ "$(sudo stat -f '%Lp %Su' /var/lib/nuc-console-notify/inbox)" = "700 _nuc-console" ]   # the web page's requests (the same account)
           rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
           /opt/nuc-console/bin/nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
       - run: sudo ./install.sh --uninstall
@@ -159,6 +162,10 @@ jobs:
           $acl = (& icacls.exe "$notify\private") -join "`n"
           if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users|LOCAL SERVICE') { throw "the notifier's private folder is open to others: $acl" }
           if ($acl -notmatch 'NETWORK SERVICE') { throw "the notifier (NETWORK SERVICE) cannot use its private folder: $acl" }
+          $acl = (& icacls.exe "$notify\inbox") -join "`n"   # the web page's requests: LOCAL SERVICE may add a file and nothing else
+          if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users') { throw "the notifier's inbox is open to others: $acl" }
+          if ($acl -notmatch 'LOCAL SERVICE:\(W\)') { throw "LOCAL SERVICE should only add files to the inbox: $acl" }
+          if ($acl -notmatch 'NETWORK SERVICE:\(OI\)\(CI\)\(M\)') { throw "the notifier cannot read its inbox: $acl" }
           $who = (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify').Principal.UserId
           if ($who -notmatch 'NETWORK SERVICE') { throw "the notify task runs as $who, not NETWORK SERVICE" }
           & "$env:ProgramFiles\nuc-console\python\python.exe" -B "$env:ProgramFiles\nuc-console\app\notify.py" --enabled

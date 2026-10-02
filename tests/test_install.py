@@ -120,8 +120,8 @@ class AiFolderIsTheWebAccounts(unittest.TestCase):
 
     def test_linux_both_units_may_write_the_ai_folder_and_the_web_unit_keeps_its_sandbox(self):
         web, tty = unit_lines("nuc-console-web.service"), unit_lines("nuc-console.service")
-        for name, lines in (("web", web), ("tty", tty)):
-            self.assertEqual([x for x in lines if x.startswith("ReadWritePaths=")], ["ReadWritePaths=-/var/lib/nuc-console/ai"], name)
+        for name, lines, more in (("web", web, ["ReadWritePaths=-/var/lib/nuc-console-notify/inbox"]), ("tty", tty, [])):
+            self.assertEqual([x for x in lines if x.startswith("ReadWritePaths=")], ["ReadWritePaths=-/var/lib/nuc-console/ai"] + more, name)
             for kept in ("NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "User=nuc-console"):
                 self.assertIn(kept, lines, "%s: %s stays" % (name, kept))
         for kept in ("ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes", "CapabilityBoundingSet=", "PrivateDevices=yes",
@@ -175,6 +175,37 @@ class AiFolderIsTheWebAccounts(unittest.TestCase):
     def test_every_installer_says_the_web_view_has_buttons_now(self):
         for path in (INSTALL, INSTALL_MACOS, INSTALL_WINDOWS):
             self.assertNotIn("read-only web view", read_text(path), path)
+
+
+class TelegramInbox(unittest.TestCase):
+    """The web view's Telegram page leaves requests in the notifier's inbox: its account may create files there and do nothing else, and only the
+    notifier lists and reads them (docs/TELEGRAM.md, SECURITY.md)."""
+
+    def test_linux_the_inbox_is_2730_and_only_the_web_unit_is_in_its_group(self):
+        src = read_text(INSTALL)
+        self.assertIn("install -d -m 2730 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify/inbox", src)
+        self.assertIn("chmod 2730 /var/lib/nuc-console-notify/inbox", src)
+        self.assertLess(src.index("/var/lib/nuc-console-notify  #"), src.index("/var/lib/nuc-console-notify/inbox"), "inside the notifier's folder")
+        web, tty, notify_unit = unit_lines("nuc-console-web.service"), unit_lines("nuc-console.service"), unit_lines("nuc-console-notify.service")
+        self.assertIn("SupplementaryGroups=nuc-console-notify", web)
+        self.assertIn("ReadWritePaths=-/var/lib/nuc-console-notify/inbox", web)
+        self.assertIn("Wants=nuc-console-notify.service", web)
+        self.assertFalse([x for x in tty if "nuc-console-notify" in x], "the console needs none of it")
+        self.assertIn("User=nuc-console", web)
+        self.assertIn("User=nuc-console-notify", notify_unit, "the token stays another account's")
+        self.assertIn("UMask=0077", notify_unit)
+
+    def test_macos_the_inbox_is_the_service_accounts(self):
+        self.assertIn('install -d -m 0700 -o "$SVC_USER" -g "$SVC_USER" "$NOTIFY_LIB/inbox"', read_text(INSTALL_MACOS))
+
+    def test_windows_local_service_may_only_create_files_in_the_inbox(self):
+        src = read_text(INSTALL_WINDOWS)
+        line = next(ln for ln in src.splitlines() if ln.startswith('& icacls.exe "$Data\\notify\\inbox"'))
+        self.assertIn("/inheritance:r /grant:r", line)
+        self.assertIn("'*S-1-5-19:(W)'", line, "write (add a file) on the folder only: no list, no read, not inherited by the files")
+        self.assertIn("'*S-1-5-20:(OI)(CI)M'", line, "the notifier reads and deletes them")
+        self.assertNotIn("S-1-5-32-545", line, "users have nothing there")
+        self.assertLess(src.index('"$Data\\notify\\private" /inheritance:r'), src.index('"$Data\\notify\\inbox" /inheritance:r'))
 
 
 def powershell():
