@@ -55,10 +55,10 @@ the dashboard (compact, `full=1`, `rotate=1`), CPU, the MAP as a tree and as a g
 `python3 -m unittest tests.test_golden` (about 2 s) compares each case and prints the first lines of the diff of the ones that differ.
 
 `tests/golden.py` renders them in a `FrozenWorld`: a clock that stands still (UTC, whatever `TZ` says), the host name `demo-host`, the default
-configuration (not the `config.ini` of the machine), the commands the advice names in their Linux words, and a host that always reads the same (CPUs,
-RAM, disk, load, uptime, temperatures, network counters). The files are therefore the same on Linux, macOS and Windows, on any number of CPUs and on every
+configuration (not the `config.ini` of the machine), the commands the advice names in their Linux words, and the AI page's engine (the demo's, on a
+temporary folder, with a fixed CSRF token). The host's readings are the demo's own (`demo.sampler_data`): only the clock moves them, and it stands still. The files are therefore the same on Linux, macOS and Windows, on any number of CPUs and on every
 Python from 3.8 (the world also adds floats the old way and gives the graph's layout an exact `abs()`, because Python 3.12 and the C libraries of the
-three systems do not round alike). If the renderer starts to read something else from the machine, fake it there, or the test fails somewhere else.
+three systems do not round alike). If the renderer starts to read something else from the machine, fake it there (or make the demo supply it), or the test fails somewhere else.
 A golden test that passes on your machine and fails on one OS in CI has found a dependency on that OS: fix the code, not the file.
 
 When a change is meant to alter what is drawn, regenerate and read the result:

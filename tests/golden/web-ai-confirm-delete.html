@@ -16,32 +16,41 @@
 <span class="st">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
 <form class="f" method="post" action="/ai/off">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <button class="bt off" type="submit" title="stop the model server and turn the advisor off">Turn AI off</button>
 </form>
 </div>
 <div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+<div class="cf" id="confirm">
+<span>Delete the files of <strong>Qwen3 1.7B</strong> (1.1 GB)? You can download it again later.</span> <form class="f" method="post" action="/ai/delete">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
+<input type="hidden" name="model" value="qwen3-1.7b">
+<input type="hidden" name="confirm" value="yes">
+<button class="bt off" type="submit">Yes, delete</button>
+</form> <a class="bt" href="/?view=ai&amp;sel=qwen3-1.7b">No</a>
+</div>
 </section>
 <section class="chat" id="chat">
 <div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>
 <form class="f ask" id="ask" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input class="q" type="text" name="q" maxlength="500" size="60" placeholder="ask: why is the disk filling up?" autocomplete="off"> <button class="bt on" type="submit">Ask</button>
 </form>
 <div class="adv">advice now: <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="days" value="1">
 <button class="bt " type="submit">last 24 h</button>
 </form> <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="days" value="7">
 <button class="bt " type="submit">last 7 days</button>
 </form> <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="days" value="30">
 <button class="bt " type="submit">last 30 days</button>
 </form>
@@ -109,7 +118,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="qwen3-30b-a3b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -134,7 +143,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="phi-4">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -158,16 +167,16 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="qwen3-14b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr class="sel" id="m-4">
+<tr id="m-4">
 <td class="mk">   </td>
 <td>
-<a class="lb" href="/?view=ai#m-4">Qwen3 8B</a>
+<a class="lb" href="/?view=ai&amp;sel=qwen3-8b#m-4">Qwen3 8B</a>
 </td>
 <td class="pm">8.2B</td>
 <td class="r sz">4.9 GB</td>
@@ -182,7 +191,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="qwen3-8b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -206,7 +215,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="granite-3.3-8b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -230,7 +239,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="phi-4-mini">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -275,7 +284,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="smollm3-3b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -299,16 +308,16 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="granite-3.3-2b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
 </td>
 </tr>
-<tr id="m-10">
+<tr class="sel" id="m-10">
 <td class="mk"> <span class="g" title="installed">✓</span> </td>
 <td>
-<a class="lb" href="/?view=ai&amp;sel=qwen3-1.7b#m-10">Qwen3 1.7B</a>
+<a class="lb" href="/?view=ai#m-10">Qwen3 1.7B</a>
 </td>
 <td class="pm">1.7B</td>
 <td class="r sz">1.1 GB</td>
@@ -323,7 +332,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="qwen3-1.7b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -347,7 +356,7 @@
 <td class="ac">
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <input type="hidden" name="model" value="qwen3-0.6b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -361,12 +370,12 @@
 <aside class="dp" id="details">
 <div class="dh">
 <span>DETAILS</span>
-<a href="/?view=ai#m-4">close ✕</a>
+<a href="/?view=ai#m-10">close ✕</a>
 </div>
 <table>
 <tr class="top">
 <th>model</th>
-<td>Qwen3 8B</td>
+<td>Qwen3 1.7B</td>
 </tr>
 <tr>
 <th>verdict</th>
@@ -376,33 +385,39 @@
 </tr>
 <tr>
 <th>why</th>
-<td>needs 5.8 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</td>
+<td>needs 1.8 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU</td>
 </tr>
 <tr>
 <th>speed</th>
-<td>about 31-51 tokens/s (a rough estimate, not a promise)</td>
+<td>about 140-233 tokens/s (a rough estimate, not a promise)</td>
 </tr>
 <tr>
 <th>state</th>
-<td>not installed</td>
+<td>✓ installed</td>
 </tr>
 <tr>
-<th>install</th>
+<th>use</th>
 <td>
-<code class="cmd">sudo nuc-console-ai setup qwen3-8b</code>
+<code class="cmd">sudo nuc-console-ai use qwen3-1.7b</code>
+</td>
+</tr>
+<tr>
+<th>remove</th>
+<td>
+<code class="cmd">sudo nuc-console-ai remove qwen3-1.7b</code>
 </td>
 </tr>
 <tr>
 <th>needs</th>
-<td>5.8 GB of memory: the file (4.9 GB), the context and the runtime</td>
+<td>1.8 GB of memory: the file (1.1 GB), the context and the runtime</td>
 </tr>
 <tr>
 <th>where</th>
-<td>all 36 layers on the GPU</td>
+<td>all 28 layers on the GPU</td>
 </tr>
 <tr>
 <th>model</th>
-<td>8.2B parameters · Q4_K_M · context up to 40960 tokens</td>
+<td>1.7B parameters · Q4_K_M · context up to 40960 tokens</td>
 </tr>
 <tr>
 <th>licence</th>
@@ -410,16 +425,21 @@
 </tr>
 <tr>
 <th>notes</th>
-<td>thinking mode: /no_think turns it off</td>
+<td>runs anywhere; thinking mode: /no_think</td>
 </tr>
 <tr>
 <th>do</th>
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
-<input type="hidden" name="model" value="qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
+<input type="hidden" name="model" value="qwen3-1.7b">
 <button class="bt use" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form> <form class="f" method="post" action="/ai/delete">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
+<input type="hidden" name="model" value="qwen3-1.7b">
+<button class="bt del" type="submit" title="asks first">delete its files</button>
 </form>
 </td>
 </tr>
@@ -435,9 +455,9 @@
  <span class="d">files    </span> <span class="d">/var/lib/nuc-console/ai</span></pre>
 <div class="mg">manage: <form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-1.7b">
 <button class="bt del" type="submit" title="asks first">delete everything</button>
 </form> the runtime and every model (4.0 GB)</div>
 <footer>
-<a href="/?">dashboard</a> · <a href="/?view=ai&amp;sel=qwen3-8b&amp;cols=100#m-4">compact</a> · <a href="/?view=ai&amp;sel=qwen3-8b&amp;cols=200#m-4">wide</a> · text <a href="/?view=ai&amp;sel=qwen3-8b&amp;zoom=90#m-4">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-8b&amp;zoom=110#m-4">A+</a> · reloads by itself while something runs · <a href="/?view=ai&amp;sel=qwen3-8b#m-4">reload</a> · 14:13:20</footer>
+<a href="/?">dashboard</a> · <a href="/?view=ai&amp;sel=qwen3-1.7b&amp;cols=100#m-10">compact</a> · <a href="/?view=ai&amp;sel=qwen3-1.7b&amp;cols=200#m-10">wide</a> · text <a href="/?view=ai&amp;sel=qwen3-1.7b&amp;zoom=90#m-10">A−</a> 100% <a href="/?view=ai&amp;sel=qwen3-1.7b&amp;zoom=110#m-10">A+</a> · reloads by itself while something runs · <a href="/?view=ai&amp;sel=qwen3-1.7b#m-10">reload</a> · 14:13:20</footer>
 </html>

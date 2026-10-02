@@ -1,9 +1,10 @@
 """Golden outputs: every screen of the console and every page of the web view, rendered in a world that is the same on every machine.
 
 `FrozenWorld` is that world: a clock that stands still (UTC, whatever TZ says), the host name `demo-host`, the default configuration
-(whatever config.ini the machine has), the commands the advice names pinned to their Linux words, and a host that always reads the same
-(CPU cores, RAM, swap, root disk, load, uptime, temperatures, network counters), so that `--demo` renders the same bytes on Linux,
-macOS and Windows, in any time zone, on any number of CPUs, under any hash seed. `CASES` lists what is locked; tests/golden/ holds the
+(whatever config.ini the machine has), the commands the advice names pinned to their Linux words, and an AI engine whose folder is a
+temporary one and whose token is fixed, so that `--demo` renders the same bytes on Linux, macOS and Windows, in any time zone, on any
+number of CPUs, under any hash seed. The host's readings (cores, RAM, disk, load, uptime, temperatures, traffic) are the demo's own
+(demo.sampler_data(os, now), which render.host_sample() returns under --demo): they depend on the clock only, which stands still. `CASES` lists what is locked; tests/golden/ holds the
 files; tests/test_golden.py compares them. tools/bench_render.py times the same renders.
 
 The files are what the renderer writes, raw: the ANSI colours included, and the `ESC[K CR LF` that ends every line of a frame (the
@@ -18,9 +19,11 @@ This module changes nothing in src/. What the world has to patch because the ren
           (the abs of a complex number) differently on Linux, macOS and Windows: the figures would differ in the last digit (see _sum, _abs)
   socket.gethostname, os.cpu_count, nuc_config.PORTABLE
   render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD,
-          KIOSK_HINT, ACCEPTED_PATH, Sampler, meminfo, loadavg, uptime_s, root_disk, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
+          KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
   render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO
-Whatever a refactor moves into the Sampler (or anywhere else the host is read) has to be faked here, in FakeSampler or in `_host()`.
+  aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
+          web.json would go); web.Server's CSRF token (a fixed one)
+Whatever is read from the host outside the demo's data (a file, a command, the environment) has to be faked here.
 """
 import contextlib
 import difflib
@@ -43,59 +46,29 @@ if SRC not in sys.path:
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # before render is imported: its CFG and what is derived from it at import time
 # the modules the renderer imports on demand are imported now, so that FrozenWorld finds them (and their `time`) when it freezes the clock
 import advisor  # noqa: E402,F401
+import aiweb  # noqa: E402
+import aisetup  # noqa: E402,F401
+import ansi  # noqa: E402,F401
 import collector  # noqa: E402,F401
 import cpuinfo  # noqa: E402,F401
 import demo  # noqa: E402,F401
+import exposure  # noqa: E402,F401
 import graph  # noqa: E402,F401
 import graphjs  # noqa: E402,F401
 import graphlayout  # noqa: E402,F401
 import health  # noqa: E402,F401
 import htmlview  # noqa: E402,F401
 import nuc_config  # noqa: E402
+import prefs  # noqa: E402,F401
 import procs  # noqa: E402,F401
 import render  # noqa: E402
+import ui  # noqa: E402,F401
 import web  # noqa: E402
 
 NOW = 1_790_000_000      # 2026-09-21 14:13:20 UTC: the header reads 14:13:20, and its burn-in shift is one column
 HOST = "demo-host"
 CPUS = 8                 # what os.cpu_count() says
 _MISSING = object()
-
-# ---- the host: what the renderer would read from /proc, /sys, statvfs or hostinfo, always the same ---------------------------------------
-GiB = 2 ** 30
-CORES = [0.12, 0.34, 0.08, 0.91, 0.27, 0.05, 0.62, 0.18, 0.44, 0.03, 0.71, 0.15]  # busy fraction of 12 logical CPUs (one of them red)
-THERMAL = {"cpu": (62.0, 100.0), "nvme": (44.0, 84.0), "throttle": 3, "throttle_s": 12.5, "clk": (3.1, 4.7), "recent": 0}
-
-
-def _series(base, n=30):
-    """30 deterministic bytes/s samples around base, for the traffic sparklines."""
-    return [base * (0.4 + ((i * 7 + 3) % 11) / 10.0) for i in range(n)]
-
-
-class FakeSampler(object):
-    """render.Sampler with nothing to read: the same cores, temperatures and interface on every call, on every machine."""
-
-    def __init__(self):
-        pass
-
-    def sample(self):
-        rx, tx = 1_200_000.0, 340_000.0
-        net = {"eth0": {"rx": rx, "tx": tx, "rx_tot": 81 * GiB, "tx_tot": 19 * GiB, "hist_rx": _series(rx), "hist_tx": _series(tx)}}
-        return {"cpu": {f"cpu{i}": v for i, v in enumerate(CORES)},
-                "thermal": dict(THERMAL) if render.on("thermal") else {},
-                "net": net if render.on("network_traffic") else {},
-                "sessions": {"local": [{"user": "alice", "tty": "tty1"}], "ssh": []} if render.on("sessions") else None,
-                "fs": [{"mount": "/", "used": 180 * GiB, "total": 480 * GiB}] if render.on("disks") else None}
-
-
-def _host():
-    """The functions render.py reads the machine through, replaced by ones that answer the same everywhere (name -> function)."""
-    mem = {"MemTotal": 16 * GiB, "MemAvailable": 9 * GiB, "MemFree": 4 * GiB, "Cached": 5 * GiB, "Buffers": GiB // 4,
-           "SwapTotal": 2 * GiB, "SwapFree": 2 * GiB - 300 * 2 ** 20}
-    return {"meminfo": lambda: dict(mem), "loadavg": lambda: ["0.42", "0.38", "0.35"], "uptime_s": lambda: 273_120.0,
-            "root_disk": lambda: (180 * GiB, 480 * GiB, "/"),
-            "telegram_status": lambda path=None: None}  # notify.py's status.json: there is none (read from the host otherwise)
-
 
 # ---- the clock -----------------------------------------------------------------------------------------------------------------------
 
@@ -212,6 +185,16 @@ class FrozenWorld(object):
         render.CFG.clear()
         render.CFG.update(new)
 
+    def _freeze_ai(self):
+        """The AI engine of the demo, deterministic: its own folder under the temporary one (the lock file, web.json and the models would go
+        there; the demo writes nothing), no other engine, no binding to the program that imported it, and the time of its modules is the clock's."""
+        folder = os.path.join(self._tmp.name, "ai")
+        os.makedirs(folder)
+        self.set(aisetup, "work_dir", lambda plat=None: folder)
+        self.set(aiweb, "DEMO_STEP_S", 0.0)  # a simulated job is not waited for (the cases do not run one)
+        self.set(aiweb, "_ENGINE", aiweb.Engine(demo=True, directory=folder))
+        self.set(aiweb, "_BIND", dict(aiweb._BIND))
+
     def __enter__(self):
         self._tmp = tempfile.TemporaryDirectory()
         try:
@@ -239,9 +222,8 @@ class FrozenWorld(object):
                 with open(path, "w") as f:
                     json.dump({pid: {"reason": "known", "fp": render.fingerprint(sev, text, pid)} for pid, sev, text in self.accepted}, f)
             self.set(render, "ACCEPTED_PATH", path)
-            self.set(render, "Sampler", FakeSampler)
-            for name, fn in _host().items():
-                self.set(render, name, fn)
+            self.set(render, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
+            self._freeze_ai()
             for name in ("DEMO", "DEMO_OS", "DEMO_HEALTH"):  # --demo and web.Server set them: put back on exit
                 self.set(render, name, getattr(render, name))
             for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO"):
@@ -290,6 +272,7 @@ class FrozenWorld(object):
         if self._server is None:
             cfg = dict(nuc_config.load("/nonexistent")["web"], refresh_seconds=2)
             self._server = web.Server(("127.0.0.1", 0), cfg, "", demo=True)
+            self._server.csrf = "csrf-token"  # random in every process: the page has the same one (web_text masks it anyway)
         return self._server
 
     def page(self, query):
@@ -349,6 +332,7 @@ SMALL = ((120, 33), (200, 50))
 SELECTED = {  # what a case selects: the key of a MAP row (graph.path_key of its path: shop-api-1 under STACKS) and of a graph node, a finding id, a pid
     "row": "99ae4e80a5", "node": "881afd34cb", "finding": "mem-leak:node", "pid": "1610"}
 ROTATION = {"map_in_rotation": True, "cpu_in_rotation": True, "health_in_rotation": True}  # the slides: ..., Map, CPU, Health
+LOCKED = {"ai": {"web_actions": False}}  # merged into the default [ai]
 ACCEPTED = (("container-exited", 1, "1 container exited with an error"),
             ("docker-bypass", 1, "1 Docker port bypassing ufw (DOCKER-USER empty)"))
 
@@ -417,6 +401,9 @@ def _cases():
         add(f"ai-details-{w}x{h}", ("--view", "ai", "--select", "qwen3-8b", "--details") + _size(w, h))
     for os_name in ("windows", "darwin"):
         add(f"ai-{os_name}-200x50", ("--view", "ai", "--demo-os", os_name) + _size(200, 50))
+    # [ai] web_actions = no: the page and the screen only show (the AI keys are gone, the state line says why)
+    add("ai-locked-120x33", ("--view", "ai") + _size(120, 33), cfg=LOCKED)
+    add("ai-locked-details-200x50", ("--view", "ai", "--select", "qwen3-4b", "--details") + _size(200, 50), cfg=LOCKED)
 
     # the web view: the pages web.Server serves in demo mode (?query)
     pages = (("dashboard", ""), ("dashboard-compact", "cols=100"), ("dashboard-full", "full=1"), ("dashboard-rotate", "rotate=1"),
@@ -424,9 +411,16 @@ def _cases():
              ("map-tree", "view=map"), ("map-tree-details", f"view=map&all=1&sel={SELECTED['row']}"),
              ("map-graph", "view=map&as=graph"), ("map-graph-details", f"view=map&as=graph&sel={SELECTED['node']}"),
              ("health", "view=health"), ("health-details", f"view=health&sel={SELECTED['finding']}"),
-             ("ai", "view=ai"), ("ai-details", "view=ai&sel=qwen3-8b"))
+             ("ai", "view=ai"), ("ai-details", "view=ai&sel=qwen3-8b"),
+             # the AI page's forms: the demo machine has the advisor on, qwen3-4b in use and qwen3-1.7b installed (the forms carry the masked CSRF token)
+             ("ai-on-details", "view=ai&sel=qwen3-4b"), ("ai-not-installed", "view=ai&sel=qwen3-30b-a3b"),
+             ("ai-confirm-on", "view=ai&sel=qwen3-8b&confirm=on"),
+             ("ai-confirm-delete", "view=ai&sel=qwen3-1.7b&confirm=delete"), ("ai-confirm-delete-all", "view=ai&confirm=delete-all"),
+             ("ai-no-question", "view=ai&sel=qwen3-8b&confirm=delete"))  # delete of what is not installed: no question, the plain page
     for name, query in pages:
         add("web-" + name, query=query)
+    add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # a locked page has no forms and the stricter CSP
+    add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=LOCKED)  # and no question: nothing to confirm
     return out
 
 

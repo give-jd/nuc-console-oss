@@ -94,10 +94,11 @@ class World(unittest.TestCase):
     def snapshot(self):
         cfg = render.CFG
         return {"cfg": copy.deepcopy(dict(cfg)), "ids": {k: id(v) for k, v in cfg.items()},
-                "attrs": [getattr(render, n) for n in ("Sampler", "meminfo", "loadavg", "uptime_s", "root_disk", "MODE", "PAGES", "ROTATE_S", "REFRESH_S",
+                "attrs": [getattr(render, n) for n in ("MODE", "PAGES", "ROTATE_S", "REFRESH_S",
                                                         "ACCEPT_CMD", "PROBLEMS_CMD", "CMD", "KIOSK_HINT", "ACCEPTED_PATH", "DEMO", "DEMO_OS", "DEMO_HEALTH",
                                                         "time", "telegram_status")],
-                "others": [socket.gethostname, os.cpu_count, nuc_config.PORTABLE, golden.demo.time, golden.graph.time, golden.web.time],
+                "others": [socket.gethostname, os.cpu_count, nuc_config.PORTABLE, golden.demo.time, golden.graph.time, golden.web.time,
+                           golden.aiweb.time, golden.aiweb._ENGINE, dict(golden.aiweb._BIND), golden.aisetup.work_dir],
                 "caches": [dict(getattr(render, n)) for n in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO")]}
 
     def test_everything_is_put_back_in_place(self):
@@ -137,19 +138,27 @@ class World(unittest.TestCase):
             self.assertEqual(world.clock.now, golden.NOW + 0.5)
 
     def test_the_host_is_not_read(self):
-        """Nothing in a frame comes from this machine: the cores, RAM, disk, load and uptime are the fake ones."""
+        """Nothing in a frame comes from this machine: under --demo the readings are demo.sampler_data()'s, which only the clock moves."""
         with golden.FrozenWorld() as world:
             self.assertEqual(os.cpu_count(), golden.CPUS)
             self.assertEqual(socket.gethostname(), golden.HOST)
-            self.assertEqual(set(render.Sampler().sample()["cpu"]), {f"cpu{i}" for i in range(len(golden.CORES))})
-            self.assertEqual(render.meminfo()["MemTotal"], 16 * 2 ** 30)
-            self.assertEqual(render.root_disk(), (180 * 2 ** 30, 480 * 2 ** 30, "/"))
-            self.assertEqual((render.loadavg(), render.uptime_s()), (["0.42", "0.38", "0.35"], 273_120.0))
             self.assertEqual(render.ACCEPT_CMD, "sudo nuc-console-accept")
             frame = world.once(["--cols", "120", "--rows", "33"])
             self.assertIn("demo-host", frame)
-            self.assertIn("7.0G/16.0G", frame)
             self.assertIn("14:13:20", frame)
+            self.assertIn("up 5d 0h", frame)                                   # demo.UP_DEMO, not this machine's uptime
+            self.assertEqual(golden.demo.sampler_data(None, golden.NOW), golden.demo.sampler_data(None, golden.NOW))
+
+    def test_the_ai_engine_is_the_demo_one_in_a_temporary_folder(self):
+        old = golden.aiweb._ENGINE
+        with golden.FrozenWorld() as world:
+            eng = golden.aiweb.engine()
+            self.assertIsNot(eng, old)
+            self.assertTrue(eng.demo)
+            self.assertTrue(eng.directory.startswith(world._tmp.name))
+            self.assertEqual(golden.aisetup.work_dir(), eng.directory)
+            self.assertEqual(world.server.csrf, "csrf-token")
+        self.assertIs(golden.aiweb._ENGINE, old)
 
     def test_the_sum_of_floats_is_the_old_one_on_every_python(self):
         with golden.FrozenWorld():

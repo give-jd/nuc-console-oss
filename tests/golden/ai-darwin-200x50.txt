@@ -1,13 +1,15 @@
 [1;41;37m  demo-host │ AI │ 14:13:20                                                                                                                                                              ✖ 4 PROBLEMS  [0m[0m[K
 [36m──[0m[1;36m AI [0m [90mwhat this machine can run[0m[90m · [0m[90m12 models[0m[90m · [0m[32m✔ 8 fit[0m  [33m! 3 slow[0m  [31m✖ 1 too big[0m [36m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[0m[K
+ [1;32m● ON      [0m on: the advisor asks  (qwen3-8b)[0m[0m[0m[K
+ [90mfolder[0m /Library/Application Support/nuc-console/ai[90m · 5.4 GB downloaded · 412.0 GB free on that disk[0m[0m[0m[0m[K
 [36m──[0m[1;36m HARDWARE [0m[36m──────────────────────────────────────────────────────────────────────────────[0m[90m  darwin arm64[0m[0m     [36m──[0m[1;36m STATUS [0m[36m──────────────────────────────────────────────────────────────────────────────[0m[0m  [0m[0m[K
- [90mCPU  [0m [1mApple M2[0m[90m · 8 cores[0m[90m · NEON[0m[0m[0m                                                                              [90madvisor  [0m [32m✔ on[0m[90m  ([ai] enabled = yes)[0m[0m[0m                                                     [0m[0m[K
+ [90mCPU  [0m [1mApple M2[0m[90m · 8 cores[0m[90m · NEON[0m[0m[0m                                                                              [90madvisor  [0m [32m✔ on[0m[90m  (turned on from the AI page or screen)[0m[0m[0m                                   [0m[0m[K
  [90mRAM  [0m [32m████████[0m[90m░░░░░░░░░░░[0m  9.6 GB free of 16.0 GB[0m[0m                                                            [90mendpoint [0m http://127.0.0.1:8080/v1[0m[0m                                                       [0m[0m[K
  [90mGPU  [0m [1mApple M2 (10-core GPU)[0m[90m · Metal[0m  [90munified memory: it shares the RAM[0m[0m[0m                                      [90mserver   [0m [31m✖ not answering[0m[0m[0m                                                                [0m[0m[K
                                                                                                               [90m         [0m [90mno server on 127.0.0.1:8080: start Ollama or run nuc-console-ai serve[0m[0m[0m          [0m[0m[K
                                                                                                               [90mmodel    [0m [36m●[0m [1mqwen3-8b[0m[90m  in the catalog[0m[0m[0m                                                     [0m[0m[K
                                                                                                               [90mruntime  [0m [32m✔ installed[0m[90m (0.10.6)[0m[0m[0m                                                           [0m[0m[K
-                                                                                                              [90mfiles    [0m [90m/usr/local/var/nuc-console-ai[0m[0m[0m                                                  [0m[0m[K
+                                                                                                              [90mfiles    [0m [90m/Library/Application Support/nuc-console/ai[0m[0m[0m                                    [0m[0m[K
 [36m──[0m[1;36m MODELS [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  best first[0m[0m[0m[K
 [90m      model               params          size    needs   verdict      est tok/s  notes[0m[0m[0m[K
       OpenAI gpt-oss 20B  [90m21B-A3.6B  [0m  11.8 GB  12.5 GB  [1;43;30m ! SLOW     [0m  30-44      [90mfast for its size (MoE, 3.6B active); reasoning effort is a setting[0m[0m[0m[0m[K
@@ -45,6 +47,4 @@
 [K
 [K
 [K
-[K
-[K
-[90m model 5/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   a/Esc: back[0m[0m[0m
+[90m model 5/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   e: AI on/off   u: use model   x: delete   X: delete all   c: cancel   a/Esc: back   questions: web page or nuc-console-ask[0m[0m[0m

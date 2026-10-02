@@ -21,6 +21,15 @@
 </form>
 </div>
 <div class="row dir">models are downloaded to <code class="cmd">/var/lib/nuc-console/ai</code> · 4.0 GB downloaded, 412.0 GB free on that disk</div>
+<div class="cf" id="confirm">
+<span>Turn AI on with <strong>Qwen3 8B</strong>? It is installed here.</span> <form class="f" method="post" action="/ai/on">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;sel=qwen3-8b">
+<input type="hidden" name="model" value="qwen3-8b">
+<input type="hidden" name="confirm" value="yes">
+<button class="bt on" type="submit">Yes, turn it on</button>
+</form> <a class="bt" href="/?view=ai&amp;sel=qwen3-8b">No</a>
+</div>
 </section>
 <section class="chat" id="chat">
 <div class="hs">CHAT · ask the model about this machine (it reads this machine's history; AI, check before acting)</div>

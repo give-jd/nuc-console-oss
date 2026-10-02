@@ -1,12 +1,14 @@
 [1;41;37m  demo-host │ AI │ 14:13:20                                                                                                                                                              ✖ 5 PROBLEMS  [0m[0m[K
 [36m──[0m[1;36m AI [0m [90mwhat this machine can run[0m[90m · [0m[90m12 models[0m[90m · [0m[32m✔ 4 fit[0m  [36m◐ 4 gpu+cpu[0m  [33m! 3 slow[0m  [31m✖ 1 too big[0m [36m────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[0m[0m[0m[K
+ [1;90m○ OFF     [0m off[0m[0m[0m[K
+ [90mfolder[0m C:\ProgramData\nuc-console\ai[90m · nothing downloaded · 412.0 GB free on that disk[0m[0m[0m[0m[K
 [36m──[0m[1;36m HARDWARE [0m[36m────────────────────────────────────────────────────────────────────────────[0m[90m  windows x86_64[0m[0m     [36m──[0m[1;36m STATUS [0m[36m──────────────────────────────────────────────────────────────────────────────[0m[0m  [0m[0m[K
- [90mCPU  [0m [1mIntel Core i7-10750H[0m[90m · 6 cores / 12 threads[0m[90m · AVX2[0m[0m[0m                                                     [90madvisor  [0m [90m· off[0m[90m  ([ai] enabled = no in config.ini)[0m[0m[0m                                       [0m[0m[K
+ [90mCPU  [0m [1mIntel Core i7-10750H[0m[90m · 6 cores / 12 threads[0m[90m · AVX2[0m[0m[0m                                                     [90madvisor  [0m [90m· off[0m[90m  (off: the AI switch turns it on)[0m[0m[0m                                        [0m[0m[K
  [90mRAM  [0m [32m██████████[0m[90m░░░░░░░░░[0m  7.2 GB free of 15.8 GB[0m[0m                                                            [90mendpoint [0m http://127.0.0.1:11434/v1[0m[0m                                                      [0m[0m[K
  [90mGPU  [0m [1mNVIDIA GeForce GTX 1650[0m[90m · CUDA[0m  [90m░░░░░░░░░░░░░░░░░░░[0m  4.0 GB[90m (free: ?)[0m[0m[0m                                  [90mserver   [0m [90m· not asked while the advisor is off[0m[0m[0m                                           [0m[0m[K
  [90m     [0m [1mIntel(R) UHD Graphics[0m[90m · Vulkan[0m  [90munified memory: it shares the RAM[0m[0m[0m                                      [90mmodel    [0m [90m· none chosen ([ai] model is empty)[0m[0m[0m                                            [0m[0m[K
 [90m  · nvidia-smi not found: the free video memory could not be read[0m[0m                                             [90mruntime  [0m [33m! not installed[0m[90m: setup downloads it[0m[0m[0m                                            [0m[0m[K
-                                                                                                              [90mfiles    [0m [90mC:\ProgramData\nuc-console-ai[0m[0m[0m                                                  [0m[0m[K
+                                                                                                              [90mfiles    [0m [90mC:\ProgramData\nuc-console\ai[0m[0m[0m                                                  [0m[0m[K
 [36m──[0m[1;36m MODELS [0m[36m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m[90m  best first[0m[0m[0m[K
 [90m      model               params          size    needs   verdict      est tok/s  notes[0m[0m[0m[K
       OpenAI gpt-oss 20B  [90m21B-A3.6B  [0m  11.8 GB  12.5 GB  [1;43;30m ! SLOW     [0m  10-20      [90mfast for its size (MoE, 3.6B active); reasoning effort is a setting[0m[0m[0m[0m[K
@@ -45,6 +47,4 @@
 [K
 [K
 [K
-[K
-[K
-[90m model 9/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   a/Esc: back[0m[0m[0m
+[90m model 9/12   ↑↓: move   PgUp/PgDn/Home/End: page   Enter: details   e: AI on/off   u: use model   x: delete   X: delete all   c: cancel   a/Esc: back   questions: web page or nuc-console-ask[0m[0m[0m
