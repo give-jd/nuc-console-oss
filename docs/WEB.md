@@ -133,6 +133,24 @@ They only ever **GET**: nothing they do sends a form, and the AI page's POSTs st
 | `PREFS_JS` | a click on a theme or density link is sent to the server in the background (`/?set=…&frag=1`, `204`) and applied at once, without a reload; if that fails the link is followed as it is. It keeps the preferences string in `localStorage` and the **Copy** button of the settings page copies the `[ui]` block. It never touches `document.cookie` (the cookie is `HttpOnly`) |
 | `BUILDER_JS` | only on the layout editor page (`?edit=1`), in place of `REFRESH_JS`: drag a card to move it, drag its right edge to resize it, a keyboard path, and each change is saved at once ([below](#edit-the-layout)). It moves the cards the server drew and builds no markup; it keeps nothing in the browser |
 
+### Wall and kiosk
+
+`/?app=1&ui=1.dw&kiosk=1` is the shell as a wall display: the **wall** density (big type, lists cut to three rows with a "+N more", no small print) and `kiosk=1`.
+Only that combination (not the settings page, not the editor) changes the page:
+
+- `main[data-rotate="N"]`: `REFRESH_JS` scrolls one screen (90 % of the window) every `N` seconds, back to the top at the end, and waits while someone is at the
+  page (a click, a key or the wheel pauses it for `3 N` seconds), while paused and while the tab is hidden; with `prefers-reduced-motion` it jumps instead of gliding.
+  `N` is `[dashboard] rotate_seconds` (default 15), or `&rotate=N` (3 to 600) in the URL. The partial refresh goes on while it scrolls and keeps the scroll.
+- Burn-in: the `shift-N` class of `<html>` (the top bar moves one character, three positions) changes every ten minutes on the server, and a wall page reloads itself
+  at every ten-minute mark so that the new class arrives.
+- The footer holds only what a wall can use: the refresh interval, `read-only`, the hint of how to close the window (`Alt+F4 closes · F11 leaves full screen`;
+  macOS: `Cmd+Q`) and the time of the last update; no pause, edit, size, theme or density links.
+- Without JavaScript the `<noscript>` meta refresh still reloads the page every refresh interval; it shows the first screen (nothing scrolls; there is no server-side paging). `rotate=1` (the classic page's "take turns") does nothing here.
+
+`[ui] web = app` makes the display open it: `render.py --kiosk` (`[display] mode = fullscreen`) starts the full-screen window on
+`http://127.0.0.1:<port>/?app=1&ui=1.dw&kiosk=1` and `render.py --open` (a normal window) on `/?app=1`, with the token as before; with `web = classic`
+(the default) they open the classic page as always. The fallback page written to a file (`--file`, or a `[web] token_file` this user cannot read) is the classic one.
+
 ### Edit the layout
 
 `Edit layout` (the overview's footer, or Appearance in the settings) opens `/?app=1&edit=1`: the overview as a grid of **previews** (the card

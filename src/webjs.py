@@ -35,7 +35,7 @@ Everything a script looks up is a literal selector, id or attribute name listed 
 <main data-refresh="2" data-frag="/?view=overview&frag=1" data-rotate="20" data-paused="1">
     data-refresh   seconds between polls (1..3600); absent or 0: no polling
     data-frag      the URL to poll, must start with "/?" (the page's own URL plus frag=1); anything else is refused
-    data-rotate    kiosk only: seconds between one-screen scrolls (>= 3)
+    data-rotate    wall density with kiosk only: seconds between one-screen scrolls (>= 3); the page also reloads every ten minutes (the burn-in shift)
     data-paused    "1" when the page starts paused (REFRESH_JS keeps it in step when the toggle is used); the page then still has
                    data-refresh and data-frag, so that the toggle can resume it. Without data-refresh the toggle is left to the server
     data-edit      (main.grid[data-edit]) the layout editor page: REFRESH_JS does nothing there, BUILDER_JS starts
@@ -289,7 +289,10 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
   window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
   root.classList.toggle("paused", paused);
   if (!paused) plan(period);
-  if (spin >= 3000) setTimeout(turn, spin);
+  if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
+    setTimeout(turn, spin);
+    setTimeout(() => location.reload(), 600000 - Date.now() % 600000 + 2000);
+  }
 })();
 """
 

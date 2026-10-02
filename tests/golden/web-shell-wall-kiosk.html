@@ -1,6 +1,6 @@
 <!-- Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-A3Gpbgcp+f5SXdMWaQM002Hm/UpECkRmKlNK5v34mvs=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
-<html lang="en" data-theme="light" data-density="wall" class="z100 shift-1" data-prefs-src="url">
+<html lang="en" data-theme="auto" data-density="wall" class="z100 shift-1" data-prefs-src="url" data-kiosk>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -12,23 +12,23 @@
 <link rel="stylesheet" href="/s/app.92d1a557.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="9b27a458ee">
+<header class="topbar" data-card="__top" data-rev="7c35b1505a">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
-<a href="/?app=1&amp;ui=1.tl.dw" data-key="1" aria-current="page">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
-<a href="/?app=1&amp;ui=1.tl.dw&amp;view=map" data-key="2">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=map" data-key="2">
 <kbd>2</kbd>Map <span class="badge">7</span>
 </a>
-<a href="/?app=1&amp;ui=1.tl.dw&amp;view=cpu" data-key="3">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
-<a href="/?app=1&amp;ui=1.tl.dw&amp;view=health" data-key="4">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=health" data-key="4">
 <kbd>4</kbd>Health <span class="badge">
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;ui=1.tl.dw&amp;view=ai" data-key="5">
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=ai" data-key="5">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -36,7 +36,7 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;ui=1.tl.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+<a class="ib" href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
 <div class="kpiblock" data-card="__kpis" data-rev="439277b829">
@@ -96,8 +96,8 @@
 </div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
-<main class="grid" data-refresh="2" data-frag="/?app=1&amp;ui=1.tl.dw&amp;frag=1">
-<article class="card s2 st-err" data-card="attention" data-rev="2c77147fe3" id="c-attention" data-state="err">
+<main class="grid" data-rotate="15" data-refresh="2" data-frag="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;frag=1">
+<article class="card s2 st-err" data-card="attention" data-rev="eb022ed6c7" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -176,7 +176,7 @@
 <p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
 </p>
 <p class="more">
-<a href="/?app=1&amp;ui=1.tl.dw&amp;card=attention">… the whole card</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=attention">… the whole card</a>
 </p>
 </div>
 </article>
@@ -310,7 +310,7 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="firewall" data-rev="9a9fbc5a07" id="c-firewall" data-state="warn">
+<article class="card s1 st-warn" data-card="firewall" data-rev="4c9ea064f4" id="c-firewall" data-state="warn">
 <div class="ch">
 <h3>FIREWALL</h3>
 <span class="chip st-warn">! warn</span>
@@ -331,7 +331,7 @@
 <summary>… +1 more</summary>
 </details>
 <p class="more">
-<a href="/?app=1&amp;ui=1.tl.dw&amp;card=firewall">… the whole card</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=firewall">… the whole card</a>
 </p>
 </div>
 </article>
@@ -435,7 +435,7 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="webapps" data-rev="747bcdca6f" id="c-webapps" data-state="ok">
+<article class="card s1 st-ok" data-card="webapps" data-rev="8cbe0104d5" id="c-webapps" data-state="ok">
 <div class="ch">
 <h3>WEB APPS</h3>
 <span class="note">4 active · 1 down (expected)</span>
@@ -506,7 +506,7 @@
 <summary>… +2 more</summary>
 </details>
 <p class="more">
-<a href="/?app=1&amp;ui=1.tl.dw&amp;card=webapps">… the whole card</a>
+<a href="/?kiosk=1&amp;app=1&amp;ui=1.dw&amp;card=webapps">… the whole card</a>
 </p>
 </div>
 </article>
@@ -862,19 +862,7 @@
 </div>
 </article>
 </main>
-<footer class="foot">refresh every <a href="/?refresh=1&amp;app=1&amp;ui=1.tl.dw">−</a> 2s <a href="/?refresh=3&amp;app=1&amp;ui=1.tl.dw">+</a>
-<span class="dot">·</span>
-<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?app=1&amp;ui=1.tl.dw&amp;pause=1">pause</a>
-<span class="dot">·</span>
-<a href="/?app=1&amp;ui=1.tl.dw&amp;edit=1">Edit layout</a>
-<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1&amp;ui=1.tl.dw">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;ui=1.tl.dw">A+</a>
-<span class="dot">·</span>
-<span class="grp">theme: <a class="lnk" data-set data-theme="auto" href="/?set=ta&amp;back=app%3D1%26ui%3D1.tl.dw">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26ui%3D1.tl.dw">dark</a> <span class="lnk" aria-current="true">light</span> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26ui%3D1.tl.dw">high contrast</a>
-</span>
-<span class="dot">·</span>
-<span class="grp">density: <span class="lnk" aria-current="true">wall</span> <a class="lnk" data-set data-density="desk" href="/?set=dk&amp;back=app%3D1%26ui%3D1.tl.dw">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26ui%3D1.tl.dw">compact</a>
-</span>
-<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+<footer class="foot">refreshed every 2 s<span class="dot">·</span>read-only<span class="dot">·</span>Alt+F4 closes · F11 leaves full screen<span class="upd">updated 14:13:20</span>
 </footer>
 <section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
 <a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">

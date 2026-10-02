@@ -142,6 +142,11 @@ WEB_COLS = 186  # what a native card is built for: the widest layout, no cut in 
 WALL_ROWS = 3  # the wall density (a screen seen from afar) shows this many rows of a list; the rest is a "+N more"
 
 
+def wall_seconds(rotate):
+    """Seconds between two one-screen scrolls of the shell's wall page: rotate=N of the URL, else [dashboard] rotate_seconds."""
+    return rotate if isinstance(rotate, int) and not isinstance(rotate, bool) else int(render.CFG["rotate_seconds"])
+
+
 def wall_trim(body):
     """The body of a native card for the wall: a table or a list of more than WALL_ROWS rows is cut there and says how many it left out (a
     More that follows it is added to, so a card never says it twice). The same list when nothing is cut."""
@@ -424,6 +429,8 @@ def view_params(q):
     cols/rows: the layout grid (rows 0 = config); zoom: text size in % (0 = [display] zoom); fit=1: the text fills the window width (and the
     height, when rows is given), so a bigger zoom means fewer columns, re-laid out; full=1: every Details page;
     rotate=1: overview and Details pages take turns like on the console; kiosk=1: the footer says how to close the window;
+    rotate=N (3-600): the same, and on the shell's wall page (kiosk=1 with the wall density) the seconds between two one-screen scrolls
+    (default [dashboard] rotate_seconds);
     refresh: seconds between two reloads (1-10; default [dashboard] refresh_seconds).
     view=map: the MAP, whose state is all in the URL: open=/shut= the branches opened/closed by hand (row keys joined by '.'),
     all=1 everything open, sel= the row whose details are shown, only=1 problems only, pause=1 no reload.
@@ -449,7 +456,8 @@ def view_params(q):
     return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
             "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
             "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
-            "rotate": one("rotate") == "1", "kiosk": one("kiosk") == "1",
+            "rotate": True if one("rotate") == "1" else num("rotate") if 3 <= num("rotate") <= 600 else False,
+            "kiosk": one("kiosk") == "1",
             "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0,  # 0 = config
             "app": one("app") if one("app") in ("0", "1") else "", "ui": ui_oneshot(one("ui")),
             "card": one("card") if not view and one("card") in prefs.CARDS and not edit else "", "edit": edit,
@@ -681,9 +689,10 @@ class Server(http.server.ThreadingHTTPServer):
         # the page
         r_live = int(v.wait or r) if v.live and not pause else 0  # the meta refresh (inside <noscript>: with the scripts, they poll)
         tools = "".join(f'<span class="tl">{t}</span>' for t in v.tools)
-        attrs = ""
+        wall = bool(here["kiosk"]) and eff["density"] == "wall" and view != "settings" and not edit  # a screen on a wall: it scrolls by itself
+        attrs = f' data-rotate="{wall_seconds(here["rotate"])}"' if wall else ""
         if (v.live or pause) and view != "settings" and not v.script:  # a graph reloads itself with its own script; a paused page can be resumed by it
-            attrs = f' data-refresh="{int(v.wait or r)}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
+            attrs += f' data-refresh="{int(v.wait or r)}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
         if pause:
             attrs += ' data-paused="1"'
         if edit:
@@ -700,7 +709,7 @@ class Server(http.server.ThreadingHTTPServer):
             else:
                 blocks = ""
             main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>{inner}</main>'
-        groups = ["refresh every " + self.every(link, r) if view != "settings" and not edit else "",
+        groups = ["refresh every " + self.every(link, r) if view != "settings" and not edit and not wall else "",
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
                   + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if view != "settings" and not edit else "",
                   link("Done", edit=False) if edit else link("Edit layout", edit=True) if view == "" and not card else "",
@@ -708,6 +717,8 @@ class Server(http.server.ThreadingHTTPServer):
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
                   "read-only · AI actions" if render.CFG["features"].get("ai", True) and advisor.web_actions_on(render.CFG) else "read-only"]
+        if wall:  # nobody clicks on a wall: no pause, no layout editor, no size, theme or density links; the way out is the keyboard
+            groups = [f"refreshed every {r} s", "read-only"]
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
         scope = view if view in ("map", "cpu", "health", "ai") else "global" if view == "settings" else "overview"
