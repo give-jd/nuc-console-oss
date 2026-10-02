@@ -116,7 +116,8 @@ class DisplayUrl(unittest.TestCase):
                     mock.patch.dict(render.CFG["web"], {"port": 8787, "token_file": ""}), \
                     mock.patch.object(render, "web_up", lambda port, wait: True), mock.patch.object(render, "find_browser", lambda *a: "/opt/browser"), \
                     mock.patch.object(render, "launch", started.append), mock.patch.object(render, "user_dir", lambda: d), \
-                    mock.patch.object(render, "kiosk_grid", lambda: (200, 64)):
+                    mock.patch.object(render, "kiosk_grid", lambda: (200, 64)), \
+                    mock.patch.object(render.nuc_config, "log_to", lambda path: None):  # --log would send this process's stdout and stderr to the file
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
             self.assertTrue(started[0][1].startswith(want), (mode, started[0][1]))
 
