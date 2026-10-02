@@ -1,5 +1,5 @@
 [Unit]
-Description=nuc-console read-only web view (does nothing unless [web] enabled = yes in config.ini)
+Description=nuc-console web view: a read-only dashboard, and the AI page's buttons (does nothing unless [web] enabled = yes in config.ini)
 After=nuc-console-collector.service
 
 [Service]
@@ -11,6 +11,8 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
+# the one place it may write: the AI folder (docs/AI.md), where the AI page downloads the local model and keeps web.json. - : not an error while it is not there
+ReadWritePaths=-/var/lib/nuc-console/ai
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
@@ -24,8 +26,10 @@ ProtectClock=yes
 ProtectHostname=yes
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes
-TasksMax=64
-MemoryMax=256M
+# The model server the AI page starts is a child of this service and lives in its cgroup: room for its threads, and for the model, which the page
+# refuses to start when it would take more than 85 % of the RAM (the cap is the same share of the machine, not a fixed size).
+TasksMax=512
+MemoryMax=85%
 
 [Install]
 WantedBy=multi-user.target

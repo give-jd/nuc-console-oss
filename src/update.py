@@ -9,8 +9,9 @@ latest release (curl, Invoke-RestMethod: HTTPS only), save the answer and call t
 
   * the installed version is VERSION in nuc_config.py of --app (default: the folder of this file);
   * versions are compared as numbers (1.10.0 is newer than 1.9.9), nothing happens when the release is not newer;
-  * the archive for this OS/arch (and SHA256SUMS) go to the cache: a file whose SHA-256 is already right is not downloaded
-    again; the archive is checked against SHA256SUMS (a mismatch deletes it and stops); `gh attestation verify` also runs when
+  * the archive for this OS and processor (and SHA256SUMS) go to the cache: a file whose SHA-256 is already right is not downloaded
+    again (Linux and macOS: nuc-console-X.Y.Z-linux-x86_64, -linux-arm64, -macos-arm64, -macos-x86_64 .tar.gz; Windows: -windows-x64,
+    -windows-arm64 .zip; each carries the Python it runs with); the archive is checked against SHA256SUMS (a mismatch deletes it and stops); `gh attestation verify` also runs when
     gh is installed and logged in (a failure stops; without gh, or without a login, it says that provenance was not checked);
   * the archive is extracted into a fresh folder of the cache (members that could escape it are refused), and its VERSION must be
     the release's;
@@ -25,6 +26,7 @@ import hmac
 import json
 import os
 import platform
+import posixpath
 import re
 import shutil
 import stat
@@ -42,7 +44,7 @@ REPO = "give-jd/nuc-console-oss"
 API = "https://api.github.com/repos/%s/releases/latest" % REPO
 SUMS = "SHA256SUMS"
 WINDOWS = sys.platform == "win32"
-MAX_ARCHIVE = 256 << 20  # bytes: the biggest archive that is downloaded or unpacked (the Windows ones carry a Python, ~25 MB)
+MAX_ARCHIVE = 256 << 20  # bytes: the biggest archive that is downloaded or unpacked (every archive carries a Python: 20 to 40 MB)
 OWN_DIRS = ("src", "bin", "docs", "config", "scripts", "systemd", "launchd")  # folders that belong wholly to a release
 KEEP = ("data", "cache")  # portable folder: yours, never touched
 STRICT = re.compile(r"\d+\.\d+\.\d+")
@@ -115,14 +117,22 @@ def https_only(url):
     return url
 
 
+OS_LABEL = {"linux": "Linux", "macos": "macOS", "windows": "Windows"}
+# the processor part of the archive name, per system: tools/build_release.py (archive_names) makes these names
+ARCH_SUFFIX = {"linux": {"x64": "x86_64", "arm64": "arm64"}, "macos": {"x64": "x86_64", "arm64": "arm64"},
+               "windows": {"x64": "x64", "arm64": "arm64"}}
+
+
 def archive_name(version, os_name, arch):
-    """The archive of this system, as tools/build_release.py names it: Linux and macOS one each, Windows per processor."""
+    """The archive of this system, as tools/build_release.py names it: per system and processor, e.g.
+    nuc-console-1.5.0-linux-x86_64.tar.gz, -linux-arm64.tar.gz, -macos-arm64.tar.gz, -macos-x86_64.tar.gz, -windows-x64.zip,
+    -windows-arm64.zip. A processor there is no archive for (32-bit x86 or ARM, RISC-V, ...) is refused with the list of what exists."""
     os_name, arch = norm_os(os_name), norm_arch(arch)
-    if os_name == "windows":
-        if arch not in ("x64", "arm64"):
-            raise UpdateError("no Windows build for the processor %r (64-bit x86 or ARM only)" % arch)
-        return "nuc-console-%s-windows-%s.zip" % (version, arch)
-    return "nuc-console-%s-%s.tar.gz" % (version, os_name)
+    suffix = ARCH_SUFFIX[os_name].get(arch)
+    if suffix is None:
+        raise UpdateError("there is no nuc-console archive for %s on the processor %r: only 64-bit x86 (%s) and 64-bit ARM (%s) have one"
+                          % (OS_LABEL[os_name], arch, ARCH_SUFFIX[os_name]["x64"], ARCH_SUFFIX[os_name]["arm64"]))
+    return "nuc-console-%s-%s-%s.%s" % (version, os_name, suffix, "zip" if os_name == "windows" else "tar.gz")
 
 
 def release_version(release):
@@ -137,16 +147,23 @@ def release_version(release):
 
 
 def pick_asset(release, os_name, arch):
-    """-> {"version", "name", "url", "sums_url"} of the archive for this OS/arch in a GitHub release (JSON of the API)."""
+    """-> {"version", "name", "url", "sums_url"} of the archive for this OS and processor in a GitHub release (JSON of the API).
+    The processor decides: a release that has no archive for it is refused, and the message says which ones it does have."""
     version = release_version(release)
     name = archive_name(version, os_name, arch)
-    found = {}
+    found, names = {}, []
     for a in release.get("assets") or []:
-        if isinstance(a, dict) and a.get("name") in (name, SUMS) and isinstance(a.get("browser_download_url"), str):
-            found[a["name"]] = a["browser_download_url"]
-    for needed in (name, SUMS):
-        if needed not in found:
-            raise UpdateError("release %s has no %s (still being built, or not for this system)" % (release["tag_name"], needed))
+        if isinstance(a, dict) and isinstance(a.get("name"), str):
+            names.append(a["name"])
+            if a["name"] in (name, SUMS) and isinstance(a.get("browser_download_url"), str):
+                found[a["name"]] = a["browser_download_url"]
+    if name not in found:
+        mine = sorted(n for n in names if n.startswith("nuc-console-%s-%s-" % (version, norm_os(os_name))))
+        raise UpdateError("release %s has no %s (the archive for %s on %s)%s" % (
+            release["tag_name"], name, OS_LABEL[norm_os(os_name)], norm_arch(arch),
+            ": for this system it has " + ", ".join(mine) if mine else " (still being built, or not for this system)"))
+    if SUMS not in found:
+        raise UpdateError("release %s has no %s (still being built)" % (release["tag_name"], SUMS))
     if any(urlsplit(https_only(found[n])).hostname != "github.com" for n in (name, SUMS)):
         raise UpdateError("the assets are not on github.com: refused")
     return {"version": version, "name": name, "url": found[name], "sums_url": found[SUMS]}
@@ -241,7 +258,7 @@ def prepare_cache(cache):
 def prune_cache(cache, keep):
     """The archives of older releases are not needed any more (the Python zips and other files of the cache are not ours)."""
     for n in os.listdir(cache):
-        if n != keep and re.fullmatch(r"nuc-console-\d+\.\d+\.\d+-(linux|macos|windows-\w+)\.(tar\.gz|zip)(\.part)?", n):
+        if n != keep and re.fullmatch(r"nuc-console-\d+\.\d+\.\d+-(linux|macos|windows)(-\w+)?\.(tar\.gz|zip)(\.part)?", n):
             os.remove(os.path.join(cache, n))
 
 
@@ -303,9 +320,20 @@ def _safe_name(name):
     return [p for p in parts if p not in ("", ".")] or [""]
 
 
+def _link_inside(name, target):
+    """May the symbolic link `name` of an archive point at `target`? Only a relative path that stays inside the archive's top
+    folder (the Python of the Linux and macOS archives has links such as python/bin/python3 -> python3.13)."""
+    if not target or "\0" in target or target.startswith(("/", "\\")) or re.match(r"[A-Za-z]:", target):
+        return False
+    top = _safe_name(name)[0]
+    joined = posixpath.normpath(posixpath.join(posixpath.dirname("/".join(_safe_name(name))), target.replace("\\", "/")))
+    return joined.startswith(top + "/")
+
+
 def extract(archive, dest):
     """Unpacks a .tar.gz or .zip of the release into dest -> the path of its one top folder (nuc-console-X.Y.Z).
-    Absolute paths, '..', links and devices are refused; so is an archive that holds more than MAX_ARCHIVE bytes."""
+    Absolute paths, '..', devices and hard links are refused, and so is a symbolic link that is absolute or leaves the top folder;
+    so is an archive that holds more than MAX_ARCHIVE bytes."""
     os.makedirs(dest, exist_ok=True)
     tops, total = set(), 0
     if archive.endswith(".zip"):
@@ -320,11 +348,15 @@ def extract(archive, dest):
         with tarfile.open(archive, "r:gz") as t:
             members = t.getmembers()
             for m in members:
-                if not (m.isfile() or m.isdir()):
-                    raise UpdateError("the archive holds something that is not a file or a folder: %r" % m.name)
+                if m.issym():
+                    if not _link_inside(m.name, m.linkname):
+                        raise UpdateError("the archive holds a link that leaves its folder: %r -> %r" % (m.name, m.linkname))
+                elif not (m.isfile() or m.isdir()):
+                    raise UpdateError("the archive holds something that is not a file, a folder or a link inside it: %r" % m.name)
                 tops.add(_safe_name(m.name)[0])
                 total += m.size
-                m.mode = 0o755 if m.isdir() or m.mode & 0o111 else 0o644  # no setuid, nothing writable by others
+                if not m.issym():
+                    m.mode = 0o755 if m.isdir() or m.mode & 0o111 else 0o644  # no setuid, nothing writable by others
                 m.uid = m.gid = 0
                 m.uname = m.gname = ""
             if total > MAX_ARCHIVE * 4:
@@ -344,52 +376,78 @@ def _same(a, b):
         return False
 
 
+def _release_entries(new):
+    """-> [(path with /, absolute path, link target or None)] of every file and every symbolic link (also one that points to a
+    folder: os.walk lists it among the folders and does not enter it) of the extracted release `new`."""
+    out = []
+    for dirpath, dirs, files in os.walk(new):
+        for name in files + [d for d in dirs if os.path.islink(os.path.join(dirpath, d))]:
+            full = os.path.join(dirpath, name)
+            out.append((os.path.relpath(full, new).replace(os.sep, "/"), full, os.readlink(full) if os.path.islink(full) else None))
+    return out
+
+
+def _unchanged(src, dst, link):
+    if link is not None:
+        return os.path.islink(dst) and os.readlink(dst) == link
+    return os.path.isfile(dst) and not os.path.islink(dst) and _same(src, dst)
+
+
 def apply_portable(new, root, say=print):
     """Replaces the code of the portable folder `root` with the release extracted in `new`; data/ and cache/ (yours) stay.
     Two steps, so that a full disk or a locked file stops it before anything is replaced: every new or changed file is first
     written beside its target (.new), then all are renamed over their targets (a script that is running right now is never
-    half-written); what the old release had in src/, bin/, docs/ ... and the new one dropped is deleted. -> files changed."""
+    half-written); what the old release had in src/, bin/, docs/ ... and the new one dropped is deleted. Symbolic links (the
+    ones of the Python of a Linux or macOS archive) are made again as links, and the times of the files are kept (the .pyc files of
+    a standard library may record the time of their source). python/ belongs to the release too when it ships python/bin/python3
+    (the Python of a Linux or macOS archive): a file of the old Python that the new one lacks is deleted. -> files changed."""
     shipped, todo = set(), []
-    for dirpath, _dirs, files in os.walk(new):
-        for fn in files:
-            src = os.path.join(dirpath, fn)
-            rel = os.path.relpath(src, new).replace(os.sep, "/")
-            if rel.split("/")[0] in KEEP:
-                continue
-            shipped.add(rel)
-            dst = os.path.join(root, *rel.split("/"))
-            if not (os.path.isfile(dst) and _same(src, dst)):
-                todo.append((src, dst))
+    for rel, src, link in _release_entries(new):
+        if rel.split("/")[0] in KEEP:
+            continue
+        shipped.add(rel)
+        dst = os.path.join(root, *rel.split("/"))
+        if not _unchanged(src, dst, link):
+            todo.append((src, dst, link))
     written = []
     try:
-        for src, dst in todo:
+        for src, dst, link in todo:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             tmp = dst + ".new"
             written.append(tmp)
-            shutil.copyfile(src, tmp)
-            shutil.copymode(src, tmp)
+            if os.path.lexists(tmp):
+                os.remove(tmp)
+            if link is not None:
+                os.symlink(link, tmp)
+            else:
+                shutil.copyfile(src, tmp)
+                shutil.copystat(src, tmp)
     except BaseException:
         for tmp in written:
-            if os.path.exists(tmp):
+            if os.path.lexists(tmp):
                 os.remove(tmp)
         raise
-    for (_src, dst), tmp in zip(todo, written):
+    for (_src, dst, _link), tmp in zip(todo, written):
+        if os.path.isdir(dst) and not os.path.islink(dst):  # a folder of the old release where the new one has a file or a link
+            shutil.rmtree(dst)
         os.replace(tmp, dst)
     changed = len(todo)
+    own = OWN_DIRS + (("python",) if "python/bin/python3" in shipped else ())
     stale = []
-    for top in OWN_DIRS:
-        for dirpath, _dirs, files in os.walk(os.path.join(root, top)):
-            stale += [os.path.join(dirpath, f) for f in files
+    for top in own:
+        for dirpath, dirs, files in os.walk(os.path.join(root, top)):
+            names = files + [d for d in dirs if os.path.islink(os.path.join(dirpath, d))]
+            stale += [os.path.join(dirpath, f) for f in names
                       if os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, "/") not in shipped]
     pydir = os.path.join(root, "python")  # the Windows archive's embeddable Python: a new zip replaces the old one
-    if os.path.isdir(pydir):
+    if os.path.isdir(pydir) and "python" not in own:
         stale += [os.path.join(pydir, f) for f in os.listdir(pydir)
                   if re.fullmatch(r"python-[\d.]+-embed-\w+\.zip", f) and "python/" + f not in shipped]
     for path in stale:
         os.remove(path)
-    for top in OWN_DIRS:  # folders the new release does not have any more
+    for top in own:  # folders the new release does not have any more
         for dirpath, _dirs, _files in os.walk(os.path.join(root, top), topdown=False):
-            if not os.listdir(dirpath):
+            if not os.path.islink(dirpath) and not os.listdir(dirpath):
                 os.rmdir(dirpath)
     say("%d files updated, %d removed in %s (data/ and cache/ untouched)" % (changed, len(stale), root))
     return changed

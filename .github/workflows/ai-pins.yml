@@ -5,12 +5,22 @@ name: ai-pins
 # and paste; shows the runtime's assets, hash and options; and, once everything is pinned, tries it for real: installs the smallest
 # model with `nuc-console-ai setup`, starts `serve`, asks it a question and checks `status`. It never changes the repository and
 # never fails a pull request (the unit tests do that).
+#
+# The job `python-pins` does the same for the Python that the Linux and macOS release archives carry (python-build-standalone,
+# the install_only_stripped tarballs of the four targets): it reads the latest release of astral-sh/python-build-standalone, lists
+# the files of the newest stable 3.13.x (3.12.x if 3.13 is missing) with their SHA-256 (the release's SHA256SUMS, checked against the
+# asset digest) and size, prints them in the log and in the job summary as the JSON for tools/python-pins.json, downloads the four
+# tarballs to check that bytes and numbers agree and that tools/build_release.py can read them, and runs the Linux x86-64 one. A
+# maintainer pastes the JSON into tools/python-pins.json (CONTRIBUTING.md, Releasing); until then the release workflow stops. Once
+# pinned, the same job checks the pinned values against the release that holds them.
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - src/aisetup.py
       - src/advisor.py
+      - tools/python_pins.py
+      - tools/python-pins.json
       - .github/workflows/ai-pins.yml
 
 permissions:
@@ -41,6 +51,30 @@ jobs:
         if: always()
         run: |
           { echo '```'; cat pins.txt 2>/dev/null || echo "no output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  python-pins:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # only for the API rate limit; sent to api.github.com and nowhere else
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: the Python to pin (python-build-standalone), its SHA-256 and size; the pins in the repository, checked
+        continue-on-error: true
+        run: python3 tools/python_pins.py --json "$RUNNER_TEMP/python-pins.json" --download "$RUNNER_TEMP/standalone"   # the table and the JSON also go to the job summary
+      - name: the Linux x86-64 Python runs from where it is unpacked
+        continue-on-error: true
+        run: |
+          set -eu
+          f=$(ls "$RUNNER_TEMP"/standalone/*x86_64-unknown-linux-gnu-install_only_stripped.tar.gz)
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar xzf "$f" -C "$RUNNER_TEMP/unpacked"
+          ls -l "$RUNNER_TEMP/unpacked/python/bin" | head -40
+          find "$RUNNER_TEMP/unpacked/python" -type l | head -20
+          "$RUNNER_TEMP/unpacked/python/bin/python3" -c 'import sys, ssl, sqlite3, json, ctypes, http.server; print(sys.version); print(sys.prefix)'
+          { echo; echo '```'; "$RUNNER_TEMP/unpacked/python/bin/python3" -V; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   for-real:
     runs-on: ubuntu-latest

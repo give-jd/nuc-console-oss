@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""nuc-console web view: the dashboard screen in a browser. READ-ONLY, opt-in, stdlib only.
+"""nuc-console web view: the dashboard screen in a browser. Read-only, opt-in, stdlib only; the AI page has buttons.
 
 Off unless `[web] enabled = yes` in config.ini. Runs as the unprivileged user, reads the same state as the tty
 renderer and serves one HTML page (no JavaScript, except the one fixed script of the MAP's graph view, pinned by its hash
-in the Content-Security-Policy). It has no write path: GET only, no forms, no API.
+in the Content-Security-Policy). GET only, except the forms of the AI page (`/?view=ai`): POST /ai/<action>, form-encoded, answered
+with a redirect (src/aiweb.py does the work in the background). Those forms are guarded: the same access as viewing (loopback, or the
+token), a CSRF token, Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` to lock.
 Binding to anything but loopback requires a token (fail closed). See docs/WEB.md.
 """
 import base64
@@ -15,6 +17,8 @@ import ipaddress
 import math
 import os
 import re
+import secrets
+import signal
 import socket
 import sys
 import threading
@@ -22,6 +26,9 @@ import time
 from collections import OrderedDict
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import advisor
+import aiweb
+import aisetup
 import graph
 import graphjs
 import graphlayout
@@ -34,6 +41,10 @@ TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
 CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+AI_CSP = CSP.replace("form-action 'none'", "form-action 'self'")  # the AI page only: its forms post to this server and nowhere else; still no script
+AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise")  # POST /ai/<action>
+AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
+POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), like a browser's: few values, bounded cache
 CACHE_MAX = 64       # rendered pages kept: map URLs have unbounded combinations, the least recently used goes first
 CACHE_CHARS = 32 * 2 ** 20  # and at most this much HTML: a map page that repeats many real row keys weighs megabytes
@@ -78,8 +89,10 @@ GRAPH_CSP = script_csp(GRAPH_SCRIPT) if GRAPH_SCRIPT else CSP  # computed once: 
 
 
 class Page(str):
-    """A rendered page and the Content-Security-Policy it is served with (only the graph page carries a script)."""
+    """A rendered page and what it is served with: the Content-Security-Policy (the graph page carries a script, the AI page may post a
+    form) and the Referrer-Policy (the AI page sends its own address to itself, so that the browser's Origin on a post is the real one)."""
     csp = CSP
+    referrer = "no-referrer"
 
 
 def is_loopback(bind):
@@ -115,6 +128,20 @@ def check_bind(bind, token):
                          "and publish with `tailscale serve`")
 
 
+def same_host(value, host):
+    """An Origin or a Referer ('http://host:port[/path]'): is that the host:port the request was addressed to? 'null', another port, another
+    name, a user name in front, anything that is not http(s): no."""
+    try:
+        u = urlsplit(value or "")
+    except ValueError:
+        return False
+    return u.scheme in ("http", "https") and bool(u.netloc) and u.netloc.lower() == (host or "").strip().lower()
+
+
+class BadRequest(ValueError):
+    """A form that is not one this page makes (an id the catalog has not, a number that is not one): 400."""
+
+
 def host_ok(host_header, allowed):
     """DNS-rebinding guard: only expected Host names are served (a rebinding page arrives with the attacker's name)."""
     h = (host_header or "").strip().lower()
@@ -145,11 +172,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):  # no access log: URLs may carry a token
         pass
 
-    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP):
+    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP, referrer="no-referrer"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        for k, v in (("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"),
+        for k, v in (("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", referrer),
                      ("Content-Security-Policy", csp), ("X-Frame-Options", "DENY")) + tuple(extra):
             self.send_header(k, v)
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")  # no other site can embed or read this
@@ -174,6 +201,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         srv = self.server
         if u.path == "/healthz":
             return self._send(200, b"ok\n")
+        if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS:
+            return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         if u.path != "/":
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
@@ -186,11 +215,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(302, extra=(("Location", view_url(view_params(q))), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
         page = srv.page(**view_params(q))
-        self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP))
+        self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"))
+
+    def do_POST(self):  # noqa: N802 - the forms of the AI page, and nothing else
+        u = urlsplit(self.path)
+        if not u.path.startswith("/ai/") or u.query:
+            return self._no()
+        act, srv = u.path[4:], self.server
+        if act not in AI_ACTIONS:
+            return self._send(404, b"not found\n")
+        # the same access as viewing: no token = loopback and a known Host name; a token = that token (constant time)
+        if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
+            return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
+        if srv.token and not hmac.compare_digest(self._token_from({}).encode(), srv.token.encode()):
+            return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
+        if not render.CFG["features"].get("ai", True):
+            return self._send(404, b"the AI screen is off ([features] ai = no)\n")
+        if not advisor.web_actions_on(render.CFG):
+            return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
+        # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None and site not in ("same-origin", "none"):
+            return self._send(403, b"a form of another site is refused\n")
+        for name in ("Origin", "Referer"):
+            if self.headers.get(name) is not None and not same_host(self.headers.get(name), self.headers.get("Host")):
+                return self._send(403, b"a form of another site is refused\n")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/x-www-form-urlencoded":
+            return self._send(415, b"a form is application/x-www-form-urlencoded\n")
+        n = self.headers.get("Content-Length")
+        if self.headers.get("Transfer-Encoding") or n is None or not NUM.fullmatch(n):
+            return self._send(400, b"a form has a Content-Length\n")
+        if int(n) > POST_MAX:
+            return self._send(413, b"too big\n")
+        body = self.rfile.read(int(n))
+        try:
+            form = parse_qs(body.decode("utf-8"), keep_blank_values=True, max_num_fields=20)
+        except (ValueError, UnicodeDecodeError):
+            return self._send(400, b"not a form\n")
+        if not hmac.compare_digest(((form.get("csrf") or [""])[0]).encode(), srv.csrf.encode()):
+            return self._send(403, b"the form is not from this page (reload the page and try again)\n")
+        try:
+            where = srv.ai_action(act, form)
+        except BadRequest as e:
+            return self._send(400, ("%s\n" % e).encode())
+        self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
 
     def _no(self):
         self._send(405, b"read-only\n", extra=(("Allow", "GET, HEAD"),))
-    do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _no
+    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _no
     do_HEAD = do_GET  # the same checks and headers as GET: _send writes no body for HEAD
 
 
@@ -209,7 +281,8 @@ def view_params(q):
     no such process).
     view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
     report does not have), pause=1 no reload.
-    view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload."""
+    view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
+    confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
@@ -229,7 +302,8 @@ def view_params(q):
             "local": int(one("local")) if one("local") in ("1", "2") else 0,
             "z": gzoom(num("z")),
             "sort": one("sort") if view == "cpu" and one("sort") in render.CPU_SORTS[1:] else "",
-            **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {})}
+            **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
+            **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else ""} if view == "ai" else {})}
 
 
 HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh")  # the size and refresh parameters every view has
@@ -277,9 +351,11 @@ class Server(http.server.ThreadingHTTPServer):
         self.cfg, self.token, self.zoom = cfg, token, zoom
         self.allowed = {"localhost", "127.0.0.1", "::1", addr[0].lower(), socket.gethostname().lower()} | set(cfg.get("allowed_hosts", []))
         self.slots = threading.BoundedSemaphore(MAX_CONN)
+        self.csrf = secrets.token_urlsafe(24)  # in every form of the AI page; a page of another site cannot read it
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
         render.DEMO = demo
+        aiweb.configure(demo=demo)  # the engine of the AI page: the real one, or the demo's (simulated); render.ai_engine() tells it where the settings are
         self.smp = render.Sampler()
         self.cpu_feed = render.CpuFeed(settle=0.4)  # the CPU page's samplers (processes cost CPU): made at the first request, one for all viewers
         self.smp.sample()  # starts the background reads (sessions, disks): the first page must not say "unavailable"
@@ -339,11 +415,16 @@ class Server(http.server.ThreadingHTTPServer):
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
             return self.cached(key, r / 2, lambda: self.health_page(here, days, sel, pause, zoom, r))
-        if view == "ai":  # the selected model is checked here too: the cache key holds only ids the catalog has
-            ids = {m["id"] for m in render.ai_rows(render.ai_data()["cat"])} if render.CFG["features"].get("ai", True) else set()  # one catalog per AI_TTL
+        if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
+            rows = render.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
+            ids = {m["id"] for m in rows}
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
-            key = ("ai", zoom, r, sel, pause) + tuple(here.items())
-            return self.cached(key, r / 2, lambda: self.ai_page(here, sel, pause, zoom, r))
+            confirm = state.get("confirm", "")
+            if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
+                    or confirm == "delete-all" and not any(m["installed"] for m in rows):
+                confirm = ""
+            key = ("ai", zoom, r, sel, pause, confirm, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
+            return self.cached(key, min(r / 2, 1.0), lambda: self.ai_page(here, sel, pause, confirm, zoom, r))  # a job's progress moves: never older than a second
         return self.cached((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda: self.dashboard(here, zoom, r))
 
     def grid(self, here, zoom):
@@ -551,15 +632,22 @@ class Server(http.server.ThreadingHTTPServer):
             bar.append(html.escape(render.KIOSK_HINT))
         return doc(body, bar, refresh=not pause)
 
-    def ai_page(self, here, sel, pause, zoom, r):
-        """The AI page: what this machine can run and which model to choose. The hardware and the status are the console's lines; the models are
-        a table of links (sel=<id> shows the details and the commands beside or under it). Read-only like every page: the commands are
-        shown, never run. The URL holds the whole view, so the reload keeps it."""
+    def ai_page(self, here, sel, pause, confirm, zoom, r):
+        """The AI page: the AI switch and what it is doing at the top, the chat under it (the model answers as soon as the server does), then what
+        this machine can run: the models as a table (a button per model: use it), their details, the hardware and the status. Forms post to /ai/*
+        (see do_POST); the page reloads by itself only while something runs, so that a question being typed is not lost. The URL holds the whole
+        view, so a reload keeps it."""
+        eng = render.ai_engine()
+        snap = eng.snapshot()
+        live = snap["busy"] or snap["locked"]   # idle with forms: no reload (a locked page has none: it reloads as the others do)
+
         def doc(body, foot, refresh=True):
-            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
-                    + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
-                    + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
+            meta = f'<meta http-equiv="refresh" content="{2 if snap["busy"] else r}">' if refresh and live else ""
+            page = Page('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                        + meta + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
+                        + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
+            page.csp, page.referrer = (CSP, "no-referrer") if snap["locked"] else (AI_CSP, "same-origin")
+            return page
         dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
         if not render.CFG["features"].get("ai", True):
             return doc("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", [dash, "read-only"], refresh=False)
@@ -568,17 +656,74 @@ class Server(http.server.ThreadingHTTPServer):
         try:
             data, pb = render.ai_state(self.smp)
             rows = render.ai_rows(data["cat"])
-            body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname())
+            ui = AiUi(snap, eng.choice() if not snap["locked"] else None, data["cat"], rows, sel, confirm, self.csrf, urlsplit(page_url(ahere)).query, ahere)
+            body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname(), ui)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
             body = "<pre>render error (see the service log)</pre>"
         anchor = f"#m-{next((i for i, m in enumerate(rows) if m['id'] == sel), 0)}" if sel else ""  # the footer's links keep the selected model in sight
         link = lambda text, **kw: f'<a href="{html.escape(page_url(ahere, **kw) + anchor)}">{text}</a>'  # noqa: E731
-        bar = [dash, link("compact", cols=100), link("wide", cols=200), "paused " + link("live", pause=False) if pause else link("pause", pause=True),
-               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
+        if snap["locked"]:  # the page as it was: read-only, and it reloads like the others
+            bar = [dash, link("compact", cols=100), link("wide", cols=200), "paused " + link("live", pause=False) if pause else link("pause", pause=True),
+                   "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only (locked by config.ini)", time.strftime("%H:%M:%S")]
+        else:  # forms: no reload while idle, so that a question being typed is not lost; it reloads by itself while a job or an answer runs
+            bar = [dash, link("compact", cols=100), link("wide", cols=200), "text " + self.sizes(link, zoom),
+                   "paused " + link("live", pause=False) if pause else "reloads by itself while something runs · " + link("reload"), time.strftime("%H:%M:%S")]
         if here["kiosk"]:
             bar.append(html.escape(render.KIOSK_HINT))
         return doc(body, bar, refresh=not pause)
+
+    def ai_action(self, act, form):
+        """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).
+        A model id is checked against the engine's catalog, a number against its list, a text is cleaned and cut by the engine; nothing of the
+        request reaches a path or a command line."""
+        eng = render.ai_engine()
+        one = lambda k, n=200: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        model, yes = one("model", 80), one("confirm", 8) == "yes"
+        if model and model not in {m["id"] for m in eng.models}:
+            raise BadRequest("unknown model")
+        sel = confirm = anchor = ""
+        if act == "on":  # the model chosen before; the recommended one only after the page has asked
+            ch = eng.choice()
+            if yes and model:
+                eng.turn_on(model)
+                sel = model
+            elif ch["model"] is None and ch["recommended"]:
+                confirm, sel = "on", ch["recommended"]
+            else:
+                eng.turn_on()
+        elif act == "off":
+            eng.turn_off()
+        elif act == "cancel":
+            eng.cancel()
+        elif act in ("use", "delete"):
+            if not model:
+                raise BadRequest("a model is needed")
+            sel = model
+            if act == "use":
+                eng.use_model(model)
+            elif yes:
+                eng.delete(model)
+            else:
+                confirm = "delete"
+        elif act == "delete-all":
+            if yes:
+                eng.delete_all()
+            else:
+                confirm = "delete-all"
+        elif act == "ask":
+            eng.ask(one("q", 600))
+            anchor = "#ask"
+        elif act == "advise":
+            if not NUM.fullmatch(one("days", 3)):
+                raise BadRequest("a number of days is needed")
+            eng.advise(int(one("days", 3)))
+            anchor = "#ask"
+        with self.lock:
+            self.cache.clear()  # the page that comes next shows what this did
+        back = view_params(parse_qs(one("back", 400)))
+        here = {k: back[k] for k in ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh")}
+        return page_url(dict({"view": "ai", "sel": sel or (back.get("sel") if back.get("view") == "ai" else ""), "confirm": confirm}, **here)) + anchor
 
 
 def sel_index(data, sel):
@@ -599,8 +744,47 @@ def health_extra_html(report):
         return ""
 
 
-def ai_row_html(r, i, sel, here):
-    """One model of the table: its marks, its name (a link: the details), the columns of the console, the pill with its symbol."""
+class AiUi(object):
+    """What the AI page needs to draw its forms: the engine's snapshot and choice (None: locked, no forms), the catalog, the rows, the selected model, the
+    question asked first, the CSRF token, the view to come back to. Every form is a button that posts to /ai/<action>."""
+
+    def __init__(self, snap, choice, cat, rows, sel, confirm, csrf, back, here):
+        self.snap, self.ch, self.cat, self.rows, self.sel, self.confirm, self.csrf, self.back, self.here = snap, choice, cat or {}, rows, sel, confirm, csrf, back, here
+        self.locked = snap["locked"]
+        self.working = bool(snap["job"] and snap["job"]["state"] == "running")  # a job runs: its buttons wait (the engine would say "busy")
+
+    def form(self, action, label, fields=(), cls="", title="", disabled=False):
+        """One button: a form that posts to /ai/<action> with the CSRF token and the view to come back to (ids and numbers only in `fields`)."""
+        if self.locked:
+            return ""
+        esc = lambda v: html.escape(str(v), quote=True)  # noqa: E731
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v)}">' for k, v in (("csrf", self.csrf), ("back", self.back)) + tuple(fields))
+        return (f'<form class="f" method="post" action="/ai/{action}">{hidden}<button class="bt {cls}" type="submit"'
+                + (f' title="{esc(title)}"' if title else "") + (" disabled" if disabled else "") + f'>{html.escape(label)}</button></form>')
+
+    def row(self, i):
+        return next((r for r in self.rows if r["id"] == i), None)
+
+
+def ai_use_cell(r, ui):
+    """The button that does everything for a model (use this model), or the reason there is none."""
+    esc = html.escape
+    if not r["pinned"]:
+        return '<span class="d">not pinned yet</span>'
+    if r["verdict"] == "no":
+        return f'<span class="d" title="{esc(r["why"], quote=True)}">too big</span>'
+    if r["active"] and ui.snap["state"][0] in ("running", "on"):
+        return '<span class="g">● in use</span>'
+    return ui.form("use", "use this model", (("model", r["id"]),), "use", "download it if needed, start it, turn AI on", ui.working)
+
+
+def ai_row_action(r, ui):
+    """The last cell of a model's row."""
+    return "" if ui is None or ui.locked else f'<td class="ac">{ai_use_cell(r, ui)}</td>'
+
+
+def ai_row_html(r, i, sel, here, ui=None):
+    """One model of the table: its marks, its name (a link: the details), the columns of the console, the pill with its symbol, and the button."""
     esc, cur = html.escape, r["id"] == sel
     label, _, cls, _ = render.AI_VERDICT.get(r["verdict"], render.AI_UNKNOWN)
     marks = "".join(f'<span class="{col}" title="{what}">{sym}</span>' if on else " "
@@ -609,11 +793,13 @@ def ai_row_html(r, i, sel, here):
     return (f'<tr{on} id="m-{i}"><td class="mk">{marks}</td>'
             f'<td{no}><a class="lb" href="{esc(page_url(here, sel="" if cur else r["id"]) + f"#m-{i}")}">{esc(r["name"])}</a></td>'
             f'<td class="pm">{esc(r["params"])}</td><td class="r sz">{esc(render.ai_mb(r["size_mb"]))}</td><td class="r">{esc(render.ai_mb(r["need_mb"]))}</td>'
-            f'<td><span class="pl {cls}">{esc(label)}</span></td><td>{esc(render.ai_tok(r["tok"]))}</td><td class="nn"><div>{esc(r["notes"])}</div></td></tr>')
+            f'<td><span class="pl {cls}">{esc(label)}</span></td><td>{esc(render.ai_tok(r["tok"]))}</td><td class="nn"><div>{esc(r["notes"])}</div></td>'
+            + ai_row_action(r, ui) + "</tr>")
 
 
-def ai_panel_html(r, here, i, windows):
-    """The details of a model: what the console's pane says, as a table (the commands selectable in one click), and a link that closes it."""
+def ai_panel_html(r, here, i, windows, ui=None):
+    """The details of a model: what the console's pane says, as a table (the commands selectable in one click), what can be done with it
+    (use it; delete its files: asked about first), and a link that closes it."""
     esc = html.escape
     title, items = render.ai_details(r, windows)
     trs = [f'<tr class="top"><th>model</th><td>{esc(title)}</td></tr>']
@@ -621,29 +807,137 @@ def ai_panel_html(r, here, i, windows):
         cell = (f'<span class="pl {render.AI_VERDICT[kind][2]}">{esc(value)}</span>' if kind in render.AI_VERDICT else f'<code class="cmd">{esc(value)}</code>' if kind == "cmd"
                 else f'<span class="{"y" if kind == "warn" else "d"}">{esc(value)}</span>' if kind in ("warn", "dim") else esc(value))
         trs.append(f"<tr><th>{esc(label)}</th><td>{cell}</td></tr>")
+    if ui is not None and not ui.locked:
+        acts = ai_use_cell(r, ui)
+        if r["installed"]:
+            acts += " " + ui.form("delete", "delete its files", (("model", r["id"]),), "del", "asks first", ui.working)
+        if acts:
+            trs.append(f"<tr><th>do</th><td>{acts}</td></tr>")
     return (f'<aside class="dp" id="details"><div class="dh"><span>DETAILS</span><a href="{esc(page_url(here, sel="") + f"#m-{i}")}">close ✕</a></div>'
             f'<table>{"".join(trs)}</table></aside>')
 
 
-def ai_body(data, st, pb, rows, sel, here, cols, host):
-    """Header, title, HARDWARE, the models (every one a link; the selected one's details beside or under the table), the legend and STATUS, as HTML.
-    The lines are the console's (render.ai_*), cleaned by render.hclean() and escaped by to_html()/html.escape()."""
+def ai_control_html(ui):
+    """The top of the page: is the AI on, what is it doing (a download with its progress, the model loading), the button (turn it on, turn it off, cancel),
+    the folder the models go to, the answer to the last click, and the question a click asked first (confirm=)."""
+    esc, snap, ch = html.escape, ui.snap, ui.ch
+    state, text = snap["state"]
+    pill, cls = {"off": ("OFF", "d"), "working": ("WORKING", "c"), "running": ("ON", "g"), "on": ("ON", "g"), "error": ("ERROR", "r")}[state]
+    out = ['<section class="ctl" id="ctl"><div class="row">' + f'<span class="pl {cls} big">{pill}</span><span class="st">{esc(text)}</span>']
+    if ui.locked:
+        out.append('<span class="d">locked by config.ini ([ai] web_actions = no): this page only shows</span>')
+    elif state == "working":
+        out.append(ui.form("cancel", "Cancel", (), "stop", "stop it: what was fetched is kept"))
+    elif snap["switch"]["by"] == "config":
+        out.append('<span class="d">on by config.ini ([ai] enabled = yes): turn it off there</span>')
+    elif snap["switch"]["on"]:
+        out.append(ui.form("off", "Turn AI off", (), "off", "stop the model server and turn the advisor off"))
+    else:
+        out.append(ui.form("on", "Turn AI on", (), "on", "set up the model and start it"))
+    out.append("</div>")
+    job = snap["job"]
+    if state == "working":
+        out.append('<div class="row"><progress max="100" value="%d"></progress> %s</div>' % (job["pct"], "%d%%" % job["pct"]) if job["phase"] == "downloading" and job["total"]
+                   else '<div class="row"><progress max="100"></progress></div>')
+    if not ui.locked and state == "off" and ch:
+        t = ui.row(ch["target"])
+        name, size = esc(t["name"]) if t else "", ch["size"]
+        todo = "installed here" if ch["installed"] else ("%s to download" % esc(render.ai_mb((size or 0) / 2 ** 20)) if size else "not downloadable yet")
+        if ch["model"] and t:
+            out.append(f'<div class="d">turning it on uses <strong>{name}</strong> ({"chosen on this page" if ch["by"] == "page" else "[ai] model in config.ini"}; {todo})</div>')
+        elif t:
+            out.append(f'<div class="d">no model is chosen yet: turning it on asks about the recommended one, <strong>{name}</strong> ({todo})</div>')
+        else:
+            out.append('<div class="d">no model fits this machine comfortably: choose one from the list below</div>')
+    cat = ui.cat
+    if cat.get("dir"):
+        out.append('<div class="row dir">models are downloaded to <code class="cmd">%s</code> · %s</div>'
+                   % (esc(render.hclean(cat["dir"], 200)), esc(aisetup.space_text(cat.get("space")))))
+    note = snap["notice"]
+    if note:
+        out.append('<div class="note %s">%s</div>' % ("ok" if note["ok"] else "bad", esc(note["text"])))
+    if ui.confirm and not ui.locked:
+        t = ui.row(ui.sel)
+        if ui.confirm == "on" and t:
+            what = "Turn AI on with <strong>%s</strong>? %s" % (esc(t["name"]), "It is installed here." if ch and ch["installed"] else
+                   "It is not here yet: <strong>%s</strong> to download (the SHA-256 is checked), then the model server starts on this machine and the advisor is turned on."
+                   % esc(render.ai_mb(((ch or {}).get("size") or 0) / 2 ** 20)))
+            yes = ui.form("on", "Yes, turn it on", (("model", ui.sel), ("confirm", "yes")), "on")
+        elif ui.confirm == "delete" and t:
+            what = "Delete the files of <strong>%s</strong> (%s)? You can download it again later." % (esc(t["name"]), esc(render.ai_mb(t["size_mb"])))
+            yes = ui.form("delete", "Yes, delete", (("model", ui.sel), ("confirm", "yes")), "off")
+        elif ui.confirm == "delete-all":
+            what = "Delete the runtime and every downloaded model (%s)? You can download them again later." % esc(aisetup.fmt_size((cat.get("space") or {}).get("used")) if (cat.get("space") or {}).get("used") else "nothing")
+            yes = ui.form("delete-all", "Yes, delete everything", (("confirm", "yes"),), "off")
+        else:
+            what = yes = ""
+        if what:
+            out.append(f'<div class="cf" id="confirm"><span>{what}</span> {yes} <a class="bt" href="{esc(page_url(ui.here))}">No</a></div>')
+    out.append("</section>")
+    return "".join(out)
+
+
+def ai_chat_html(ui):
+    """The chat under the switch: the questions and answers of this process (newest last), the question box, and 'advice now'. The model's text goes
+    through advisor.html() (escaped, cleaned, capped); a question is escaped here. The box works when the AI is on and its server is not still starting."""
+    esc, snap = html.escape, ui.snap
+    chat, ready = snap["chat"], snap["switch"]["on"] and snap["state"][0] != "working"
+    out = ['<section class="chat" id="chat"><div class="hs">CHAT · ask the model about this machine (it reads this machine\'s history; AI, check before acting)</div>']
+    for e in chat["history"]:
+        res = advisor.html(e["res"]) if e["res"] else advisor.html({"error": e["error"] or "no answer"})
+        out.append(f'<div class="qa"><p class="q"><strong>{"advice" if e["kind"] == "advise" else "you"}:</strong> {esc(e["q"])}</p>{res}</div>')
+    if chat["pending"]:
+        out.append(f'<div class="qa"><p class="q"><strong>{"advice" if chat["pending"]["kind"] == "advise" else "you"}:</strong> {esc(chat["pending"]["q"])}</p>'
+                   '<p class="d">the model is writing the answer (a small model on a slow CPU may need a minute; this page reloads by itself)</p></div>')
+    if not ui.locked:
+        dis = "" if ready and not chat["busy"] else " disabled"
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", ui.csrf), ("back", ui.back)))
+        out.append(f'<form class="f ask" id="ask" method="post" action="/ai/ask">{hidden}<input class="q" type="text" name="q" maxlength="500" size="60" '
+                   f'placeholder="ask: why is the disk filling up?" autocomplete="off"{dis}> <button class="bt on" type="submit"{dis}>Ask</button></form>')
+        out.append('<div class="adv">advice now: ' + " ".join(ui.form("advise", label, (("days", d),), "", "", not ready or bool(chat["busy"]))
+                                                             for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))) + "</div>")
+        if not ready:
+            out.append('<p class="d">%s</p>' % ("the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
+    out.append("</section>")
+    return "".join(out)
+
+
+def ai_manage_html(ui):
+    """The small 'manage' area at the bottom: the downloaded files, and the button that deletes all of them (asked about first)."""
+    cat = ui.cat
+    used = (cat.get("space") or {}).get("used")
+    if ui.locked or not (used or any(r["installed"] for r in ui.rows)):
+        return ""
+    return ('<div class="mg">manage: %s the runtime and every model (%s)</div>'
+            % (ui.form("delete-all", "delete everything", (), "del", "asks first", ui.working), html.escape(aisetup.fmt_size(used) if used else "nothing")))
+
+
+def ai_body(data, st, pb, rows, sel, here, cols, host, ui=None):
+    """Header, title, the AI switch and the chat, HARDWARE, the models (every one a link; the selected one's details beside or under the table), the
+    legend, STATUS and the manage area, as HTML. The lines are the console's (render.ai_*), cleaned by render.hclean() and escaped by to_html()/html.escape().
+    ui: the forms (AiUi); None draws the page without them."""
     esc, cat = html.escape, data["cat"]
     text, code = render.status_pill(pb)
     out = [f'<div class="hd {sgr_class(code)}"><span> {esc(host)} │ AI │ {time.strftime("%H:%M:%S")}</span><span>{esc(text)} </span></div>',
            f'<pre class="ht">{to_html(render.ai_title(rows if cat is not None else None, cols))}</pre>']
+    if ui is not None:
+        out += [ai_control_html(ui), ai_chat_html(ui)]
     if cat is None:  # the catalog could not be read
         return "".join(out) + f'<p class="hn {"r" if data.get("err") else ""}">{esc(render.hclean(data["msg"]))}</p>'
     ids, windows = {m["id"] for m in rows}, render.dd(cat.get("hw")).get("os") == "windows"
     out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_hw_lines(cat.get("hw"), cols, 0)))}</pre>')
     i = next((j for j, m in enumerate(rows) if m["id"] == sel), None)
-    panel = ai_panel_html(rows[i], here, i, windows) if i is not None else ""
-    table = ('<div class="mw"><table class="mt"><thead><tr><th></th><th>model</th><th class="pm">params</th><th class="r sz">size</th><th class="r">needs</th><th>verdict</th><th>est tok/s</th>'
-             '<th class="nn">notes</th></tr></thead><tbody>' + "".join(ai_row_html(m, j, sel, here) for j, m in enumerate(rows)) + "</tbody></table></div>"
+    panel = ai_panel_html(rows[i], here, i, windows, ui) if i is not None else ""
+    act = ui is not None and not ui.locked
+    table = ('<div class="mw" id="models"><table class="mt"><thead><tr><th></th><th>model</th><th class="pm">params</th><th class="r sz">size</th><th class="r">needs</th><th>verdict</th><th>est tok/s</th>'
+             '<th class="nn">notes</th>' + ("<th></th>" if act else "") + '</tr></thead><tbody>'
+             + "".join(ai_row_html(m, j, sel, here, ui) for j, m in enumerate(rows)) + "</tbody></table></div>"
              if rows else '<div class="nt">the catalog lists no model</div>')
     out.append(f'<div class="hs">MODELS · best first</div><main class="mp{" two" if panel else ""}"><div class="tree">{table}'
                f'<pre class="ht">{to_html(render.ai_legend(cols))}</pre></div>{panel}</main>')
     out.append(f'<pre class="ht">{to_html(chr(10).join(render.ai_status_lines(st, cat, ids, cols, 0)))}</pre>')
+    if ui is not None:
+        out.append(ai_manage_html(ui))
     return "".join(out)
 
 
@@ -1144,11 +1438,16 @@ def main(argv):
     except (OSError, ValueError, IndexError) as e:
         print("nuc-console web:", e, file=sys.stderr)
         return 2
-    print(f"nuc-console web view on http://{'[' + cfg['bind'] + ']' if ':' in cfg['bind'] else cfg['bind']}:{srv.server_address[1]} (read-only{', token required' if token else ''})", flush=True)
+    acts = render.CFG["features"].get("ai", True) and advisor.web_actions_on(render.CFG)
+    print(f"nuc-console web view on http://{'[' + cfg['bind'] + ']' if ':' in cfg['bind'] else cfg['bind']}:{srv.server_address[1]} "
+          f"({'read-only except the buttons of the AI page' if acts else 'read-only'}{', token required' if token else ''})", flush=True)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # a stop is an exit: the model server this process started ends with it (aiweb.shutdown)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        aiweb.shutdown()
     return 0
 
 

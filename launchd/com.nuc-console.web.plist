@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- nuc-console read-only web view, as the unprivileged user _nuc-console. Loaded by install-macos.sh when [web] enabled = yes
+<!-- nuc-console web view (read-only; only the AI page has buttons), as the unprivileged user _nuc-console. Loaded by install-macos.sh when [web] enabled = yes
      (then as configured there) or [display] mode is browser/fullscreen (then, with web disabled, on 127.0.0.1 only: the "local" option). -->
 <plist version="1.0">
 <dict>

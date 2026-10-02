@@ -13,6 +13,8 @@
 # As a normal user it still runs: what needs root (firewall, other users' processes, containers) shows as missing on the screen.
 # `sudo ./run.sh` collects everything, and then every part runs as root: keep this folder yours alone.
 # It stops everything it started when you quit. Update: bin/nuc-console-update (keeps ./data).
+# Python: the release archive carries one (python/bin/python3, python-build-standalone): download, unpack, run, on a machine with no
+# Python and no network. It is used first; $PYTHON overrides it; a clone has none and uses the Python 3.8+ of the machine.
 set -eu
 
 die() { echo "nuc-console: $*" >&2; exit 1; }
@@ -54,10 +56,33 @@ if [ "$VIEW" = console ] && [ "$ACCEPT" = 0 ] && [ "$PROBLEMS" = 0 ] && [ "$WHIC
     [ -t 0 ] && [ -t 1 ] || die "--console needs a terminal: use --web"
 fi
 
+# ---- the folder; as root, what root would run or write must not be something others can change ---------------------------
+HERE=$(cd "$(dirname "$0")" && pwd -P)
+DATA=$HERE/data
+LOGS=$DATA/logs
+unsafe() {  # as root: a link, or a folder others can write to, could be turned against root
+    [ -L "$1" ] && return 0
+    case $(ls -ld "$1") in ?????w????*|????????w?*) return 0 ;; esac
+    return 1
+}
+if [ "$(id -u)" -eq 0 ]; then
+    for d in "$HERE/src" "$HERE/python" "$HERE/python/bin" "$DATA" "$DATA/run" "$DATA/lib" "$LOGS"; do
+        if [ -e "$d" ] || [ -L "$d" ]; then
+            ! unsafe "$d" || die "$d is a link or writable by others: as root nothing is written there. Fix it (chmod go-w) or move this folder"
+        fi
+    done
+fi
+
 # ---- Python 3.8+ ------------------------------------------------------------------------------------------------------
+BUNDLED=$HERE/python/bin/python3  # what the release archive carries (a clone has none)
 py_ok() { [ -x "$1" ] && "$1" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; }
 find_python() {
     if [ -n "${PYTHON:-}" ]; then py_ok "$PYTHON" && { echo "$PYTHON"; return 0; }; return 1; fi
+    if py_ok "$BUNDLED"; then echo "$BUNDLED"; return 0; fi
+    if [ -e "$BUNDLED" ]; then  # there, but it does not run: the archive of another processor or system, or macOS blocks it
+        echo "nuc-console: the Python in $HERE/python does not run here: is this the archive for $OS $(uname -m)?" >&2
+        [ "$OS" != Darwin ] || echo "nuc-console: macOS blocks programs of a browser download until you run: xattr -dr com.apple.quarantine \"$HERE\"" >&2
+    fi
     cands=""
     if [ "$OS" = Darwin ]; then  # python.org's (the newest), then Apple's with the Command Line Tools (else it opens an install dialog)
         best=0 found=""
@@ -76,27 +101,12 @@ find_python() {
     done
     return 1
 }
-PY=$(find_python) || die "Python 3.8 or newer not found (Linux: install python3; macOS: python.org/downloads or xcode-select --install)"
+PY=$(find_python) || die "Python 3.8 or newer not found (a release archive carries one in python/: use the archive for $OS $(uname -m); a clone needs a python3: Linux: install it; macOS: python.org/downloads or xcode-select --install)"
 
 if [ "$WHICH" = 1 ]; then echo "$PY"; exit 0; fi
 
 # ---- the data folder --------------------------------------------------------------------------------------------------
-HERE=$(cd "$(dirname "$0")" && pwd -P)
-DATA=$HERE/data
-LOGS=$DATA/logs
 [ -f "$HERE/src/collector.py" ] || die "src/collector.py not found next to run.sh: run it from the extracted folder"
-unsafe() {  # as root: a link, or a folder others can write to, could be turned against root
-    [ -L "$1" ] && return 0
-    case $(ls -ld "$1") in ?????w????*|????????w?*) return 0 ;; esac
-    return 1
-}
-if [ "$(id -u)" -eq 0 ]; then
-    for d in "$HERE/src" "$DATA" "$DATA/run" "$DATA/lib" "$LOGS"; do
-        if [ -e "$d" ] || [ -L "$d" ]; then
-            ! unsafe "$d" || die "$d is a link or writable by others: as root nothing is written there. Fix it (chmod go-w) or move this folder"
-        fi
-    done
-fi
 umask 077
 mkdir -p "$DATA/run" "$DATA/lib" "$LOGS"
 [ -w "$DATA" ] || die "$DATA is not writable by you (an earlier sudo run made it root's? sudo chown -R \"\$USER\" \"$DATA\")"

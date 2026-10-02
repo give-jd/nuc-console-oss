@@ -90,10 +90,91 @@ class DownloadsAreKept(unittest.TestCase):
 
     def test_windows_cache_has_the_acl_of_the_data_folder(self):
         src = read_text(INSTALL_WINDOWS)
-        create = src.index('foreach ($d in @($Data, "$Data\\run", "$Data\\lib", "$Data\\logs", $Cache))')
+        create = src.index('foreach ($d in @($Data, "$Data\\run", "$Data\\lib", "$Data\\logs", "$Data\\ai", $Cache))')
         acl = src.index("& icacls.exe $Data /inheritance:r")
         self.assertLess(create, acl)  # created inside $Data before the ACL: it inherits "only SYSTEM and Administrators write"
         self.assertLess(acl, src.index("Get-PythonZip  #"))  # and the ACL is set before anything is downloaded into it
+
+
+SYSTEMD = os.path.join(os.path.dirname(__file__), "..", "systemd")
+
+
+def unit_lines(name):
+    with open(os.path.join(SYSTEMD, name), encoding="utf-8") as f:
+        return [ln.strip() for ln in f.read().splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+
+class AiFolderIsTheWebAccounts(unittest.TestCase):
+    """The AI page and the AI screen download the local model into the AI folder as the account of the web view and of the console: the
+    installers give them that folder (and no other place), on each system, and loosen nothing else (docs/AI.md, docs/INSTALL.md)."""
+
+    def test_linux_the_folder_and_its_two_subfolders_belong_to_the_user_of_the_units(self):
+        src = read_text(INSTALL)
+        self.assertIn("install -d -o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai /var/lib/nuc-console/ai/runtime /var/lib/nuc-console/ai/models", src)
+        self.assertLess(src.index("useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console"), src.index("-o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai"),
+                        "the user exists before the folder is given to it")
+        at = src.index("-o nuc-console -g nuc-console -m 0755 /var/lib/nuc-console/ai")
+        self.assertLess(at, src.index("systemctl daemon-reload", at), "before the units are read again and the services restarted")
+        self.assertNotRegex(src, r"chown -R .*/var/lib/nuc-console\b(?!/ai)", "nothing else of the state folder is handed over")
+        self.assertNotRegex(src, r"chmod -R .*/var/lib/nuc-console", "nor are its permissions loosened")  # the archive's Python in $DEST is another matter
+
+    def test_linux_both_units_may_write_the_ai_folder_and_the_web_unit_keeps_its_sandbox(self):
+        web, tty = unit_lines("nuc-console-web.service"), unit_lines("nuc-console.service")
+        for name, lines in (("web", web), ("tty", tty)):
+            self.assertEqual([x for x in lines if x.startswith("ReadWritePaths=")], ["ReadWritePaths=-/var/lib/nuc-console/ai"], name)
+            for kept in ("NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "User=nuc-console"):
+                self.assertIn(kept, lines, "%s: %s stays" % (name, kept))
+        for kept in ("ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectControlGroups=yes", "CapabilityBoundingSet=", "PrivateDevices=yes",
+                     "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK", "LockPersonality=yes", "ProtectClock=yes", "ProtectHostname=yes",
+                     "RestrictNamespaces=yes", "RestrictSUIDSGID=yes"):
+            self.assertIn(kept, web, "the web unit keeps %s" % kept)
+
+    def test_linux_the_web_unit_has_room_for_the_model_server_it_starts_and_still_a_cap(self):
+        web = unit_lines("nuc-console-web.service")
+        self.assertIn("MemoryMax=85%", web, "the model server is a child, in this unit's cgroup: a share of the machine, the same as the page's own 'too big'")
+        self.assertIn("TasksMax=512", web)
+        self.assertFalse([x for x in web if x.startswith("MemoryMax=") and x.endswith("M")], "no fixed 256M any more: a model does not fit in it")
+        import re as _re
+        self.assertEqual(_re.search(r"RAM_MAX_FRAC = ([0-9.]+)", read_text(os.path.join(os.path.dirname(INSTALL), "src", "aihw.py"))).group(1), "0.85",
+                         "85% is aihw's line between slow and too big")
+
+    @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze is not installed")
+    def test_linux_systemd_accepts_the_units(self):
+        for name in ("nuc-console-web.service", "nuc-console.service"):
+            text = read_text(os.path.join(SYSTEMD, name))
+            text = re.sub(r"^ExecStart=.*$", "ExecStart=/bin/true", text, flags=re.M)
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, name)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                r = subprocess.run(["systemd-analyze", "verify", "--man=no", path], capture_output=True, text=True)
+            bad = [ln for ln in (r.stdout + r.stderr).splitlines()  # only about this unit: the runner's own units have their warnings (snapd.service: RestartMode)
+                   if name in ln and any(k in ln for k in ("ReadWritePaths", "MemoryMax", "TasksMax", "Unknown key", "Unknown section", "Unknown lvalue",
+                                                            "Invalid", "Failed to parse"))]
+            self.assertEqual(bad, [], name)
+
+    def test_macos_the_web_users_folder_is_made_after_the_user_and_owned_by_it(self):
+        src = read_text(INSTALL_MACOS)
+        self.assertIn('AI_PARENT="/Library/Application Support/nuc-console"', src)
+        self.assertIn('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI" "$AI/runtime" "$AI/models"', src)
+        self.assertGreater(src.index('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI"'), src.index('dscl . -create "/Users/$SVC_USER" Password'))
+        self.assertLess(src.index('install -d -m 0755 -o "$SVC_USER" -g "$SVC_USER" "$AI"'), src.index('fill launchd/com.nuc-console.web.plist'))
+        self.assertLess(src.index('install -d -m 0755 "$AI_PARENT"'), src.index('install -d -m 0755 -o "$SVC_USER"'), "the folder above it is root's")
+        self.assertNotIn('chown -R', src.split("# ---- 3. collector and web view")[1].split("# ---- 4.")[0].replace('chown "$SVC_USER:$SVC_USER" "$LOG/web.log"', ""))
+
+    def test_windows_local_service_may_write_the_ai_folder_and_nothing_else_new(self):
+        src = read_text(INSTALL_WINDOWS)
+        self.assertIn("& icacls.exe \"$Data\\ai\" /grant '*S-1-5-19:(OI)(CI)M'", src)
+        grants = [ln for ln in src.splitlines() if "icacls.exe" in ln and "$Data" in ln and "'*S-1-5-19:(OI)(CI)M'" in ln]
+        self.assertEqual(len(grants), 2, "logs and ai are the only folders LOCAL SERVICE may modify (the others it only reads)")
+        self.assertTrue(all(("$Data\\logs" in ln) or ("$Data\\ai" in ln) for ln in grants), grants)
+        self.assertIn("& icacls.exe $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' '*S-1-5-19:(OI)(CI)RX'", src,
+                      "the data folder's own ACL is as it was: users read, LOCAL SERVICE reads")
+        self.assertLess(src.index("& icacls.exe $Data /inheritance:r"), src.index("& icacls.exe \"$Data\\ai\" /grant"))
+
+    def test_every_installer_says_the_web_view_has_buttons_now(self):
+        for path in (INSTALL, INSTALL_MACOS, INSTALL_WINDOWS):
+            self.assertNotIn("read-only web view", read_text(path), path)
 
 
 def powershell():
@@ -460,6 +541,196 @@ class MacosPythonPackageCache(unittest.TestCase):
                 f.write(b"x")
         self.assertEqual(self.fetch().returncode, 0)
         self.assertEqual(sorted(os.listdir(self.cache)), ["other.txt", "python-9.9.9-macos11.pkg"])
+
+
+# ---- the Python of a release archive: install.sh (Linux) and install-macos.sh use it, run for real in bash ---------------------------
+
+def write_file(path, text, mode=0o644):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(text)
+    os.chmod(path, mode)
+
+
+def archive_python(folder, ok=True):
+    """A python/ like the one of an archive (a link python3 -> python3.99, a library, a link to it), in a hostile umask: 0700 / 0600.
+    The fake python3.99 is a script: it exits 0 for `-c` when ok (so `Python 3.8+?` is answered yes), else 1."""
+    write_file(os.path.join(folder, "python", "bin", "python3.99"), "#!/bin/sh\n" + ("exit 0\n" if ok else "exit 1\n"), 0o700)
+    os.symlink("python3.99", os.path.join(folder, "python", "bin", "python3"))
+    write_file(os.path.join(folder, "python", "lib", "libpython3.99.so.1.0"), "lib", 0o700)
+    os.symlink("libpython3.99.so.1.0", os.path.join(folder, "python", "lib", "libpython3.99.so"))
+    write_file(os.path.join(folder, "python", "lib", "python3.99", "os.py"), "# os\n", 0o600)
+    for dirpath, _dirs, _files in os.walk(os.path.join(folder, "python")):
+        os.chmod(dirpath, 0o700)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "install.sh runs on Linux")
+class LinuxInstallerPython(unittest.TestCase):
+    """install.sh: the system's /usr/bin/python3 when it is 3.8+, else the archive's python/ (copied to /opt/nuc-console/python)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="nuc-install-py-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.src = read_text(INSTALL)
+        self.choose = re.search(r"(?ms)^# ---- Python 3\.8\+: the system's, else the one of the archive.*?^fi\n", self.src).group(0)
+        self.copy = re.search(r"(?ms)^if \[ \"\$PY\" != \"\$SYS_PY\" \]; then\n    # the archive's Python.*?^fi\n", self.src).group(0)
+        self.py_ok = re.search(r"(?m)^py_ok\(\) .*$", self.src).group(0)
+        self.dest = os.path.join(self.tmp, "opt", "nuc-console")
+        self.folder = os.path.join(self.tmp, "archive")
+        os.makedirs(self.folder)
+        os.makedirs(self.dest)
+        stubs = os.path.join(self.tmp, "stubs")
+        write_file(os.path.join(stubs, "chown"), "#!/bin/sh\nexit 0\n", 0o755)  # the test is not root: the owner is not changed here
+        self.env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"])
+
+    def choose_python(self, system_python):
+        script = "set -euo pipefail\nDEST=%s\n%s\necho \"PY=$PY\"\n" % (
+            shlex.quote(self.dest), self.choose.replace("SYS_PY=/usr/bin/python3", "SYS_PY=" + shlex.quote(system_python)))
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def good_system_python(self, ok=True):
+        path = os.path.join(self.tmp, "sys", "python3")
+        write_file(path, "#!/bin/sh\n" + ("exit 0\n" if ok else "exit 1\n"), 0o755)
+        return path
+
+    def test_the_system_python_is_used_when_there_is_one_even_with_the_archive_python_there(self):
+        archive_python(self.folder)
+        sys_py = self.good_system_python()
+        r = self.choose_python(sys_py)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "PY=" + sys_py), r.stderr)
+
+    def test_no_system_python_or_one_older_than_3_8_gives_the_one_of_the_archive(self):
+        archive_python(self.folder)
+        for system in (os.path.join(self.tmp, "nowhere", "python3"), self.good_system_python(ok=False)):
+            r = self.choose_python(system)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, "PY=" + os.path.join(self.dest, "python", "bin", "python3")), (system, r.stderr))
+
+    def test_neither_is_an_error_that_says_what_to_do(self):
+        r = self.choose_python(os.path.join(self.tmp, "nowhere", "python3"))  # a clone on a machine without python3: no python/ either
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Python 3.8 or newer is needed", r.stderr)
+        self.assertIn("release archive", r.stderr)
+
+    def copy_python(self, ok=True):
+        archive_python(self.folder, ok)
+        script = ("set -euo pipefail\nDEST=%s\nSYS_PY=/usr/bin/python3\nPY=$DEST/python/bin/python3\n%s\n%s\n"
+                  % (shlex.quote(self.dest), self.py_ok, self.copy))
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def mode(self, *parts):
+        return os.lstat(os.path.join(self.dest, *parts)).st_mode & 0o777
+
+    def test_the_python_is_copied_with_its_links_and_readable_by_the_service_users(self):
+        r = self.copy_python()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        py = os.path.join(self.dest, "python")
+        self.assertEqual(os.readlink(os.path.join(py, "bin", "python3")), "python3.99")  # links stay links
+        self.assertEqual(os.readlink(os.path.join(py, "lib", "libpython3.99.so")), "libpython3.99.so.1.0")
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python"])  # no python.new or python.old left
+        for rel in (("python",), ("python", "bin"), ("python", "lib", "python3.99")):  # extracted with umask 077: now 0755
+            self.assertEqual(self.mode(*rel), 0o755, rel)
+        self.assertEqual(self.mode("python", "bin", "python3.99"), 0o755)  # exec kept, others may run it
+        self.assertEqual(self.mode("python", "lib", "python3.99", "os.py"), 0o644)  # others may read it, nobody else may write it
+        self.assertEqual(self.mode("python", "lib", "libpython3.99.so.1.0"), 0o755)
+        self.assertIn("using the Python of the archive", r.stdout)
+
+    def test_a_python_that_does_not_run_here_stops_the_install_and_leaves_the_old_one(self):
+        write_file(os.path.join(self.dest, "python", "marker"), "the old install")
+        r = self.copy_python(ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("does not run on this machine", r.stderr)
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python"])  # python.new removed
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "python", "marker")))  # the installed one is as it was
+
+    def test_a_new_python_replaces_the_old_one_whole(self):
+        write_file(os.path.join(self.dest, "python", "old-file"), "from the last release")
+        self.assertEqual(self.copy_python().returncode, 0)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.dest, "python"))), ["bin", "lib"])
+
+    def test_the_units_and_the_commands_that_name_the_system_python_are_all_rewritten(self):
+        """Every systemd unit (the glob) and every sh command of bin/ that runs /usr/bin/python3 is in the sed of install.sh."""
+        sed = re.search(r'(?ms)^    sed -i "s\|\$SYS_PY\|\$PY\|g" (.*?)\nfi\n', self.src).group(1)
+        self.assertIn("/etc/systemd/system/nuc-console*.service", sed)
+        named = set()
+        for m in re.finditer(r"/usr/local/(?:s?bin)/nuc-console-\{([^}]*)\}", sed):
+            named |= set("nuc-console-" + n for n in m.group(1).split(","))
+        users = set()
+        for name in os.listdir(os.path.join(ROOT, "bin")):
+            if not name.endswith((".cmd", ".ps1")) and "/usr/bin/python3" in read_text(os.path.join(ROOT, "bin", name)):
+                users.add(name)
+        self.assertEqual(users, named)  # a new command that runs the system Python must be added to that sed
+        for name in os.listdir(os.path.join(ROOT, "systemd")):
+            text = read_text(os.path.join(ROOT, "systemd", name))
+            if "/usr/bin/python3" in text:
+                fixed = text.replace("/usr/bin/python3", "/opt/nuc-console/python/bin/python3")
+                self.assertNotIn("/usr/bin/python3", fixed)
+                self.assertRegex(fixed, r"(?m)^ExecStart=/opt/nuc-console/python/bin/python3 ")
+        # and the steps that run the installed code use the chosen Python, not whatever python3 the PATH has
+        for line in self.src.splitlines():
+            if "$DEST/render.py" in line or "$DEST/web.py" in line or "$DEST/notify.py" in line:
+                self.assertIn('"$PY" "$DEST/', line)
+
+    def test_the_uninstall_removes_the_python_with_the_rest(self):
+        down = self.src[self.src.index('"--uninstall" ]'):self.src.index("exit 0")]
+        self.assertIn('rm -rf "$DEST"', down)  # /opt/nuc-console/python is inside it
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "the macOS tools are replaced by stand-ins that run on Linux only")
+class MacosInstallerPython(unittest.TestCase):
+    """install-macos.sh: the archive's Python is copied to /opt/nuc-console/python, checked, and used; nothing is downloaded."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="nuc-install-macpy-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.src = read_text(INSTALL_MACOS)
+        self.dest = os.path.join(self.tmp, "opt", "nuc-console")
+        self.folder = os.path.join(self.tmp, "archive")
+        os.makedirs(self.folder)
+        os.makedirs(self.dest)
+        stubs = os.path.join(self.tmp, "stubs")
+        for name, text in (("stat", "#!/bin/sh\n[ \"$1\" = -f ] && [ \"$2\" = %u ] && { echo 0; exit 0; }\necho \"stat stand-in: $*\" >&2; exit 2\n"),
+                           ("chown", "#!/bin/sh\nexit 0\n"), ("xattr", "#!/bin/sh\necho \"$*\" >> \"$STUB_LOG\"\n")):
+            write_file(os.path.join(stubs, name), text, 0o755)
+        self.log = os.path.join(self.tmp, "xattr.log")
+        self.env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], STUB_LOG=self.log)
+        functions = [re.search(r"(?ms)^py_ok\(\) \{.*?^\}$", self.src).group(0), re.search(r"(?m)^python_real\(\) \{.*\}$", self.src).group(0)]
+        functions.append(re.search(r"(?ms)^prepare_bundled_python\(\) \{.*?^\}$", self.src).group(0))
+        self.functions = "\n".join(functions)
+
+    def prepare(self, ok=True):
+        archive_python(self.folder, ok)
+        script = "set -euo pipefail\nDEST=%s\n%s\nprepare_bundled_python\n" % (shlex.quote(self.dest), self.functions)
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=self.folder, env=self.env, timeout=60)
+
+    def test_the_python_is_copied_beside_the_final_one_checked_and_cleaned_of_quarantine_marks(self):
+        r = self.prepare()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        new = os.path.join(self.dest, "python.new")
+        self.assertEqual(os.readlink(os.path.join(new, "bin", "python3")), "python3.99")
+        self.assertEqual(os.lstat(os.path.join(new, "bin")).st_mode & 0o777, 0o755)
+        self.assertEqual(os.lstat(os.path.join(new, "lib", "python3.99", "os.py")).st_mode & 0o777, 0o644)
+        self.assertEqual(sorted(os.listdir(self.dest)), ["python.new"])  # the final one is put in place later, with the services stopped
+        with open(self.log) as f:
+            self.assertIn("-cr %s" % new, f.read())  # a browser download marks every file: the copy that root runs has none
+
+    def test_a_python_that_does_not_run_on_this_mac_stops_the_install(self):
+        r = self.prepare(ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("does not run on this Mac", r.stderr)
+        self.assertIn("macos-arm64", r.stderr)
+        self.assertEqual(os.listdir(self.dest), [])
+
+    def test_the_archives_python_comes_first_and_nothing_is_downloaded_for_it(self):
+        src = self.src
+        use = src.index("    prepare_bundled_python\n    PY=")
+        self.assertLess(use, src.index("for cand in /Library/Frameworks/Python.framework"))  # before the search for a system Python
+        self.assertLess(use, src.index("    fetch_python_pkg\n    tmp="))  # and before the download of the python.org package
+        self.assertIn('if [ -x python/bin/python3 ]; then', src)
+        self.assertIn('if [ -z "$PY" ] && xcode-select', src)  # the old search is still there, for a clone
+        # in place only after the services are stopped, and the old one of an earlier install is dropped when it is not used any more
+        place = src.index('mv "$DEST/python.new" "$DEST/python"')
+        self.assertLess(src.index('launchctl bootout "system/$label" 2>/dev/null || true; done\ninstall -d'), place)
+        self.assertLess(place, src.index('install -m 0644 src/*.py "$DEST/"'))
 
 
 if __name__ == "__main__":

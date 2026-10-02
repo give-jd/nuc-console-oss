@@ -24,6 +24,8 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict
+# the one place it may write: the AI folder (docs/AI.md), where the AI screen downloads the local model and keeps web.json. - : not an error while it is not there
+ReadWritePaths=-/var/lib/nuc-console/ai
 ProtectHome=yes
 PrivateTmp=yes
 

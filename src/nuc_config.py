@@ -61,7 +61,7 @@ def load(path=None):
                    "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
-                  "daily": False, "gpu": "auto"}}
+                  "daily": False, "gpu": "auto", "web_actions": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
@@ -191,7 +191,7 @@ def load(path=None):
             print(f"nuc-console: {path}: [display] zoom must be an integer (percent)", file=sys.stderr)
     if cp.has_section("ai"):  # the optional local model of the HEALTH screen (docs/HEALTH.md): off unless asked for
         ai = cfg["ai"]
-        for key in ("enabled", "allow_remote", "daily"):
+        for key in ("enabled", "allow_remote", "daily", "web_actions"):  # web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
             try:
                 ai[key] = cp.getboolean("ai", key, fallback=ai[key])
             except ValueError:

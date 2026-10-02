@@ -1,11 +1,19 @@
 name: tests
 
+# One run per commit: a push to main, or the commits of a pull request (a branch push with a PR open no longer runs twice).
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer commit on the same PR or branch cancels the older run (frees the few macOS runners); main is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   unit:
@@ -53,6 +61,9 @@ jobs:
           nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
           state=$(systemctl is-failed nuc-console-notify || true); echo "nuc-console-notify: $state"; [ "$state" != failed ]
       - run: nuc-console-ask --help && sudo nuc-console-ai --help   # the optional AI commands are installed (nothing is downloaded or started)
+      - run: |   # the AI folder is the web view's and the console's to write (the AI page downloads the local model there), and nothing else of /var/lib is
+          test "$(stat -c %U /var/lib/nuc-console/ai)" = nuc-console && sudo -u nuc-console test -w /var/lib/nuc-console/ai/models
+          ! sudo -u nuc-console test -w /var/lib/nuc-console
       - run: sudo ./install.sh --uninstall
       - run: |
           for p in /var/lib/nuc-console-notify /etc/systemd/system/nuc-console-notify.service /usr/local/bin/nuc-console-telegram; do
@@ -68,6 +79,7 @@ jobs:
       - run: sudo cat /var/log/nuc-console/collector.log || true
       - run: /opt/nuc-console/bin/nuc-console-problems
       - run: /opt/nuc-console/bin/nuc-console-ask --help && /opt/nuc-console/bin/nuc-console-ai --help
+      - run: test "$(stat -f %Su "/Library/Application Support/nuc-console/ai")" = _nuc-console   # the AI page downloads the local model there, as the web view's user
       - run: |
           python3 - <<'PY'
           import json
@@ -107,6 +119,8 @@ jobs:
               & "$env:ProgramFiles\nuc-console\bin\$c.cmd" --help | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "$c.cmd --help failed" }
           }
+          $acl = (& icacls.exe "$env:ProgramData\nuc-console\ai") -join "`n"   # the AI page downloads the local model there, as LOCAL SERVICE
+          if ($acl -notmatch 'LOCAL SERVICE:\(OI\)\(CI\)\(M\)') { throw "LOCAL SERVICE may not write the AI folder: $acl" }
           $d = Get-Content "$env:ProgramData\nuc-console\run\net.json" -Raw | ConvertFrom-Json
           if ($d.os -ne 'windows' -or -not $d.listeners -or $d.firewall.kind -ne 'windows') { throw "unexpected net.json" }
           if (@($d.errors.PSObject.Properties).Count) { throw ("net errors: " + ($d.errors | ConvertTo-Json)) }
