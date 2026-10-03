@@ -303,6 +303,8 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 ## Web view (optional)
 
 Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; the pages work with scripts off, and the few small first-party scripts (partial refresh, keys, the layout editor, the MAP graph's drag and zoom) are pinned by their hashes in the page's CSP. The page is the new shell (cards, key figures, five screens, appearance settings, a layout editor, a wall display for a monitor): the older "classic" pages are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will be removed.
+**`/app`** is the same web view as a live app: the screens are drawn in the browser and change in place as the machine does, without a reload
+(the footer's **live app** link); what they show is also JSON, `/api/v1/<view>`, for your own scripts.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. Config editing from the web is deliberately not offered.
 
 ## Telegram alerts (optional)

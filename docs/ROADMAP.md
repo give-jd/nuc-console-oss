@@ -11,7 +11,7 @@ with nothing else to install by hand. The Linux console (no X11) keeps working a
 |---|---|---|
 | [1. The AI on Ollama](#1-the-ai-on-ollama) | the local AI works with one click on Windows, macOS and Linux, on the GPU when there is one | done |
 | [2. A data API](#2-a-data-api) | everything the screens show, as JSON and as a live stream | done |
-| [3. A new web front end](#3-a-new-web-front-end) | smooth, live pages and charts, in any browser | planned |
+| [3. A new web front end](#3-a-new-web-front-end) | smooth, live pages and charts, in any browser | in progress: `/app` |
 | [4. The desktop app and its packages](#4-the-desktop-app-and-its-packages) | `.msi`/`.exe`, `.dmg`, `.deb`/`.rpm`/AppImage, built on every release | planned |
 | [Later: signing and stores](#later-signing-and-stores) | signed packages, Microsoft Store and the other catalogs | later |
 
@@ -45,14 +45,20 @@ Telegram pages' forms, whose CSRF token the documents carry.
 
 ## 3. A new web front end
 
-The pages are rebuilt as a front end that updates in place from the stream of step 2: no reloads, live charts, transitions. Proposed:
-Svelte with TypeScript, and uPlot for the charts. The views move one at a time (AI, Overview, CPU, Health, Map), each when it can do
-everything the current one does; the current pages stay until then.
+The pages are rebuilt as a front end that updates in place from the stream of step 2: no reloads, live charts, transitions. The views move one
+at a time, each when it can do everything the current one does; the current pages stay until then.
 
-- **Built only in CI.** Node runs in the release workflow and the archives carry the built files: nobody builds anything to install
-  or run nuc-console.
-- The Python core stays standard library only. `CONTRIBUTING.md` gets the rules of the front end (dependencies pinned with a lock file,
-  the same Content Security Policy and no external script).
+**Done: the live app, `/app`** ([docs/WEB.md](WEB.md#the-live-app)). The overview, CPU, Health, Map (as a tree) and AI screens are drawn in the
+browser from the API's documents and morphed in place at each change; links, keys and the back button move inside the page, the AI screen's
+buttons are posted in the background. It draws the same components into the same markup as the shell (a check in a real browser compares them
+screen by screen), with the same style sheet, themes, densities and keys.
+
+It is not Svelte, as first proposed: it is one first-party script (`src/appjs.py`), with **no framework, no dependency and no build**. That keeps
+the project's rules (standard library only, nothing to build, nothing downloaded at release time) and its security model (a script pinned by its
+hash, strict CSP with Trusted Types, static rules on what the script may do), and the release archives need no Node.
+
+**Still to come in this step**: charts of the recent history (CPU, memory, network) that grow with the stream; the settings, the Telegram page,
+the MAP as a graph and the layout editor inside the app; then `/app` becomes what `/` serves.
 
 ## 4. The desktop app and its packages
 

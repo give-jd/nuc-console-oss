@@ -36,7 +36,7 @@ class Matrix(unittest.TestCase):
 
     def test_paths_use_the_ui_grammar_of_prefs(self):
         for p in bc.build_matrix():
-            self.assertTrue(p.path.startswith("/?app=1&ui=1."), p.path)
+            self.assertTrue(p.path.startswith("/app?ui=1." if p.kind.startswith("app-") else "/?app=1&ui=1."), p.path)
             ui = p.path.split("ui=")[1].split("&")[0]
             got = prefs.parse_cookie(ui)
             self.assertEqual(set(got), {"theme", "density"}, (p.path, got))
@@ -44,6 +44,47 @@ class Matrix(unittest.TestCase):
         self.assertIn("as=graph", bc.page_path("map-graph", "a", "k"))
         self.assertIn("edit=1", bc.page_path("layout", "a", "k"))
         self.assertEqual(prefs.parse_cookie(bc.ui_string("d", "w")), {"theme": "dark", "density": "wall"})
+
+
+    def test_the_live_app_in_every_theme_with_its_stream_off(self):
+        """It is the script that draws the app: no scriptless variant; live=0, or the stream keeps the page from ever settling."""
+        app = [p for p in bc.build_matrix() if p.kind.startswith("app-")]
+        self.assertEqual({p.kind for p in app}, {"app-" + v for v in bc.APP_VIEWS})
+        self.assertTrue(all(p.js and "live=0" in p.path for p in app))
+        for view in bc.APP_VIEWS:
+            for theme, _c in bc.THEMES:
+                self.assertIn("app-%s/%s/desk/js" % (view, theme), {p.name for p in app})
+            self.assertIn("app-%s" % view, bc.VIEW_LANDMARKS)
+        self.assertEqual(bc.app_path("overview", "d", "k"), "/app?ui=1.td.dk&live=0")
+        self.assertEqual(bc.app_path("cpu", "a", "c"), "/app?ui=1.ta.dc&live=0&view=cpu")
+
+
+class Parity(unittest.TestCase):
+    DOM = ('<div class="kpiblock" id="kpis"><div class="kpis">K</div></div><!--END-KPIS--><main id="app" class="grid">'
+           '<article class="card s2 st-ok r14" data-card="x">A</article></main><!--END-APP--><div id="expect-kpis"><div class="kpis">K</div></div>'
+           '<!--END-EXPECT-KPIS--><div id="expect"><article class="card s2 st-ok" data-card="x">A</article></div><!--END-EXPECT-->')
+
+    def test_the_same_markup_passes_and_the_measured_rows_do_not_count(self):
+        self.assertEqual(bc.parity_problems(self.DOM, "overview"), [])
+
+    def test_a_difference_is_named_with_where(self):
+        got = bc.parity_problems(self.DOM.replace(">A</article></main>", ">B</article></main>"), "overview")
+        self.assertEqual(len(got), 1)
+        self.assertIn("the screen differs", got[0])
+        got = bc.parity_problems(self.DOM.replace('<div class="kpis">K</div></div><!--END-KPIS-->', '<div class="kpis">Q</div></div><!--END-KPIS-->'), "overview")
+        self.assertIn("the key figures differs", got[0])
+        self.assertEqual(bc.parity_problems(self.DOM.replace('<div class="kpis">K</div></div><!--END-KPIS-->', '<div class="kpis">Q</div></div><!--END-KPIS-->'), "cpu"), [],
+                         "the key figures are compared on the overview only")
+
+    def test_a_missing_region_is_a_problem(self):
+        self.assertEqual(bc.parity_problems("<html></html>", "cpu")[0], "no app region in the DOM")
+
+    def test_the_parity_page_holds_both_drawings(self):
+        text, csp = bc.parity_page("cpu")
+        for marker in ("<!--END-APP-->", "<!--END-KPIS-->", '<div id="expect">', "<!--END-EXPECT-->", 'class="scr scr-cpu"', 'id="doc"'):
+            self.assertIn(marker, text)
+        self.assertIn("script-src 'sha256-", csp)
+        self.assertNotIn("data-rev=", text.split('<div id="expect-kpis">')[1], "the shell's revisions are not the app's")
 
 
 class Log(unittest.TestCase):
@@ -87,7 +128,9 @@ class Landmarks(unittest.TestCase):
                  "map-graph": '<div id="gv"><svg></svg></div>', "cpu": '<div class="scr scr-cpu"></div>', "health": '<div class="hv"></div>',
                  "ai": '<div class="scr av"></div>', "settings": '<div class="settings"></div>',
                  "telegram": '<div class="settings av" id="tg"><form action="/telegram/pair"></form></div>',
-                 "layout": '<span data-edit></span><article class="card x">', "wall": '<div class="kpis"></div><article class="card st-ok">'}
+                 "layout": '<span data-edit></span><article class="card x">', "wall": '<div class="kpis"></div><article class="card st-ok">',
+                 "app-overview": '<a class="kpi st-ok" role="listitem"></a><article class="card s1">', "app-cpu": '<div class="scr scr-cpu"></div>',
+                 "app-health": '<div class="hv"></div>', "app-map": '<div class="scr mapv"></div>', "app-ai": '<div class="scr av"></div>'}
         self.assertEqual(set(pages), set(bc.VIEW_LANDMARKS))
         for kind, inner in pages.items():
             self.assertEqual(bc.missing_landmarks(self.COMMON % inner, kind), [], kind)

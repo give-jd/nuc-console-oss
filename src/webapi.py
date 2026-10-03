@@ -17,9 +17,12 @@ import cards
 import ui
 
 VERSION = 1  # /api/v1: a field that changes meaning, or goes, is a new version; a new field is not
-VIEWS = ("overview", "cpu", "health", "map", "ai", "telegram")
-CONSOLE_ONLY = frozenset(("w", "gap", "clip", "pad_in", "wprio", "indent", "head_line", "titled", "fill", "fit", "lw", "cw", "per", "h", "once"))
+VIEWS = ("overview", "cpu", "health", "map", "ai", "telegram", "summary")  # summary: the top bar and the key figures every page shows
+# What only the console reads: its widths, gaps, heights, indents and clipping (htmlview.py, the web's drawing, reads none of these; a column's
+# wprio and a table's titled are the web's too, so they stay).
+CONSOLE_ONLY = frozenset(("w", "gap", "clip", "pad_in", "indent", "head_line", "fill", "fit", "lw", "cw", "per", "h", "once"))
 EVENT_ID = re.compile(r"[0-9a-f]{16}")  # a rev: what a client may send back as Last-Event-ID
+STREAM_VIEWS_MAX = 3  # views one stream may carry (a page: its view and the summary)
 JSON_TYPE = "application/json; charset=utf-8"
 STREAM_TYPE = "text/event-stream; charset=utf-8"
 

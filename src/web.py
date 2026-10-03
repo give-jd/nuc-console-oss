@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import html
 import http.server
+import json
 import ipaddress
 import math
 import os
@@ -34,6 +35,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import advisor
 import aiweb
+import appjs
 import aisetup
 import ansi  # same directory: the console's drawing of a card, kept in the shell's cards for now
 import cards
@@ -58,8 +60,9 @@ MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
+APP_PATH = "/app"     # the live app (src/appjs.py): every screen drawn in the browser from the data API, kept up to date by its stream
 API_PATH = "/api/v1"  # the data API: /api/v1 (what there is), /api/v1/<view> (JSON), /api/v1/stream?view=<view> (Server-Sent Events)
-STREAMS_MAX = 4      # streams open at once (each holds a connection and a thread): more get 503
+STREAMS_MAX = 8      # streams open at once (each holds a connection and a thread; the app's tabs hold one each): more get 503
 STREAM_S = 300       # a stream ends after this long (the request deadline does not apply to it); the client reconnects by itself
 KEEPALIVE_S = 15     # a comment line when nothing changed for this long: proxies and clients see the stream is alive
 RETRY_MS = 3000      # what a stream tells the client to wait before it reconnects
@@ -111,14 +114,18 @@ def page_csp(scripts=(), shell=False, forms=False):
     (refresh, preferences, layout editor); where the refresh script is, Trusted Types: its one policy, nuc-frag, is the only way to hand
     markup to the parser. shell: the page loads /s/app.<sha8>.css and has no inline style at all (no <style>, no style= attribute: style-src 'self'). forms: the page's forms post to this server (the AI page) and nowhere else."""
     scripts = [s for s in scripts if s]
+    if appjs.APP_JS in scripts:
+        forms = True  # its screens' buttons are forms (posted by the app, or by the browser when it does not run)
     parts = ["default-src 'none'", "style-src " + ("'self'" if shell else "'unsafe-inline'"), "base-uri 'none'",
              "form-action " + ("'self'" if forms else "'none'"), "frame-ancestors 'none'"]
     if scripts:
         parts.append("script-src " + " ".join(dict.fromkeys(webjs.csp_source(s) for s in scripts)))
-    if any(s in (webjs.REFRESH_JS, webjs.PREFS_JS, webjs.BUILDER_JS) for s in scripts):
+    if any(s in (webjs.REFRESH_JS, webjs.PREFS_JS, webjs.BUILDER_JS, appjs.APP_JS) for s in scripts):
         parts.append("connect-src 'self'")
     if webjs.REFRESH_JS in scripts:
         parts += ["require-trusted-types-for 'script'", "trusted-types nuc-frag"]
+    elif appjs.APP_JS in scripts:  # the app builds its elements one by one and never hands markup to the parser: no policy at all
+        parts += ["require-trusted-types-for 'script'", "trusted-types 'none'"]
     return "; ".join(parts)
 
 
@@ -361,7 +368,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS or u.path.startswith("/telegram/") and u.path[10:] in TG_ACTIONS:
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         api = u.path == API_PATH or u.path.startswith(API_PATH + "/")
-        if u.path != "/" and not u.path.startswith("/s/") and not api:
+        if u.path not in ("/", APP_PATH) and not u.path.startswith("/s/") and not api:
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
@@ -369,11 +376,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             given = self._token_from(q)
             if not hmac.compare_digest(given.encode(), srv.token.encode()):
                 return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
-            if "token" in q and u.path == "/":  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
-                return self._send(302, extra=(("Location", view_url(view_params(q))), ("Set-Cookie",
+            if "token" in q and u.path in ("/", APP_PATH):  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
+                where = view_url(view_params(q)) if u.path == "/" else app_url(view_params(q))
+                return self._send(302, extra=(("Location", where), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
         if api:
             return self._api(u.path[len(API_PATH):].strip("/"), q)
+        if u.path == APP_PATH:
+            page = srv.app_page(self._cookie(prefs.COOKIE_NAME), q)
+            return self._send(200, page.encode(), "text/html; charset=utf-8", csp=page.csp, referrer="same-origin", extra=(("Vary", "Cookie"),))
         if u.path != "/":
             return self._asset(u.path)
         if "set" in q:
@@ -417,19 +428,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _stream(self, q):
         """/api/v1/stream?view=<view> (and that view's parameters): Server-Sent Events. Each event is the view's document, sent when its rev changes
-        (the first at once, unless Last-Event-ID is already its rev); a comment every KEEPALIVE_S when nothing changed. A stream holds a
+        (the first at once, unless Last-Event-ID is already its rev); a comment every KEEPALIVE_S when nothing changed. view may be given up to
+        STREAM_VIEWS_MAX times (a page: its view and the summary): each event is then one of them (its "view" says which). A stream holds a
         connection and a thread: STREAMS_MAX at once (more: 503), and it ends after STREAM_S, the request deadline lifted (the client reconnects
         after RETRY_MS, with the last id). A client that stops reading is dropped by the socket's timeout."""
         srv = self.server
-        name = (q.get("view") or [""])[0] or "overview"
-        if name not in webapi.VIEWS:
+        names = []
+        for v in q.get("view") or ["overview"]:
+            if (v or "overview") not in names:
+                names.append(v or "overview")
+        if len(names) > webapi.STREAM_VIEWS_MAX:
+            return self._json(400, {"error": "a stream carries at most %d views" % webapi.STREAM_VIEWS_MAX})
+        bad = [v for v in names if v not in webapi.VIEWS]
+        if bad:
             return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
         try:
-            if srv.api(name, q) is None:
-                return self._json(404, {"error": "this screen is off in config.ini ([features] %s = no)" % name})
+            off = [v for v in names if srv.api(v, q) is None]
         except Exception as e:  # noqa: BLE001
-            print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)
+            print("nuc-console web: api %s error: %r" % (names, e), file=sys.stderr)
             return self._json(500, {"error": "the data could not be read (see the service log)"})
+        if off:
+            return self._json(404, {"error": "this screen is off in config.ini ([features] %s = no)" % off[0]})
         if not srv.streams.acquire(blocking=False):
             return self._json(503, {"error": "too many streams are open: try again later"}, extra=(("Retry-After", "10"),))
         try:
@@ -437,22 +456,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._head(200, webapi.STREAM_TYPE, None)
             if self.command == "HEAD":
                 return
-            last = self.headers.get("Last-Event-ID", "").strip()
-            last = last if webapi.EVENT_ID.fullmatch(last) else ""
-            tick = srv.stream_tick or (1.0 if name in ("ai", "telegram") else srv.cfg["refresh_seconds"])  # a job's progress moves every second
+            given = self.headers.get("Last-Event-ID", "").strip()
+            last = {names[0]: given} if len(names) == 1 and webapi.EVENT_ID.fullmatch(given) else {}  # an id is one view's rev
+            tick = srv.stream_tick or (1.0 if {"ai", "telegram"} & set(names) else srv.cfg["refresh_seconds"])  # a job's progress moves every second
             self.wfile.write(webapi.retry(RETRY_MS))
             start = quiet = time.monotonic()
             while True:
-                try:
-                    doc = srv.api(name, q)
-                except Exception as e:  # noqa: BLE001 - one failed read: the stream waits for the next
-                    print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)
-                    doc = None
                 now = time.monotonic()
-                if doc is not None and doc.rev != last:
-                    self.wfile.write(webapi.event(doc))
-                    last, quiet = doc.rev, now
-                elif now - quiet >= srv.keepalive_s:
+                for name in names:
+                    try:
+                        doc = srv.api(name, q)
+                    except Exception as e:  # noqa: BLE001 - one failed read: the stream waits for the next
+                        print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)
+                        doc = None
+                    if doc is not None and doc.rev != last.get(name):
+                        self.wfile.write(webapi.event(doc))
+                        last[name], quiet = doc.rev, now
+                if now - quiet >= srv.keepalive_s:
                     self.wfile.write(webapi.comment("keepalive"))
                     quiet = now
                 if now - start >= srv.stream_s:
@@ -584,6 +604,7 @@ def view_params(q):
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else ""} if view == "ai" else {})}
 
 
+APP_VIEWS = ("cpu", "health", "map", "ai")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
 HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
              "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
@@ -602,6 +623,16 @@ def view_url(p):
     p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ()) + (("pause",) if p["app"] == "1" and p["view"] == "" else ())}  # the shell's overview pauses too
     p.update({k: ".".join(p[k]) for k in ("open", "shut") if k in p})  # row keys: 'k1.k2', like the pages' own links
     return page_url(p).rstrip("?")  # nothing left: "/"
+
+
+def app_url(p):
+    """The address of a screen of the live app for view_params() p: the screen and the parameters it takes, the defaults left out."""
+    view = p["view"] if p["view"] in APP_VIEWS else ""
+    keep = {"cpu": ("sort", "sel"), "health": ("period", "sel"), "map": ("open", "shut", "all", "sel", "only"), "ai": ("sel", "confirm")}.get(view, ())
+    q = {"view": view}
+    q.update((k, ".".join(p[k]) if k in ("open", "shut") and not isinstance(p[k], str) else p[k]) for k in keep if k in p)
+    return APP_PATH + ("?" + urlencode([(k, "1" if v is True else v) for k, v in q.items() if v not in (0, False, None, "")]) if any(
+        v not in (0, False, None, "") for v in q.values()) else "")
 
 
 def gzoom(z):
@@ -739,12 +770,68 @@ class Server(http.server.ThreadingHTTPServer):
             return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
         return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
 
+    # ---- the live app: /app (src/appjs.py draws the screens from the data API) -------------------------------------------------------
+
+    def app_page(self, cookie, q):
+        """The live app's page: the shell's frame (top bar, key figures, footer, help) around an empty <main id="app">, the settings the app
+        needs (#cfg: the refresh, the screens on, the layout and order of the cards and the key figures the preferences give) and the first
+        documents (#doc), so that the first paint needs no request; then APP_JS draws and listens, KEYS_JS and PREFS_JS do what they do on the
+        shell. Without scripts the page says so and links to the shell. live=0: the page as it is now, no stream (data-static: a snapshot, a
+        screenshot, the browser check)."""
+        p = view_params(q)
+        feats = lambda f: render.CFG["features"].get(f, True)  # noqa: E731
+        view = p["view"] if p["view"] in APP_VIEWS and feats(p["view"]) else ""
+        eff, src = prefs.effective(render.CFG.get("ui"), cookie, p["ui"])
+        cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing), as the shell reads it
+        on = [c for c in prefs.CARDS if cards.enabled(c, render.CFG)]
+        r = self.cfg["refresh_seconds"]
+        conf = {"refresh": r, "views": [v for v in APP_VIEWS if feats(v)], "layout": [[c, w] for c, w in prefs.visible_cards(eff, on)],
+                "order": eff["order"], "custom": prefs.custom_layout(src, eff["order"]), "kpis": list(eff["kpis"]), "kpi_card": KPI_CARD,
+                "kpi_view": KPI_VIEW, "tabs": [[digit, name, TAB_TITLES[name]] for digit, name in ui.screen_keys(feats)]}
+        qq = parse_qs(urlsplit(app_url(dict(p, view=view))).query)
+        first = {}
+        for name in ([view, "summary"] if view else ["overview"]):
+            try:
+                doc = self.api(name, qq)
+                if doc is not None:
+                    first[name] = json.loads(doc)
+            except Exception as e:  # noqa: BLE001 - the stream brings it
+                print("nuc-console web: app %s error: %r" % (name, e), file=sys.stderr)
+        top = first.get("summary") or first.get("overview") or {}
+        state, text = (top.get("status") or {}).get("state", "unknown"), (top.get("status") or {}).get("text", "?")
+        host = socket.gethostname()
+        tabs = [htmlview.tab(digit, TAB_TITLES[name], APP_PATH if name == "overview" else APP_PATH + "?view=" + name, (name if name != "overview" else "") == view)
+                for digit, name in ui.screen_keys(feats)]
+        here = app_url(dict(p, view=view))
+        top_bar = htmlview.topbar(host, state, text, tabs, time.strftime("%H:%M:%S"), "#help", page_url({"view": "settings"}), False)
+        back = urlsplit(page_url({"view": view} if view else {})).query
+        setlink = lambda field, label, cur, **data: set_link(field, back, label, cur, **data)  # noqa: E731
+        groups = ['<span class="live">live</span>',
+                  f'<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="{html.escape(here)}">pause</a>',
+                  f'<a class="lnk" href="{html.escape(page_url({"view": view} if view else {}) if view else "/")}">classic pages</a>',
+                  '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
+                  '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>"]
+        data = lambda obj, ident: ('<script type="application/json" id="%s">' % ident) + json.dumps(obj, separators=(",", ":"), ensure_ascii=False).replace(
+            "<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "</script>"  # noqa: E731 - nothing in it can end the element
+        body = (top_bar + '<div class="kpiblock" id="kpis"></div><div id="stale" class="stale-banner" role="status" hidden></div>'
+                + f'<main id="app" class="{"view" if view else "grid"}"{" data-static" if (q.get("live") or [""])[0] == "0" else ""}>'
+                + '<noscript><p class="msg lv-info"><span class="sym">\u00b7</span> the live app needs JavaScript: the <a href="/">classic pages</a> do not.</p></noscript>'
+                + "</main>" + htmlview.foot(groups, time.strftime("%H:%M:%S"))
+                + htmlview.help_dialog(ui.help_rows(view or "overview", feats, bool(nuc_config.PORTABLE), False))
+                + data(conf, "cfg") + data(first, "doc"))
+        scripts = [appjs.APP_JS, webjs.KEYS_JS, webjs.PREFS_JS]
+        page = Page(htmlview.shell_doc(f"{host} · {view or 'overview'} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], 100,
+                                       int(time.time() // 600) % 3, False, "url" if p["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
+                                       cookie if not p["ui"] and cookie != prefs.COOKIE_VERSION else "", 0, "app", scripts))
+        page.csp = page_csp(scripts, shell=True)
+        return page
+
     # ---- the data API: /api/v1 (webapi.py turns the components into JSON) -----------------------------------------------------------
 
     def api_index(self):
         """GET /api/v1: what there is."""
         return {"api": webapi.VERSION, "version": nuc_config.VERSION, "refresh": self.cfg["refresh_seconds"],
-                "views": [v for v in webapi.VIEWS if v in ("overview", "telegram") or render.CFG["features"].get(v, True)],
+                "views": [v for v in webapi.VIEWS if v in ("overview", "telegram", "summary") or render.CFG["features"].get(v, True)],
                 "documents": API_PATH + "/<view>", "stream": API_PATH + "/stream?view=<view>"}
 
     def api(self, name, q):
@@ -759,6 +846,8 @@ class Server(http.server.ThreadingHTTPServer):
             return None
         if name == "overview":
             return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_overview(r), time.time()))
+        if name == "summary":
+            return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_summary(r), time.time()))
         if name == "cpu":
             self.cpu_feed.max_age = r
             sort, sel = p["sort"] or "cpu", p["sel"]
@@ -800,8 +889,21 @@ class Server(http.server.ThreadingHTTPServer):
                 entry = cards.CARDS.get(cid)
                 built.append(ui.Card(cid, entry.title if entry else cid, "could not be drawn (see the service log)", "unknown", []))
         state, text = self.shell_pill(ctx.problems)
-        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
+        stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
+        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
+                "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
+                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
                 "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
+
+    def api_summary(self, r):
+        """What every page shows above its view: the host, the status pill, every key figure, whether a collector's data is old or missing
+        (the banner of the pages) and how many problems there are."""
+        ctx = self.shell_frame(r)
+        state, text = self.shell_pill(ctx.problems)
+        stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
+        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS),
+                "stale": stale, "restart": render.CMD.get("restart", ""), "problems": len(ctx.problems or []),
+                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True))}
 
     def api_cpu(self, here, sort, sel):
         nodes, sel = self.cpu_nodes(dict({"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}, **here), sort, sel)
@@ -929,6 +1031,8 @@ class Server(http.server.ThreadingHTTPServer):
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
                   + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if not quiet and not edit else "",
                   link("Done", edit=False) if edit else link("Edit layout", edit=True) if view == "" and not card else "",
+                  f'<a class="lnk" href="{html.escape(app_url(dict(vhere, view=view if view in APP_VIEWS else "")))}">live app</a>'
+                  if not quiet and not edit and not wall and not (view == "map" and vhere.get("as") == "graph") else "",
                   "text " + self.sizes(link, zoom),
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
@@ -961,23 +1065,34 @@ class Server(http.server.ThreadingHTTPServer):
         state = "ok" if not pb else "err" if any(sev >= 2 for sev, _ in pb) else "warn"
         return state, text
 
-    def shell_tabs(self, ctx, here, view, r, feats):
-        """The tabs: a link per screen with its key, a badge where there is something to say (the Map's problems, the Health findings, the AI)."""
-        badges = {}
+    def tab_badges(self, ctx, r, feats, graph_too=True):
+        """What the tabs have to say, as data: {"map": the Map's problems, "health": [errors, warnings] of the findings, "ai": "on", "down" or
+        "unknown" while the AI is enabled}; a screen with nothing to say has no entry. graph_too: count the Map's problems (it builds the graph)."""
+        out = {}
         try:
-            if feats("map") and view not in ("settings", "telegram"):
-                n = graph.counts(self.map_graph(r)[0])["problems"]
-                badges["map"] = str(n) if n else ""
+            if feats("map") and graph_too:
+                out["map"] = graph.counts(self.map_graph(r)[0])["problems"]
             rep = ((ctx.health or {}).get("report") or {}).get("findings") if feats("health") else None
             if isinstance(rep, list):
-                err, warn = (sum(1 for f in rep if isinstance(f, dict) and f.get("level") == lv) for lv in ("err", "warn"))
-                badges["health"] = " ".join(x for x in (f'<span class="s-err">✖{err}</span>' if err else "", f'<span class="s-warn">!{warn}</span>' if warn else "") if x)
+                out["health"] = [sum(1 for f in rep if isinstance(f, dict) and f.get("level") == lv) for lv in ("err", "warn")]
             ai = ctx.ai if feats("ai") and isinstance(ctx.ai, dict) else {}
             if ai.get("enabled"):
                 answer = (ai.get("probe") or {}).get("state") if isinstance(ai.get("probe"), dict) else None
-                badges["ai"] = '<span class="s-ok">●</span> on' if answer == "answering" else '<span class="s-err">✖</span> down' if answer == "down" else '<span class="s-unknown">?</span>'
+                out["ai"] = "on" if answer == "answering" else "down" if answer == "down" else "unknown"
         except Exception as e:  # noqa: BLE001 - a badge is a nicety: the tab stays
             print("nuc-console web: badge error:", repr(e)[:200], file=sys.stderr)
+        return out
+
+    def shell_tabs(self, ctx, here, view, r, feats):
+        """The tabs: a link per screen with its key, a badge where there is something to say (the Map's problems, the Health findings, the AI)."""
+        data, badges = self.tab_badges(ctx, r, feats, view not in ("settings", "telegram")), {}
+        if "map" in data:
+            badges["map"] = str(data["map"]) if data["map"] else ""
+        if "health" in data:
+            err, warn = data["health"]
+            badges["health"] = " ".join(x for x in (f'<span class="s-err">✖{err}</span>' if err else "", f'<span class="s-warn">!{warn}</span>' if warn else "") if x)
+        if "ai" in data:
+            badges["ai"] = {"on": '<span class="s-ok">●</span> on', "down": '<span class="s-err">✖</span> down'}.get(data["ai"], '<span class="s-unknown">?</span>')
         out = []
         for digit, name in ui.screen_keys(feats):
             href = page_url(dict(here, view=name)) if name != "overview" else page_url(here)

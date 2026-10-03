@@ -1,6 +1,6 @@
 # Web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)), and **`/app`** draws the screens from it in the browser, live, without a reload ([below](#the-live-app)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
 switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
@@ -52,7 +52,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 ## Hardening built in
 
 - **DNS-rebinding guard**: without a token, requests whose `Host` is not `localhost`, `127.0.0.1`, `::1`, the bind address, the hostname, a `*.ts.net` name or one listed in `[web] allowed_hosts` get `421`.
-- **Connection cap** (32) and a **15 s total deadline per request**: a slow client cannot hold threads. A stream of the data API is the one request the deadline does not end: at most 4 are open at once (more get `503`), each ends after 5 minutes, and a client that stops reading is dropped by the socket's 10 s timeout ([below](#the-data-api)). The unit adds `ProtectSystem=strict` with one writable place, `ReadWritePaths=-/var/lib/nuc-console/ai` (the AI folder), `TasksMax=512`, `MemoryMax=85%`, `PrivateDevices`, `RestrictNamespaces` and more. (`TasksMax` and `MemoryMax` were 64 and 256M before the AI page could start a model server: it is a child of this service and lives in its cgroup; 85% of the RAM is the line the page's "too big" is drawn at.)
+- **Connection cap** (32) and a **15 s total deadline per request**: a slow client cannot hold threads. A stream of the data API is the one request the deadline does not end: at most 8 are open at once (more get `503`), each ends after 5 minutes, and a client that stops reading is dropped by the socket's 10 s timeout ([below](#the-data-api)). The unit adds `ProtectSystem=strict` with one writable place, `ReadWritePaths=-/var/lib/nuc-console/ai` (the AI folder), `TasksMax=512`, `MemoryMax=85%`, `PrivateDevices`, `RestrictNamespaces` and more. (`TasksMax` and `MemoryMax` were 64 and 256M before the AI page could start a model server: it is a child of this service and lives in its cgroup; 85% of the RAM is the line the page's "too big" is drawn at.)
 - Page cache: layout widths are rounded to steps of 20, so at most a dozen distinct renders exist and a burst costs one render per size.
 - Render errors go to the journal, never to the page.
 
@@ -75,6 +75,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 | `/api/v1/...` | the **data API**, with either interface: every screen as JSON, and as a stream of Server-Sent Events ([below](#the-data-api)) |
+| `/app` | the **live app**: every screen drawn in the browser from the data API and kept up to date by its stream ([below](#the-live-app)) |
 
 Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`), except the `POST` of the AI page's and the Telegram page's forms (below).
 HEAD is answered like GET (same status, same headers, `Content-Length` included, the same token and `Host` checks), without the body.
@@ -219,6 +220,7 @@ The editor page does not reload by itself and has no pause link: a page that mov
 | shell edit page (`?edit=1`) | the hashes of `KEYS_JS`, `PREFS_JS`, `BUILDER_JS` | `'self'` | no (no script there parses markup) | `'none'` |
 | shell AI page | the same three as the shell pages | `'self'` | yes | `'self'` (not when locked) |
 | shell map graph | the same three as the shell pages and the graph script's | `'self'` | yes | `'none'` |
+| the live app (`/app`) | the hashes of `APP_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | `require-trusted-types-for 'script'; trusted-types 'none'` (it parses no markup at all) | `'self'` |
 
 Always `default-src 'none'; base-uri 'none'; frame-ancestors 'none'`. The scripts are inline and pinned (a hash source is honoured reliably by Safari
 and Firefox only for inline scripts). To verify a page: take each `<script>…</script>` body of the page, hash its UTF-8 bytes and compare:
@@ -249,8 +251,9 @@ a test parses every fragment and checks the same lists.
 
 ## The data API
 
-What the screens show, as JSON, for a program or a front end: `GET /api/v1/<view>` (`overview`, `cpu`, `health`, `map`, `ai`, `telegram`), and
-the same document again each time it changes, as Server-Sent Events: `GET /api/v1/stream?view=<view>`. It changes nothing; the buttons of the AI
+What the screens show, as JSON, for a program or a front end (the [live app](#the-live-app) is one): `GET /api/v1/<view>` (`overview`, `cpu`,
+`health`, `map`, `ai`, `telegram`, `summary`), and the same document again each time it changes, as Server-Sent Events:
+`GET /api/v1/stream?view=<view>`. It changes nothing; the buttons of the AI
 and Telegram pages stay their forms (below), which a client posts as a page does.
 
 | Path | What |
@@ -262,7 +265,8 @@ and Telegram pages stay their forms (below), which a client posts as a page does
 | `/api/v1/map?sel=&open=&shut=&all=&only=` | the MAP as a tree (the parameters of the page), `node` (the selected row's node) and `counts` |
 | `/api/v1/ai?sel=&confirm=` | the AI screen, `engine` (the state of the downloads, the server and the chat: what the page shows) and `csrf` |
 | `/api/v1/telegram` | `engine` (the pairing and the notifier's state: never the bot's token), `csrf` and the `actions` its buttons post to |
-| `/api/v1/stream?view=<view>&…` | Server-Sent Events: each message is that view's document (the same parameters) |
+| `/api/v1/summary` | what every page shows above its screen: `host`, `status`, `kpis`, `stale` (a collector's data is old or missing) with the `restart` command, the number of `problems` and the tabs' `badges` (`map`: its problems, `health`: errors and warnings, `ai`: on, down or unknown); the overview carries the same fields |
+| `/api/v1/stream?view=<view>&…` | Server-Sent Events: each message is that view's document (the same parameters). `view` may be given up to 3 times (a screen and the summary): each message is then one of them, its `view` says which |
 
 **A document** is `{"api": 1, "view": …, "rev": …, "at": …, …}`: `at` is when the data was read (seconds since the epoch), `rev` a hash of the
 rest. The same data has the same `rev`: it is the document's `ETag` (`If-None-Match` gets `304`) and the id of its event. Screens are
@@ -274,7 +278,7 @@ may appear in version 1; one that changes meaning or goes is version 2.
 
 **The stream** sends `retry: 3000`, then the document at once (unless the request's `Last-Event-ID` is already its `rev`), then again each
 time its `rev` changes (it looks every refresh interval, every second for `ai` and `telegram`), and a `: keepalive` comment after 15 s of
-nothing. It ends after 5 minutes and the browser's `EventSource` reconnects by itself with the last id; 4 streams at most at once (`503`
+nothing. It ends after 5 minutes and the browser's `EventSource` reconnects by itself with the last id; 8 streams at most at once (`503`
 with `Retry-After` after that). The shell's own scripts do not use it: they keep polling the fragment endpoint.
 
 **Access**: exactly the page's. Without a token the `Host` guard (`421`); with one the token as a header (`Authorization: Bearer`), the
@@ -290,6 +294,36 @@ curl -s http://127.0.0.1:8787/api/v1/overview | python3 -m json.tool | head
 curl -sN http://127.0.0.1:8787/api/v1/stream?view=cpu         # one document per refresh, until you stop it
 curl -s -H "Authorization: Bearer $(sudo cat /etc/nuc-console/web.token)" http://box.example.ts.net:8787/api/v1/health
 ```
+
+## The live app
+
+`/app` is the web view as an app: one page that draws every screen in the browser from the [data API](#the-data-api)'s documents and keeps it
+up to date from its stream. Nothing reloads: a new document is drawn and morphed into the page, so what did not change stays the same element
+(the focus, a `<details>` you opened, the scroll, the question you are typing); the tabs, the column heads, a row, a period, a model are
+followed inside the page (`history.pushState`, the back button works), and the buttons of the AI screen are posted in the background, their
+effect arriving with the stream. It looks exactly like the shell: it draws the same components into the same markup (`src/appjs.py` is
+`htmlview.html` in the browser, and `tools/browser_check.py` checks, screen by screen, that the two give the same markup), with the same style
+sheet, themes, densities, keys and help. The shell has a **live app** link in its footer, and the app a **classic pages** one.
+
+| Path | What |
+|---|---|
+| `/app` | the overview: the key figures and every card, in the order your layout gives them |
+| `/app?view=cpu&sort=&sel=`, `?view=health&period=&sel=`, `?view=map&sel=&open=&shut=&all=&only=`, `?view=ai&sel=&confirm=` | the other screens, with the parameters of their pages |
+| `/app?…&live=0` | the page as it is now, with no stream (a snapshot: a screenshot, the browser check) |
+
+The settings, the Telegram page, the MAP as a graph, a card in full and the layout editor are the shell's: a link to them leaves the app. The
+app needs JavaScript (without it the page says so and links to the shell) and one of the 8 streams the server allows (when none is free it
+asks for the documents every refresh interval instead). The page carries what it needs to draw at once: the settings (`<script
+type="application/json" id="cfg">`: the refresh, the screens, your layout, order and key figures) and the first documents (`id="doc"`), with
+`<`, `>` and `&` escaped so that nothing in them can end the element.
+
+**Security**: the access is the pages' (the `Host` guard, or the token, which `?token=` moves into the cookie as on `/`), the forms are the AI
+and Telegram pages' with their CSRF token, and the app's script obeys the rules of the shell's scripts with four exceptions, each replaced by a
+narrower rule (`tests/jsrules.py`, policy `app`): it creates elements, but only with `createElement` / `createElementNS` from a fixed list of
+tags (no `script`, `style`, `iframe`, `object`, `img`...) and only attributes from a fixed list (no `on…`, `style`, `src`), text only as text,
+never markup (`innerHTML`, `DOMParser` stay banned, and the page's CSP has `trusted-types 'none'`: no policy can hand markup to the parser);
+it opens one `EventSource`, behind a door that only opens `/api/v1/stream`; it fetches only `/api/v1/…` and posts only to `/ai/…` and
+`/telegram/…`, without following the redirect; and it changes the address only to `/app…` with `history`.
 
 ## The AI page's buttons
 
