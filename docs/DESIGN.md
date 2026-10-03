@@ -149,6 +149,7 @@ read by `ansi`, `exposure` and `cards`, `exposure` by `graph` and `cards`, `grap
 | `notify.py` | the optional Telegram notifier (and the requests of the web view's Telegram page, read from its inbox) |
 | `aisetup.py`, `advisor.py` | `nuc-console-ai` and `nuc-console-ask` |
 | `update.py` | the logic of `nuc-console-update` |
+| `desktop/src-tauri/src/main.rs` (Rust, Tauri 2; not shipped in the archives) | the desktop app ([docs/DESKTOP.md](DESKTOP.md)): starts `core/run.sh` / `core\run.ps1` with `NUC_CONSOLE_DATA`, reads the address, shows `/app`, the tray icon, start at login; `tools/desktop_core.py` fills `core/` from a release archive |
 
 | Module | Holds |
 |---|---|

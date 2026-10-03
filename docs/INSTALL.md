@@ -33,6 +33,11 @@ file. The release workflow builds them from the tag, not on anyone's machine, an
 | Windows on ARM | `nuc-console-X.Y.Z-windows-arm64.zip` | the same, with the ARM64 Python |
 | every system | `SHA256SUMS` | the SHA-256 of each archive |
 
+**The desktop app** is on the same release: `nuc-console-desktop-X.Y.Z-<target>` with `.msi` or `-setup.exe` (Windows), `.dmg` (macOS),
+`.deb`, `.rpm` or `.AppImage` (Linux), and `SHA256SUMS-desktop`. It is the portable run in a window with a tray icon, running as you, with
+nothing to unpack: [docs/DESKTOP.md](DESKTOP.md) says which file, what the first start of an unsigned app asks, and where its data goes.
+The archives below are for installing the services (everything, as root) or for the portable run.
+
 Windows: *Settings › System › About › System type* says which one you have. 32-bit Windows is not supported, nor 32-bit Linux or ARM
 (`armv7l`, a 32-bit Raspberry Pi OS): there is no archive for them, and the updater says so. The Linux archives are for glibc systems (Debian,
 Ubuntu, Fedora, Arch, Raspberry Pi OS 64-bit...); on Alpine (musl) use a clone and the system's `python3`. An archive of the wrong processor does not run: `run.sh`

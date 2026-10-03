@@ -200,6 +200,7 @@ jobs:
           sudo apt-get install -y "./$deb"
           run_sh="$(dpkg -L "$name" | grep '/core/run\.sh$')"
           core="$(dirname "$run_sh")"
+          echo "the core is in $core"
           test "$("$run_sh" --which-python)" = "$core/python/bin/python3"   # the Python of the package, not the runner's
           NUC_CONSOLE_DATA="$RUNNER_TEMP/core-data" "$run_sh" --problems > /dev/null
           test ! -e "$core/data"   # nothing written inside the package

@@ -17,6 +17,7 @@ python3 -m unittest tests.test_golden            # every screen and page, byte f
 python3 tools/bench_render.py                    # the CPU a frame costs, per view and size (--json, --compare before.json)
 shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
 python3 tools/browser_check.py --out shots      # the web shell in a real headless Chrome/Chromium: every view, theme and density, scripts on and off, the wall page (--quick, --only TEXT, --chrome PATH or $CHROME)
+python3 tools/desktop_core.py --checkout && (cd desktop/src-tauri && cargo test && cargo tauri dev)   # the desktop app, if you touch desktop/ (docs/DESKTOP.md)
 ```
 
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
@@ -52,6 +53,12 @@ python3 tools/browser_check.py --out shots      # the web shell in a real headle
   parity check of `tools/browser_check.py` (the `browser` job; `python3 tools/browser_check.py --only app-` for the app's pages, the parity runs
   without `--only`) compares the two screen by screen in a real browser and fails on the first difference; `tests/test_appjs.py` checks the
   script against its policy and the page web.py serves.
+- The desktop app (`desktop/`, [docs/DESKTOP.md](docs/DESKTOP.md)) is the one place that is not Python: a Tauri 2 window in Rust that starts
+  the portable core it carries and shows `/app`. It adds no behaviour of its own to the dashboard: what the screens do stays in the core, and
+  the app only starts, shows, hides and stops it. Its crates are Tauri's and `libc`, nothing else (`tests/test_desktop.py` checks the list); its
+  window shows only its start page and the core, and declares no capability. `desktop/` is never shipped in the archives; `core/` is filled by
+  `tools/desktop_core.py` and never committed. `cargo fmt` and `cargo test` run in `.github/workflows/desktop.yml`, which also builds every
+  package and installs and starts it: a change there runs it on its pull request.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view's scripts are first-party, inline and pinned by hash: the shell's four in `src/webjs.py` (partial refresh, keys,
@@ -176,7 +183,10 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
      The release job needs all six: **a broken archive is never published**. On Windows the archive is unpacked under Program Files, because the runner is an administrator and
      `run.ps1` refuses, as one, a folder that ordinary users can write to. `macos-15-intel` is the last Intel image GitHub hosts (announced until August 2027): when it goes,
      remove its entry from the matrix and say here that `macos-x86_64` is not run in CI (`tests/test_release.py` names the six entries);
-   - attests every archive and `SHA256SUMS` (build provenance), and creates the release `nuc-console X.Y.Z` with them, with generated notes.
+   - builds the desktop app's packages around the same archives (`.github/workflows/desktop.yml`: `.msi`, setup `.exe`, `.dmg`, `.deb`, `.rpm`,
+     AppImage), each installed and started with `--smoke-test` on a runner of its own system and processor; the release job needs them all too;
+   - attests every archive, `SHA256SUMS`, every package and `SHA256SUMS-desktop` (build provenance), and creates the release `nuc-console X.Y.Z`
+     with them, with generated notes.
    The release is public as soon as the workflow ends, and from then on it is the *latest* one that `nuc-console-update` offers.
 4. **Locally**, to look at what would ship: `python3 tools/build_release.py --version X.Y.Z --out dist --python-dir DIR`. `--list-python` prints the file, SHA-256 and URL
    of the six Pythons to download into `DIR` (it refuses while the pins are `null`); there is no build without them, because every archive carries its Python, and a
@@ -184,7 +194,7 @@ A release is a tag. Everything else is done by `.github/workflows/release.yml`, 
    (the archives are of the files git tracks).
 
 What goes in an archive is computed from the files git tracks, so a new file is shipped without touching the script: everything except `tests/`, `tools/`,
-`CONTRIBUTING.md`, `CLAUDE.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
+`desktop/`, `CONTRIBUTING.md`, `CLAUDE.md` and dotfiles (`.github/`); `systemd/` only in the Linux archive, `launchd/` and `install-macos.sh` only in the macOS one, `*.cmd` / `*.bat` /
 `*.ps1` only in the Windows ones, shell scripts and `scripts/` not in the Windows ones. Name and place a new file accordingly. The rules are in the docstring of
 `tools/build_release.py` and tested in `tests/test_release.py`.
 

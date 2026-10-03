@@ -137,6 +137,10 @@ network.**
 
 `uname -m` says which processor a Linux or macOS machine has (`x86_64`, or `aarch64` / `arm64`); 32-bit systems have no archive.
 
+**Or the desktop app**: a window of its own with an icon in the tray and *start at login*, from a package on the same release:
+`.msi` / setup `.exe` (Windows x64 and ARM), `.dmg` (Apple silicon, Intel), `.deb` / `.rpm` (Linux x86-64 and ARM) and an AppImage.
+It runs as you (what needs root or administrator rights shows less) and is not signed yet: [docs/DESKTOP.md](docs/DESKTOP.md).
+
 - **Check it**: `sha256sum --ignore-missing -c SHA256SUMS` (macOS: `shasum -a 256`; Windows: `Get-FileHash`) and
   `gh attestation verify <archive> --repo give-jd/nuc-console-oss`: [how, and what they prove](docs/INSTALL.md#check-it).
 - **Offline**: every archive carries its Python (Linux and macOS: python-build-standalone, unpacked in `python/`; Windows: the official embeddable Python), so
