@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "nuc-console",
+  "identifier": "io.github.give-jd.nuc-console",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'none'; style-src 'self'; img-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "nuc-console",
+    "copyright": "Copyright (c) 2026 Gi.Ve Group S.r.l.",
+    "license": "MIT",
+    "homepage": "https://github.com/give-jd/nuc-console-oss",
+    "category": "Utility",
+    "shortDescription": "The dashboard of your machine: exposure, firewall, containers, health, local AI",
+    "longDescription": "nuc-console shows what your machine exposes and to whom, what needs attention and why, its health over time and a local AI that analyses it. This app runs it in a window of its own; nothing leaves the machine.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["core/"],
+    "linux": {
+      "deb": {
+        "section": "admin"
+      },
+      "rpm": {
+        "release": "1"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

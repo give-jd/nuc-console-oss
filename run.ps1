@@ -16,8 +16,9 @@
     1. finds Python: the official embeddable one that the release ZIP carries in python\ (unpacked once into python\ after its
        SHA-256 is checked against the pin in install-windows.ps1, then reused), else a Python 3.8+ of this machine (py -3,
        python);
-    2. keeps everything it writes (config.ini, state, the baseline of the port alarms, logs) in .\data, which is created on the
-       first run (config.ini is copied there once: your edits stay);
+    2. keeps everything it writes (config.ini, state, the baseline of the port alarms, logs) in .\data (or in
+       $env:NUC_CONSOLE_DATA, an absolute path), which is created on the first run (config.ini is copied there once: your edits
+       stay);
     3. starts the collector (as you: without administrator rights the sections that need them show less; right-click run.cmd,
        Run as administrator, shows everything) and the web view on 127.0.0.1 only (no token: nothing else can connect), and
        opens your default browser;
@@ -61,7 +62,10 @@ if ($PSVersionTable.PSEdition -eq 'Desktop' -and $env:PSModulePath) {
 $Here = $PSScriptRoot
 $Src = Join-Path $Here 'src'
 $PyDir = Join-Path $Here 'python'
-$Data = Join-Path $Here 'data'
+# $env:NUC_CONSOLE_DATA (an absolute path) moves the data folder: the desktop app runs this script from inside the app, which
+# ordinary users cannot write to, with its data in theirs
+$Data = if ($env:NUC_CONSOLE_DATA) { $env:NUC_CONSOLE_DATA } else { Join-Path $Here 'data' }
+if ($Data -notmatch '^([A-Za-z]:\\|\\\\)') { throw "NUC_CONSOLE_DATA must be an absolute path: $Data" }
 $Logs = Join-Path $Data 'logs'
 
 function Say($text) { Write-Host "nuc-console: $text" }

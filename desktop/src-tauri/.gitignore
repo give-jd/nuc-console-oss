@@ -1,0 +1,7 @@
+# what a build makes: the compiler's output, the schemas tauri-build writes, the core tools/desktop_core.py unpacks and the
+# version the workflow gives the bundler
+/target/
+/gen/
+/core/
+/core.part/
+/version.json

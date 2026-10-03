@@ -1,0 +1,280 @@
+name: desktop
+
+# The desktop app (desktop/, docs/DESKTOP.md): its packages for every system and processor, each built on a runner of its own
+# from the release archive of that target (the core and the Python it carries) by Tauri, then installed (or mounted) there and
+# started with --smoke-test: the app starts the core from where the package put it, asks it for /app and /api/v1/summary, stops it.
+#
+# When: on a pull request that touches the app, the launchers it starts or the builds; by hand (Actions > desktop > Run workflow);
+# and from release.yml, which passes the archives it built (input dist) and attaches the packages to the release. Run on its own,
+# the job "archives" builds them first, the way release.yml does.
+#
+# The packages are not signed yet (docs/DESKTOP.md says what that means at the first start); macOS gets an ad-hoc signature.
+# Nothing here can write: contents: read, no OIDC token, no secret. Actions are pinned by commit SHA (the comment says which
+# release). Values reach the scripts through env:, never pasted into them.
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "tools/desktop_core.py"
+      - "tools/desktop_icons.py"
+      - "tools/build_release.py"
+      - "run.sh"
+      - "run.ps1"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      dist:
+        description: "The artifact of the calling run that holds the release archives (empty: build them here)."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  archives:
+    if: ${{ !inputs.dist }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: The archives, as release.yml builds them (the Pythons downloaded and checked against their pins)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/build_release.py --list-python > python-files.txt
+          [ "$(wc -l < python-files.txt)" -eq 6 ]
+          mkdir pythons
+          while read -r file sha256 url; do
+            curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+              --output "pythons/$file" "$url"
+            echo "$sha256  pythons/$file" | sha256sum --check -
+          done < python-files.txt
+          version="$(python3 -c 'import sys; sys.path.insert(0, "src"); import nuc_config; print(nuc_config.VERSION)')"
+          python3 tools/build_release.py --version "$version" --out dist --python-dir pythons
+          (cd dist && sha256sum --check SHA256SUMS)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  bundle:
+    name: bundle · ${{ matrix.target }}
+    needs: archives
+    if: ${{ !cancelled() && (needs.archives.result == 'success' || needs.archives.result == 'skipped') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x86_64, runner: ubuntu-22.04, bundles: "deb,rpm,appimage" }   # glibc 2.35: the oldest hosted Ubuntu
+          - { target: linux-arm64, runner: ubuntu-22.04-arm, bundles: "deb,rpm" }          # free for public repositories
+          - { target: macos-arm64, runner: macos-latest, bundles: "app,dmg" }              # Apple silicon
+          - { target: macos-x86_64, runner: macos-15-intel, bundles: "app,dmg" }           # the last hosted Intel Mac (see release.yml)
+          - { target: windows-x64, runner: windows-latest, bundles: "msi,nsis" }
+          - { target: windows-arm64, runner: windows-11-arm, bundles: "nsis" }             # free for public repositories
+    env:
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.dist || 'desktop-dist' }}
+          path: dist
+
+      - name: What Tauri needs on Linux (WebKitGTK, the tray), and a display and a session bus for the smoke test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libssl-dev patchelf file xvfb xauth dbus
+
+      - name: Rust (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo > /dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Rust (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
+            $init = Join-Path $env:RUNNER_TEMP 'rustup-init.exe'
+            Invoke-WebRequest -UseBasicParsing -Uri "https://static.rust-lang.org/rustup/dist/$arch-pc-windows-msvc/rustup-init.exe" -OutFile $init
+            & $init -y --profile minimal
+            if ($LASTEXITCODE -ne 0) { throw "rustup-init exited $LASTEXITCODE" }
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE '.cargo\bin')
+          }
+
+      - name: The Tauri command line (2.x, with the versions its release locked)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          cargo install tauri-cli --version "^2" --locked
+          cargo tauri --version
+
+      - name: The core the app carries, from the release archive of this target
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -- dist/nuc-console-*-"$TARGET".tar.gz dist/nuc-console-*-"$TARGET".zip
+          archive=""
+          for f in "$@"; do if [ -f "$f" ]; then archive=$f; fi; done
+          if [ -z "$archive" ]; then echo "error: no release archive for $TARGET in dist" >&2; ls dist >&2; exit 1; fi
+          version=${archive#dist/nuc-console-}
+          version=${version%%-"$TARGET".*}
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          python tools/desktop_core.py --archive "$archive"
+          cat desktop/src-tauri/core/core.json
+          printf '{"version": "%s"}\n' "$version" > desktop/src-tauri/version.json
+
+      - name: The app's own tests, and its format
+        if: matrix.target == 'linux-x86_64'
+        shell: bash
+        working-directory: desktop/src-tauri
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo test
+
+      - name: Build the packages
+        shell: bash
+        working-directory: desktop/src-tauri
+        run: |
+          set -euo pipefail
+          cargo tauri build --ci --bundles "$BUNDLES" --config version.json
+          find target/release/bundle -maxdepth 2 -type f | sort
+
+      - name: The packages, named after the release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/desktop_core.py --collect desktop/src-tauri/target/release/bundle --target "$TARGET" --version "$VERSION" \
+            --bundles "$BUNDLES" --out packages
+          ls -l packages
+
+      - name: Smoke test (Linux) - the .deb installed, its core runs its own Python, the app starts it and gets /app (and the AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHON PYTHONHOME PYTHONPATH
+          deb="$(ls packages/*.deb)"
+          name="$(dpkg-deb -f "$deb" Package)"
+          sudo apt-get install -y "./$deb"
+          run_sh="$(dpkg -L "$name" | grep '/core/run\.sh$')"
+          core="$(dirname "$run_sh")"
+          test "$("$run_sh" --which-python)" = "$core/python/bin/python3"   # the Python of the package, not the runner's
+          NUC_CONSOLE_DATA="$RUNNER_TEMP/core-data" "$run_sh" --problems > /dev/null
+          test ! -e "$core/data"   # nothing written inside the package
+          dbus-run-session -- xvfb-run -a timeout 300 "/usr/bin/$name" --smoke-test
+          for image in packages/*.AppImage; do
+            [ -f "$image" ] || continue
+            chmod +x "$image"
+            APPIMAGE_EXTRACT_AND_RUN=1 dbus-run-session -- xvfb-run -a timeout 300 "$image" --smoke-test
+          done
+
+      - name: Smoke test (macOS) - the .dmg mounted, the app's signature checked, its core runs its own Python, the app starts it
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PYTHON PYTHONHOME PYTHONPATH
+          dmg="$(ls packages/*.dmg)"
+          mnt="$RUNNER_TEMP/dmg"
+          mkdir -p "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          app="$(ls -d "$mnt"/*.app)"
+          codesign --verify --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -E '^(Identifier|Signature|Format)'
+          core="$app/Contents/Resources/core"
+          test "$("$core/run.sh" --which-python)" = "$core/python/bin/python3"
+          NUC_CONSOLE_DATA="$RUNNER_TEMP/core-data" "$core/run.sh" --problems > /dev/null
+          bin="$(ls "$app/Contents/MacOS/" | head -n 1)"
+          "$app/Contents/MacOS/$bin" --smoke-test
+          hdiutil detach "$mnt"
+
+      - name: Smoke test (Windows) - installed (the .msi per machine, else the setup .exe for this user), the app starts its core
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = @(Get-ChildItem -LiteralPath packages -Filter '*.msi')
+          $setup = @(Get-ChildItem -LiteralPath packages -Filter '*-setup.exe')
+          if ($msi.Count -eq 1) {
+            $log = Join-Path $env:RUNNER_TEMP 'msi.log'
+            $p = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', "`"$($msi[0].FullName)`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content -LiteralPath $log -Tail 60; throw "msiexec exited $($p.ExitCode)" }
+            $where = $env:ProgramFiles
+          } elseif ($setup.Count -eq 1) {
+            $p = Start-Process -FilePath $setup[0].FullName -ArgumentList '/S' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "the setup exited $($p.ExitCode)" }
+            $where = $env:LOCALAPPDATA
+          } else { throw 'no installer in packages' }
+          $exe = @(Get-ChildItem -LiteralPath $where -Filter 'nuc-console.exe' -Recurse -Depth 2 -ErrorAction SilentlyContinue)
+          if ($exe.Count -ne 1) { throw "nuc-console.exe was not installed under $where" }
+          $dir = $exe[0].DirectoryName
+          Write-Host "installed in $dir"
+          if (-not (Test-Path -LiteralPath (Join-Path $dir 'core\run.ps1'))) { throw 'core\run.ps1 is not next to the app' }
+          if (-not (Test-Path -LiteralPath (Join-Path $dir 'core\python\python.exe'))) { throw 'the core has no unpacked Python' }
+          if (-not (Test-Path -LiteralPath (Join-Path $dir 'core\python\nuc-console-python.txt'))) { throw 'the core has no Python stamp' }
+          $out = Join-Path $env:RUNNER_TEMP 'smoke-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'smoke-err.txt'
+          $p = Start-Process -FilePath $exe[0].FullName -ArgumentList '--smoke-test' -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          Get-Content -LiteralPath $out, $err
+          if ($p.ExitCode -ne 0) { throw "nuc-console --smoke-test exited $($p.ExitCode)" }
+          if (-not (Select-String -LiteralPath $out -Pattern '^smoke test: ok' -Quiet)) { throw 'the smoke test did not say ok' }
+          if (Test-Path -LiteralPath (Join-Path $dir 'core\data')) { throw 'something was written inside the installed core' }
+
+      - name: The logs of the app and of the core, when something failed
+        if: failure()
+        shell: bash
+        run: |
+          for d in "$HOME/.local/share/io.github.give-jd.nuc-console" "$HOME/Library/Application Support/io.github.give-jd.nuc-console" \
+                   "${LOCALAPPDATA:-/nonexistent}/io.github.give-jd.nuc-console"; do
+            [ -d "$d/logs" ] || continue
+            for f in "$d"/logs/*.log; do echo "==> $f"; tail -n 80 "$f"; done
+          done
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-package-${{ matrix.target }}
+          path: packages/
+          if-no-files-found: error
+          retention-days: 7
