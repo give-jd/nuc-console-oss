@@ -1,6 +1,6 @@
 # Web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, no API, GET (and HEAD) only.** The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
 switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
@@ -52,7 +52,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 ## Hardening built in
 
 - **DNS-rebinding guard**: without a token, requests whose `Host` is not `localhost`, `127.0.0.1`, `::1`, the bind address, the hostname, a `*.ts.net` name or one listed in `[web] allowed_hosts` get `421`.
-- **Connection cap** (32) and a **15 s total deadline per request**: a slow client cannot hold threads. The unit adds `ProtectSystem=strict` with one writable place, `ReadWritePaths=-/var/lib/nuc-console/ai` (the AI folder), `TasksMax=512`, `MemoryMax=85%`, `PrivateDevices`, `RestrictNamespaces` and more. (`TasksMax` and `MemoryMax` were 64 and 256M before the AI page could start a model server: it is a child of this service and lives in its cgroup; 85% of the RAM is the line the page's "too big" is drawn at.)
+- **Connection cap** (32) and a **15 s total deadline per request**: a slow client cannot hold threads. A stream of the data API is the one request the deadline does not end: at most 4 are open at once (more get `503`), each ends after 5 minutes, and a client that stops reading is dropped by the socket's 10 s timeout ([below](#the-data-api)). The unit adds `ProtectSystem=strict` with one writable place, `ReadWritePaths=-/var/lib/nuc-console/ai` (the AI folder), `TasksMax=512`, `MemoryMax=85%`, `PrivateDevices`, `RestrictNamespaces` and more. (`TasksMax` and `MemoryMax` were 64 and 256M before the AI page could start a model server: it is a child of this service and lives in its cgroup; 85% of the RAM is the line the page's "too big" is drawn at.)
 - Page cache: layout widths are rounded to steps of 20, so at most a dozen distinct renders exist and a burst costs one render per size.
 - Render errors go to the journal, never to the page.
 
@@ -74,6 +74,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?view=ai` | the **AI** page (the **ai** link in the bottom bar): the AI switch and what it is doing (a download with its progress, the model server starting), the chat, the hardware found (RAM, GPU memory) and, for each local model, whether it fits (GPU, GPU+CPU, RAM, slow, too big), a rough speed, the commands of the command line and a **use this model** button; `sel=<model id>` its details, `pause=1` no reload, `confirm=on\|delete\|delete-all` the question the page asks before it does that. It has forms (below) unless `[ai] web_actions = no` locks it ([AI.md](AI.md)). It reloads by itself only while something runs (a download, a start, an answer), every 2 s, so that a question being typed is not lost. Off with `[features] ai = no` |
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
+| `/api/v1/...` | the **data API**, with either interface: every screen as JSON, and as a stream of Server-Sent Events ([below](#the-data-api)) |
 
 Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`), except the `POST` of the AI page's and the Telegram page's forms (below).
 HEAD is answered like GET (same status, same headers, `Content-Length` included, the same token and `Host` checks), without the body.
@@ -245,6 +246,50 @@ The markup tests are static; `tools/browser_check.py` (the `browser` job of the 
 A classic page ignores `frag`. The refresh script parses the fragment inertly and takes over only the tags and attributes of two allowlists
 (`webjs.FRAG_TAGS`, `webjs.FRAG_ATTRS`: no script, style, link, image, frame, `on…`, `style`; `href` only `/?…` or `#`; `action` only a path of this server);
 a test parses every fragment and checks the same lists.
+
+## The data API
+
+What the screens show, as JSON, for a program or a front end: `GET /api/v1/<view>` (`overview`, `cpu`, `health`, `map`, `ai`, `telegram`), and
+the same document again each time it changes, as Server-Sent Events: `GET /api/v1/stream?view=<view>`. It changes nothing; the buttons of the AI
+and Telegram pages stay their forms (below), which a client posts as a page does.
+
+| Path | What |
+|---|---|
+| `/api/v1` | what there is: the API version, nuc-console's, the refresh interval, the views whose feature is on |
+| `/api/v1/overview` | `status` (the pill), `kpis` (every key figure), `cards` (every card whose feature is on, built in full: nothing hidden), `layout` (the cards `config.ini`'s `[ui]` shows, in order, with their widths), `problems` (each with its id, state, text, the cards it belongs to, and the catalog's title, why, fix and accept command; how many were accepted, and which) |
+| `/api/v1/cpu?sort=&sel=` | the CPU screen (`sort` cpu, mem, time, pid or user; `sel` a pid: its details) |
+| `/api/v1/health?period=&sel=` | the HEALTH screen (`period` 1, 7 or 30 days; `sel` a finding's id) |
+| `/api/v1/map?sel=&open=&shut=&all=&only=` | the MAP as a tree (the parameters of the page), `node` (the selected row's node) and `counts` |
+| `/api/v1/ai?sel=&confirm=` | the AI screen, `engine` (the state of the downloads, the server and the chat: what the page shows) and `csrf` |
+| `/api/v1/telegram` | `engine` (the pairing and the notifier's state: never the bot's token), `csrf` and the `actions` its buttons post to |
+| `/api/v1/stream?view=<view>&…` | Server-Sent Events: each message is that view's document (the same parameters) |
+
+**A document** is `{"api": 1, "view": …, "rev": …, "at": …, …}`: `at` is when the data was read (seconds since the epoch), `rev` a hash of the
+rest. The same data has the same `rev`: it is the document's `ETag` (`If-None-Match` gets `304`) and the id of its event. Screens are
+**components**, the ones the console and the pages draw (`src/ui.py`): `{"type": "Card", "id": …, "title": …, "state": …, "body": [...]}`,
+`{"type": "Span", "text": …, "tone": …}`, a `Table` with its `cols` and `rows`, a `Bar` with its `frac` and `state`... the classes and their
+fields, less what only the console draws (widths, gaps, heights, indents). A state is one of `ok`, `warn`, `err`, `down`, `unknown`, `info`
+and a value that could not be read is `unknown`, never `ok`, as on the screens. The links inside (`href`) are the pages' URLs. A new field
+may appear in version 1; one that changes meaning or goes is version 2.
+
+**The stream** sends `retry: 3000`, then the document at once (unless the request's `Last-Event-ID` is already its `rev`), then again each
+time its `rev` changes (it looks every refresh interval, every second for `ai` and `telegram`), and a `: keepalive` comment after 15 s of
+nothing. It ends after 5 minutes and the browser's `EventSource` reconnects by itself with the last id; 4 streams at most at once (`503`
+with `Retry-After` after that). The shell's own scripts do not use it: they keep polling the fragment endpoint.
+
+**Access**: exactly the page's. Without a token the `Host` guard (`421`); with one the token as a header (`Authorization: Bearer`), the
+`nuc_token` cookie or `?token=` (no redirect: a program asked), else `401`. A request a browser marks as coming from another site
+(`Sec-Fetch-Site` other than `same-origin` or `none`) gets `403`, and the answers carry the headers of every page (`no-store`, `nosniff`,
+`Cross-Origin-Resource-Policy: same-origin`, a CSP of `default-src 'none'`) and no CORS header: no page of another site can read them. The AI
+and Telegram documents carry the CSRF token their buttons need, as their pages do (none when `web_actions = no` locks them). Errors are JSON
+too: `{"error": "..."}` (`404` for an unknown view or one whose feature is off, `500` when the data could not be read: the detail goes to
+the journal). Anything but GET and HEAD: `405`.
+
+```bash
+curl -s http://127.0.0.1:8787/api/v1/overview | python3 -m json.tool | head
+curl -sN http://127.0.0.1:8787/api/v1/stream?view=cpu         # one document per refresh, until you stop it
+curl -s -H "Authorization: Bearer $(sudo cat /etc/nuc-console/web.token)" http://box.example.ts.net:8787/api/v1/health
+```
 
 ## The AI page's buttons
 

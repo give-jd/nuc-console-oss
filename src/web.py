@@ -11,7 +11,8 @@ in the Content-Security-Policy). GET only, except the forms of the AI page (`/?v
 with a redirect (src/aiweb.py does the work in the background), and those of the Telegram page (`/?view=telegram`): POST /telegram/<action>
 (src/tgweb.py: pair, cancel, on, off, test). Those forms are guarded: the same access as viewing (loopback, or the token), a CSRF token,
 Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` / `[telegram] web_actions = no` to lock.
-Binding to anything but loopback requires a token (fail closed). See docs/WEB.md.
+Binding to anything but loopback requires a token (fail closed). The data API (`/api/v1/...`, src/webapi.py) gives what the screens show as JSON,
+and their changes as Server-Sent Events (`/api/v1/stream`), behind the same checks; it changes nothing. See docs/WEB.md.
 """
 import base64
 import hashlib
@@ -47,6 +48,7 @@ import render
 import screens
 import tgweb
 import ui
+import webapi
 import webcss
 import webjs
 from ui import dd, hclean, hnum
@@ -56,6 +58,11 @@ MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 MAX_CONN = 32        # simultaneous connections; more are dropped
 DEADLINE_S = 15      # total time a single request may take (slowloris)
+API_PATH = "/api/v1"  # the data API: /api/v1 (what there is), /api/v1/<view> (JSON), /api/v1/stream?view=<view> (Server-Sent Events)
+STREAMS_MAX = 4      # streams open at once (each holds a connection and a thread): more get 503
+STREAM_S = 300       # a stream ends after this long (the request deadline does not apply to it); the client reconnects by itself
+KEEPALIVE_S = 15     # a comment line when nothing changed for this long: proxies and clients see the stream is alive
+RETRY_MS = 3000      # what a stream tells the client to wait before it reconnects
 ASSET_FILES = {"%s.%s.css" % (name, sha[:8]): (body, ctype) for name, (body, ctype, sha) in webcss.ASSETS.items()}  # /s/<name>.<sha8>.<ext>
 ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the hash: a changed sheet is another URL
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
@@ -258,7 +265,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     timeout = 10
 
     def handle(self):  # timeout above is per recv(): add a total deadline so a trickling client can't hold a thread
-        t = threading.Timer(DEADLINE_S, self._kill)
+        t = self._deadline = threading.Timer(DEADLINE_S, self._kill)  # a stream (/api/v1/stream) cancels it and keeps its own end
         t.daemon = True
         t.start()
         try:
@@ -276,18 +283,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def _send(self, code, body=b"", ctype="text/plain; charset=utf-8", extra=(), csp=CSP, referrer="no-referrer", cache="no-store"):
+        self._head(code, ctype, None if code in (204, 304) else len(body), extra, csp, referrer, cache)  # 204, 304: no body, and no length either
+        if body and self.command != "HEAD":  # HEAD: the headers of the GET (Content-Length included), no body
+            self.wfile.write(body)
+
+    def _head(self, code, ctype, length, extra=(), csp=CSP, referrer="no-referrer", cache="no-store"):
+        """The status line and the headers every answer has (length None: no Content-Length, a stream's or a 204's)."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        if code not in (204, 304):  # these have no body, and no length either
-            self.send_header("Content-Length", str(len(body)))
+        if length is not None:
+            self.send_header("Content-Length", str(length))
         for k, v in (("Cache-Control", cache), ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", referrer),
                      ("Content-Security-Policy", csp), ("X-Frame-Options", "DENY")) + tuple(extra):
             self.send_header(k, v)
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")  # no other site can embed or read this
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.end_headers()
-        if body and self.command != "HEAD":  # HEAD: the headers of the GET (Content-Length included), no body
-            self.wfile.write(body)
 
     def _token_from(self, query):
         auth = self.headers.get("Authorization", "")
@@ -349,7 +360,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, b"ok\n")
         if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS or u.path.startswith("/telegram/") and u.path[10:] in TG_ACTIONS:
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
-        if u.path != "/" and not u.path.startswith("/s/"):
+        api = u.path == API_PATH or u.path.startswith(API_PATH + "/")
+        if u.path != "/" and not u.path.startswith("/s/") and not api:
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
@@ -360,6 +372,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "token" in q and u.path == "/":  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
                 return self._send(302, extra=(("Location", view_url(view_params(q))), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
+        if api:
+            return self._api(u.path[len(API_PATH):].strip("/"), q)
         if u.path != "/":
             return self._asset(u.path)
         if "set" in q:
@@ -371,6 +385,83 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._fragment(page.blocks)
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
                    extra=(("Vary", "Cookie"),))
+
+    def _json(self, code, obj, extra=()):
+        self._send(code, webapi.dump(obj), webapi.JSON_TYPE, extra=extra)
+
+    def _api(self, name, q):
+        """The data API, after the checks every request has (Host or token): /api/v1 (what there is), /api/v1/<view> (its document, with an ETag:
+        304 when If-None-Match has it), /api/v1/stream (_stream). Read-only. A request a browser marks as coming from another site is refused (no
+        page of another site reads this, and none can make it work for it either)."""
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None and site not in ("same-origin", "none"):
+            return self._json(403, {"error": "a page of another site cannot read this server's data"})
+        srv = self.server
+        if name == "":
+            return self._json(200, srv.api_index())
+        if name == "stream":
+            return self._stream(q)
+        if name not in webapi.VIEWS:
+            return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
+        try:
+            doc = srv.api(name, q)
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the server down
+            print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)  # detail to the journal, not to the answer
+            return self._json(500, {"error": "the data could not be read (see the service log)"})
+        if doc is None:
+            return self._json(404, {"error": "this screen is off in config.ini ([features] %s = no)" % name})
+        tag = '"%s"' % doc.rev
+        if tag in [t.strip() for t in self.headers.get("If-None-Match", "").split(",")]:
+            return self._send(304, extra=(("ETag", tag),))
+        self._send(200, doc, webapi.JSON_TYPE, extra=(("ETag", tag),))
+
+    def _stream(self, q):
+        """/api/v1/stream?view=<view> (and that view's parameters): Server-Sent Events. Each event is the view's document, sent when its rev changes
+        (the first at once, unless Last-Event-ID is already its rev); a comment every KEEPALIVE_S when nothing changed. A stream holds a
+        connection and a thread: STREAMS_MAX at once (more: 503), and it ends after STREAM_S, the request deadline lifted (the client reconnects
+        after RETRY_MS, with the last id). A client that stops reading is dropped by the socket's timeout."""
+        srv = self.server
+        name = (q.get("view") or [""])[0] or "overview"
+        if name not in webapi.VIEWS:
+            return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
+        try:
+            if srv.api(name, q) is None:
+                return self._json(404, {"error": "this screen is off in config.ini ([features] %s = no)" % name})
+        except Exception as e:  # noqa: BLE001
+            print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)
+            return self._json(500, {"error": "the data could not be read (see the service log)"})
+        if not srv.streams.acquire(blocking=False):
+            return self._json(503, {"error": "too many streams are open: try again later"}, extra=(("Retry-After", "10"),))
+        try:
+            self._deadline.cancel()
+            self._head(200, webapi.STREAM_TYPE, None)
+            if self.command == "HEAD":
+                return
+            last = self.headers.get("Last-Event-ID", "").strip()
+            last = last if webapi.EVENT_ID.fullmatch(last) else ""
+            tick = srv.stream_tick or (1.0 if name in ("ai", "telegram") else srv.cfg["refresh_seconds"])  # a job's progress moves every second
+            self.wfile.write(webapi.retry(RETRY_MS))
+            start = quiet = time.monotonic()
+            while True:
+                try:
+                    doc = srv.api(name, q)
+                except Exception as e:  # noqa: BLE001 - one failed read: the stream waits for the next
+                    print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)
+                    doc = None
+                now = time.monotonic()
+                if doc is not None and doc.rev != last:
+                    self.wfile.write(webapi.event(doc))
+                    last, quiet = doc.rev, now
+                elif now - quiet >= srv.keepalive_s:
+                    self.wfile.write(webapi.comment("keepalive"))
+                    quiet = now
+                if now - start >= srv.stream_s:
+                    return
+                time.sleep(max(0.01, min(tick, srv.stream_s - (now - start))))
+        except OSError:  # the client went away, or stopped reading (the socket's timeout)
+            return
+        finally:
+            srv.streams.release()
 
     def _tg_open(self):
         """/?view=telegram&open=1: the t.me link of the pairing that waits for Start (a link on the page that the refresh can keep: it points
@@ -544,6 +635,8 @@ class Server(http.server.ThreadingHTTPServer):
         self.cfg, self.token, self.zoom = cfg, token, zoom
         self.allowed = {"localhost", "127.0.0.1", "::1", addr[0].lower(), socket.gethostname().lower()} | set(cfg.get("allowed_hosts", []))
         self.slots = threading.BoundedSemaphore(MAX_CONN)
+        self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
+        self.stream_s, self.keepalive_s, self.stream_tick = STREAM_S, KEEPALIVE_S, 0  # (tick 0: the refresh interval; the tests shorten them)
         self.csrf = secrets.token_urlsafe(24)  # in every form of the AI page; a page of another site cannot read it
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
@@ -645,6 +738,102 @@ class Server(http.server.ThreadingHTTPServer):
             norm = {"version": tgweb.version()}
             return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
         return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
+
+    # ---- the data API: /api/v1 (webapi.py turns the components into JSON) -----------------------------------------------------------
+
+    def api_index(self):
+        """GET /api/v1: what there is."""
+        return {"api": webapi.VERSION, "version": nuc_config.VERSION, "refresh": self.cfg["refresh_seconds"],
+                "views": [v for v in webapi.VIEWS if v in ("overview", "telegram") or render.CFG["features"].get(v, True)],
+                "documents": API_PATH + "/<view>", "stream": API_PATH + "/stream?view=<view>"}
+
+    def api(self, name, q):
+        """The document of the view `name` (webapi.VIEWS) for the request's parameters (the page's: view_params checks and clamps them), as a
+        webapi.Doc; None when the view's feature is off. Built at most once per half refresh interval for the same parameters, whoever asks (the
+        AI's and the Telegram page's at most once a second: a job's progress moves), like a page."""
+        p = view_params(dict(q, view=["" if name == "overview" else name]))
+        here = {k: p[k] for k in HERE_KEYS}
+        r = self.cfg["refresh_seconds"]
+        feats = render.CFG["features"]
+        if name in ("cpu", "health", "map", "ai") and not feats.get(name, True):
+            return None
+        if name == "overview":
+            return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_overview(r), time.time()))
+        if name == "cpu":
+            self.cpu_feed.max_age = r
+            sort, sel = p["sort"] or "cpu", p["sel"]
+            return self.cached(("api", name, sort, sel), r / 2, lambda: webapi.document(name, self.api_cpu(here, sort, sel), time.time()))
+        if name == "health":
+            days = p.get("period") if p.get("period") in screens.HEALTH_DAYS else 7
+            ids = {f["id"] for f in screens.health_findings(render.health_data(days)["report"])}
+            sel = p["sel"] if p["sel"] in ids else ""
+            hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": False}, **here)
+            return self.cached(("api", name, days, sel), r / 2, lambda: webapi.document(name, {"period": days, "sel": sel,
+                               "nodes": health_nodes(self.smp, days, sel, hhere)}, time.time()))
+        if name == "map":
+            state = map_mode({k: p[k] for k in VIEW_KEYS["map"] if k not in ("as", "pause")})
+            key = ("api", name) + tuple(sorted((k, tuple(sorted(v)) if isinstance(v, (set, frozenset, list, tuple)) else v) for k, v in state.items()))
+            return self.cached(key, r / 2, lambda: webapi.document(name, self.api_map(here, state, r), time.time()))
+        if name == "ai":
+            rows = screens.ai_rows(render.ai_data()["cat"])
+            sel = p["sel"] if p["sel"] in {m["id"] for m in rows} else ""
+            confirm = p.get("confirm", "")
+            if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
+                    or confirm == "delete-all" and not any(m["installed"] for m in rows):
+                confirm = ""
+            return self.cached(("api", name, sel, confirm, aiweb.version()), min(r / 2, 1.0),
+                               lambda: webapi.document(name, self.api_ai(here, sel, confirm), time.time()))
+        return self.cached(("api", name, tgweb.version()), min(r / 2, 1.0), lambda: webapi.document(name, self.api_telegram(), time.time()))
+
+    def api_overview(self, r):
+        """The overview's fields: the status pill, the key figures, every card whose feature is on (built in full: nothing hidden), the layout
+        config.ini gives them (which, in which order, how wide) and the problems."""
+        ctx = self.shell_frame(r)
+        eff, _src = prefs.effective(render.CFG.get("ui"), "", "")
+        on = [c for c in prefs.CARDS if cards.enabled(c, render.CFG)]
+        built = []
+        for cid in on:
+            try:
+                built.append(cards.build(cid, ctx, -2, cards.Caps(WEB_COLS, True)))
+            except Exception as e:  # noqa: BLE001 - a broken card is unknown, the others stay
+                print("nuc-console web: card %s error: %r" % (cid, e), file=sys.stderr)
+                entry = cards.CARDS.get(cid)
+                built.append(ui.Card(cid, entry.title if entry else cid, "could not be drawn (see the service log)", "unknown", []))
+        state, text = self.shell_pill(ctx.problems)
+        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
+                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
+
+    def api_cpu(self, here, sort, sel):
+        nodes, sel = self.cpu_nodes(dict({"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}, **here), sort, sel)
+        return {"sort": sort, "sel": sel, "nodes": nodes}
+
+    def api_map(self, here, state, r):
+        """The Map as a tree (the graph view's drawing is not data: its nodes and edges are the tree's rows and details)."""
+        st, sel = map_state(state), state.get("sel", "")
+        G, _pb = self.map_graph(r)
+        prune(G, st)
+        found = {}
+        nodes = map_nodes(G, st, sel, map_here(here, st, sel, False), here, False, found)
+        return {"sel": sel, "node": found.get("node"), "counts": graph.counts(G), "nodes": nodes}
+
+    def api_ai(self, here, sel, confirm):
+        """The AI screen's fields: its components (their ui.Action buttons carry the CSRF token: a client posts them as they are), the engine's state,
+        and the CSRF token (none when [ai] web_actions = no locks the page)."""
+        eng = render.ai_engine()
+        snap = eng.snapshot()
+        nodes = ai_nodes(self, dict({"view": "ai", "sel": sel, "pause": False}, **here), sel, confirm, snap, eng)
+        return {"sel": sel, "confirm": "" if snap["locked"] else confirm, "engine": snap, "csrf": None if snap["locked"] else self.csrf, "nodes": nodes}
+
+    def api_telegram(self):
+        """The Telegram page's fields: the engine's state (never the bot's token) and, when its buttons work, the CSRF token and their actions. Less
+        the clock readings that change on every read (the engine's now, the time of the notifier's status file: `listening` says what it means), so
+        that the rev changes only with the state."""
+        snap = tgweb.engine().snapshot()
+        forms = not (snap["locked"] or snap["portable"]) and snap["listening"]
+        snap = dict(snap, status=dict(snap["status"] or {}))
+        snap.pop("now", None)
+        snap["status"].pop("ts", None)
+        return {"engine": snap, "csrf": self.csrf if forms else None, "actions": ["/telegram/" + a for a in TG_ACTIONS] if forms else []}
 
     # ---- the shell: `[ui] web = app` or ?app=1 --------------------------------------------------------------------------------------
 
@@ -1014,17 +1203,23 @@ class Server(http.server.ThreadingHTTPServer):
         chere = {"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}
         chere.update(here)
         try:
-            d = self.cpu_feed.read()
-            sel = sel if sel and int(sel) in {p["pid"] for p in d["procs"]["procs"]} else ""  # no such process (any more): dropped
+            nodes, sel = self.cpu_nodes(chere, sort, sel)
             chere["sel"] = sel
-            links = screens.CpuLinks(lambda by: page_url(chere, sort="" if by == "cpu" else by), lambda pid: page_url(chere, sel="" if str(pid) == sel else str(pid)))
-            sc = screens.cpu_view(d, render.cpu_ctx(False), screens.WEB_W, 10 ** 4, sort, int(sel) if sel else None, bool(sel), 0, links)
-            body = '<div class="scr scr-cpu">' + "".join(htmlview.html(node) for node in sc.nodes) + "</div>"
+            body = '<div class="scr scr-cpu">' + "".join(htmlview.html(node) for node in nodes) + "</div>"
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: cpu render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
             body = '<p class="sm">render error (see the service log)</p>'
         tools = [f'<a href="{esc(page_url(chere, sel=""))}">close details</a>'] if sel else []  # no sel: the rows are links, nothing to say
         return View(body, tools, chere, True, legacy=False)
+
+    def cpu_nodes(self, chere, sort, sel):
+        """(the CPU screen's components for the web, the selected pid if that process still exists else ''): screens.cpu_view at the web's size,
+        its column heads sort links and its rows selection links, made from chere (the page's parameters). The page and the data API draw these."""
+        d = self.cpu_feed.read()
+        sel = sel if sel and int(sel) in {p["pid"] for p in d["procs"]["procs"]} else ""  # no such process (any more): dropped
+        chere = dict(chere, sel=sel)
+        links = screens.CpuLinks(lambda by: page_url(chere, sort="" if by == "cpu" else by), lambda pid: page_url(chere, sel="" if str(pid) == sel else str(pid)))
+        return screens.cpu_view(d, render.cpu_ctx(False), screens.WEB_W, 10 ** 4, sort, int(sel) if sel else None, bool(sel), 0, links).nodes, sel
 
     def cpu_page(self, here, zoom, r, sort, sel, shell=False):
         """The CPU screen as a page: the console's own screen through the ANSI path, its process rows links (sel= shows that process's
@@ -1461,18 +1656,23 @@ def health_advice_node(report):
         return None
 
 
+def health_nodes(smp, days, sel, here):
+    """The Health screen's components for the web (screens.health_model): the period as links, the findings and the details of `sel`, the ADVICE
+    block, the sections of tables. here: the page's parameters (the links of the periods change only the period). The page and the data API draw these."""
+    data, _pb = render.health_state(smp, days)
+    fl = screens.health_findings(data["report"])
+    hv = screens.HealthView(days)
+    hv.cur = sel
+    advice = health_advice_node(data["report"]) if data["report"] is not None else None
+    href = lambda d: page_url(here, period=d if d != 7 else 0)  # noqa: E731
+    return screens.health_model(data, hv, fl, advice, href, time.time())
+
+
 def health_native(smp, days, sel, here):
     """The Health screen of the shell, drawn from components (screens.health_model): the period as links with their keys, the findings with their
     details, the ADVICE block, the sections of tables. here: the page's parameters; the links of the periods change only the period."""
     try:
-        data, _pb = render.health_state(smp, days)
-        fl = screens.health_findings(data["report"])
-        hv = screens.HealthView(days)
-        hv.cur = sel
-        advice = health_advice_node(data["report"]) if data["report"] is not None else None
-        href = lambda d: page_url(here, period=d if d != 7 else 0)  # noqa: E731
-        nodes = screens.health_model(data, hv, fl, advice, href, time.time())
-        return '<div class="hv">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+        return '<div class="hv">' + "".join(htmlview.html(n) for n in health_nodes(smp, days, sel, here)) + "</div>"
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the health screen could not be drawn (see the service log)</p>'
@@ -1489,19 +1689,25 @@ def ai_chat_nodes(snap):
     return out + ([ui.Qa(pend["kind"], pend["q"], None, True)] if pend else [])
 
 
+def ai_nodes(srv, ahere, sel, confirm, snap, eng):
+    """The AI screen's components for the web (screens.ai_model): the switch and its progress, the chat, the hardware and the status, the models
+    with their buttons (ui.Action: each posts to /ai/* with the CSRF token and the page to come back to; none when the page is locked), the details.
+    ahere: the page's parameters. The page and the data API draw these."""
+    data, _pb = render.ai_state(srv.smp)
+    rows = screens.ai_rows(data["cat"])
+    locked = snap["locked"]
+    acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(ahere)).query)
+    links = screens.AiLinks(lambda mid: page_url(ahere, sel="" if mid == sel else mid), page_url(ahere, sel=""), page_url(ahere))
+    return screens.ai_model(data, render.ai_status(), snap, None if locked else eng.choice(), rows, sel, "" if locked else confirm, acts, links,
+                            ai_chat_nodes(snap))
+
+
 def ai_native(srv, ahere, sel, confirm, snap, eng):
     """The AI screen of the shell, drawn from components (screens.ai_model, the model the console draws from too): the switch and its progress, the
     chat, the hardware and the status, the models as a table with their buttons, the details, what can be deleted. Every button is a form that posts
     to /ai/* with the CSRF token and the page to come back to, as on the classic page; a locked page has none. ahere: the page's parameters."""
     try:
-        data, _pb = render.ai_state(srv.smp)
-        rows = screens.ai_rows(data["cat"])
-        locked = snap["locked"]
-        acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(ahere)).query)
-        links = screens.AiLinks(lambda mid: page_url(ahere, sel="" if mid == sel else mid), page_url(ahere, sel=""), page_url(ahere))
-        nodes = screens.ai_model(data, render.ai_status(), snap, None if locked else eng.choice(), rows, sel, "" if locked else confirm, acts, links,
-                                 ai_chat_nodes(snap))
-        return '<div class="scr av">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+        return '<div class="scr av">' + "".join(htmlview.html(n) for n in ai_nodes(srv, ahere, sel, confirm, snap, eng)) + "</div>"
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the AI screen could not be drawn (see the service log)</p>'
@@ -1837,11 +2043,9 @@ def map_body(G, pb, st, sel, here, host, found=None):
     return "".join(out)
 
 
-def map_native(G, st, sel, here, base, pause, found=None):
-    """The Map screen of the shell, drawn from components (screens.map_web, the model the console draws too): the title with its choices (expand
-    all, collapse all, problems only: links with their keys, and the graph view), the tree as a list whose rows are links (a row selects it, its
-    mark opens or closes the branch) and the details of the selected row beside it. here: the map's URL parameters, base: the page's own (the
-    graph view keeps those). found: gets the selected row's node, as map_body does."""
+def map_nodes(G, st, sel, here, base, pause, found=None):
+    """The Map screen's components for the web (screens.map_web): the title with its choices, the tree's rows (links) and the details of the selected
+    row. here: the map's URL parameters, base: the page's own; found gets the selected row's node. The page (map_native) and the data API draw these."""
     rs = graph.rows(G, st, limit=MAP_ROWS)
     row = None
     if sel:
@@ -1864,9 +2068,16 @@ def map_native(G, st, sel, here, base, pause, found=None):
         state(**state_params(graph.State(only=st.only))),
         lambda only: state(only=only),
         graph_url(mine, st.only, pause, base))
+    return screens.map_web(G, rs, st, sel, nid, links, MAP_ROWS, rs.truncated)
+
+
+def map_native(G, st, sel, here, base, pause, found=None):
+    """The Map screen of the shell, drawn from components (screens.map_web, the model the console draws too): the title with its choices (expand
+    all, collapse all, problems only: links with their keys, and the graph view), the tree as a list whose rows are links (a row selects it, its
+    mark opens or closes the branch) and the details of the selected row beside it. here: the map's URL parameters, base: the page's own (the
+    graph view keeps those). found: gets the selected row's node, as map_body does."""
     try:
-        nodes = screens.map_web(G, rs, st, sel, nid, links, MAP_ROWS, rs.truncated)
-        return '<div class="scr mapv">' + "".join(htmlview.html(n) for n in nodes) + "</div>"
+        return '<div class="scr mapv">' + "".join(htmlview.html(n) for n in map_nodes(G, st, sel, here, base, pause, found)) + "</div>"
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: map render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the map could not be drawn (see the service log)</p>'

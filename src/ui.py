@@ -256,6 +256,9 @@ class _Component(object):
         return "%s(%s)" % (type(self).__name__, ", ".join("%s=%r" % (n, getattr(self, n)) for n in self.__slots__))
 
 
+Component = _Component  # the base of every component: what webapi.data() turns into JSON
+
+
 def _text(x):
     return safe("" if x is None else x)
 

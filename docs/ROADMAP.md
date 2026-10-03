@@ -9,8 +9,8 @@ with nothing else to install by hand. The Linux console (no X11) keeps working a
 
 | Step | What you get | State |
 |---|---|---|
-| [1. The AI on Ollama](#1-the-ai-on-ollama) | the local AI works with one click on Windows, macOS and Linux, on the GPU when there is one | in progress |
-| [2. A data API](#2-a-data-api) | everything the screens show, as JSON and as a live stream | planned |
+| [1. The AI on Ollama](#1-the-ai-on-ollama) | the local AI works with one click on Windows, macOS and Linux, on the GPU when there is one | done |
+| [2. A data API](#2-a-data-api) | everything the screens show, as JSON and as a live stream | done |
 | [3. A new web front end](#3-a-new-web-front-end) | smooth, live pages and charts, in any browser | planned |
 | [4. The desktop app and its packages](#4-the-desktop-app-and-its-packages) | `.msi`/`.exe`, `.dmg`, `.deb`/`.rpm`/AppImage, built on every release | planned |
 | [Later: signing and stores](#later-signing-and-stores) | signed packages, Microsoft Store and the other catalogs | later |
@@ -30,7 +30,7 @@ Intel through CUDA or Vulkan, Apple silicon through Metal) and falls back to the
   through `[ai] endpoint`.
 - **Tried for real in CI**: the `ai-pins` workflow installs the smallest model, serves it and asks it a question on Linux, Windows and
   macOS runners.
-- **Next in this step**: use an Ollama that is already installed and running instead of a second copy; the ROCm add-on for AMD cards
+- **Still to come in this step**: use an Ollama that is already installed and running instead of a second copy; the ROCm add-on for AMD cards
   that Vulkan does not serve well.
 
 ## 2. A data API
@@ -38,6 +38,10 @@ Intel through CUDA or Vulkan, Apple silicon through Metal) and falls back to the
 The Python core (collector, history, AI engine) exposes what the screens show as JSON, and the changes as a live stream (Server-Sent
 Events), on `127.0.0.1` with the same access rules as the web view (loopback or token; CSRF token and origin checks for actions). Nothing
 visible changes: the console and the current pages keep working on top of the same data. This is what steps 3 and 4 are built on.
+
+Done: `/api/v1/<view>` for the overview, CPU, Health, Map, AI and Telegram screens (their components as JSON, an `ETag` per document) and
+`/api/v1/stream?view=<view>` (the document again each time it changes): [docs/WEB.md](WEB.md#the-data-api). The actions stay the AI and
+Telegram pages' forms, whose CSRF token the documents carry.
 
 ## 3. A new web front end
 
