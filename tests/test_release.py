@@ -438,7 +438,7 @@ class RepoArchives(TempDirCase):
                 parts = name.split("/")
                 self.assertEqual(parts[0], self.top, (label, name))
                 self.assertFalse(any(p.startswith(".") for p in parts), (label, name))  # .github, .gitignore, .gitattributes
-                self.assertNotIn(parts[1:2], (["tests"], ["tools"]), (label, name))
+                self.assertNotIn(parts[1:2], (["tests"], ["tools"], ["desktop"]), (label, name))
                 self.assertNotIn(name, (self.top + "/CONTRIBUTING.md", self.top + "/CLAUDE.md"), label)
             for name in self.repo_part(members):
                 self.assertNotIn("__pycache__", name)
@@ -928,6 +928,8 @@ def make_tree(base, version="9.9.9"):
         "CLAUDE.md": "# rules\n",
         "tests/test_x.py": "pass\n",
         "tools/t.py": "pass\n",
+        "desktop/src-tauri/src/main.rs": "fn main() {}\n",  # the desktop app's sources: its packages carry an archive
+        "desktop/ui/index.html": "<!doctype html>\n",
         ".github/workflows/w.yml": "name: w\n",
         ".gitignore": "dist/\n",
     }
@@ -1091,7 +1093,11 @@ class Workflow(unittest.TestCase):
     def test_every_action_is_pinned_by_commit_sha_and_says_which_release(self):
         uses = re.findall(r"^\s*(?:- )?uses:\s*(\S+)(.*)$", self.text, re.M)
         self.assertGreaterEqual(len(uses), 5)
+        local = [ref for ref, _ in uses if ref.startswith("./")]
+        self.assertEqual(local, ["./.github/workflows/desktop.yml"])  # a workflow of this repository, at this commit: nothing to pin
         for ref, rest in uses:
+            if ref in local:
+                continue
             self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$", ref)
             self.assertRegex(rest, r"#\s*v\d+\.\d+\.\d+", ref)
 
@@ -1104,7 +1110,7 @@ class Workflow(unittest.TestCase):
 
     def test_only_the_publishing_job_can_write(self):
         self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
-        self.assertEqual(sorted(self.jobs), ["build", "release", "smoke-unix", "smoke-windows"])
+        self.assertEqual(sorted(self.jobs), ["build", "desktop", "release", "smoke-unix", "smoke-windows"])
         build, release = self.jobs["build"], self.jobs["release"]
         self.assertRegex(build, r"permissions:\n      contents: read\n")
         for word in ("write", "id-token", "attestations"):
@@ -1117,7 +1123,7 @@ class Workflow(unittest.TestCase):
         for word in ("actions/checkout", "unittest", "tools/", "python", "setup-python"):
             self.assertNotIn(word, release)
         self.assertIn("github.event_name == 'push'", release)  # a dry run publishes nothing
-        for job in ("smoke-unix", "smoke-windows"):  # the smoke jobs read only: they run the archives, they publish and sign nothing
+        for job in ("smoke-unix", "smoke-windows", "desktop"):  # these read only: they run the archives, they publish and sign nothing
             self.assertRegex(self.jobs[job], r"permissions:\n      contents: read\n")
             self.assertNotRegex(self.jobs[job], r"\w: write\b")
             for word in ("id-token", "attestations", "gh release", "attest-build-provenance"):
@@ -1131,6 +1137,17 @@ class Workflow(unittest.TestCase):
             self.assertIn(pattern, release)  # every archive, and the sums
         self.assertIn("gh release create", release)
         self.assertIn("--verify-tag", release)
+        # and the desktop app's packages, made by desktop.yml around those very archives: listed, counted, summed and attested too
+        desktop = self.jobs["desktop"]
+        self.assertIn("uses: ./.github/workflows/desktop.yml", desktop)
+        self.assertIn("needs: build", desktop)
+        self.assertRegex(desktop, r"with:\n      dist: dist\b")
+        for word in ("pattern: desktop-package-*", "-eq 10", "SHA256SUMS-desktop", "desktop/nuc-console-desktop-*", "desktop/SHA256SUMS-desktop",
+                     'gh release create "$TAG" dist/* desktop/*'):
+            self.assertIn(word, release, word)
+        for suffix in ("linux-x86_64.deb", "linux-x86_64.rpm", "linux-x86_64.AppImage", "linux-arm64.deb", "linux-arm64.rpm", "macos-arm64.dmg",
+                       "macos-x86_64.dmg", "windows-x64.msi", "windows-x64-setup.exe", "windows-arm64-setup.exe"):
+            self.assertIn(suffix, release, suffix)
         self.assertLess(release.index("attest-build-provenance"), release.index("gh release create"))
         self.assertIn("--python-dir", self.jobs["build"])  # every archive carries its Python
         self.assertIn("cmp ", self.jobs["build"])  # and the build is made twice and compared

@@ -1,0 +1,71 @@
+/* The start page of the desktop app: shown while the core starts, and when it could not (desktop/src-tauri/src/main.rs fills
+   #status and #log). No script of its own; the colours follow the system's light or dark mode. */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f8fa;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --tile: #0f1720;
+  --edge: #30363d;
+  --screen: #161b22;
+  --frame: #c9d1d9;
+  --pulse: #3fb950;
+  --bad: #cf222e;
+  --panel: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --bad: #f85149;
+    --panel: #161b22;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+}
+main { width: min(42rem, 100% - 2rem); text-align: center; }
+.logo { width: 96px; height: 96px; }
+.tile { fill: var(--tile); stroke: var(--edge); stroke-width: 1.5; }
+.frame { fill: var(--frame); }
+.screen { fill: var(--screen); }
+.pulse { fill: none; stroke: var(--pulse); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+h1 { margin: .5rem 0 0; font-size: 1.6rem; font-weight: 600; letter-spacing: .01em; }
+#status { margin: .75rem 0 1.25rem; color: var(--muted); }
+.spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto;
+  border: 3px solid var(--edge);
+  border-top-color: var(--pulse);
+  border-radius: 50%;
+  animation: turn 1s linear infinite;
+}
+@keyframes turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+#log { display: none; }
+.failed #status { color: var(--bad); font-weight: 600; }
+.failed .spinner { display: none; }
+.failed #log {
+  display: block;
+  max-height: 50vh;
+  overflow: auto;
+  margin: 0;
+  padding: .75rem 1rem;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.failed #log:empty { display: none; }

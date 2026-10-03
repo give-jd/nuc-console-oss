@@ -1,8 +1,9 @@
 name: release
 
 # Push a tag vX.Y.Z (X.Y.Z = VERSION in src/nuc_config.py) and this builds the six archives (Linux and macOS for x86-64 and ARM,
-# Windows for x64 and ARM64) with tools/build_release.py, attests each one (SLSA build provenance, signed with this workflow's
-# identity) and creates the GitHub release with the archives and SHA256SUMS. Every archive carries the Python it runs with:
+# Windows for x64 and ARM64) with tools/build_release.py and the desktop app's packages around them (desktop.yml), attests each one
+# (SLSA build provenance, signed with this workflow's identity) and creates the GitHub release with the archives, SHA256SUMS, the
+# packages and SHA256SUMS-desktop. Every archive carries the Python it runs with:
 # the Windows ones the official embeddable Python (pinned in install-windows.ps1), the Linux and macOS ones a python-build-standalone
 # CPython (pinned in tools/python-pins.json, filled by the python-pins job of ai-pins.yml): this workflow downloads the six files,
 # checks each against its pin, and the build checks them again. While a pin is null the workflow stops: no archive without a Python.
@@ -10,13 +11,15 @@ name: release
 # Dry run: Actions > release > Run workflow, choose the branch or tag to build and type the tag it is for (v1.4.0). The same
 # checks and the same archives, uploaded as a workflow artifact: no provenance is signed and no release is created.
 #
-# Four jobs, so that nothing but the publishing step can write: "build" (tests, downloads, archives) can only read the repository
+# Five jobs, so that nothing but the publishing step can write: "build" (tests, downloads, archives) can only read the repository
 # and has no OIDC token; "smoke-unix" and "smoke-windows" take the six archives that "build" made, each on a runner of its own
 # system and processor with NO setup-python and no checkout (the archive alone: the Python it carries is the only one it may use),
 # check it against SHA256SUMS, unpack it and run it (run.sh / run.cmd --which-python, --problems, a --once --demo render); they can
-# only read; "release" runs no code of this repository, it needs all of them (a broken archive is never published), only signs the
-# archives that "build" made (checked against SHA256SUMS again) and publishes them, and is the only one with contents: write,
-# id-token: write, attestations: write. A dry run runs the smoke jobs too.
+# only read; "desktop" (desktop.yml) builds the desktop app's packages around those same archives, installs each on a runner of its
+# own and starts it (--smoke-test), and can only read too; "release" runs no code of this repository, it needs all of them (a broken
+# archive or package is never published), only signs what "build" and "desktop" made (the archives checked against SHA256SUMS
+# again, the packages listed in SHA256SUMS-desktop) and publishes them, and is the only one with contents: write, id-token: write,
+# attestations: write. A dry run runs the smoke jobs and the desktop packages too.
 # Actions are pinned by commit SHA (the comment says which release it is); the only secret is the built-in GITHUB_TOKEN.
 
 on:
@@ -328,8 +331,18 @@ jobs:
           $text = $out -join "`n"
           if ($text -notmatch 'demo-host' -or $text -notmatch 'ATTENTION' -or $out.Count -lt 20) { throw "the demo screen is not the one expected" }
 
+  # The desktop app: its packages (.deb, .rpm, AppImage, .dmg, .msi, setup .exe), built around the archives above (input dist), each
+  # installed and started on a runner of its own system and processor. desktop.yml says how; it can only read.
+  desktop:
+    needs: build
+    uses: ./.github/workflows/desktop.yml
+    permissions:
+      contents: read
+    with:
+      dist: dist
+
   release:
-    needs: [build, smoke-unix, smoke-windows]   # a broken archive is never published
+    needs: [build, smoke-unix, smoke-windows, desktop]   # a broken archive or package is never published
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -345,6 +358,12 @@ jobs:
           name: dist
           path: dist
 
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-package-*
+          path: desktop
+          merge-multiple: true
+
       - name: What was built is what is published
         shell: bash
         run: |
@@ -355,14 +374,25 @@ jobs:
           for os in linux-x86_64.tar.gz linux-arm64.tar.gz macos-arm64.tar.gz macos-x86_64.tar.gz windows-x64.zip windows-arm64.zip; do
             test -s "nuc-console-${TAG#v}-$os"
           done
+          cd ../desktop
+          # the ten packages of the desktop app, named after the archives they carry
+          for p in linux-x86_64.deb linux-x86_64.rpm linux-x86_64.AppImage linux-arm64.deb linux-arm64.rpm macos-arm64.dmg macos-x86_64.dmg \
+                   windows-x64.msi windows-x64-setup.exe windows-arm64-setup.exe; do
+            test -s "nuc-console-desktop-${TAG#v}-$p"
+          done
+          test "$(find . -type f | wc -l)" -eq 10
+          sha256sum nuc-console-desktop-* > SHA256SUMS-desktop
+          cat SHA256SUMS-desktop
 
-      - name: Provenance of every archive
+      - name: Provenance of every archive and package
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
             dist/SHA256SUMS
+            desktop/nuc-console-desktop-*
+            desktop/SHA256SUMS-desktop
 
       - name: GitHub release
         shell: bash
@@ -371,4 +401,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" dist/* --verify-tag --title "nuc-console ${TAG#v}" --generate-notes
+          gh release create "$TAG" dist/* desktop/* --verify-tag --title "nuc-console ${TAG#v}" --generate-notes

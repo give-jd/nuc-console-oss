@@ -12,7 +12,7 @@ with nothing else to install by hand. The Linux console (no X11) keeps working a
 | [1. The AI on Ollama](#1-the-ai-on-ollama) | the local AI works with one click on Windows, macOS and Linux, on the GPU when there is one | done |
 | [2. A data API](#2-a-data-api) | everything the screens show, as JSON and as a live stream | done |
 | [3. A new web front end](#3-a-new-web-front-end) | smooth, live pages and charts, in any browser | in progress: `/app` |
-| [4. The desktop app and its packages](#4-the-desktop-app-and-its-packages) | `.msi`/`.exe`, `.dmg`, `.deb`/`.rpm`/AppImage, built on every release | planned |
+| [4. The desktop app and its packages](#4-the-desktop-app-and-its-packages) | `.msi`/`.exe`, `.dmg`, `.deb`/`.rpm`/AppImage, built on every release | in progress: the app and its packages |
 | [Later: signing and stores](#later-signing-and-stores) | signed packages, Microsoft Store and the other catalogs | later |
 
 ## 1. The AI on Ollama
@@ -70,6 +70,16 @@ front end of step 3 and runs the Python core beside it (the release archives alr
 - **Updates** from inside the app, from the GitHub releases.
 - **Not signed yet**: at the first start Windows SmartScreen and macOS Gatekeeper warn about an unknown publisher; the install guide
   says how to open it anyway.
+
+**Done: the app and its packages** ([docs/DESKTOP.md](DESKTOP.md)). `desktop/` starts the portable core it carries (the release
+archive of its system and processor, Python included) with its data in the user's folder, shows the live app, and has the tray icon,
+start at login and one instance per user. `.github/workflows/desktop.yml` builds the `.deb`, `.rpm` and AppImage (Linux x86-64), the
+`.deb` and `.rpm` (Linux arm64), the `.dmg` (Apple silicon, Intel), the `.msi` and setup `.exe` (Windows x64) and the setup `.exe`
+(Windows arm64), installs each on a runner of its own and starts it; `release.yml` attaches them to every
+release.
+
+**Still to come in this step**: the updates from inside the app (Tauri's updater checks a signature of its own: its key goes in the
+repository's secrets, which the owner holds); the advice on screen naming the app's own commands instead of the portable ones.
 
 ## Later: signing and stores
 

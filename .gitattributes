@@ -9,3 +9,6 @@ bin/nuc-console-ai text eol=lf
 bin/nuc-console-ask text eol=lf
 # the golden outputs (tests/golden) are compared byte for byte: a frame ends its lines with CR LF on purpose, so no checkout may convert line ends in them
 tests/golden/** -text
+
+# the icons of the desktop app are drawn by tools/desktop_icons.py: binary, compared byte for byte by tests/test_desktop.py
+desktop/src-tauri/icons/* -text

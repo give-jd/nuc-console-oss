@@ -1149,6 +1149,35 @@ class RunSh(unittest.TestCase):
         self.assertEqual(sorted(set(self.listing()) - set(before)), sorted(os.path.join("data", n) for n in ("config.ini", "config.ini.dist")))
         self.assertEqual(stat.S_IMODE(os.stat(data).st_mode) & 0o077, 0)  # yours alone (umask 077)
 
+    def test_nuc_console_data_moves_the_data_folder_and_the_folder_of_run_sh_may_be_read_only(self):
+        """The desktop app runs run.sh from inside the app (read-only) with its data in the user's folder."""
+        elsewhere = os.path.join(self.tmp.name, "user data", "nuc-console")  # a space, and folders that do not exist yet
+        self.env["NUC_CONSOLE_DATA"] = elsewhere
+        before = self.listing()
+        modes = {}
+        for dp, ds, fs in os.walk(self.dir):
+            for name in ds + fs:
+                full = os.path.join(dp, name)
+                modes[full] = os.stat(full).st_mode
+                os.chmod(full, stat.S_IMODE(modes[full]) & ~0o222)
+        os.chmod(self.dir, 0o555)
+        try:
+            r = self.sh("--problems", stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(os.path.join(elsewhere, "logs", "collector.log"), r.stdout)
+        finally:
+            os.chmod(self.dir, 0o755)
+            for full, mode in modes.items():
+                os.chmod(full, stat.S_IMODE(mode))
+        self.assertEqual(self.listing(), before)  # nothing in the folder of run.sh
+        self.assertEqual(sorted(os.listdir(elsewhere)), ["config.ini", "config.ini.dist", "lib", "logs", "run"])
+        self.assertEqual(stat.S_IMODE(os.stat(elsewhere).st_mode) & 0o077, 0)
+        self.env["NUC_CONSOLE_DATA"] = "relative/data"
+        r = self.sh("--problems", stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("NUC_CONSOLE_DATA must be an absolute path", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "relative")))
+
     def test_accept_passes_its_arguments_to_the_renderer(self):
         r = self.sh("--accept", "--problem", "no-such-problem", "--reason", "x")
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)  # render.py's own answer, not the usage of run.sh
@@ -1743,6 +1772,23 @@ class RunPs1(unittest.TestCase):
             write(os.path.join(data, "config.ini"), "[features]\nmap = no\n")
             subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
             self.assertEqual(read(os.path.join(data, "config.ini")), "[features]\nmap = no\n")
+
+    def test_nuc_console_data_moves_the_data_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = os.path.join(os.path.realpath(tmp), "nuc-console")
+            os.mkdir(d)
+            tree_copy(d)
+            os.remove(os.path.join(d, "install-windows.ps1"))
+            elsewhere = os.path.join(os.path.realpath(tmp), "user data", "nuc-console")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("NUC_CONSOLE_")}
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", os.path.join(d, "run.ps1"), "-Problems"]
+            r = subprocess.run(cmd, capture_output=True, text=True, env=dict(env, NUC_CONSOLE_DATA=elsewhere), timeout=300, stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse(os.path.exists(os.path.join(d, "data")))
+            self.assertEqual(sorted(os.listdir(elsewhere)), ["config.ini", "config.ini.dist", "lib", "logs", "run"])
+            r = subprocess.run(cmd, capture_output=True, text=True, env=dict(env, NUC_CONSOLE_DATA="relative\\data"), timeout=300, stdin=subprocess.DEVNULL)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("NUC_CONSOLE_DATA must be an absolute path", r.stdout + r.stderr)
 
 
 class PortableAdvice(unittest.TestCase):

@@ -1,6 +1,7 @@
 #!/bin/sh
 # nuc-console, portable: run it from the extracted folder. No installation, no service, no system change: everything it
-# writes (config, state, baseline, logs) is in ./data, and nothing listens beyond 127.0.0.1.
+# writes (config, state, baseline, logs) is in ./data, and nothing listens beyond 127.0.0.1. $NUC_CONSOLE_DATA (an absolute
+# path) moves that folder: the desktop app runs this script from inside the app, which is read-only, with its data in yours.
 #
 #   ./run.sh                       Linux: the dashboard in this terminal (--console); macOS: in your browser (--web)
 #   ./run.sh --console             in this terminal (q or Ctrl+C quits)
@@ -28,7 +29,7 @@ usage: ./run.sh [--console | --web] [--port N] [--no-open] | --problems [--json]
   --no-open   with --web: only print the address
   --problems  list what needs attention now: why it matters and how to fix it (--json: for scripts)
   --accept    accept the ports exposed now as the baseline of the port alarms (or a known problem: --problem ID --reason TEXT)
-Everything it writes is in ./data. sudo ./run.sh shows more.
+Everything it writes is in ./data ($NUC_CONSOLE_DATA if set). sudo ./run.sh shows more.
 EOF
 }
 
@@ -58,7 +59,8 @@ fi
 
 # ---- the folder; as root, what root would run or write must not be something others can change ---------------------------
 HERE=$(cd "$(dirname "$0")" && pwd -P)
-DATA=$HERE/data
+DATA=${NUC_CONSOLE_DATA:-$HERE/data}
+case $DATA in /*) ;; *) die "NUC_CONSOLE_DATA must be an absolute path: $DATA" ;; esac
 LOGS=$DATA/logs
 unsafe() {  # as root: a link, or a folder others can write to, could be turned against root
     [ -L "$1" ] && return 0

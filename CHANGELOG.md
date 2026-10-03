@@ -7,6 +7,13 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Added
 
+- **The desktop app.** nuc-console in a window of its own, with an icon in the tray (the menu bar on macOS), *start at login* and one
+  instance per user: closing the window hides it while the collector keeps running, quitting stops everything. Packages on every release,
+  built and installed-and-started in CI on each system and processor: `.msi` and setup `.exe` (Windows x64), setup `.exe` (Windows arm64),
+  `.dmg` (Apple silicon, Intel), `.deb` and `.rpm` (Linux x86-64 and arm64) and an AppImage (Linux x86-64), with `SHA256SUMS-desktop` and
+  their build provenance. Each carries the core and its Python; it runs as you, with its data in your user folder. Not signed yet: the first
+  start asks once. `run.sh` and `run.ps1` take `NUC_CONSOLE_DATA` (an absolute path) to keep their data outside their folder.
+  [docs/DESKTOP.md](docs/DESKTOP.md)
 - **The live app, `/app`.** The web view as an app: the overview, CPU, Health, Map and AI screens drawn in the browser from the data API and kept
   up to date by its stream, without a reload; the tabs, the column heads, the rows, the periods and the back button move inside the page, and the
   AI screen's buttons work in the background. It looks exactly like the shell (the same markup, checked screen by screen in a browser), with its

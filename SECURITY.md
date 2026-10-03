@@ -165,6 +165,22 @@ pinned in the script; macOS also checks the signature. The updater compares the 
 
 The repository is scanned with `gitleaks` (history + tree), `trufflehog` and `semgrep`; the test-suite includes checks that secrets in container environments are never emitted. Run the same tools yourself before trusting any build.
 
+## The desktop app
+
+The desktop app ([docs/DESKTOP.md](docs/DESKTOP.md)) is the portable run in a window: it runs as the user who starts it, starts the
+core it carries (`core/run.sh`, `core\run.ps1` through the PowerShell of `System32`, never one found on the `PATH`) with
+`NUC_CONSOLE_DATA` in that user's data folder, and stops it on quit. The core is the release archive of the same target, Python
+included (on Windows unpacked when the package is built, after its SHA-256 is checked against the pin), installed where users
+cannot write (`/usr/lib`, an `.app`, Program Files; the setup `.exe` installs into the user's own `%LOCALAPPDATA%`), and it writes
+only to the data folder. The window shows only the app's start page and the core on `127.0.0.1`: any other address goes to the
+browser. No page can call into the app: it declares no capability, exposes no API to its pages (`withGlobalTauri` off), and its
+start page has no script and a CSP of `default-src 'none'`. The dashboard keeps its own CSP, CSRF tokens and checks.
+
+The packages are built and smoke-tested by `.github/workflows/desktop.yml` (read-only, actions pinned by SHA) and attested by the
+release workflow with the archives, with their SHA-256 in `SHA256SUMS-desktop`. They are **not signed** with a publisher's
+certificate yet (macOS: an ad-hoc signature), so the operating system cannot tell who made them: check `SHA256SUMS-desktop` and
+`gh attestation verify <package> --repo give-jd/nuc-console-oss` before the first start. The app does not update itself.
+
 ## Portable mode and the updater
 
 `run.sh` / `run.cmd` run everything as the user who starts them (as root only if you use `sudo` / *Run as administrator*: then keep the folder

@@ -1,0 +1,30 @@
+# The desktop app of nuc-console (docs/DESKTOP.md): a native window around the portable core, which it carries in core/
+# (tools/desktop_core.py fills it). Four crates of the Tauri project, and libc on Linux and macOS. The version is VERSION of
+# src/nuc_config.py, given to the bundler at build time (.github/workflows/desktop.yml): this one never changes.
+[package]
+name = "nuc-console"
+version = "0.0.0"
+description = "nuc-console: the dashboard of your machine, in a window of its own"
+license = "MIT"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2" # to stop the core with SIGTERM (run.sh then stops all it started), and its group with SIGKILL if it hangs
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -16,9 +16,10 @@ Creates in --out (each archive has one top folder, nuc-console-X.Y.Z/):
   SHA256SUMS                              "<sha256>  <name>" of every archive: sha256sum -c SHA256SUMS
 
 What goes in is computed, never listed by hand: every file git tracks (every file under --root when it is not a git
-checkout), minus what is for development only (tests/, tools/, CONTRIBUTING.md, CLAUDE.md, dotfiles such as .github/), and per
-OS minus what belongs to another one: systemd/ is Linux only; launchd/ and install-macos.sh macOS only; *.cmd, *.bat
-and *.ps1 Windows only; shell scripts (*.sh, extensionless files with a #!/bin/sh-like line) and scripts/ not on Windows.
+checkout), minus what is for development only (tests/, tools/, CONTRIBUTING.md, CLAUDE.md, dotfiles such as .github/), minus
+desktop/ (the desktop app's sources: its packages carry an archive, not the other way round), and per OS minus what belongs
+to another one: systemd/ is Linux only; launchd/ and install-macos.sh macOS only; *.cmd, *.bat and *.ps1 Windows only;
+shell scripts (*.sh, extensionless files with a #!/bin/sh-like line) and scripts/ not on Windows.
 A new file (a portable launcher, an updater) is shipped without touching this script.
 
 Reproducible: sorted entries, every mtime = SOURCE_DATE_EPOCH (default: the time of the last commit), uid/gid 0 and
@@ -70,7 +71,7 @@ STANDALONE_FLAVOUR = "install_only_stripped"
 STANDALONE_URL = "https://github.com/astral-sh/python-build-standalone/releases/download/{release}/{file}"  # file is URL-quoted: its + is %2B
 STANDALONE_FILE = "cpython-{python}+{release}-{target}-%s.tar.gz" % STANDALONE_FLAVOUR
 PINS_FILE = os.path.join("tools", "python-pins.json")  # relative to --root
-DEV_DIRS, DEV_FILES = ("tests", "tools"), ("CONTRIBUTING.md", "CLAUDE.md")  # never shipped (nor any dotfile: .github/, .gitignore)
+DEV_DIRS, DEV_FILES = ("tests", "tools", "desktop"), ("CONTRIBUTING.md", "CLAUDE.md")  # never shipped (nor any dotfile: .github/, .gitignore)
 WINDOWS_EXT, SHELL_EXT = (".cmd", ".bat", ".ps1"), (".sh",)
 ZIP_EPOCH_MIN = 315532800  # 1980-01-01 00:00 UTC: the oldest time a zip entry can hold
 
