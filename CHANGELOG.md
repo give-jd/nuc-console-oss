@@ -3,7 +3,17 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.1.0] - 2026-10-03
+
+The desktop app, with packages for Windows, macOS and Linux built and tried on every release; the live app (`/app`) and a data API
+for every screen; the local AI on Ollama, on the GPU of every system; Telegram set up from the web view. A minor version: nothing is
+removed, but the AI's models are chosen again (see the upgrade notes). Still Python 3.8+, standard library only.
+
+### Upgrade notes
+
+- Models downloaded for llamafile are not used by Ollama: choose a model again on the AI page (or `sudo nuc-console-ai setup`), and delete the old files with
+  *delete everything* (or `sudo nuc-console-ai remove`). A service installed by an older version needs `sudo nuc-console-ai serve --install-service` again.
+- On Linux the Ollama build is a `.tar.zst`: Python 3.14 reads it, an older Python needs the `zstd` tool (`apt install zstd`).
 
 ### Added
 
@@ -24,8 +34,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   from the components the console and the pages draw, with an `ETag` per document; and `GET /api/v1/stream?view=<view>` sends the document again
   each time it changes (Server-Sent Events; one stream may carry a screen and `summary`, the top bar and key figures every page shows). Read-only,
   behind the same token and `Host` checks as the pages, refused to a page of another site;
-  at most 8 streams at once, each ending after 5 minutes (the browser reconnects). It is what the new front end and the desktop app of
-  [docs/ROADMAP.md](docs/ROADMAP.md) will be built on. [docs/WEB.md](docs/WEB.md#the-data-api)
+  at most 8 streams at once, each ending after 5 minutes (the browser reconnects). The live app and the desktop app are built on it.
+  [docs/WEB.md](docs/WEB.md#the-data-api)
 - **Telegram from the web view.** A Telegram page (`/?view=telegram`, linked from the settings) pairs the notifier with your own bot without a terminal
   (paste the token and your @username, tap the link it shows, press Start), switches the alerts on and off and sends a test, with the notifier's last
   message and error. The token goes one way: the web view hands it to the notifier through a folder it can write into but never read
@@ -52,12 +62,6 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - The models are pulled by their Ollama names (Qwen3, gpt-oss, Phi-4, Granite 3.3; SmolLM3 from its GGUF repository): Ollama checks every layer against the
   registry's SHA-256; the version of a model is the registry's, not a commit pinned by nuc-console. The server's archive stays pinned by size and SHA-256 and every
   member is checked before it is unpacked.
-
-### Upgrade notes
-
-- Models downloaded for llamafile are not used by Ollama: choose a model again on the AI page (or `sudo nuc-console-ai setup`), and delete the old files with
-  *delete everything* (or `sudo nuc-console-ai remove`). A service installed by an older version needs `sudo nuc-console-ai serve --install-service` again.
-- On Linux the Ollama build is a `.tar.zst`: Python 3.14 reads it, an older Python needs the `zstd` tool (`apt install zstd`).
 
 ## [2.0.0] - 2026-10-02
 
@@ -490,7 +494,9 @@ with who actually connects; boot health, temperatures and throttling, disks, tra
 new, changed or vanished port (`sudo nuc-console-accept`). A small root collector and an unprivileged renderer; `[features]` switches
 every section; optional helper scripts `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` (never run by the installer).
 
-[1.5.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.4.0...main
+[2.1.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.5.0...v2.0.0
+[1.5.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/give-jd/nuc-console-oss/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.2.0...v1.3.0
