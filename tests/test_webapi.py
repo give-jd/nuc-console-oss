@@ -19,6 +19,16 @@ import webapi  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_web import TOKEN, get_any as get, raw, serve  # noqa: E402
 
+_SAVED = {}
+
+
+def setUpModule():  # the demo servers' render.demo_defaults() renames the host and declares [webapps] and [expose] for good: put them back
+    _SAVED.update(host=socket.gethostname, webapps=render.CFG["webapps"], expose=render.CFG["expose"], demo=render.DEMO)
+
+
+def tearDownModule():
+    socket.gethostname, render.CFG["webapps"], render.CFG["expose"], render.DEMO = _SAVED["host"], _SAVED["webapps"], _SAVED["expose"], _SAVED["demo"]
+
 
 def stop(srv):
     srv.shutdown()
@@ -177,6 +187,18 @@ class Api(unittest.TestCase):
         self.assertTrue(d["problems"]["items"], "the demo has problems")
         self.assertTrue(all(p["state"] in ("err", "warn") for p in d["problems"]["items"]))
 
+    def test_the_summary_is_what_every_page_shows_above_its_screen(self):
+        _h, d = self.doc("/api/v1/summary")
+        self.assertEqual(set(d) - {"api", "view", "rev", "at"}, {"host", "status", "kpis", "stale", "restart", "problems", "badges"})
+        self.assertEqual([k["id"] for k in d["kpis"]], list(prefs.KPI_IDS))
+        self.assertIsInstance(d["stale"], bool)
+        self.assertGreater(d["problems"], 0, "the demo has problems")
+        self.assertIn("map", d["badges"])
+        self.assertEqual(len(d["badges"]["health"]), 2, "errors and warnings")
+        _h, o = self.doc("/api/v1/overview")
+        self.assertEqual(o["badges"], d["badges"])
+        self.assertEqual(o["status"], d["status"])
+
     def test_the_views_take_the_pages_parameters_checked(self):
         self.assertEqual(self.doc("/api/v1/cpu?sort=mem&sel=999999999")[1]["sort"], "mem")
         self.assertEqual(self.doc("/api/v1/cpu?sel=999999999")[1]["sel"], "", "no such process: dropped")
@@ -305,6 +327,21 @@ class Stream(unittest.TestCase):
         self.assertEqual(get(self.srv, "/api/v1/stream?view=nope")[0], 404)
         with mock.patch.dict(render.CFG["features"], {"map": False}):
             self.assertEqual(get(self.srv, "/api/v1/stream?view=map")[0], 404)
+
+    def test_one_stream_carries_a_screen_and_the_summary(self):
+        _t, (_head, body) = self.open("/api/v1/stream?view=cpu&view=summary&sort=mem")
+        got = {d["view"]: d for _id, d in events(body)}
+        self.assertEqual(set(got), {"cpu", "summary"})
+        self.assertEqual(got["cpu"]["sort"], "mem")
+        rev = json.loads(get(self.srv, "/api/v1/telegram")[2])["rev"]
+        _t, (_head, body) = self.open("/api/v1/stream?view=telegram&view=telegram", [("Last-Event-ID", rev)])
+        self.assertEqual(events(body), [], "one view, named twice: its id is honoured")
+        _t, (_head, body) = self.open("/api/v1/stream?view=telegram&view=summary", [("Last-Event-ID", rev)])
+        self.assertEqual({d["view"] for _id, d in events(body)}, {"telegram", "summary"}, "an id is one view's rev: with two, both are sent")
+        st, _h, body = get(self.srv, "/api/v1/stream?view=cpu&view=map&view=health&view=ai")
+        self.assertEqual(st, 400)
+        self.assertIn("at most 3 views", json.loads(body)["error"])
+        self.assertEqual(get(self.srv, "/api/v1/stream?view=cpu&view=nope")[0], 404)
 
     def test_head_is_the_headers_only(self):
         took, (head, body) = self.open(method="HEAD")

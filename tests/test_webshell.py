@@ -113,7 +113,7 @@ class Shell(unittest.TestCase):
             self.assertNotIn(t, ("button", "select", "textarea", "iframe", "form"), t)
             self.assertFalse([k for k in a if k.startswith("on") or k == "style"], (t, a))
         for t, a, _ in self.tree.find("a"):
-            self.assertTrue(a["href"].startswith(("/?", "#")), a)
+            self.assertTrue(a["href"].startswith(("/?", "#")) or a["href"] == "/app" or a["href"].startswith("/app?"), a)  # /app: the live app
 
     def test_the_footer_has_pause_zoom_theme_and_density_as_links(self):
         self.assertTrue(self.tree.find("a", data_pause=True, data_key="Z"))

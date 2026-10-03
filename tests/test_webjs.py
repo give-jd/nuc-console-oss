@@ -42,7 +42,7 @@ def flagged(name, src, label):
 class Rules(unittest.TestCase):
     def test_the_four_scripts_and_their_policies(self):
         self.assertEqual(tuple(webjs.SCRIPTS), NAMES)
-        self.assertEqual(sorted(jsrules.POLICIES), sorted(NAMES + ("graph",)))
+        self.assertEqual(sorted(jsrules.POLICIES), sorted(NAMES + ("graph", "app")))  # app: src/appjs.py, tested in test_appjs.py
         for name, js in (("refresh", webjs.REFRESH_JS), ("keys", webjs.KEYS_JS), ("prefs", webjs.PREFS_JS), ("builder", webjs.BUILDER_JS)):
             self.assertIs(webjs.SCRIPTS[name], js)
 
@@ -110,6 +110,8 @@ CAP_SAMPLES = {
     "localStorage": 'const v = localStorage.getItem("a");', "sessionStorage": 'const v = sessionStorage.getItem("a");',
     "navigator": "const l = navigator.language;", "clipboard.writeText": "navigator.clipboard.writeText(x);",
     "trustedTypes": "const t = window.trustedTypes;",
+    "createElement": 'const e = document.createElement("p");', "createElementNS": 'const e = document.createElementNS(ns, "svg");',
+    "EventSource": 'const s = new EventSource("/api/v1/stream?view=cpu");', "history": 'history.pushState(null, "", "/app");',
 }
 
 
@@ -132,8 +134,9 @@ class RulesBite(unittest.TestCase):
                 with self.subTest(cap=label, script=name):
                     if name not in who:
                         self.assertTrue(flagged(name, inject(src, CAP_SAMPLES[label]), "not allowed in " + name), label)
-                    elif most < 99:
-                        self.assertTrue(flagged(name, inject(src, CAP_SAMPLES[label], times=most + 1), label), label)
+                    elif (most.get(name, 0) if isinstance(most, dict) else most) < 99:
+                        n = most.get(name, 0) if isinstance(most, dict) else most
+                        self.assertTrue(flagged(name, inject(src, CAP_SAMPLES[label], times=n + 1), label), label)
         # and the table matches who really uses what
         for name, src in sources.items():
             for label, rx, most, who in jsrules.CAPS:

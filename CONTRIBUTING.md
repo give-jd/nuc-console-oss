@@ -47,6 +47,11 @@ python3 tools/browser_check.py --out shots      # the web shell in a real headle
   field of the class and its bases, less `CONSOLE_ONLY`). A new component or field shows up in the API by itself; one that only the console draws
   (a width, an indent) goes in `CONSOLE_ONLY`, and a field that changes meaning, or goes, is a new API version. `tests/test_webapi.py` tests the
   documents, the access rules and the stream.
+- The live app (`/app`, `src/appjs.py`) draws those documents with the markup `htmlview.html` gives the same components: a change of a component's
+  HTML in `htmlview.py` is the same change in `draw()` of `appjs.py` (and of the shell's card or key figure: `card_article`, `kpi_tile`). The
+  parity check of `tools/browser_check.py` (the `browser` job; `python3 tools/browser_check.py --only app-` for the app's pages, the parity runs
+  without `--only`) compares the two screen by screen in a real browser and fails on the first difference; `tests/test_appjs.py` checks the
+  script against its policy and the page web.py serves.
 - The collector must **fail per section** (one broken command must not blank the others) and treat missing tools as `Absent`, not as errors.
 - Anything that can be wrong must show `?` / "unknown", never a reassuring green.
 - JavaScript: the web view's scripts are first-party, inline and pinned by hash: the shell's four in `src/webjs.py` (partial refresh, keys,

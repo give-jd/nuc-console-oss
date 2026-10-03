@@ -12,6 +12,11 @@ page must then be complete by itself), plus the wall page (`ui=1.dw&kiosk=1`). A
     uncaught exception or a failed load of one of the page's own files (the log of `--enable-logging=stderr`, parsed by `parse_log`);
   * the DOM it dumps lacks a landmark (the top bar, `main`, the key figures, the view's own block: `missing_landmarks`).
 
+The live app (`/app`, src/appjs.py) is loaded too, each of its screens in every theme (scripts on: it draws the page, so it has no
+script-free variant; `live=0`, so that its stream does not keep the page from ever settling), and then its **parity** is checked: for
+each screen a page that has the app draw the document of tests/golden.py's frozen world next to the markup htmlview.py draws of the
+very same components (`parity_page`); after the script ran, the two must be the same markup (`parity_problems`). `--no-parity` skips it.
+
 With `--out DIR` it also writes one screenshot per page. Exit status 0 when every page passed, 1 otherwise, 2 when no browser
 or no server could be started. Python standard library only; the browser is found from `--chrome`, `$CHROME` or the usual names and
 paths on Linux, macOS and Windows."""
@@ -25,12 +30,14 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 VIEWS = ("overview", "map", "map-graph", "cpu", "health", "ai", "settings", "telegram", "layout")
+APP_VIEWS = ("overview", "cpu", "health", "map", "ai")  # the live app's screens (/app)
 THEMES = (("auto", "a"), ("dark", "d"), ("light", "l"), ("high-contrast", "h"))
 DENSITIES = (("wall", "w"), ("desk", "k"), ("compact", "c"))
 # the graph is paused: its script reloads the page when the refresh is due, and a reload inside --virtual-time-budget keeps some Chrome
@@ -62,6 +69,12 @@ VIEW_LANDMARKS = {
     "telegram": (("the Telegram page", ('id="tg"',)), ("its pairing form", ('action="/telegram/pair"',))),
     "layout": (("the layout editor", ("data-edit",)), ("a card", ('<article class="card',))),
     "wall": (("the key figures", ('class="kpis"',)), ("a card", ('<article class="card',))),
+    # the live app: what its script drew from the documents (the server sends an empty <main id="app">)
+    "app-overview": (("the key figures it drew", ('role="listitem"',)), ("a card it drew", ('<article class="card',))),
+    "app-cpu": (("the CPU screen it drew", ('class="scr scr-cpu"',)),),
+    "app-health": (("the findings it drew", ('class="hv"',)),),
+    "app-map": (("the map it drew", ('class="scr mapv"',)),),
+    "app-ai": (("the AI screen it drew", ('class="scr av"',)),),
 }
 # With the scripts off the page is the server's markup alone: the same landmarks.
 
@@ -96,6 +109,11 @@ def page_path(view, theme_code, density_code, kiosk=False):
     return path + ("&kiosk=1" if kiosk else "")
 
 
+def app_path(view, theme_code, density_code):
+    """The live app's address for a screen in a theme and a density, without its stream: /app?ui=1.td.dk&live=0&view=cpu."""
+    return "/app?ui=" + ui_string(theme_code, density_code) + "&live=0" + ("" if view == "overview" else "&view=" + view)
+
+
 def build_matrix(quick=False):
     """-> the list of Page to load. Scripts on: every view x theme x density, and the wall page (kiosk) in every theme; scripts off: every
     view x theme in the desk density, and the wall page. quick: the default theme and density only, plus the dark/compact pair."""
@@ -112,6 +130,11 @@ def build_matrix(quick=False):
         for theme, tc in themes[:1] if quick else themes:
             pages.append(Page("%s/%s/desk/nojs" % (view, theme), page_path(view, tc, "k"), False, view))
     pages.append(Page("wall/auto/nojs", page_path("overview", "a", "w", kiosk=True), False, "wall"))
+    for view in APP_VIEWS:  # the live app: scripts on only (it is the script that draws the page)
+        for theme, tc in themes:
+            pages.append(Page("app-%s/%s/desk/js" % (view, theme), app_path(view, tc, "k"), True, "app-" + view))
+        if not quick:
+            pages.append(Page("app-%s/dark/compact/js" % view, app_path(view, "d", "c"), True, "app-" + view))
     return pages
 
 
@@ -263,6 +286,129 @@ class NoScriptProxy(object):
         self.httpd.server_close()
 
 
+# ------------------------------------------------------------------------------------------------------- the app's parity
+
+_REV = re.compile(r' data-rev="[^"]*"')
+_ROWS = re.compile(r'(<article class="card s\d st-[a-z]+) r\d+"')
+_REGION = {"app": re.compile(r'<main id="app"[^>]*>(.*)</main><!--END-APP-->', re.S),
+           "expect": re.compile(r'<div id="expect">(.*)</div><!--END-EXPECT-->', re.S),
+           "kpis": re.compile(r'<div class="kpiblock" id="kpis">(.*)</div><!--END-KPIS-->', re.S),
+           "expect-kpis": re.compile(r'<div id="expect-kpis">(.*)</div><!--END-EXPECT-KPIS-->', re.S)}
+
+
+def parity_page(view):
+    """-> (the page, its Content-Security-Policy) for one screen of the live app: web.Server.app_page of tests/golden.py's frozen world (the
+    app draws the document embedded in it, no stream), with markers after the regions the app draws (#kpis, main#app) and, before </body>,
+    what htmlview.py draws of the same components: #expect (the screen) and #expect-kpis (the key figures, on the overview)."""
+    for d in (os.path.join(ROOT, "src"), os.path.join(ROOT, "tests")):
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    import golden
+    import htmlview
+    import prefs
+    import render
+    import web
+    with golden.FrozenWorld() as world:
+        srv = world.server
+        srv.cache.clear()
+        page = srv.app_page("", {"live": ["0"]} if view == "overview" else {"view": [view], "live": ["0"]})
+        r = srv.cfg["refresh_seconds"]
+        here = {k: v for k, v in web.view_params({}).items() if k in web.HERE_KEYS}
+        kpis = ""
+        if view == "overview":
+            body = srv.api_overview(r)
+            eff, _src = prefs.effective(render.CFG.get("ui"), "", "")
+            layout = [(cid, w) for cid, w in prefs.visible_cards(eff, [c for c in prefs.CARDS if web.cards.enabled(c, render.CFG)])]
+            by = {c.id: c for c in body["cards"]}
+            order = [(by[cid], w) for cid, w in layout if cid in by]
+            if eff["order"] == "severity":
+                order.sort(key=lambda x: web.STATE_RANK.get(x[0].state, 3))
+            screen = "".join(htmlview.card_article(c.id, c.title, c.note, c.state, w, "".join(htmlview.html(x) for x in c.body)) for c, w in order)
+            ids = {cid for cid, _w in layout}
+            byk = {k.id: k for k in body["kpis"]}
+            tiles = []
+            for kid in eff["kpis"]:
+                if kid not in byk:
+                    continue
+                if kid in web.KPI_VIEW and render.CFG["features"].get(web.KPI_VIEW[kid], True):
+                    to = "/app?view=" + web.KPI_VIEW[kid]
+                else:
+                    to = "#c-" + web.KPI_CARD[kid] if web.KPI_CARD.get(kid) in ids else ""
+                tiles.append(htmlview.kpi_tile(byk[kid], to))
+            note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
+                                   'restart it: <code class="cmd">%s</code>' % htmlview.esc(render.CMD.get("restart", ""))) if body["stale"] else ""
+            kpis = note + '<div class="kpis" role="list" aria-label="Key figures">' + "".join(tiles) + "</div>"
+        else:
+            if view == "cpu":
+                nodes = srv.api_cpu(here, "cpu", "")["nodes"]
+            elif view == "health":
+                nodes = web.health_nodes(srv.smp, 7, "", dict({"view": "health", "period": 0, "sel": "", "pause": False}, **here))
+            elif view == "map":
+                p = web.view_params({"view": ["map"]})
+                nodes = srv.api_map(here, web.map_mode({k: p[k] for k in web.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]
+            else:
+                nodes = srv.api_ai(here, "", "")["nodes"]
+            box = {"cpu": "scr scr-cpu", "health": "hv", "map": "scr mapv", "ai": "scr av"}[view]
+            screen = '<div class="%s">' % box + "".join(htmlview.html(n) for n in nodes) + "</div>"
+    html_text = str(page).replace('<div class="kpiblock" id="kpis"></div>', '<div class="kpiblock" id="kpis"></div><!--END-KPIS-->', 1)
+    html_text = html_text.replace("</main>", "</main><!--END-APP-->", 1)
+    expect = ('<div id="expect-kpis">' + _REV.sub("", kpis) + '</div><!--END-EXPECT-KPIS--><div id="expect">' + _REV.sub("", screen)
+              + "</div><!--END-EXPECT-->")
+    return html_text.replace("</body>", expect + "</body>", 1), page.csp
+
+
+def parity_problems(dom, view):
+    """What differs, in the DOM the browser dumped, between what the app drew and what htmlview.py draws: [] when the same. The grid rows
+    the app measured for each card (class rN) are not compared: the server's page estimates them instead."""
+    got = {k: (rx.search(dom).group(1) if rx.search(dom) else None) for k, rx in _REGION.items()}
+    out = ["no %s region in the DOM" % k for k, v in got.items() if v is None]
+    if out:
+        return out
+    pairs = [("the screen", _ROWS.sub(r'\1"', got["app"]), got["expect"])]
+    if view == "overview":
+        pairs.append(("the key figures", got["kpis"], got["expect-kpis"]))
+    for what, a, b in pairs:
+        if a != b:
+            at = next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), min(len(a), len(b)))
+            out.append("%s differs at %d: app %r / htmlview %r" % (what, at, a[max(0, at - 80):at + 80], b[max(0, at - 80):at + 80]))
+    return out
+
+
+def check_parity(chrome, profile, views=APP_VIEWS):
+    """-> {view: problems}: each parity page served on a loopback port of its own (with its CSP), dumped by the browser, compared."""
+    import http.server
+    import threading
+    out = {}
+    for view in views:
+        text, csp = parity_page(view)
+        body = text.encode("utf-8")
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200 if urllib.parse.urlsplit(self.path).path == "/app" else 404)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", csp)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            url = "http://127.0.0.1:%d/app%s" % (httpd.server_address[1], "" if view == "overview" else "?view=" + view)
+            rc, dom, err = run_chrome(chrome_args(chrome, profile) + ["--dump-dom", url])
+            problems = ["browser exited with %s" % rc] if rc != 0 else []
+            problems += ["%s: %s" % (k, m) for k, m in parse_log(err)]
+            out[view] = problems + parity_problems(dom, view)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+    return out
+
+
 # ------------------------------------------------------------------------------------------------------------ the server
 
 def free_port():
@@ -297,6 +443,7 @@ def main(argv=None):
     ap.add_argument("--keep-going", action="store_true", help="accepted for clarity: every page is always checked, the status says whether all passed")
     ap.add_argument("--port", type=int, default=0, help="the port of the demo server (default: a free one)")
     ap.add_argument("--list", action="store_true", help="print the pages and stop")
+    ap.add_argument("--no-parity", action="store_true", help="do not compare what the live app draws with what htmlview.py draws")
     a = ap.parse_args(argv)
     pages = build_matrix(a.quick)
     if a.only:
@@ -330,6 +477,12 @@ def main(argv=None):
             if len(problems) > 8:
                 print("      ... %d more" % (len(problems) - 8))
             failed += bool(problems)
+        if not a.no_parity and not a.only:
+            for view, problems in check_parity(chrome, profile).items():
+                print("%s  %-34s" % ("FAIL" if problems else "ok  ", "app parity: " + view))
+                for line in problems[:4]:
+                    print("      " + line[:600])
+                failed += bool(problems)
     finally:
         if noscript:
             noscript.close()

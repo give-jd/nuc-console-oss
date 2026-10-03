@@ -7,11 +7,17 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Added
 
+- **The live app, `/app`.** The web view as an app: the overview, CPU, Health, Map and AI screens drawn in the browser from the data API and kept
+  up to date by its stream, without a reload; the tabs, the column heads, the rows, the periods and the back button move inside the page, and the
+  AI screen's buttons work in the background. It looks exactly like the shell (the same markup, checked screen by screen in a browser), with its
+  themes, densities and keys; the shell's footer has a **live app** link. One first-party script, no framework, no build, no dependency, under
+  the same strict CSP as the shell's scripts. [docs/WEB.md](docs/WEB.md#the-live-app)
 - **A data API.** Everything the web view's screens show is also JSON: `GET /api/v1/<view>` (`overview`: the status, every key figure, every
   card in full, the layout and the problems with their fix; `cpu`, `health`, `map`, `ai`, `telegram`: the same parameters as their pages), built
   from the components the console and the pages draw, with an `ETag` per document; and `GET /api/v1/stream?view=<view>` sends the document again
-  each time it changes (Server-Sent Events). Read-only, behind the same token and `Host` checks as the pages, refused to a page of another site;
-  at most 4 streams at once, each ending after 5 minutes (the browser reconnects). It is what the new front end and the desktop app of
+  each time it changes (Server-Sent Events; one stream may carry a screen and `summary`, the top bar and key figures every page shows). Read-only,
+  behind the same token and `Host` checks as the pages, refused to a page of another site;
+  at most 8 streams at once, each ending after 5 minutes (the browser reconnects). It is what the new front end and the desktop app of
   [docs/ROADMAP.md](docs/ROADMAP.md) will be built on. [docs/WEB.md](docs/WEB.md#the-data-api)
 - **Telegram from the web view.** A Telegram page (`/?view=telegram`, linked from the settings) pairs the notifier with your own bot without a terminal
   (paste the token and your @username, tap the link it shows, press Start), switches the alerts on and off and sends a test, with the notifier's last

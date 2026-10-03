@@ -1,4 +1,4 @@
-"""One set of static rules for every first-party script of the web view (src/graphjs.py, src/webjs.py).
+"""One set of static rules for every first-party script of the web view (src/graphjs.py, src/webjs.py, src/appjs.py).
 
 The scripts are inlined into pages whose Content-Security-Policy lists their SHA-256 (or served from a hashed URL), so what
 matters is what they can do once they run: build no markup from data, run no code from strings, open no connection but this
@@ -7,7 +7,7 @@ the server wrote, touch no global, and read and write only the ids, classes, att
 (the module docstring of src/webjs.py; the top of src/graphjs.py). This file is those rules as a checker, with no browser:
 
     jsrules.check("refresh", source)          -> a list of problems, empty when the script obeys every rule
-    jsrules.POLICIES[name]                    -> what one script is allowed (names: graph, refresh, keys, prefs, builder)
+    jsrules.POLICIES[name]                    -> what one script is allowed (names: graph, refresh, keys, prefs, builder, app)
     jsrules.rule_*(source, policy)            -> one rule group, for a test that names it
 
 Three kinds of rule:
@@ -15,6 +15,12 @@ Three kinds of rule:
   * CAPS: an API a few scripts need (fetch, DOMParser, localStorage...), and which ones may use it, how often and how;
   * the CONTRACT of each script: its literal ids, selectors, attributes, classes, events and styles, which must match its
     POLICY exactly (an allowance nobody uses is a hole nobody notices) and may only be string literals.
+
+The live app (src/appjs.py, policy "app") draws the page itself, so four of the global bans are lifted for it alone, each replaced by a
+narrower rule: createElement / createElementNS once each, inside the helpers that check the tag against a fixed list (rule_build);
+EventSource once, behind the one door that only opens this server's /api/v1/stream; history only pushState / replaceState to the app's
+own "/app" address (rule_history); and the one URL it may write is the SVG namespace (it is a name, nothing is loaded from it). Markup
+from data stays banned for it as for every script: no innerHTML, no DOMParser, no insertAdjacentHTML.
 
 The behaviour was checked in a real browser (see tests/test_webjs.py for what is checked here, and why a rule exists).
 Run `python3 tests/jsrules.py` to print the problems of every script.
@@ -65,7 +71,7 @@ class Policy(object):
         self.ban_extra = tuple(ban_extra)       # more regex bans for this script only
 
 
-# ---- the global bans: (label, regex). Whole text, comments included. -----------------------------------------------------------
+# ---- the global bans: (label, regex). Whole text, comments included (EXEMPT: the bans one policy is spared, with the rule that replaces them). --
 GLOBAL_BANS = [
     # markup from data
     ("innerHTML", r"innerHTML"), ("outerHTML", r"outerHTML"), ("insertAdjacent", r"insertAdjacent(?:HTML|Text|Element)"),
@@ -99,17 +105,25 @@ GLOBAL_BANS = [
     ("assignment to this.x", r"\bthis\.\w+\s*=[^=]"), ("var", r"\bvar\b"),
 ]
 
+EXEMPT = {"app": {"createElement", "EventSource", "history", "a URL"}}  # rule_build, rule_network, rule_history, SVG_NS (rule_global)
+SVG_NS = '"http://www.w3.org/2000/svg"'  # a namespace name, not an address: the app's one URL
+
 # ---- the caps: (label, regex, how many times at most, the scripts that may use it). A script not listed may not match at all. ---
+# How many times: a number for every script that may, or {script: number}.
 CAPS = [
-    ("fetch", r"\bfetch\b", 1, {"refresh", "prefs", "builder"}),            # and only as the one canonical helper, see rule_network
+    ("fetch", r"\bfetch\b", 1, {"refresh", "prefs", "builder", "app"}),     # and only as the one canonical helper, see rule_network
+    ("createElement", r"\bcreateElement\(", 1, {"app"}),                     # inside el(), after the tag is checked: rule_build
+    ("createElementNS", r"\bcreateElementNS\(", 1, {"app"}),                 # inside sv(), the same
+    ("EventSource", r"\bEventSource\b", 1, {"app"}),                         # the one stream: rule_network
+    ("history", r"\bhistory\b", 2, {"app"}),                                 # pushState / replaceState to "/app": rule_history
     ("DOMParser", r"\bDOMParser\b", 1, {"refresh"}),
     ("parseFromString", r"\bparseFromString\(", 1, {"refresh"}),
     ("createPolicy", r"\bcreatePolicy\(", 1, {"refresh"}),
     ("importNode", r"\bimportNode\b", 1, {"refresh"}),
-    ("replaceWith", r"\.replaceWith\(", 1, {"refresh"}),
-    ("before/after", r"\.(?:before|after)\(", 4, {"builder"}),
-    ("append", r"\.append\(", 3, {"builder"}),
-    ("textContent", r"\btextContent\b", 99, {"refresh", "prefs", "builder"}),
+    ("replaceWith", r"\.replaceWith\(", {"refresh": 1, "app": 2}, {"refresh", "app"}),
+    ("before/after", r"\.(?:before|after)\(", {"builder": 4, "app": 2}, {"builder", "app"}),
+    ("append", r"\.append\(", {"builder": 3, "app": 3}, {"builder", "app"}),
+    ("textContent", r"\btextContent\b", 99, {"refresh", "prefs", "builder", "app"}),
     ("localStorage", r"\blocalStorage\b", 99, {"prefs"}),
     ("sessionStorage", r"\bsessionStorage\b", 99, {"graph", "refresh"}),
     ("navigator", r"\bnavigator\b", 2, {"prefs"}),
@@ -123,6 +137,18 @@ CANON_LOAD = re.compile(
     r'    if \(typeof url !== "string" \|\| !url\.startsWith\("/\?"\)\) return Promise\.reject\(new Error\("refused"\)\);\n'
     r'    return fetch\(url, \{credentials: "same-origin", cache: "no-store", redirect: "error", '
     r'headers: etag \? \{"If-None-Match": etag\} : \{\}, signal\}\);\n  \};')
+
+# the app's two doors (src/appjs.py): its data API and the forms of its screens; its stream
+CANON_CALL = re.compile(
+    r'  const call = \(url, form\) => \{[^\n]*\n'
+    r'    if \(typeof url !== "string" \|\| !\(form \? /\^\\/\(ai\|telegram\)\\/\[a-z-\]\+\$/\.test\(url\) : url\.startsWith\("/api/v1/"\)\)\) '
+    r'return Promise\.reject\(new Error\("refused"\)\);\n'
+    r'    return fetch\(url, form \? \{method: "POST", body: form, credentials: "same-origin", cache: "no-store", redirect: "manual"\} : '
+    r'\{credentials: "same-origin", cache: "no-store", redirect: "error"\}\);\n  \};')
+CANON_STREAM = re.compile(
+    r'  const stream = url => \{[^\n]*\n'
+    r'    if \(typeof url !== "string" \|\| !url\.startsWith\("/api/v1/stream\?"\)\) throw new Error\("refused"\);\n'
+    r'    return new EventSource\(url\);\n  \};')
 
 REFRESH_ATTRS_READ = {"class", "data-edit", "data-frag", "data-refresh", "data-rotate", "data-paused", "data-k", "data-card", "data-rev",
                       "data-density", "data-kiosk"}
@@ -167,14 +193,29 @@ POLICIES = {
         classes_read={"s2", "s3", "s4", "off"},
         events={"DOMContentLoaded", "click", "pointerdown", "pointermove", "pointerup", "pointercancel", "keydown", "focusout"},
         location=()),
+    # src/appjs.py: the live app. Its DOM contract is its docstring (the page web.py app_page serves)
+    "app": Policy(
+        "app", 48 * 1024, 640, ids={"app", "cfg", "doc", "kpis", "stale"},
+        selectors={".host", ".kl", ".kv", ".status", "[data-pause]", "[data-state]", "a[href]", "article.card[data-card]", "button", "footer .upd", "form",
+                   "input.q", "nav.tabs", "summary", "time.clock"},
+        attrs_read={"action", "class", "data-card", "data-k", "data-problem", "data-static", "href"},
+        attrs_write={"aria-pressed", "class", "disabled"}, classes_set={"busy", "chg", "paused", "stale"},
+        events={"DOMContentLoaded", "click", "error", "load", "message", "open", "popstate", "resize", "submit", "visibilitychange"},
+        location={"search"}, literal_attrs=False,
+        dynamic_setattr=('n.setAttribute(name, v === true ? "" : String(v));',
+                         "if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);")),
 }
 
 
 # ---- the rules ------------------------------------------------------------------------------------------------------------------
 def rule_global(src, pol):
     """Nothing banned anywhere in the text (markup from data, code from strings, network, navigation, globals)."""
-    out = ["banned: %s" % label for label, rx in GLOBAL_BANS if re.search(rx, src)]
+    spared = EXEMPT.get(pol.name, set())
+    text = src.replace(SVG_NS, '""') if "a URL" in spared else src
+    out = ["banned: %s" % label for label, rx in GLOBAL_BANS if label not in spared and re.search(rx, text)]
     out += ["banned here: %s" % label for label, rx in pol.ban_extra if re.search(rx, src)]
+    if "a URL" in spared and re.search(dict(GLOBAL_BANS)["a URL"], text):
+        out.append("banned: a URL (the SVG namespace is the only one allowed)")
     return out
 
 
@@ -183,6 +224,7 @@ def rule_caps(src, pol):
     out = []
     for label, rx, most, who in CAPS:
         n = len(re.findall(rx, src))
+        most = most.get(pol.name, 0) if isinstance(most, dict) else most
         if n and pol.name not in who:
             out.append("%s is not allowed in %s" % (label, pol.name))
         elif n > most:
@@ -193,7 +235,14 @@ def rule_caps(src, pol):
 def rule_network(src, pol):
     """fetch only through the one canonical helper (same-origin "/?..." URLs, no redirect, no cache); navigator only for the clipboard."""
     out = []
-    if re.search(r"\bfetch\b", src):
+    if pol.name == "app":  # its own doors: call() and stream(), each used, nothing else reaches the network
+        if len(re.findall(r"\bfetch\b", src)) != 1 or not CANON_CALL.search(src):
+            out.append("fetch is not the one canonical call() helper")
+        if len(re.findall(r"\bEventSource\b", src)) != 1 or not CANON_STREAM.search(src):
+            out.append("EventSource is not the one canonical stream() helper")
+        if not re.search(r"\bcall\(", src.replace("const call = (", "")) or not re.search(r"\bstream\(", src.replace("const stream = url", "")):
+            out.append("call() or stream() is defined but never called")
+    elif re.search(r"\bfetch\b", src):
         if len(re.findall(r"\bfetch\b", src)) != 1 or not CANON_LOAD.search(src):
             out.append("fetch is not the one canonical load() helper")
         if len(re.findall(r"\bload\(", src)) < 1:
@@ -312,7 +361,33 @@ def rule_contract(src, pol):
     return out
 
 
-RULES = [rule_global, rule_caps, rule_network, rule_navigation, rule_storage, rule_shape, rule_contract]
+def rule_history(src, pol):
+    """history: none, except the app's pushState / replaceState of its own address (appUrl() starts with "/app")."""
+    uses = re.findall(r"\bhistory\b[^\n]*", src)
+    if pol.name != "app":
+        return ["history is not allowed in %s" % pol.name] if uses else []
+    out = ["history used otherwise than pushState/replaceState(null, \"\", appUrl(...)): %s" % u.strip()
+           for u in uses if not re.match(r'history\.(?:pushState|replaceState)\(null, "", appUrl\(', u)]
+    if not re.search(r'const appUrl = r => "/app" \+', src):
+        out.append("appUrl() does not start with \"/app\"")
+    return out
+
+
+def rule_build(src, pol):
+    """createElement / createElementNS: only the app, each once, right after the check of the tag against its fixed list."""
+    if pol.name != "app":
+        return []
+    out = []
+    if not re.search(r'if \(!HTML_TAGS\.has\(tag\)\) throw new Error\("tag " \+ tag\);\n    return dress\(document\.createElement\(tag\), attrs, kids\);', src):
+        out.append("createElement is not behind the HTML_TAGS check")
+    if not re.search(r'if \(!SVG_TAGS\.has\(tag\)\) throw new Error\("tag " \+ tag\);\n    return dress\(document\.createElementNS\(SVGNS, tag\), attrs, kids\);', src):
+        out.append("createElementNS is not behind the SVG_TAGS check")
+    if not re.search(r'if \(!ATTRS\.has\(name\)\) throw new Error\("attribute " \+ name\);\n      n\.setAttribute\(name, ', src):
+        out.append("setAttribute in dress() is not behind the ATTRS check")
+    return out
+
+
+RULES = [rule_global, rule_caps, rule_network, rule_navigation, rule_history, rule_build, rule_storage, rule_shape, rule_contract]
 
 
 def check(name, src, policy=None):
@@ -325,9 +400,10 @@ def check(name, src, policy=None):
 
 
 def main():
+    import appjs
     import graphjs
     import webjs
-    sources = dict(webjs.SCRIPTS, graph=graphjs.SCRIPT)
+    sources = dict(webjs.SCRIPTS, graph=graphjs.SCRIPT, app=appjs.APP_JS)
     bad = 0
     for name in sorted(sources):
         problems = check(name, sources[name])
