@@ -22,6 +22,11 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   within 10 seconds. In an installation the section shows the switches and how to change them (`config.ini` stays the administrator's).
   [docs/WEB.md](docs/WEB.md#the-settings-pages-switches)
 - The collector reads `[features]` again when `config.ini` changes: a section switched on or off applies without a restart.
+- **Every key of `config.ini` on the settings page**, a section at a time, each with what it does, the values it takes, its default and when a change
+  applies. In a portable run and the desktop app a **Save** per section writes the keys you changed (comments and the rest of the file stay), after
+  checking each value the way the dashboard reads it: one it would not take is refused with the reason, and the file stays as it was. Most keys apply
+  at once; the page says which wait for the next start. The locks (`[ai] web_actions`, `[ai] allow_remote`, `[telegram] web_actions`) and the keys only an
+  installation reads stay for the file. In an installation the block shows the keys read-only. [docs/WEB.md](docs/WEB.md#the-settings-pages-configini)
 
 ### Changed
 

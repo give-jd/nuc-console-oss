@@ -54,18 +54,21 @@ CFG = nuc_config.current()  # the process's one configuration dict (tests and --
 if WINDOWS:
     ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
     CMD = {"restart": "Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName collector (administrator PowerShell)",
-           "logs": r"%ProgramData%\nuc-console\logs\collector.log"}
+           "logs": r"%ProgramData%\nuc-console\logs\collector.log", "apply": "run install-windows.cmd again (it keeps config.ini)"}
 elif MACOS:
     ACCEPT_CMD = "sudo nuc-console-accept"
-    CMD = {"restart": "sudo launchctl kickstart -k system/com.nuc-console.collector", "logs": "/var/log/nuc-console/collector.log"}
+    CMD = {"restart": "sudo launchctl kickstart -k system/com.nuc-console.collector", "logs": "/var/log/nuc-console/collector.log",
+           "apply": "run sudo ./install.sh again (it keeps config.ini)"}
 else:
     ACCEPT_CMD = "sudo nuc-console-accept"
-    CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"}
+    CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
+           "apply": "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"}  # apply: config.ini, everything that reads it
 PROBLEMS_CMD = "nuc-console-problems"
 if nuc_config.PORTABLE:  # run.sh / run.cmd: no nuc-console-accept on the PATH, no service to restart: the advice says what exists
     ACCEPT_CMD = "run.cmd -Accept" if WINDOWS else "./run.sh --accept"
     PROBLEMS_CMD = "run.cmd -Problems" if WINDOWS else "./run.sh --problems"
-    CMD = {"restart": "quit it (Ctrl+C) and start it again", "logs": os.path.join(nuc_config.BASE_DIR, "logs", "collector.log")}
+    CMD = {"restart": "quit it (Ctrl+C) and start it again", "logs": os.path.join(nuc_config.BASE_DIR, "logs", "collector.log"),
+           "apply": "quit the app (or run.sh / run.cmd) and start it again"}
 MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]  # overview = a single screen, no rotation
 
 
@@ -74,6 +77,29 @@ def on(feature):
     return CFG["features"].get(feature, True)
 
 ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
+
+
+def reload_config():
+    """config.ini read again into CFG, in place: every module holds this very dict and its parts, so they all see what the settings page just
+    wrote; the pace of the rotation with it. A file that cannot be read changes nothing (the page wrote one load() read back)."""
+    global MODE, ROTATE_S, REFRESH_S
+    new = nuc_config.load()
+    if new.get("config_error"):
+        return False
+    for k, v in new.items():
+        old = CFG.get(k)
+        if isinstance(old, dict) and isinstance(v, dict):
+            old.clear()
+            old.update(v)
+        elif isinstance(old, list) and isinstance(v, list):
+            old[:] = v
+        else:
+            CFG[k] = v
+    MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]
+    ROTATE_S, REFRESH_S = CFG["rotate_seconds"], CFG["refresh_seconds"]
+    return True
+
+
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
                               ("Boot", on("boot"))) if ok)

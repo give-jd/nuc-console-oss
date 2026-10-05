@@ -39,6 +39,7 @@ import appjs
 import aisetup
 import ansi  # same directory: the console's drawing of a card, kept in the shell's cards for now
 import cards
+import confedit
 import exposure
 import graph
 import graphjs
@@ -72,7 +73,7 @@ UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear")  # POST /ai/<action>
 AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
-SETTINGS_ACTIONS = ("feature",)  # POST /settings/<action>: the [features] switches of a portable run (the desktop app is one)
+SETTINGS_ACTIONS = ("feature", "config")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS}
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), like a browser's: few values, bounded cache
@@ -198,25 +199,8 @@ KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", 
             "unhealthy": "containers", "failed_units": "boot", "ssh": "sessions", "tailnet": "tailscale", "rx": "network_traffic", "tx": "network_traffic"}
 KPI_VIEW = {"health": "health", "ai": "ai"}  # the key figures that open a screen
 STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "stale-net", "collector-boot")  # a collector that is not running
-FEATURE_WORDS = (  # the settings page's [features] switches, screens first: (key, title, what it is); every nuc_config.FEATURES once
-    ("map", "Map screen", "who reaches what, and what is behind it"),
-    ("cpu", "CPU screen", "per-core load, temperatures, the processes"),
-    ("health", "Health screen", "which apps cause trouble over time; the collector keeps history.db"),
-    ("ai", "AI screen", "the local model: what fits this machine, the chat"),
-    ("exposure", "Exposure", "listening ports by scope, port alarms, Funnel"),
-    ("firewall", "Firewall", "the firewall's rules and recent drops"),
-    ("fail2ban", "fail2ban", "jails and bans, inside Firewall"),
-    ("containers", "Containers", "Docker containers and their health"),
-    ("databases", "Databases", "database and broker ports, who connects"),
-    ("webapps", "Web apps", "declared apps and the web listeners found"),
-    ("tailscale", "Tailscale", "the tailnet's peers"),
-    ("boot", "Boot", "boot time, slowest and failed units, journal errors"),
-    ("docker_disk", "Docker disk", "what Docker keeps on the disk"),
-    ("network_traffic", "Network traffic", "per-interface throughput"),
-    ("sessions", "Sessions", "logged-in users and SSH sessions"),
-    ("disks", "Disks", "mounted filesystems"),
-    ("thermal", "Thermal", "CPU and NVMe temperatures, throttling"),
-)
+FEATURE_WORDS = confedit.FEATURE_WORDS  # the settings page's [features] switches: (key, title, what it is)
+CONFIG_NOTE_S = 300  # how long the settings page shows what its last save of config.ini did
 SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
 
 
@@ -695,6 +679,7 @@ class Server(http.server.ThreadingHTTPServer):
         self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
         self.stream_s, self.keepalive_s, self.stream_tick = STREAM_S, KEEPALIVE_S, 0  # (tick 0: the refresh interval; the tests shorten them)
         self.csrf = secrets.token_urlsafe(24)  # in every form of the AI page; a page of another site cannot read it
+        self.config_note = None  # the settings page's last save of config.ini: {at, section, ok, lines, form} (settings_action)
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
         render.DEMO = demo
@@ -1271,8 +1256,8 @@ class Server(http.server.ThreadingHTTPServer):
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
         feats, forms = self.features_html(back)
-        return View(f'<div class="settings">{appearance}{feats}{self.alerts_html(here)}{self.about_html(here)}</div>', [], vhere, False, forms=forms,
-                    legacy=False)
+        return View(f'<div class="settings">{appearance}{feats}{self.config_html(back)}{self.alerts_html(here)}{self.about_html(here)}</div>', [],
+                    vhere, False, forms=forms, legacy=False)
 
     def features_html(self, back):
         """(the 'Screens and sections' block of the settings page, whether it has forms): every [features] switch with its state in words and a
@@ -1301,6 +1286,78 @@ class Server(http.server.ThreadingHTTPServer):
         html_ = (f'<section class="sec" id="features" aria-labelledby="sec-feat"><h3 class="sech" id="sec-feat">Screens and sections</h3>'
                  f'<p class="hintl">{note}</p><ul class="feats">{"".join(rows)}</ul></section>')
         return html_, ok
+
+    def config_html(self, back):
+        """The settings page's 'config.ini' block: every key of every section (confedit.KEYS) with its value in force, what it does, the values
+        it takes, its default and when a change applies. In a portable run (the desktop app) each section is a form posting to
+        /settings/config with the CSRF token; the locks and the keys only an installation reads are shown, not offered. In an installation
+        the same, read-only, with the file to edit and how to restart. A section opens by itself after a save, with what the save did."""
+        esc, cfg = html.escape, render.CFG
+        ok, why = nuc_config.features_writable()
+        path = nuc_config.config_path()
+        note = self.config_note if self.config_note and time.time() - self.config_note["at"] < CONFIG_NOTE_S else None
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back)))
+        blocks = []
+        for sec, title, what in confedit.SECTIONS:
+            mine = note if note and note["section"] == sec else None
+            typed = mine["form"] if mine and not mine["ok"] else {}  # a refused post: the page shows what was typed, to fix it
+            if sec in confedit.MAPS:
+                text = typed.get("text", confedit.map_text(cfg, sec))
+                body = (f'<textarea class="cmap" id="f-{sec}" name="text" rows="{max(3, min(12, text.count(chr(10)) + 2))}" maxlength="1200" '
+                        f'spellcheck="false" autocomplete="off" aria-label="[{sec}]">{esc(text)}</textarea>' if ok
+                        else f'<pre class="cmap">{esc(text)}</pre>' if text else '<p class="hintl">Nothing in this section.</p>')
+                body = f'<div class="ck wide">{body}</div>'
+            else:
+                body = "".join(self.config_row(key, typed.get(key.name), ok) for key in confedit.BY_SECTION[sec])
+            if mine:
+                body = (f'<div class="cfgn {"ok" if mine["ok"] else "bad"}" role="status">'
+                        + "<br>".join(esc(x) for x in mine["lines"]) + "</div>" + body)
+            if ok:
+                body = (f'<form class="cfgf" method="post" action="/settings/config">{hidden}<input type="hidden" name="section" value="{sec}">'
+                        f'{body}<div class="cfgb"><button class="btn pri" type="submit">Save [{sec}]</button></div></form>')
+            blocks.append(f'<details class="cfgs" id="cfg-{sec}"{" open" if mine else ""}><summary><code>[{sec}]</code> {esc(title)}</summary>'
+                          f'<p class="hintl">{esc(what)}</p>{body}</details>')
+        if ok:
+            head = (f'Every key of <code class="cmd">{esc(path)}</code>, section by section: <b>Save</b> writes the keys of that section you changed, '
+                    'and nothing else of the file (its comments stay). A value is checked before it is written: one the dashboard would not '
+                    'take is refused, and the file stays as it was. [features] is <a class="lnk" href="#features">Screens and sections</a> above.')
+        else:
+            head = (f'What <code class="cmd">{esc(path)}</code> sets, key by key, and what each one does. Read-only here ({esc(why)}): edit the file, '
+                    f'then apply it: <code class="cmd">{esc(render.CMD.get("apply") or render.CMD["restart"])}</code>. [features] is <a class="lnk" href="#features">Screens '
+                    'and sections</a> above.')
+        return (f'<section class="sec" id="config" aria-labelledby="sec-cfg"><h3 class="sech" id="sec-cfg">config.ini</h3>'
+                f'<p class="hintl">{head}</p><div class="cfgl">{"".join(blocks)}</div></section>')
+
+    @staticmethod
+    def config_row(key, typed, ok):
+        """One key of the config.ini block: its name, its value (a control when the page may change it), and what it does, the values it takes,
+        its default and when a change applies."""
+        esc, cur = html.escape, confedit.value(render.CFG, key)
+        v = cur if typed is None else typed
+        fid = f"f-{key.section}-{key.name}"
+        dflt = "default " + key.default if key.default and key.default != ", ".join(key.choices) else "default: all, in this order" if key.default else ""
+        when = confedit.APPLIES[key.applies] if ok or key.applies in (confedit.LOCK, confedit.NOTIFIER) else ""  # installed: all at the restart
+        meta = [x for x in (key.values(), dflt, when) if x]
+        hint = f'<p class="hintl">{esc(key.what)}' + (f' <span class="sm">{esc(" · ".join(meta))}</span>' if meta else "") + "</p>"
+        if not (ok and key.editable()):
+            shown = f'<code class="cv">{esc(cur)}</code>' if cur else '<span class="sm">not set</span>'
+            return f'<div class="ck cko" id="k-{key.section}-{key.name}"><span class="cn"><code>{key.name}</code></span>{shown}{hint}</div>'
+        if key.kind in (confedit.BOOL, confedit.CHOICE):
+            opts = list(confedit._YESNO if key.kind == confedit.BOOL else key.choices)
+            if key.unset:
+                opts.insert(0, "")
+            if v not in opts:  # a value the file has that the page does not list (kiosk): shown as it is, kept unless changed
+                opts.insert(0, v)
+            ctl = (f'<select id="{fid}" name="{key.name}">' + "".join(
+                f'<option value="{esc(o, quote=True)}"{" selected" if o == v else ""}>{esc(o or "not set (default " + key.default + ")")}</option>'
+                for o in opts) + "</select>")
+        elif key.kind == confedit.INT:
+            lo = 0 if key.zero else key.lo
+            ctl = f'<input id="{fid}" name="{key.name}" type="number" min="{lo}" max="{key.hi}" step="1" value="{esc(v, quote=True)}" required>'
+        else:
+            ctl = (f'<input id="{fid}" name="{key.name}" type="text" maxlength="{confedit.MAX_TEXT}" spellcheck="false" autocomplete="off" '
+                   f'value="{esc(v, quote=True)}"' + (f' placeholder="{esc(key.default, quote=True)}"' if key.default else "") + ">")
+        return f'<div class="ck" id="k-{key.section}-{key.name}"><label class="cn" for="{fid}"><code>{key.name}</code></label>{ctl}{hint}</div>'
 
     def alerts_html(self, here):
         """The settings page's 'Phone alerts' block: are the Telegram alerts on and do they reach a phone (the Telegram page's state, in words and
@@ -1680,6 +1737,8 @@ class Server(http.server.ThreadingHTTPServer):
         nuc_config.FEATURES and the value yes or no, nothing else of the request is written. config.ini keeps every other line; the screens
         follow at once, the collector within a cycle. -> the settings page again."""
         one = lambda k, n=40: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        if act == "config":
+            return self.config_action(form, one("section", 20), view_params(parse_qs(one("back", 400))))
         name, on = one("name"), one("on", 3)
         if act != "feature" or name not in nuc_config.FEATURES or on not in ("yes", "no"):
             raise BadRequest("a feature of [features] and yes or no are needed")
@@ -1690,6 +1749,38 @@ class Server(http.server.ThreadingHTTPServer):
             self.cache.clear()  # what the pages show changes with it
         back = view_params(parse_qs(one("back", 400)))
         return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#features"
+
+    def config_action(self, form, section, back):
+        """A section of the settings page's config.ini block (a portable run: do_POST checked that the file is this account's): the keys the page
+        may change are checked (confedit.save: what load() would not take is refused, and nothing is written), the file keeps every other line,
+        and this process reads it again at once (render.reload_config, and the web view's own grid, pace and zoom). A refused post comes back
+        with the reasons and what was typed. -> the settings page, at that section."""
+        if section not in confedit.TITLES:
+            raise BadRequest("a section of config.ini is needed")
+        typed = {k: v[0][:3000] for k, v in form.items() if k not in ("csrf", "back", "section") and v}
+        try:
+            names = confedit.save(nuc_config.config_path(), section, form)
+        except confedit.Refused as e:
+            note = dict(ok=False, lines=["Not saved, nothing changed:"] + [r[:300] for r in e.reasons[:12]], form=typed)
+        else:
+            if names:
+                render.reload_config()
+                web = render.CFG["web"]
+                for k in ("columns", "rows", "refresh_seconds"):  # what this server copied at its start; the rest of [web] is read at the next one
+                    self.cfg[k] = web[k]
+                self.zoom = render.CFG["display"]["zoom"]
+                lines = ["Saved in config.ini: " + ", ".join(names) + "."]
+                for code, keys in confedit.applies(section, names).items():
+                    lines.append("%s: %s." % (", ".join(keys), confedit.APPLIES[code]))
+                if confedit.START in confedit.applies(section, names):
+                    lines.append("To start again: " + (render.CMD.get("apply") or render.CMD["restart"]) + ".")
+            else:
+                lines = ["Nothing changed: every value is the one config.ini already has."]
+            note = dict(ok=True, lines=lines, form={})
+        self.config_note = dict(note, at=time.time(), section=section)
+        with self.lock:
+            self.cache.clear()  # what the pages show changes with it
+        return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#cfg-" + section
 
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).

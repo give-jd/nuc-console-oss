@@ -57,9 +57,11 @@ def expose_port(key):
     return int(head), proto or "tcp"
 
 
-def load(path=None):
-    """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int}"""
+def load(path=None, warn=None):
+    """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int, ...}. warn: what to do with each complaint about the file (a line of
+    text): printed to stderr unless given (the settings page collects them to refuse a value before it writes it)."""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
+    say = warn or (lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
                    "refresh_seconds": 2, "allowed_hosts": []},
@@ -77,47 +79,47 @@ def load(path=None):
                 cfg["config_error"] = "cannot open " + path[-150:]
             return cfg
     except (configparser.Error, OSError, UnicodeDecodeError) as e:
-        print(f"nuc-console: cannot read {path}: {e}", file=sys.stderr)
+        say(f"nuc-console: cannot read {path}: {e}")
         cfg["config_error"] = str(e)[:200]
         return cfg
     for key in cp["features"] if cp.has_section("features") else ():
         if key not in FEATURES:
-            print(f"nuc-console: {path}: unknown feature '{key}' ignored", file=sys.stderr)
+            say(f"nuc-console: {path}: unknown feature '{key}' ignored")
             continue
         try:
             cfg["features"][key] = cp.getboolean("features", key)
         except ValueError:
-            print(f"nuc-console: {path}: [features] {key} is not a boolean: kept on", file=sys.stderr)
+            say(f"nuc-console: {path}: [features] {key} is not a boolean: kept on")
     if cp.has_section("dashboard"):
         mode = cp.get("dashboard", "mode", fallback="overview").strip().lower()
         if mode in MODES:
             cfg["mode"] = mode
         else:
-            print(f"nuc-console: {path}: [dashboard] mode must be one of {MODES}", file=sys.stderr)
+            say(f"nuc-console: {path}: [dashboard] mode must be one of {MODES}")
         for key, lo, hi in (("rotate_seconds", 3, 600), ("columns", 40, 500), ("rows", 10, 200), ("spacing", 0, 1), ("overview_seconds", 10, 600)):
             try:
                 v = cp.getint("dashboard", key, fallback=cfg[key])
                 cfg[key] = 0 if key != "rotate_seconds" and v == 0 else max(lo, min(hi, v))  # 0 = automatic
             except ValueError:
-                print(f"nuc-console: {path}: [dashboard] {key} must be an integer", file=sys.stderr)
+                say(f"nuc-console: {path}: [dashboard] {key} must be an integer")
     refresh = lambda sec: max(REFRESH_MIN, min(REFRESH_MAX, cp.getint(sec, "refresh_seconds")))  # noqa: E731
     dash_refresh, web_refresh = False, None
     if cp.has_section("dashboard") and cp.has_option("dashboard", "refresh_seconds"):
         try:
             cfg["refresh_seconds"], dash_refresh = refresh("dashboard"), True
         except ValueError:
-            print(f"nuc-console: {path}: [dashboard] refresh_seconds must be an integer (1-10)", file=sys.stderr)
+            say(f"nuc-console: {path}: [dashboard] refresh_seconds must be an integer (1-10)")
     for key in ("details", "map_in_rotation", "cpu_in_rotation", "health_in_rotation"):
         if cp.has_section("dashboard") and cp.has_option("dashboard", key):
             try:
                 cfg[key] = cp.getboolean("dashboard", key)
             except ValueError:
-                print(f"nuc-console: {path}: [dashboard] {key} is not a boolean: kept {'on' if cfg[key] else 'off'}", file=sys.stderr)
+                say(f"nuc-console: {path}: [dashboard] {key} is not a boolean: kept {'on' if cfg[key] else 'off'}")
     if cp.has_section("dashboard") and cp.has_option("dashboard", "sections"):
         asked = [x.strip().lower() for x in cp.get("dashboard", "sections").split(",") if x.strip()]
         for x in asked:
             if x not in SECTIONS:
-                print(f"nuc-console: {path}: [dashboard] sections: unknown name '{x}' ignored (known: {', '.join(SECTIONS)})", file=sys.stderr)
+                say(f"nuc-console: {path}: [dashboard] sections: unknown name '{x}' ignored (known: {', '.join(SECTIONS)})")
         order = [x for i, x in enumerate(asked) if x in SECTIONS and x not in asked[:i]]
         cfg["sections"] = order + [x for x in SECTIONS if x not in order]  # sections you forget keep their default place at the end
     if cp.has_section("webapps"):  # name = port[, port...]: web apps you expect to be reachable (and running)
@@ -125,30 +127,30 @@ def load(path=None):
             try:
                 ports = [int(x) for x in cp.get("webapps", name).replace(";", ",").split(",") if x.strip()]
             except ValueError:
-                print(f"nuc-console: {path}: [webapps] {name}: ports must be integers", file=sys.stderr)
+                say(f"nuc-console: {path}: [webapps] {name}: ports must be integers")
                 continue
             if ports and all(0 < p < 65536 for p in ports):
                 cfg["webapps"][name] = ports
             else:
-                print(f"nuc-console: {path}: [webapps] {name}: invalid port list", file=sys.stderr)
+                say(f"nuc-console: {path}: [webapps] {name}: invalid port list")
     if cp.has_section("expose"):  # name or port = local|tailnet|lan|internet: the widest reach you intend (more is an ATTENTION problem)
         for key in [k for k in cp.options("expose") if k not in cp.defaults()]:  # a [DEFAULT] key belongs to every section: not a service
             word = cp.get("expose", key).strip().lower()
             try:
                 expose_port(key)
             except ValueError:
-                print(f"nuc-console: {path}: [expose] {key}: not a valid port (use 8080 or 8080/udp)", file=sys.stderr)
+                say(f"nuc-console: {path}: [expose] {key}: not a valid port (use 8080 or 8080/udp)")
                 continue
             if word in EXPOSE_WORDS:
                 cfg["expose"][key] = EXPOSE_WORDS[word]
             else:
-                print(f"nuc-console: {path}: [expose] {key}: '{word}' is not local, tailnet, lan or internet", file=sys.stderr)
+                say(f"nuc-console: {path}: [expose] {key}: '{word}' is not local, tailnet, lan or internet")
     if cp.has_section("web"):
         w = cfg["web"]
         try:
             w["enabled"] = cp.getboolean("web", "enabled", fallback=False)
         except ValueError:
-            print(f"nuc-console: {path}: [web] enabled is not a boolean: kept off", file=sys.stderr)
+            say(f"nuc-console: {path}: [web] enabled is not a boolean: kept off")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
@@ -156,12 +158,12 @@ def load(path=None):
             try:
                 w[key] = max(lo, min(hi, cp.getint("web", key, fallback=w[key])))
             except ValueError:
-                print(f"nuc-console: {path}: [web] {key} must be an integer", file=sys.stderr)
+                say(f"nuc-console: {path}: [web] {key} must be an integer")
         if cp.has_option("web", "refresh_seconds"):  # the old place of the setting: used while [dashboard] has none
             try:
                 web_refresh = refresh("web")
             except ValueError:
-                print(f"nuc-console: {path}: [web] refresh_seconds must be an integer (1-10)", file=sys.stderr)
+                say(f"nuc-console: {path}: [web] refresh_seconds must be an integer (1-10)")
     # one refresh for every screen and page; [web] refresh_seconds (older config files) only for the web pages, as before
     cfg["web"]["refresh_seconds"] = cfg["refresh_seconds"] if dash_refresh or web_refresh is None else web_refresh
     if cp.has_section("telegram"):  # notify.py: ATTENTION changes sent to one Telegram user (docs/TELEGRAM.md)
@@ -170,17 +172,17 @@ def load(path=None):
             try:
                 t[key] = cp.getboolean("telegram", key, fallback=t[key])
             except ValueError:
-                print(f"nuc-console: {path}: [telegram] {key} is not a boolean: kept {'on' if t[key] else 'off'}", file=sys.stderr)
+                say(f"nuc-console: {path}: [telegram] {key} is not a boolean: kept {'on' if t[key] else 'off'}")
         user = cp.get("telegram", "username", fallback="").strip().lstrip("@").lower()
         if user and not (5 <= len(user) <= 32 and user.isascii() and all(ch.isalnum() or ch == "_" for ch in user)):
-            print(f"nuc-console: {path}: [telegram] username must be a Telegram @username (5-32 letters, digits, _)", file=sys.stderr)
+            say(f"nuc-console: {path}: [telegram] username must be a Telegram @username (5-32 letters, digits, _)")
         else:
             t["username"] = user
         detail = cp.get("telegram", "detail", fallback=t["detail"]).strip().lower()
         if detail in TELEGRAM_DETAILS:
             t["detail"] = detail
         else:
-            print(f"nuc-console: {path}: [telegram] detail must be titles or full: kept {t['detail']}", file=sys.stderr)
+            say(f"nuc-console: {path}: [telegram] detail must be titles or full: kept {t['detail']}")
     if cp.has_section("display"):  # Windows/macOS: the dashboard in a browser tab or a full-screen window
         b = cp.get("display", "browser", fallback="auto").strip()
         cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")
@@ -188,18 +190,18 @@ def load(path=None):
         if mode in DISPLAY_MODES:
             cfg["display"]["mode"] = DISPLAY_MODES[mode]
         else:
-            print(f"nuc-console: {path}: [display] mode must be browser, fullscreen or none: kept browser", file=sys.stderr)
+            say(f"nuc-console: {path}: [display] mode must be browser, fullscreen or none: kept browser")
         try:
             cfg["display"]["zoom"] = max(50, min(200, cp.getint("display", "zoom", fallback=100)))
         except ValueError:
-            print(f"nuc-console: {path}: [display] zoom must be an integer (percent)", file=sys.stderr)
+            say(f"nuc-console: {path}: [display] zoom must be an integer (percent)")
     if cp.has_section("ai"):  # the optional local model of the HEALTH screen (docs/HEALTH.md): off unless asked for
         ai = cfg["ai"]
         for key in ("enabled", "allow_remote", "daily", "web_actions"):  # web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
             try:
                 ai[key] = cp.getboolean("ai", key, fallback=ai[key])
             except ValueError:
-                print(f"nuc-console: {path}: [ai] {key} is not a boolean: kept {'on' if ai[key] else 'off'}", file=sys.stderr)
+                say(f"nuc-console: {path}: [ai] {key} is not a boolean: kept {'on' if ai[key] else 'off'}")
         ai["endpoint"] = cp.get("ai", "endpoint", fallback=ai["endpoint"]).strip() or ai["endpoint"]
         ai["model"] = cp.get("ai", "model", fallback="").strip()
         gpu = cp.get("ai", "gpu", fallback="").strip().lower()  # nuc-console-ai serve: use the GPU when the model fits there (auto) or never (no)
@@ -208,19 +210,19 @@ def load(path=None):
         elif gpu in ("no", "off", "false", "0", "none", "cpu"):
             ai["gpu"] = "no"
         elif gpu:
-            print(f"nuc-console: {path}: [ai] gpu must be auto or no: kept auto", file=sys.stderr)
+            say(f"nuc-console: {path}: [ai] gpu must be auto or no: kept auto")
         try:
             ai["timeout_s"] = max(10, min(600, cp.getint("ai", "timeout_s", fallback=ai["timeout_s"])))
         except ValueError:
-            print(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)", file=sys.stderr)
+            say(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours
         cfg["ui"], warnings = prefs.parse_ui(keys, cfg["sections"])
         for w in warnings:
-            print(f"nuc-console: {path}: {w}", file=sys.stderr)
+            say(f"nuc-console: {path}: {w}")
     except Exception as e:  # noqa: BLE001  (a bug in the optional interface settings must never take the collector or the screen down)
-        print(f"nuc-console: {path}: [ui] ignored: {e}", file=sys.stderr)
+        say(f"nuc-console: {path}: [ui] ignored: {e}")
     return cfg
 
 
@@ -287,7 +289,7 @@ def _new_value(old, value):
     """The line `old` (`key = value  # comment`) with only its value changed: the key as it was written, and the comment after the value
     kept in its column when there is room."""
     at = old.index("=") + 1
-    line = old[:at].rstrip() + " " + value
+    line = (old[:at].rstrip() + " " + value).rstrip()
     m = re.search(r"\s+([#;].*)$", old[at:])
     if not m:
         return line
@@ -299,43 +301,76 @@ def set_key(path, section, key, value):
     """Writes `key = value` in [section] of an ini file, keeping every comment (the one after the old value too) and every other line; adds
     what is missing. The file keeps its permissions. Used by the installers' --display option, the AI setup, the notifier and the settings
     page of a portable run: the admin's other edits are never touched."""
+    set_keys(path, section, [(key, value)])
+
+
+def set_keys(path, section, items, drop=(), check=None):
+    """set_key for several keys of one section at once (items: [(key, value)]), and the keys in `drop` removed (their line, not the comments
+    around it), in one write. check(tmp_path): called with the new file before it takes the place of the old one; an exception from it (the
+    settings page refuses a value that load() complains about) leaves the old file as it was."""
     with _SET_LOCK:
-        _set_key(path, section, key, value)
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                lines = f.read().splitlines()
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except FileNotFoundError:
+            lines, mode = [], None
+        out = edit_lines(lines, section, items, drop)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(out) + "\n")
+        try:
+            if mode is not None:
+                os.chmod(tmp, mode)
+            if check is not None:
+                check(tmp)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
-def _set_key(path, section, key, value):
-    try:
-        with open(path, encoding="utf-8-sig") as f:
-            lines = f.read().splitlines()
-        mode = stat.S_IMODE(os.stat(path).st_mode)
-    except FileNotFoundError:
-        lines, mode = [], None
+def edit_lines(lines, section, items, drop=()):
+    """The lines of an ini file with [section]'s keys set (items: [(key, value)], in that order) and the keys of `drop` removed: a key that is
+    there gets its new value in place (_new_value: its comment stays), one that is not is added after the section's last non-empty line, and a
+    section that is not there is added at the end. Names compare without case, like configparser; a commented-out line is not a key."""
+    want = [(k, v) for k, v in items]
+    value = {k.lower(): v for k, v in want}
+    found, gone = set(), {k.lower() for k in drop}
+    sec = section.lower()
     header = lambda ln: ln.strip()[1:ln.strip().index("]")].strip().lower() if ln.strip().startswith("[") and "]" in ln else None  # noqa: E731
-    is_key = lambda ln: ln.split("=", 1)[0].strip().lower() == key.lower() and "=" in ln and not ln.lstrip().startswith(("#", ";"))  # noqa: E731
-    out, inside, done = [], False, False
+    name = lambda ln: ln.split("=", 1)[0].strip().lower() if "=" in ln and not ln.lstrip().startswith(("#", ";")) else None  # noqa: E731
+    out, inside, seen = [], False, False
+
+    def rest():  # the keys not found: after the section's last non-empty line
+        at = len(out)
+        while at and not out[at - 1].strip():
+            at -= 1
+        out[at:at] = [("%s = %s" % (k, v)).rstrip() for k, v in want if k.lower() not in found]
+        found.update(value)
     for ln in lines:
         h = header(ln)
         if h is not None:
-            if inside and not done:  # leaving the section without the key: add it after its last non-empty line
-                at = len(out)
-                while at and not out[at - 1].strip():
-                    at -= 1
-                out.insert(at, f"{key} = {value}")
-                done = True
-            inside = h == section.lower()
-        elif inside and not done and is_key(ln):
-            ln, done = _new_value(ln, value), True
+            if inside:
+                rest()
+            inside = h == sec
+            seen = seen or inside
+        elif inside and name(ln) is not None:
+            key = name(ln)
+            if key in gone:
+                continue
+            if key in value:  # every line of it: configparser keeps the last one
+                ln = _new_value(ln, value[key])
+                found.add(key)
         out.append(ln)
-    if inside and not done:
-        out.append(f"{key} = {value}")
-    elif not done:
-        out += ["", f"[{section}]", f"{key} = {value}"]
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(out) + "\n")
-    if mode is not None:
-        os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    if inside:
+        rest()
+    elif not seen and want:
+        out += ["", "[%s]" % section] + [("%s = %s" % (k, v)).rstrip() for k, v in want]
+    return out
 
 
 def config_path():
