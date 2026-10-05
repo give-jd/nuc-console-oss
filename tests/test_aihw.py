@@ -196,6 +196,72 @@ def verdict(m, hw, ctx=0):
 
 
 # =============================================================================================================================
+IOREG_M1 = """+-o AGXAcceleratorG13X  <class AGXAcceleratorG13X, id 0x1000002a0, registered, matched, active, busy 0 (0 ms), retain 104>
+    {
+      "IOClass" = "AGXAcceleratorG13X"
+      "PerformanceStatistics" = {"In use system memory (driver)"=0,"Alloc system memory"=2348810240,"Tiler Utilization %"=3,"Renderer Utilization %"=11,"Device Utilization %"=12,"In use system memory"=578813952}
+      "model" = "Apple M1 Pro"
+    }
+"""
+IOREG_INTEL = """+-o AMDRadeonX6000_AMDNavi14GraphicsAccelerator  <class AMDRadeonX6000_AMDNavi14GraphicsAccelerator, id 0x100000abc>
+    {
+      "PerformanceStatistics" = {"vramUsedBytes"=1073741824,"GPU Activity(%)"=7,"VRAM,totalMB"=4096}
+    }
++-o IntelAccelerator  <class IntelAccelerator, id 0x100000def>
+    {
+      "IOClass" = "IntelAccelerator"
+    }
+"""
+
+
+class GpuLoad(unittest.TestCase):
+    """How busy the GPU is now (the AI page's MODEL USAGE): every OS's source, from fixtures."""
+
+    def test_nvidia_smi(self):
+        rows = aihw.parse_nvidia_load("NVIDIA GeForce RTX 3060, 45, 5210, 12288\nTesla T4, [N/A], 10, [Not Supported]\nnot csv\n")
+        self.assertEqual(rows, [{"name": "NVIDIA GeForce RTX 3060", "busy_pct": 45.0, "used_mb": 5210.0, "total_mb": 12288.0},
+                                {"name": "Tesla T4", "busy_pct": None, "used_mb": 10.0, "total_mb": None}])
+        self.assertEqual(aihw.parse_nvidia_load(""), [])
+        self.assertEqual(aihw.parse_nvidia_load(None), [])
+
+    def test_ioreg(self):
+        self.assertEqual(aihw.parse_ioreg_load(IOREG_M1), [{"name": "Apple M1 Pro", "busy_pct": 12.0, "used_mb": 552.0, "total_mb": None}])
+        self.assertEqual(aihw.parse_ioreg_load(IOREG_INTEL), [{"name": "GPU", "busy_pct": 7.0, "used_mb": 1024.0, "total_mb": 4096.0}])
+        self.assertEqual(aihw.parse_ioreg_load("garbage"), [])
+
+    def test_each_os_asks_its_own_source_with_a_fixed_argument_list(self):
+        seen = []
+
+        def run(out, rc=0):
+            def f(argv, timeout):
+                seen.append((tuple(argv), timeout))
+                return rc, out
+            return f
+        nope = lambda p: (_ for _ in ()).throw(OSError(p))  # noqa: E731
+        got = aihw.gpu_load("linux", run("RTX, 45, 5210, 12288"), nope)
+        self.assertEqual((got["source"], got["gpus"][0]["busy_pct"]), ("nvidia-smi", 45.0))
+        self.assertEqual(seen[-1], (("nvidia-smi",) + tuple(aihw.NVIDIA_LOAD), aihw.LOAD_TIMEOUT))
+        got = aihw.gpu_load("darwin", run(IOREG_M1), nope)
+        self.assertEqual((got["source"], got["gpus"][0]["name"]), ("ioreg", "Apple M1 Pro"))
+        self.assertEqual(seen[-1][0], tuple(aihw.IOREG))
+        self.assertEqual(aihw.gpu_load("darwin", run("", 1), nope)["gpus"], [])
+        amd = {"/sys/class/drm/card1/device/vendor": "0x1002\n", "/sys/class/drm/card1/device/gpu_busy_percent": "37\n",
+               "/sys/class/drm/card1/device/mem_info_vram_used": str(3 * 2 ** 30), "/sys/class/drm/card1/device/mem_info_vram_total": str(16 * 2 ** 30)}
+        got = aihw.gpu_load("linux", lambda a, t: (None, ""), lambda p: amd[p])
+        self.assertEqual(got, {"gpus": [{"name": "AMD GPU", "busy_pct": 37.0, "used_mb": 3072, "total_mb": 16384}], "source": "sysfs", "note": ""})
+        n = len(seen)
+        got = aihw.gpu_load("windows", run("", None), nope)
+        self.assertEqual((got["gpus"], got["source"]), ([], None))
+        self.assertEqual([a[0][0] for a in seen[n:]][-1].lower()[-14:], "nvidia-smi.exe", "the driver's own folder is tried too")
+        self.assertIn("NVIDIA", got["note"])
+
+    def test_it_never_raises(self):
+        def boom(*a):
+            raise RuntimeError("x")
+        got = aihw.gpu_load("linux", boom, boom)
+        self.assertEqual((got["gpus"], got["source"]), ([], None))
+
+
 class Parsers(unittest.TestCase):
     def test_meminfo(self):
         self.assertEqual(aihw.parse_meminfo(MEMINFO), (32000, 24000))

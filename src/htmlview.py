@@ -522,6 +522,7 @@ def _advice_html(a):
 #   <div class="controls"><div class="ci">   Controls          <div class="ask" role="group">   Question: <p>, the yes form, <a class="btn" data-key="n">No
 #   <section class="spec"><dl class="spec-dl">   Spec: values in <code class="cmd"> when whole, in a tone class otherwise, a 'do' row of Actions
 #   <div class="qa"><p class="q">   Qa: the question, then the answer as an Advice block or the waiting line
+#   <div class="log" role="log"><div class="log-in">   Log: the chat's exchanges in a box that scrolls, its end in sight
 
 _BADGE_CLASS = {"ok": "ok", "warn": "warn", "err": "err", "accent": "accent", "muted": ""}
 _SAFE_PATH = re.compile(r"^/[a-z][a-z0-9/-]*$")  # an Action posts to a path of this server, never to another address
@@ -579,6 +580,8 @@ _HTML = {
     ui.Question: _question_html,
     ui.Spec: _spec_html,
     ui.Qa: _qa_html,
+    ui.Log: lambda n: (f'<div class="log" role="log" aria-label="{_e(n.label)}"><div class="log-in">' + "".join(html(c) for c in n.children)
+                       + "</div></div>"),
     ui.Title: _title_html,
     ui.Seg: _seg_html,
     ui.Legend: _legend_html,

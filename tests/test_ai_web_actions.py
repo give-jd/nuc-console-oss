@@ -89,7 +89,7 @@ class Base(unittest.TestCase):
         port.start()
         self.addCleanup(port.stop)
         self.eng = aiweb.Engine(directory=self.d, runtime=self.runtime, models=self.models, allow_loopback_http=True, cfg_fn=lambda: self.cfg,
-                                hw_fn=lambda: self.hw, popen=self.popen)
+                                hw_fn=lambda: self.hw, popen=self.popen, state_fn=lambda: None)  # no state of the machine unless a test gives one
         self.eng.start_wait, self.eng.stop_grace, self.eng.poll_s, self.eng.answer_wait, self.eng.load_wait = 0.2, 0.5, 0.05, 30, 30
         self.addCleanup(self.eng.shutdown)
         self.control()
@@ -1139,6 +1139,66 @@ class Chat(Base):
         self.eng.advise(7)
         self.assertIn("no history yet", self.chat()["history"][-1]["error"])
 
+    STATE = {"host": "host-x", "status": "2 PROBLEMS", "problems": [{"level": "err", "text": "disk / is 97% full", "id": "disk-full"}],
+             "figures": ["CPU: 6 % (ok; 16 threads)"], "top_cpu": [{"name": "ffmpeg", "cpu_pct": 280.0, "mem_mb": 640.0}]}
+
+    def test_a_question_comes_with_the_state_of_the_machine_now_as_data(self):
+        self.eng.state_fn = lambda: dict(self.STATE)
+        self.model.queue.append(ta.completion("/ is almost full."))
+        self.assertTrue(self.eng.ask("why is it slow?")[0])
+        e = self.chat()["history"][-1]
+        self.assertEqual((e["res"]["text"], e["res"]["state"], e["error"]), ("/ is almost full.", True, ""))
+        msgs = self.model.posts()[0]["body"]["messages"]
+        self.assertNotIn("disk / is 97% full", msgs[0]["content"], "the state is data: never in the instructions")
+        said = msgs[1]["content"]
+        self.assertTrue(said.startswith(advisor.STATE_PREAMBLE))
+        self.assertEqual(json.loads(said[len(advisor.STATE_PREAMBLE):].split("\n\nQuestion: ")[0]), self.STATE)
+        self.assertTrue(said.endswith("\n\nQuestion: why is it slow?"))
+        self.assertIn(advisor.STATE_ONLY, advisor.parts(e["res"])["notes"][0][1])
+
+    def test_without_a_history_the_state_still_answers_and_the_tools_say_there_is_none(self):
+        self.eng.state_fn = lambda: dict(self.STATE)
+        self.eng.history_fn = lambda: (_ for _ in ()).throw(advisor.NoHistory("no history yet"))
+        self.model.queue += [ta.tool_calls(("events", {"kind": "crash"})), ta.completion("Nothing crashed that I can see; / is almost full.")]
+        self.eng.ask("what crashed?")
+        e = self.chat()["history"][-1]
+        self.assertEqual(e["error"], "")
+        self.assertIn("almost full", e["res"]["text"])
+        tool = [m for m in self.model.posts()[1]["body"]["messages"] if m["role"] == "tool"][0]
+        self.assertIn("there is no history yet", tool["content"])
+
+    def test_a_state_that_cannot_be_read_is_left_out(self):
+        self.eng.state_fn = lambda: (_ for _ in ()).throw(RuntimeError("broken"))
+        self.model.queue.append(ta.completion("fine"))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.eng.ask("is it up?")
+            e = self.chat()["history"][-1]
+        self.assertEqual((e["res"]["text"], e["res"]["state"]), ("fine", False))
+        self.assertEqual(self.model.posts()[0]["body"]["messages"][1]["content"], "is it up?")
+        self.assertIn("machine state error", err.getvalue())
+
+    def test_clear_forgets_the_chat_and_keeps_an_answer_being_written(self):
+        self.model.queue.append(ta.completion("one"))
+        self.eng.ask("first?")
+        self.chat()
+        self.assertEqual(self.eng.clear_chat(), (True, "the chat is cleared"))
+        self.assertEqual(self.eng.snapshot()["chat"]["history"], [])
+        self.assertEqual(self.eng.clear_chat(), (True, "the chat was already empty"))
+        release = threading.Event()
+        self.model.queue.append({"body": ta.completion("two"), "wait": release})
+        advisor._reset_limits()
+        self.eng.ask("second?")
+        self.eng.clear_chat()
+        self.assertEqual(self.eng.snapshot()["chat"]["pending"]["q"], "second?")
+        release.set()
+        self.assertEqual([x["q"] for x in self.chat()["history"]], ["second?"])
+
+    def test_clear_is_refused_when_the_page_is_locked(self):
+        self.eng.history.append({"kind": "ask", "q": "kept?", "res": None, "error": "x", "at": 0})
+        self.cfg["ai"]["web_actions"] = False
+        self.assertEqual(self.eng.clear_chat(), (False, aiweb.LOCKED))
+        self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1)
+
     def test_a_bug_ends_the_answer_not_the_thread(self):
         with mock.patch.object(advisor, "ask", side_effect=RuntimeError("secret detail")), contextlib.redirect_stderr(io.StringIO()):
             self.eng.ask("boom?")
@@ -1146,6 +1206,132 @@ class Chat(Base):
         self.assertIn("unexpected error: RuntimeError", e["error"])
         self.assertNotIn("secret detail", e["error"], "the detail goes to the log, not to the page")
         self.assertFalse(self.eng.snapshot()["chat"]["busy"])
+
+
+# ------------------------------------------------------------------------------------------------------------------------ usage
+
+class FakeProbe(object):
+    """Stands for aiweb.UsageProbe: what it returns is the test's, and it counts the readings."""
+
+    def __init__(self, procs=(), loaded=None, gpu=None, threads=8, ram=16384):
+        self.p, self.l, self.g, self.t, self.r, self.calls, self.seen = list(procs), loaded, gpu, threads, ram, 0, threading.Event()
+
+    def procs(self):
+        self.calls += 1
+        self.seen.set()
+        return list(self.p)
+
+    def loaded(self, endpoint):
+        self.endpoint = endpoint
+        return self.l
+
+    def gpu(self):
+        return self.g
+
+    def threads(self):
+        return self.t
+
+    def ram_mb(self):
+        return self.r
+
+
+PROCS = [{"pid": 10, "ppid": 1, "name": "ollama", "cpu": 2.0, "mem": 100 * 2 ** 20}, {"pid": 11, "ppid": 10, "name": "ollama", "cpu": 398.0, "mem": 3000 * 2 ** 20},
+         {"pid": 12, "ppid": 11, "name": "helper", "cpu": None, "mem": None}, {"pid": 20, "ppid": 1, "name": "bash", "cpu": 50.0, "mem": 5 * 2 ** 20}]
+
+
+class Usage(unittest.TestCase):
+    def test_the_processes_of_the_server_this_process_started_and_their_children(self):
+        u = aiweb.usage_of(PROCS, 10, [{"name": "qwen3:4b", "size_mb": 3000.0, "vram_mb": 0.0, "ctx": 4096}], {"gpus": [], "note": "none"}, 16, 32000, at=5)
+        self.assertEqual(u["procs"], {"n": 3, "cpu_pct": 400.0, "share_pct": 25.0, "mem_mb": 3100.0, "ram_mb": 32000, "threads": 16})
+        self.assertEqual((u["at"], u["models"][0]["name"], u["gpus"], u["gpu_note"]), (5, "qwen3:4b", [], "none"))
+
+    def test_a_server_started_elsewhere_is_found_by_its_name_and_nothing_seen_is_none(self):
+        u = aiweb.usage_of(PROCS, None)
+        self.assertEqual((u["procs"]["n"], u["procs"]["cpu_pct"], u["procs"]["share_pct"]), (3, 400.0, None))
+        self.assertIsNone(u["models"], "not asked: unknown, not 'none loaded'")
+        self.assertIsNone(u["gpus"])
+        self.assertIsNone(aiweb.usage_of([PROCS[3]], 999)["procs"])
+        u = aiweb.usage_of([{"pid": 1, "ppid": 0, "name": "OLLAMA.EXE", "cpu": None, "mem": None}], None, threads=4)
+        self.assertEqual(u["procs"], {"n": 1, "cpu_pct": None, "share_pct": None, "mem_mb": None, "ram_mb": None, "threads": 4})
+        self.assertIsNone(aiweb.usage_of(["x", {"pid": True}, {"pid": "1"}], None)["procs"])
+
+    def test_the_models_ollama_has_loaded(self):
+        self.assertEqual(aiweb.parse_ps({"models": [{"name": "qwen3:4b", "size": 3 * 2 ** 30, "size_vram": 2 ** 30, "context_length": 4096},
+                                                    {"model": "x\x1b[31m", "size": -1, "size_vram": True}, "junk"]}),
+                         [{"name": "qwen3:4b", "size_mb": 3072.0, "vram_mb": 1024.0, "ctx": 4096}, {"name": "x", "size_mb": None, "vram_mb": None, "ctx": None}])  # no escape reaches a page
+        for bad in (None, [], {"models": None}, {"error": "x"}):
+            self.assertIsNone(aiweb.parse_ps(bad))
+        self.assertEqual(aiweb.parse_ps({"models": []}), [])
+
+    def test_the_probe_asks_only_a_loopback_server_and_nothing_answering_is_unknown(self):
+        with mock.patch.object(aiollama.Api, "call", side_effect=AssertionError("never another machine")):
+            for ep in ("http://192.0.2.1:11434/v1", "https://127.0.0.1:1/v1", "", None):
+                self.assertIsNone(aiweb.UsageProbe.loaded(ep))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertIsNone(aiweb.UsageProbe.loaded("http://127.0.0.1:%d/v1" % free_port()))
+        self.assertEqual(err.getvalue(), "", "a server that is not up yet is not an error in the log")
+
+    def engine(self, probe, on=True):
+        cfg = nuc_config.load("/nonexistent")
+        cfg["ai"].update(enabled=on, endpoint="http://127.0.0.1:11434/v1")
+        eng = aiweb.Engine(directory=tempfile.mkdtemp(), cfg_fn=lambda: cfg, probe=probe, state_fn=lambda: None)
+        self.addCleanup(shutil.rmtree, eng.directory, True)
+        self.addCleanup(eng.shutdown)
+        eng.usage_s = 0.01
+        return eng
+
+    def test_it_is_measured_in_the_background_only_while_the_ai_is_on_and_a_page_asks(self):
+        probe = FakeProbe(PROCS, [], {"gpus": [{"name": "GPU", "busy_pct": 40.0, "used_mb": 1.0, "total_mb": 8.0}], "source": "x", "note": ""})
+        off = self.engine(probe, on=False)
+        self.assertIsNone(off.snapshot(usage=True)["usage"], "the AI is off: nothing to measure")
+        self.assertIsNone(off._usage_thread)
+        eng = self.engine(probe)
+        self.assertIsNone(eng.snapshot()["usage"], "a screen that does not show it never starts the sampler")
+        self.assertIsNone(eng._usage_thread)
+        first = eng.snapshot(usage=True)["usage"]
+        self.assertTrue(first == {"running": False, "measuring": True} or "procs" in first)
+        self.assertTrue(probe.seen.wait(10))
+        gate = threading.Event()
+        for _ in range(500):
+            if eng.usage:
+                break
+            gate.wait(0.01)
+        u = eng.snapshot(usage=True)["usage"]
+        self.assertEqual((u["running"], u["procs"]["cpu_pct"], u["models"], u["gpus"][0]["busy_pct"]), (False, 400.0, [], 40.0))  # the ollama processes and their child, not bash
+        self.assertEqual(probe.endpoint, "http://127.0.0.1:11434/v1", "no server of its own: the endpoint of [ai]")
+        with mock.patch.object(aiweb, "USAGE_IDLE_S", 0.0):  # nobody asks any more: the sampler stops and forgets
+            eng._usage_thread.join(10)
+        self.assertFalse(eng._usage_thread.is_alive())
+        self.assertIsNone(eng.usage)
+
+    def test_a_probe_that_fails_is_unknown_not_an_error(self):
+        probe = FakeProbe()
+        probe.procs = lambda: (_ for _ in ()).throw(OSError("no /proc"))
+        probe.gpu = lambda: (_ for _ in ()).throw(RuntimeError("x"))
+        with contextlib.redirect_stderr(io.StringIO()):
+            u = self.engine(probe).measure_usage()
+        self.assertEqual((u["procs"], u["gpus"], u["models"]), (None, None, None))
+
+    def test_the_page_draws_it_and_what_cannot_be_read_is_a_question_mark(self):
+        snap = {"usage": dict(aiweb.usage_of(PROCS, 10, [{"name": "qwen3:4b", "size_mb": 3000.0, "vram_mb": 1000.0, "ctx": 4096}],
+                                             {"gpus": [{"name": "RTX", "busy_pct": None, "used_mb": 900.0, "total_mb": 8192.0}], "note": ""}, 16, 32000), running=True)}
+        text = " ".join(n.__class__.__name__ for n in screens.ai_usage_nodes(snap))
+        self.assertEqual(text, "Head KV")
+        kv = screens.ai_usage_nodes(snap)[1]
+        labels = [k for k, _v in kv.pairs]
+        self.assertEqual(labels, ["model", "CPU", "RAM", "GPU"])
+        import htmlview
+        html_text = "".join(htmlview.html(n) for n in screens.ai_usage_nodes(snap))
+        self.assertIn("1000 MB in the GPU&#x27;s memory, 2.0 GB in RAM", html_text)
+        self.assertIn("25%", html_text)
+        self.assertIn('<span class="st-unknown" role="img" aria-label="unknown">?</span><span class="t-muted"> busy', html_text,
+                      "a GPU whose load is unknown is '?', never an empty bar")
+        self.assertIn("the AI is off", htmlview.html(screens.ai_usage_nodes({"usage": None})[1]))
+        self.assertIn("measuring", htmlview.html(screens.ai_usage_nodes({"usage": {"running": True, "measuring": True}})[1]))
+        none = screens.ai_usage_nodes({"usage": {"running": True, "procs": None, "models": [], "gpus": [], "gpu_note": "no GPU here"}})
+        html_text = htmlview.html(none[1])
+        for words in ("none loaded now", "no process of the model server", "no GPU here"):
+            self.assertIn(words, html_text)
 
 
 # ------------------------------------------------------------------------------------------------------------------------- demo
@@ -1164,6 +1350,34 @@ class Demo(unittest.TestCase):
 
     def installed(self):
         return sorted(m["id"] for m in self.cat()["models"] if m["installed"])
+
+    def test_the_model_usage_is_invented_from_the_demo_machine_and_nothing_is_measured(self):
+        self.assertIsNone(self.eng.snapshot(usage=True)["usage"], "no server on this demo machine")
+        eng = aiweb.Engine(demo=True)
+        eng._demo_os = "linux"  # the NVIDIA box, its server up
+        with mock.patch.object(aiweb.UsageProbe, "procs", side_effect=AssertionError("the demo measures nothing")):
+            u = eng.snapshot(usage=True)["usage"]
+            self.assertIsNone(eng.snapshot()["usage"])
+        self.assertTrue(u["demo"] and u["running"])
+        self.assertEqual(u["models"][0]["vram_mb"], u["models"][0]["size_mb"], "it fits the GPU: all of it there")
+        self.assertIn("NVIDIA", u["gpus"][0]["name"])
+        self.assertEqual(u["procs"]["n"], 2)
+        self.assertIsNone(eng._usage_thread)
+        with mock.patch.object(aiweb, "time", mock.Mock(time=lambda: 1_790_000_000.0, sleep=time.sleep)):
+            self.assertEqual(eng.snapshot(usage=True)["usage"], eng.snapshot(usage=True)["usage"], "a clock that stands still: the same figures")
+
+    def test_the_chat_box_and_its_clear_button_are_there_only_with_something_in_it(self):
+        acts = screens.AiActs("t", "view=ai")
+        snap = self.eng.snapshot()
+        nodes = screens.ai_chat_nodes(snap, [], acts)[0].children
+        self.assertFalse([n for n in nodes if isinstance(n, screens.ui.Log)])
+        self.assertNotIn("/ai/clear", repr([getattr(x, "action", "") for n in nodes if isinstance(n, screens.ui.Controls) for x in n.items]))
+        self.eng.history.append({"kind": "ask", "q": "q", "res": None, "error": "e", "at": 0})
+        snap = self.eng.snapshot()
+        nodes = screens.ai_chat_nodes(snap, [screens.ui.Qa("you", "q")], acts)[0].children
+        self.assertEqual(len([n for n in nodes if isinstance(n, screens.ui.Log)]), 1)
+        clear = [x for n in nodes if isinstance(n, screens.ui.Controls) for x in n.items if getattr(x, "action", "") == "/ai/clear"]
+        self.assertEqual((len(clear), clear[0].label, clear[0].disabled), (1, "Clear chat", False))
 
     def test_one_choice_downloads_starts_and_turns_the_advisor_on_in_memory(self):
         self.assertEqual(self.installed(), [])
@@ -1583,6 +1797,32 @@ class WebSecurity(WebBase):
         self.assertIsNone(self.eng.snapshot()["job"], "nothing was started")
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {}, "nothing was written")
         self.assertEqual(self.httpd.requests, [], "nothing was fetched")
+
+    def test_clear_needs_the_token_and_forgets_the_chat_the_page_draws_in_its_box(self):
+        self.eng.history.append({"kind": "ask", "q": "why <so> slow?", "res": {"text": "busy", "tools_used": [], "model": "m", "calls": [], "state": True},
+                                 "error": "", "at": 0})
+        body = self.page("/?app=1&view=ai")
+        self.assertIn('<div class="log" role="log" aria-label="chat"><div class="log-in"><div class="qa">', body)
+        self.assertIn("why &lt;so&gt; slow?", body)
+        self.assertIn('action="/ai/clear"', body)
+        self.assertIn(advisor.STATE_ONLY.replace("'", "&#x27;"), body)
+        self.assertEqual(self.post("clear", csrf=False)[0], 403)
+        self.assertEqual(self.post("clear", headers={"Origin": "http://203.0.113.9"})[0], 403)
+        self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1, "a refused post changes nothing")
+        self.assertTrue(self.go("clear").endswith("#ask"))
+        self.assertEqual(self.eng.snapshot()["chat"]["history"], [])
+        self.assertEqual(self.notice(), "the chat is cleared")
+        body = self.page("/?app=1&view=ai")
+        self.assertNotIn('class="log"', body)
+        self.assertNotIn('action="/ai/clear"', body, "nothing to clear: no button")
+
+    def test_the_server_gives_the_engine_the_machine_as_its_pages_show_it(self):
+        self.assertEqual(aiweb._BIND["state"], self.srv.machine_state)
+        st = self.srv.machine_state()
+        self.assertEqual(st["host"], advisor.clean_line(socket.gethostname(), 64))
+        self.assertIn(st["os"], ("linux", "darwin", "windows"))
+        self.assertTrue(any(f.startswith("CPU: ") for f in st["figures"]))
+        self.assertLessEqual(len(advisor.state_text(st)), advisor.MAX_STATE_CHARS)
 
     def test_the_token_of_the_page_is_per_process_and_random(self):
         self.assertGreaterEqual(len(self.srv.csrf), 24)

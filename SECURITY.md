@@ -57,7 +57,8 @@ Design rules you can audit in the code:
   the hardware with fixed commands and no shell, as the unprivileged user, and sets the model up when you click: see the bullet above). The advisor talks only to an endpoint on this machine
   (it refuses any other unless `[ai] allow_remote = yes`, and connects only to the addresses it checked); the model server that
   `nuc-console-ai serve` starts binds `127.0.0.1` and has no option to bind anything else. What the model receives is the HEALTH
-  findings as JSON: names, counts and log *templates*, never log lines or command lines. Names are data, never instructions (they
+  findings as JSON: names, counts and log *templates*, never log lines or command lines; a question asked on the web page also carries the
+  machine as the pages show it now (the problems, the key figures, process names with their CPU and memory), as JSON beside the question. Names are data, never instructions (they
   travel inside the JSON only; the model's text is stripped of escape sequences and control characters and capped before it is shown;
   every answer is marked "AI, check before acting"). To answer questions it may pick one of six fixed read-only queries: arguments
   validated against whitelists and ranges, bound parameters, a read-only connection, three at most. It has no tool that runs a command,

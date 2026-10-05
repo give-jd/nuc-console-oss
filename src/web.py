@@ -69,7 +69,7 @@ RETRY_MS = 3000      # what a stream tells the client to wait before it reconnec
 ASSET_FILES = {"%s.%s.css" % (name, sha[:8]): (body, ctype) for name, (body, ctype, sha) in webcss.ASSETS.items()}  # /s/<name>.<sha8>.<ext>
 ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the hash: a changed sheet is another URL
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
-AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise")  # POST /ai/<action>
+AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear")  # POST /ai/<action>
 AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
@@ -672,6 +672,7 @@ class Server(http.server.ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         render.DEMO = demo
         aiweb.configure(demo=demo)  # the engine of the AI page: the real one, or the demo's (simulated); render.ai_engine() tells it where the settings are
+        aiweb.bind(state=self.machine_state)  # ... and the chat's model is given the machine as these pages show it
         tgweb.configure(demo=demo)  # the engine of the Telegram page (pairing, requests to the notifier), the same way
         tgweb.bind(cfg=lambda: render.CFG)
         self.smp = render.Sampler()
@@ -904,6 +905,24 @@ class Server(http.server.ThreadingHTTPServer):
                 "stale": stale, "restart": render.CMD.get("restart", ""), "problems": len(ctx.problems or []),
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True))}
 
+    def machine_state(self):
+        """The machine as the pages show it now, for the AI's chat (advisor.machine_state: the model reads it with a question): the status, the
+        problems, every key figure, the busiest processes (names only) and the HEALTH findings. Read from the frame the pages share; the
+        processes from the CPU page's sampler, at most once per refresh interval, only while the CPU screen is on."""
+        r = self.cfg["refresh_seconds"]
+        ctx = self.shell_frame(r)
+        _state, text = self.shell_pill(ctx.problems)
+        pb = [{"level": "err" if sev >= 2 else "warn" if sev >= 1 else "info", "text": words, "id": pid or ""}
+              for (sev, words), (_s, pid) in zip(ctx.problems or [], ctx.problem_ids())]
+        figures = [{"label": k.label, "value": k.value, "unit": k.unit, "state": k.state, "hint": k.hint} for k in cards.kpis(ctx, prefs.KPI_IDS)]
+        rows = []
+        if render.CFG["features"].get("cpu", True):
+            with self.lock:  # the CPU page reads it under the same lock
+                rows = ((self.cpu_feed.read() or {}).get("procs") or {}).get("procs") or []
+        report = (ctx.health or {}).get("report") if isinstance(ctx.health, dict) else None
+        findings = report.get("findings") if isinstance(report, dict) and isinstance(report.get("findings"), list) else []
+        return advisor.machine_state(socket.gethostname(), render.cpu_os(), time.time(), text, pb, figures, rows, findings)
+
     def api_cpu(self, here, sort, sel):
         nodes, sel = self.cpu_nodes(dict({"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}, **here), sort, sel)
         return {"sort": sort, "sel": sel, "nodes": nodes}
@@ -921,7 +940,7 @@ class Server(http.server.ThreadingHTTPServer):
         """The AI screen's fields: its components (their ui.Action buttons carry the CSRF token: a client posts them as they are), the engine's state,
         and the CSRF token (none when [ai] web_actions = no locks the page)."""
         eng = render.ai_engine()
-        snap = eng.snapshot()
+        snap = eng.snapshot(usage=True)
         nodes = ai_nodes(self, dict({"view": "ai", "sel": sel, "pause": False}, **here), sel, confirm, snap, eng)
         return {"sel": sel, "confirm": "" if snap["locked"] else confirm, "engine": snap, "csrf": None if snap["locked"] else self.csrf, "nodes": nodes}
 
@@ -1520,7 +1539,7 @@ class Server(http.server.ThreadingHTTPServer):
         (see do_POST); the page reloads by itself only while something runs, so that a question being typed is not lost. The URL holds the whole
         view, so a reload keeps it."""
         eng = render.ai_engine()
-        snap = eng.snapshot()
+        snap = eng.snapshot(usage=True)
         live = snap["busy"] or snap["locked"]   # idle with forms: no reload (a locked page has none: it reloads as the others do)
 
         def doc(body, foot, refresh=True, tools=(), vhere=None):
@@ -1626,6 +1645,9 @@ class Server(http.server.ThreadingHTTPServer):
             if not NUM.fullmatch(one("days", 3)):
                 raise BadRequest("a number of days is needed")
             eng.advise(int(one("days", 3)))
+            anchor = "#ask"
+        elif act == "clear":
+            eng.clear_chat()
             anchor = "#ask"
         with self.lock:
             self.cache.clear()  # the page that comes next shows what this did
@@ -1969,7 +1991,7 @@ def ai_chat_html(ui):
     through advisor.html() (escaped, cleaned, capped); a question is escaped here. The box works when the AI is on and its server is not still starting."""
     esc, snap = html.escape, ui.snap
     chat, ready = snap["chat"], snap["switch"]["on"] and snap["state"][0] != "working"
-    out = ['<section class="chat" id="chat"><div class="hs">CHAT · ask the model about this machine (it reads this machine\'s history; AI, check before acting)</div>']
+    out = ['<section class="chat" id="chat"><div class="hs">CHAT · ask the model about this machine (it sees its state now and reads its history; AI, check before acting)</div>']
     for e in chat["history"]:
         res = advisor.html(e["res"]) if e["res"] else advisor.html({"error": e["error"] or "no answer"})
         out.append(f'<div class="qa"><p class="q"><strong>{"advice" if e["kind"] == "advise" else "you"}:</strong> {esc(e["q"])}</p>{res}</div>')
@@ -1982,7 +2004,8 @@ def ai_chat_html(ui):
         out.append(f'<form class="f ask" id="ask" method="post" action="/ai/ask">{hidden}<input class="q" type="text" name="q" maxlength="500" size="60" '
                    f'placeholder="ask: why is the disk filling up?" autocomplete="off"{dis}> <button class="bt on" type="submit"{dis}>Ask</button></form>')
         out.append('<div class="adv">advice now: ' + " ".join(ui.form("advise", label, (("days", d),), "", "", not ready or bool(chat["busy"]))
-                                                             for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))) + "</div>")
+                                                             for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days")))
+                   + (" · " + ui.form("clear", "Clear chat", (), "", "forget the questions and answers on this page") if chat["history"] else "") + "</div>")
         if not ready:
             out.append('<p class="d">%s</p>' % ("the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
     out.append("</section>")

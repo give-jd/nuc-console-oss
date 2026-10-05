@@ -353,6 +353,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
         x.yes ? action(x.yes) : null, href(x.no_href) ? el("a", {class: "btn", href: href(x.no_href), "data-key": "n"}, "No") : null));
       case "Spec": return spec(x);
       case "Qa": return qa(x);
+      case "Log": return el("div", {class: "log", role: "log", "aria-label": tx(x.label)}, el("div", {class: "log-in"}, (x.children || []).map(draw)));
       case "Title": return title(x);
       case "Seg": return seg(x.label, x.options || []);
       case "Legend": return legend(x);
