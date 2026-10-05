@@ -222,7 +222,8 @@ class FrozenWorld(object):
             self.set(render, "REFRESH_S", 2)
             self.set(render, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
             self.set(render, "PROBLEMS_CMD", "nuc-console-problems")
-            self.set(render, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector"})
+            self.set(render, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
+                                     "apply": "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"})
             self.set(render, "CATALOG", dict(render.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
             self.set(render, "KIOSK_HINT", "Alt+F4 closes · F11 leaves full screen")
             path = os.path.join(self._tmp.name, "accepted.json")  # not there: nothing accepted, whatever the host has

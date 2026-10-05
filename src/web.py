@@ -1323,7 +1323,7 @@ class Server(http.server.ThreadingHTTPServer):
                     'take is refused, and the file stays as it was. [features] is <a class="lnk" href="#features">Screens and sections</a> above.')
         else:
             head = (f'What <code class="cmd">{esc(path)}</code> sets, key by key, and what each one does. Read-only here ({esc(why)}): edit the file, '
-                    f'then apply it: <code class="cmd">{esc(confedit.restart_hint())}</code>. [features] is <a class="lnk" href="#features">Screens '
+                    f'then apply it: <code class="cmd">{esc(render.CMD.get("apply") or render.CMD["restart"])}</code>. [features] is <a class="lnk" href="#features">Screens '
                     'and sections</a> above.')
         return (f'<section class="sec" id="config" aria-labelledby="sec-cfg"><h3 class="sech" id="sec-cfg">config.ini</h3>'
                 f'<p class="hintl">{head}</p><div class="cfgl">{"".join(blocks)}</div></section>')
@@ -1773,7 +1773,7 @@ class Server(http.server.ThreadingHTTPServer):
                 for code, keys in confedit.applies(section, names).items():
                     lines.append("%s: %s." % (", ".join(keys), confedit.APPLIES[code]))
                 if confedit.START in confedit.applies(section, names):
-                    lines.append("To start again: " + confedit.restart_hint() + ".")
+                    lines.append("To start again: " + (render.CMD.get("apply") or render.CMD["restart"]) + ".")
             else:
                 lines = ["Nothing changed: every value is the one config.ini already has."]
             note = dict(ok=True, lines=lines, form={})

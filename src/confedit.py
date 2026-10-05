@@ -28,17 +28,6 @@ PORT_KEY_RE = re.compile(r"[0-9]{1,5}(/(tcp|udp))?")        # an [expose] port
 UNSAFE = re.compile(r"[\x00-\x1f\x7f#;]")                    # a newline breaks the file, # and ; start a comment there
 
 
-def restart_hint():
-    """How config.ini is applied on this machine, as docs/CONFIGURATION.md says it: what to run, or what to do."""
-    if nuc_config.PORTABLE:
-        return "quit the app (or run.sh / run.cmd) and start it again"
-    if nuc_config.WINDOWS:
-        return "run install-windows.cmd again (it keeps config.ini)"
-    if nuc_config.MACOS:
-        return "run sudo ./install.sh again (it keeps config.ini)"
-    return "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"
-
-
 class Key(object):
     """One key: its section and name, its kind (BOOL, INT, CHOICE, TEXT, LIST), what it does (what), its default as the file writes it,
     when a change applies, and the values it takes: choices (CHOICE, LIST), lo..hi (INT; zero: 0 is allowed too and means automatic), a
