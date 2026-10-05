@@ -40,6 +40,8 @@ system warns the first time:
   one that runs, from a terminal or a script.
 - Links to anything but the dashboard (the docs, a project page) open in your browser, never in the window.
 - One app per user: starting it again shows the window of the one that runs.
+- **Settings** (the gear at the top right): the look of the dashboard, and **Screens and sections**, where each `[features]` switch (the Health
+  screen, the containers, the firewall...) is turned on or off in the app's `config.ini`, without a restart.
 - **Phone alerts**: ⚙ settings › *Phone alerts* › *Set up Telegram alerts* walks you through a Telegram bot of your own (create it, pair it,
   press Start, send a test); the app starts the notifier itself ([TELEGRAM.md](TELEGRAM.md#in-the-desktop-app-and-a-portable-run)).
 

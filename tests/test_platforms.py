@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -44,6 +45,14 @@ render.CFG["details"] = False
 
 def lst(port, proc="", addr="0.0.0.0", proto="tcp", fw=None):
     return {"proto": proto, "addr": addr, "port": port, "proc": proc, "fw": fw}
+
+
+def this_thread_only(record):
+    """A fake subprocess.run that records the calls of the thread that made it and hands every other call to the real one. subprocess.run is
+    one function for every module and every thread: while a test fakes it, the web view of another test may still be reading loginctl in its
+    sampler thread, and that call must neither land in the test's list nor get the fake's answer."""
+    real, me = subprocess.run, threading.current_thread()
+    return lambda cmd, **kw: record(cmd, **kw) if threading.current_thread() is me else real(cmd, **kw)
 
 
 # ---- Windows: IP helper buffers ----------------------------------------------------------------------------------------
@@ -405,7 +414,7 @@ class NativeCollector(unittest.TestCase):
         class Pw:
             pw_uid, pw_gid, pw_dir, pw_name = 501, 20, "/Users/alice", "alice"
         collector.shutil.which = lambda name, path=None: "/usr/local/bin/" + name
-        collector.subprocess.run = lambda cmd, **kw: seen.update(cmd=cmd, kw=kw) or R()
+        collector.subprocess.run = this_thread_only(lambda cmd, **kw: seen.update(cmd=cmd, kw=kw) or R())
         collector.mac_identity = lambda exe: Pw
         try:
             collector.run("docker", "ps")
@@ -667,7 +676,7 @@ class Kiosk(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             render.user_dir = lambda: d
             render.os.startfile = lambda url: opened.append(url)
-            render.subprocess.run = lambda cmd, **kw: opened.append(cmd[-1])
+            render.subprocess.run = this_thread_only(lambda cmd, **kw: opened.append(cmd[-1]))
             import webbrowser
             saved_wb, webbrowser.open = webbrowser.open, lambda url: opened.append(url) or True
             try:
@@ -708,7 +717,7 @@ class Kiosk(unittest.TestCase):
                        mock.patch.object(render, "kiosk_file", lambda *a: files.append(a) or 0),
                        mock.patch.dict(render.CFG["web"], token_file=os.path.join(d, token_name) if token_name else ""),
                        mock.patch.object(render.os, "startfile", lambda url: opened.append(url), create=True),
-                       mock.patch.object(render.subprocess, "run", lambda cmd, **kw: opened.append(cmd[-1])),
+                       mock.patch.object(render.subprocess, "run", this_thread_only(lambda cmd, **kw: opened.append(cmd[-1]))),
                        mock.patch("webbrowser.open", lambda url: opened.append(url) or True)]
             log = os.path.join(d, "o.log")
             for p in patches:

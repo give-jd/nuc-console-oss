@@ -9,9 +9,13 @@
   server      the model server is a CHILD of this process (aisetup.serve_argv and serve_env: 127.0.0.1 only, low priority, the models in the AI
               folder, the GPU unless [ai] gpu = no); it serves every installed model, keeps the one in use loaded, ends with the process, and there
               is only ever one
-  chat        a question (advisor.ask) or "advice now" (advisor.advise), answered in the background; the last few are kept in memory
+  chat        a question (advisor.ask, with the machine's state now: the program that owns the process binds it) or "advice now"
+              (advisor.advise), answered in the background; the last few are kept in memory until the chat is cleared
   switch      on/off, the model and the endpoint of the server started here: web.json in the AI folder (advisor.effective_cfg lays it
               over config.ini, which these programs never write)
+  usage       what the model uses now (the AI page's MODEL USAGE): the CPU and memory of the model server's processes, the models it has
+              loaded and where (Ollama's /api/ps: in the GPU's memory or in RAM), how busy the GPU is (aihw.gpu_load). Measured in a thread of
+              its own every USAGE_S, only while the AI is on and a page has asked for the snapshot within USAGE_IDLE_S
 
 One job at a time (use, download, delete, start), plus one answer being written; both run in threads of their own, so a request or a key never
 waits for them. The state is in memory (snapshot() is what the pages read) and the AI folder is the one the commands use
@@ -21,7 +25,9 @@ Standard library only, Python 3.8+.
 """
 import atexit
 import collections
+import http.client
 import json
+import math
 import os
 import shutil
 import signal
@@ -31,6 +37,7 @@ import threading
 import time
 
 import advisor
+import aihw
 import aiollama
 import aisetup
 import nuc_config
@@ -48,6 +55,9 @@ STOP_GRACE_S = 10         # asked to end (SIGTERM), then killed
 TAIL_LINES = 12           # the last lines the server wrote, kept to say why it stopped
 DEMO_STEPS, DEMO_STEP_S = 16, 0.15   # a simulated download: this many steps of this many seconds, per file
 DEMO_FREE = 412 * 10 ** 9
+USAGE_S = 3.0             # the model's usage is measured this often ...
+USAGE_IDLE_S = 30.0       # ... while a page has asked for the snapshot within this long (nobody looking: nothing is measured)
+SERVER_NAMES = ("ollama", "ollama.exe", "ollama_llama_server", "ollama_llama_se", "ollama_llama_server.exe")  # a server this process did not start
 
 VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server"}
 DEMO_RUNTIME = {"linux": "linux-amd64", "windows": "windows-amd64", "darwin": "darwin"}  # the build each demo machine would download
@@ -60,12 +70,16 @@ class Engine(object):
     blocks (a job or an answer runs in its own thread). Tests give the folder, the catalog and the hooks; the demo gives demo=True."""
 
     def __init__(self, demo=False, directory=None, runtime=None, models=None, allow_loopback_http=False, cfg_fn=None, hw_fn=None,
-                 report_fn=None, history_fn=None, popen=subprocess.Popen):
+                 report_fn=None, history_fn=None, popen=subprocess.Popen, state_fn=None, probe=None):
         self.demo, self._dir, self.allow_loopback_http, self.popen = demo, directory, allow_loopback_http, popen
         self.runtime = runtime if runtime is not None else aisetup.RUNTIME
         self.models = models if models is not None else aisetup.MODELS
         self.cfg_fn, self.hw_fn, self.report_fn, self.history_fn = cfg_fn or default_cfg, hw_fn or aisetup._hardware, report_fn or default_report, \
             history_fn or advisor._open_history
+        self.state_fn = state_fn or default_state
+        self.probe = probe or UsageProbe()     # what the usage is read with (tests: a fake)
+        self.usage, self._usage_seen, self._usage_thread, self._usage_stop = None, 0.0, None, threading.Event()
+        self.usage_s = USAGE_S
         self.start_wait, self.stop_grace, self.demo_step = START_WAIT_S, STOP_GRACE_S, DEMO_STEP_S  # tests shorten them
         self.load_wait, self.answer_wait, self.poll_s = LOAD_WAIT_S, ANSWER_WAIT_S, POLL_S
         self.lock = threading.RLock()
@@ -794,9 +808,13 @@ class Engine(object):
         with self.lock:
             self.version += 1
 
+    def stop_usage(self):
+        self._usage_stop.set()
+
     def shutdown(self):
         """The process is ending: the server it started ends with it, and a download in the way is stopped."""
         self._cancel.set()
+        self._usage_stop.set()
         self._stop_child()
         self._unclaim()
 
@@ -849,6 +867,26 @@ class Engine(object):
                     self.notice = None
                 self.version += 1
 
+    def clear_chat(self):
+        """Forget the questions and answers kept so far (an answer still being written stays, and shows when it is done)."""
+        blocked = self._refuse()
+        if blocked:
+            return blocked
+        with self.lock:
+            n = len(self.history)
+            self.history.clear()
+        return self._result(True, "the chat is cleared" if n else "the chat was already empty")
+
+    def state(self):
+        """The machine's state now (advisor.machine_state(), from the program that owns this process: bind(state=...)), or None when it cannot
+        be read: a question is then answered from the history alone."""
+        try:
+            st = self.state_fn()
+        except Exception as e:  # noqa: BLE001 - the state is a help: a question without it is still a question
+            print("nuc-console ai: machine state error: %r" % (e,), file=sys.stderr)
+            return None
+        return st if isinstance(st, dict) and st else None
+
     def wait_chat(self, timeout=30):
         t = self._chat_thread
         if t is not None:
@@ -860,11 +898,18 @@ class Engine(object):
         ok, why = advisor.available(cfg)
         if not ok:
             raise advisor.Disabled(why)
-        conn = self.history_fn()
+        state = self.state()
         try:
-            return advisor.ask(q, conn, cfg)
+            conn = self.history_fn()
+        except advisor.NoHistory:
+            if state is None:
+                raise
+            conn = None  # no history yet (a new install, the HEALTH screen off): the state now still answers, and the tools say there is none
+        try:
+            return advisor.ask(q, conn, cfg, state=state)
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     def _advise(self, days):
         cfg = self.ecfg()
@@ -882,8 +927,9 @@ class Engine(object):
         return res
 
     # ------------------------------------------------------------------------------------------------------------------------ the pages
-    def snapshot(self):
-        """What a page or a screen shows, as plain data (copies): the job, the server, the chat, the last notice, the switch."""
+    def snapshot(self, usage=False):
+        """What a page or a screen shows, as plain data (copies): the job, the server, the chat, the last notice, the switch; with usage, also what
+        the model uses now (the page that shows it asks: that keeps the sampler going; the others never start it)."""
         with self.lock:
             job = dict(self.job) if self.job else None
             if job:
@@ -902,7 +948,44 @@ class Engine(object):
                 web = self._dstate().get("web") or {}
                 snap["ai"] = {"endpoint": server["endpoint"], "model": web.get("model") or self.demo_state["model"]}
             snap["state"] = state_of(snap)
+            snap["usage"] = None if not usage else self._demo_usage(server) if self.demo else self._usage_now(server, snap["switch"])
             return snap
+
+    # ------------------------------------------------------------------------------------------------------------------------ the usage
+    def _usage_now(self, server, switch):
+        """The last measurement (a copy), and the sampler kept going while the AI is on or its server runs; None when there is nothing to measure."""
+        if not (server["running"] or (switch or {}).get("on")):
+            self.usage = None
+            return None
+        self._usage_seen = time.time()
+        t = self._usage_thread
+        if t is None or not t.is_alive():
+            self._usage_stop.clear()
+            self._usage_thread = threading.Thread(target=self._usage_loop, daemon=True)
+            self._usage_thread.start()
+        return dict(self.usage, running=bool(server["running"])) if self.usage else {"running": bool(server["running"]), "measuring": True}
+
+    def _usage_loop(self):
+        while not self._usage_stop.is_set() and time.time() - self._usage_seen < USAGE_IDLE_S:
+            u = self.measure_usage()
+            with self.lock:
+                self.usage = u
+            self._usage_stop.wait(self.usage_s)
+        with self.lock:
+            self.usage = None  # nobody looks: what was measured goes stale, and is measured again when a page comes back
+
+    def measure_usage(self):
+        """One measurement (usage_of): the server's processes, its models, the GPUs. Never raises: what fails is unknown."""
+        with self.lock:
+            root = self.child_info["pid"] if self._child_alive() and self.child_info else None
+            endpoint = (self.child_info or {}).get("endpoint") if root else ""
+        if not endpoint:
+            try:
+                endpoint = self.ecfg()["ai"].get("endpoint") or ""
+            except Exception:  # noqa: BLE001
+                endpoint = ""
+        p = self.probe
+        return usage_of(_try(p.procs, []), root, _try(lambda: p.loaded(endpoint), None), _try(p.gpu, None), p.threads(), _try(p.ram_mb, None))
 
     def switch(self):
         if self.demo:
@@ -1057,13 +1140,139 @@ class Engine(object):
 
     def _demo_answer(self, q):
         time.sleep(self.demo_step * 4)
-        return {"text": "Demo answer. A real answer comes from the local model, built from read-only queries on this machine's history.\n\n"
-                        "You asked: %s" % q, "tools_used": ["top_apps"], "model": "demo", "calls": []}
+        st = self.state() or {}
+        seen = ("It was given this machine's state now: %s, %d problem%s, %d key figures, the busiest processes (%s)."
+                % (st.get("status") or "?", len(st.get("problems") or []), "" if len(st.get("problems") or []) == 1 else "s", len(st.get("figures") or []),
+                   ", ".join(p.get("name", "?") for p in (st.get("top_cpu") or [])[:3]) or "none read") if st else "No state of the machine could be read.")
+        return {"text": "Demo answer. A real answer comes from the local model, built from this machine's state now and read-only queries on its "
+                        "history.\n\n%s\n\nYou asked: %s" % (seen, q), "tools_used": ["top_apps"], "model": "demo", "calls": [], "state": bool(st)}
+
+    def _demo_usage(self, server):
+        """What the demo machine's model would use: invented, from the demo's catalog (its model and its GPU) and the clock, nothing measured."""
+        if not server["running"]:
+            return None
+        import demo
+        cat, now = demo.ai_catalog(self._demo_os), time.time()
+        m = next((x for x in cat["models"] if x["id"] == server["model"]), None)
+        hw = cat.get("hw") or {}
+        gpus = [g for g in hw.get("gpus") or [] if isinstance(g, dict)]
+        size = int(m["approx_mb"] * 1.15) if m else 3000
+        dedicated = [g for g in gpus if not g.get("unified") and g.get("vram_mb")]
+        unified = bool(gpus) and not dedicated
+        vram = size if dedicated or unified else 0
+        wave = abs(math.sin(now / 9.0))
+        threads = (hw.get("cpu") or {}).get("threads") or 8
+        cpu = (12.0 + 30.0 * wave) if vram else (180.0 + 300.0 * wave)
+        gpu_rows = [{"name": g.get("name") or "GPU", "busy_pct": round(25.0 + 50.0 * wave), "used_mb": float(size + 600),
+                     "total_mb": float(g["vram_mb"]) if not g.get("unified") and g.get("vram_mb") else None} for g in gpus[:1]]
+        procs = [{"pid": 4242, "ppid": 1, "name": "ollama", "cpu": 0.4, "mem": 90 * 2 ** 20},
+                 {"pid": 4243, "ppid": 4242, "name": "ollama", "cpu": cpu, "mem": (size - vram + 600) * 2 ** 20 if not unified else 700 * 2 ** 20}]
+        u = usage_of(procs, 4242, [{"name": aiollama_name(m) if m else server["model"], "size_mb": float(size), "vram_mb": float(vram), "ctx": aisetup.DEFAULT_CTX}],
+                     {"gpus": gpu_rows, "source": "demo" if gpu_rows else None, "note": "" if gpu_rows else "no GPU whose load can be read"},
+                     threads, (hw.get("ram") or {}).get("total_mb"))
+        return dict(u, running=True, demo=True)
 
     def _demo_advice(self, days):
         time.sleep(self.demo_step * 4)
         return {"text": "Demo advice for the last %d day%s. A real one comes from the local model and the HEALTH findings; the one you see here is not." % (days, "" if days == 1 else "s"),
                 "model": "demo", "at": int(time.time()), "cites": [], "stored": False}
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ usage
+
+def _try(fn, default):
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - a measurement that fails is unknown, never an error on the page
+        print("nuc-console ai: usage: %r" % (e,), file=sys.stderr)
+        return default
+
+
+def aiollama_name(m):
+    """The name Ollama lists a catalog model under (its `ollama` field), for the demo's /api/ps."""
+    return str(m.get("ollama") or m.get("id") or "?")
+
+
+class UsageProbe(object):
+    """What the usage is read with: the processes (one procs.ProcSampler kept from one reading to the next, so that the second has a CPU%),
+    the models the server has loaded (Ollama's /api/ps, on a loopback http endpoint only), the GPUs (aihw.gpu_load), the logical CPUs and the
+    RAM (aihw.cached). Tests replace it."""
+
+    def __init__(self):
+        self._ps = None
+
+    def procs(self):
+        if self._ps is None:
+            import procs
+            self._ps = procs.ProcSampler()
+        got = self._ps.sample()
+        return got.get("procs") or [] if isinstance(got, dict) else []
+
+    @staticmethod
+    def loaded(endpoint):
+        if not endpoint or not advisor.WEB_ENDPOINT.fullmatch(endpoint):  # http://127.0.0.1|localhost|[::1]:port only: never another machine
+            return None
+        try:
+            status, obj = aiollama.Api(aiollama.base_of(endpoint), timeout=2.0).call("GET", "/api/ps", timeout=2.0)
+        except (OSError, aiollama.SetupError, ValueError, http.client.HTTPException):  # nothing answers (yet): unknown, quietly
+            return None
+        return parse_ps(obj) if status == 200 else None
+
+    @staticmethod
+    def gpu():
+        return aihw.gpu_load()
+
+    @staticmethod
+    def threads():
+        return os.cpu_count() or None
+
+    @staticmethod
+    def ram_mb():
+        return (aihw.cached().get("ram") or {}).get("total_mb")
+
+
+def parse_ps(obj):
+    """Ollama's /api/ps answer -> [{"name", "size_mb", "vram_mb", "ctx"}]: each model loaded now, what it takes in all and in the GPU's memory,
+    and its context in tokens (None where the server does not say). None when the answer is not that."""
+    if not isinstance(obj, dict) or not isinstance(obj.get("models"), list):
+        return None
+    out = []
+    for m in obj["models"][:8]:
+        if not isinstance(m, dict):
+            continue
+        n = lambda k: m.get(k) if isinstance(m.get(k), (int, float)) and not isinstance(m.get(k), bool) and m.get(k) >= 0 else None  # noqa: E731
+        out.append({"name": advisor.clean_line(m.get("name") or m.get("model") or "?", 80), "size_mb": round(n("size") / 2.0 ** 20, 1) if n("size") is not None else None,
+                    "vram_mb": round(n("size_vram") / 2.0 ** 20, 1) if n("size_vram") is not None else None, "ctx": n("context_length")})
+    return out
+
+
+def usage_of(procs, root=None, models=None, gpu=None, threads=None, ram_mb=None, at=None):
+    """What the model uses, from one reading: procs (procs.ProcSampler's list), root (the pid of the server this process started; None: the
+    processes named like a model server, SERVER_NAMES), models (parse_ps; None: unknown), gpu (aihw.gpu_load), threads (logical CPUs) and
+    ram_mb (the RAM). -> {"at", "procs": {"n", "cpu_pct" (% of one core), "share_pct" (% of the machine), "mem_mb", "ram_mb", "threads"} or None
+    when no process of it is seen, "models", "gpus", "gpu_note"}. A value that cannot be read is None. Pure."""
+    rows = [p for p in procs or [] if isinstance(p, dict) and isinstance(p.get("pid"), int) and not isinstance(p.get("pid"), bool)]
+    kids = collections.defaultdict(list)
+    for p in rows:
+        if isinstance(p.get("ppid"), int):
+            kids[p["ppid"]].append(p["pid"])
+    by = {p["pid"]: p for p in rows}
+    todo = [root] if root in by else [p["pid"] for p in rows if str(p.get("name") or "").lower() in SERVER_NAMES]
+    mine = set()
+    while todo:
+        pid = todo.pop()
+        if pid not in mine:
+            mine.add(pid)
+            todo.extend(kids.get(pid, ()))
+    got = [by[pid] for pid in mine]
+    real = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0  # noqa: E731
+    cpus, mems = [p["cpu"] for p in got if real(p.get("cpu"))], [p["mem"] for p in got if real(p.get("mem"))]
+    cpu = round(sum(cpus), 1) if cpus else None
+    pr = {"n": len(got), "cpu_pct": cpu, "share_pct": round(cpu / threads, 1) if cpu is not None and real(threads) and threads else None,
+          "mem_mb": round(sum(mems) / 2.0 ** 20, 1) if mems else None, "ram_mb": ram_mb if real(ram_mb) else None, "threads": threads if real(threads) else None}
+    g = gpu if isinstance(gpu, dict) else {}
+    return {"at": time.time() if at is None else at, "procs": pr if got else None, "models": models,
+            "gpus": [x for x in g.get("gpus") or [] if isinstance(x, dict)] if gpu is not None else None, "gpu_note": str(g.get("note") or "")}
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ module
@@ -1074,10 +1283,16 @@ _ENGINE, _ENGINE_LOCK = None, threading.Lock()
 _BIND = {}
 
 
-def bind(cfg=None, report=None):
-    """The program that owns this process tells the engine where its settings and the HEALTH report are: the web view (render.CFG,
-    render.health_data) and the console (its own, as __main__: importing render from here would run it a second time)."""
-    _BIND.update({k: v for k, v in (("cfg", cfg), ("report", report)) if v is not None})
+def bind(cfg=None, report=None, state=None):
+    """The program that owns this process tells the engine where its settings, the HEALTH report and the machine's state now are: the web view
+    (render.CFG, render.health_data, the state its pages show) and the console (its own, as __main__: importing render from here would run it
+    a second time)."""
+    _BIND.update({k: v for k, v in (("cfg", cfg), ("report", report), ("state", state)) if v is not None})
+
+
+def default_state():
+    """The machine's state now, as bind(state=...) gives it (advisor.machine_state()); None when nobody bound one."""
+    return _BIND["state"]() if "state" in _BIND else None
 
 
 def default_cfg():

@@ -1009,6 +1009,45 @@ class Ask(Base):
 
 # ------------------------------------------------------------------------------------------------------------------ screens
 
+class State(unittest.TestCase):
+    """What the chat's model is given of the machine now (machine_state): cleaned, capped, the least important cut first."""
+
+    def test_the_parts_cleaned_and_the_processes_by_cpu_and_memory(self):
+        procs = [{"pid": 1, "name": "ffmpeg", "cpu": 280.0, "mem": 640 * 2 ** 20}, {"pid": 2, "name": "java", "cpu": 60.0, "mem": 2300 * 2 ** 20},
+                 {"pid": 3, "name": "idle\x1b[31m", "cpu": 0.0, "mem": None}, {"pid": 4, "name": None}, "junk"]
+        st = advisor.machine_state("host\x07x", "linux", NOW, "6 PROBLEMS", [{"level": "err", "text": "db open", "id": "db-open-lan"}],
+                                   [{"label": "CPU", "value": "6", "unit": "%", "state": "ok", "hint": "16 threads"}, {"label": "Up", "value": "5d"}, {"x": 1}],
+                                   procs, [{"level": "warn", "title": "Disk filling up: /data", "text": "long"}])
+        self.assertEqual(st["host"], "hostx")
+        self.assertEqual(st["time_utc"], time.strftime("%Y-%m-%d %H:%M", time.gmtime(NOW)))
+        self.assertEqual(st["figures"], ["CPU: 6 % (ok; 16 threads)", "Up: 5d"])
+        self.assertEqual([p["name"] for p in st["top_cpu"]], ["ffmpeg", "java"], "a process that uses nothing is not news")
+        self.assertEqual([p["name"] for p in st["top_mem"]], ["java", "ffmpeg"])
+        self.assertEqual(st["top_cpu"][0], {"name": "ffmpeg", "cpu_pct": 280.0, "mem_mb": 640.0})
+        self.assertEqual(st["findings"], [{"level": "warn", "title": "Disk filling up: /data"}])
+        self.assertNotIn("truncated", st)
+        self.assertEqual(json.loads(advisor.state_text(st)), st)
+        self.assertEqual(advisor.state_text(None), "")
+        self.assertNotIn("problems", advisor.machine_state(), "an empty part is left out")
+
+    def test_a_big_state_is_cut_to_fit_and_the_problems_go_last(self):
+        many = [{"level": "warn", "text": "problem %d " % i + "x" * 150, "id": "p%d" % i} for i in range(40)]
+        figs = [{"label": "F%d" % i, "value": "1" * 20, "hint": "h" * 60} for i in range(40)]
+        procs = [{"pid": i, "name": "p%d" % i, "cpu": float(i + 1), "mem": (i + 1) * 2 ** 20} for i in range(50)]
+        st = advisor.machine_state("h", "linux", NOW, "x", many, figs, procs, [{"level": "info", "title": "t" * 100}] * 30)
+        self.assertTrue(st["truncated"])
+        self.assertLessEqual(len(advisor.state_text(st)), advisor.MAX_STATE_CHARS)
+        self.assertFalse(st.get("top_mem"), "the least important part goes first")
+        self.assertTrue(st["problems"], "the problems are the last to go")
+        self.assertTrue(all(len(p["text"]) <= 160 for p in st["problems"]))
+
+    def test_what_an_answer_was_built_from(self):
+        self.assertEqual(advisor._tool_note({"tools_used": [], "state": True}), advisor.STATE_ONLY)
+        self.assertEqual(advisor._tool_note({"tools_used": []}), advisor.NO_QUERY)
+        self.assertEqual(advisor._tool_note({"tools_used": ["events"], "state": True}), "queries: events · and this machine's state now")
+        self.assertEqual(advisor.lines({"text": "ok", "model": "m", "tools_used": [], "state": True}, 100)[-1], advisor.STATE_ONLY)
+
+
 class Screens(unittest.TestCase):
     RES = {"text": "Free space on / first [disk-full:/].\n\n- run it yourself after checking: sudo journalctl --vacuum-size=200M\n"
                    "1. A long line " + "word " * 60, "model": "tiny-model", "at": NOW, "cites": ["disk-full:/", "oom:postgres"]}

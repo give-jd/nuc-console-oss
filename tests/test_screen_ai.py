@@ -250,6 +250,11 @@ class Console(unittest.TestCase):
         self.assertTrue(any("the catalog lists no model" in x for x in text))
 
 
+def webcss_text():
+    import webcss
+    return webcss.CSS
+
+
 class Components(unittest.TestCase):
     def test_a_badge_is_the_pill_the_console_always_drew(self):
         for tone, code in (("ok", "1;42;30"), ("accent", "1;46;30"), ("warn", "1;43;30"), ("err", "1;41;37"), ("muted", "90")):
@@ -277,9 +282,18 @@ class Components(unittest.TestCase):
         self.assertTrue(SGR.sub("", ansi.render(ui.Question("Delete it?"), 20)[0][0]).endswith("[y/n]"))
 
     def test_what_is_for_the_web_only_draws_nothing_on_the_console(self):
-        for node in (ui.Action("/ai/use", "use"), ui.Controls([ui.Span("x"), ui.Action("/ai/off", "off")]), ui.Qa("you", "why?", ui.Advice("h"))):
+        for node in (ui.Action("/ai/use", "use"), ui.Controls([ui.Span("x"), ui.Action("/ai/off", "off")]), ui.Qa("you", "why?", ui.Advice("h")),
+                     ui.Log([ui.Qa("you", "why?")])):
             self.assertEqual(ansi.render(node, 80), ([], False))
         self.assertEqual(ansi.inline(ui.Action("/ai/use", "use")), "")
+
+    def test_the_chat_log_is_a_box_that_scrolls_with_its_exchanges_oldest_first(self):
+        log = ui.Log([ui.Qa("you", "first <q>"), ui.Qa("you", "second", None, True)], "the <chat>")
+        out = htmlview.html(log)
+        self.assertTrue(out.startswith('<div class="log" role="log" aria-label="the &lt;chat&gt;"><div class="log-in"><div class="qa">'))
+        self.assertLess(out.index("first &lt;q&gt;"), out.index("second"))
+        self.assertTrue(out.endswith("</div></div>"))
+        self.assertIn(".av .log{display:flex;flex-direction:column-reverse;", webcss_text(), "its end, the newest, stays in sight")
 
     def test_cols_once_clips_where_the_lines_are_put_side_by_side_only(self):
         left = ui.Group([ui.Line([ui.Span("aaaa")], clip=10), ui.Head("H")])

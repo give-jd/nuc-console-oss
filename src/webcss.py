@@ -286,6 +286,17 @@ SETTINGS = """
 .kchk li>a,.kchk li>span:first-child{flex:1;color:var(--fg);text-decoration:none}
 .kchk li>a:hover{color:var(--accent)}
 .kchk li>span[aria-disabled="true"]{color:var(--muted);opacity:.6;cursor:not-allowed}
+.feats{display:grid;gap:.2em;margin:0;padding:0;list-style:none}
+.feats li{display:flex;flex-wrap:wrap;align-items:center;gap:.3em .9em;padding:.35em .4em;border-radius:5px;min-width:0}
+.feats li:hover{background:var(--surface-2)}
+.feats .ft{flex:1 1 18em;min-width:0;overflow-wrap:anywhere}
+.feats .ft b{color:var(--fg-strong);font-weight:600}
+.feats .fs-st{font:600 .82em var(--mono);min-width:4.2em}
+.feats .fs-st.on{color:var(--ok)}
+.feats .fs-st.off{color:var(--muted)}
+.feats li.off .ft b{color:var(--muted)}
+.feats form.f{margin:0}
+.feats button.btn{font:inherit;font-size:.9em}
 .kchk .box{font-family:var(--mono);color:var(--muted);min-width:1.4em;text-align:center}
 .kchk .on .box{color:var(--accent);font-weight:700}
 .kchk .o{margin-left:auto;font:600 .72em var(--mono);color:var(--accent);min-width:1.4em;text-align:right}
@@ -637,7 +648,7 @@ a.tg:hover{color:var(--fg-strong)}
 """
 MAP_VIEW = MAP_VIEW.replace("DEPTHS", "".join('.ob[data-depth="%d"]{padding-left:%.1fem}' % (d, 0.3 + 1.3 * d) for d in range(1, 13)))
 
-# the AI screen drawn from components (screens.ai_model; htmlview: Badge, Action, Controls, Question, Spec, Qa, Title, Cols, Split, Table): everything under
+# the AI screen drawn from components (screens.ai_model; htmlview: Badge, Action, Controls, Question, Spec, Qa, Log, Title, Cols, Split, Table): everything under
 # .av, which is also .scr (the panels, the table rows, the split). The buttons are forms that post to /ai/*: their look is here, their rules are the server's.
 AI_VIEW = """
 .av{display:grid;gap:var(--gap);min-width:0}
@@ -665,6 +676,8 @@ AI_VIEW = """
 .av table.tbl .bt{padding:.05em .7em;font-size:.92em;position:relative;z-index:1}
 .av input.q{font:inherit;width:min(42em,100%);padding:.3em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
 .av input.q:disabled{opacity:.55}
+.av .log{display:flex;flex-direction:column-reverse;max-height:min(30em,55vh);overflow-y:auto;overscroll-behavior:contain;margin:0 0 .7em;padding:0 .7em;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.av .log-in{padding:.2em 0}
 .av .qa{margin:.5em 0}
 .av .qa .q{margin:0 0 .35em}
 .av .pend{color:var(--muted)}

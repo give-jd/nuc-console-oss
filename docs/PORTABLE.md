@@ -108,7 +108,8 @@ terminal accept the state of right now:
 
 ## Configuration
 
-Edit `data/config.ini` ([CONFIGURATION.md](CONFIGURATION.md) lists every key), then quit and start it again. Everything applies except the
+Edit `data/config.ini` ([CONFIGURATION.md](CONFIGURATION.md) lists every key), then quit and start it again. The `[features]` switches need neither:
+the web view's settings page turns them on and off (**Screens and sections**), and the collector picks a change up within 10 seconds. Everything applies except the
 parts that decide how an installation shows itself: `[web] enabled`, `bind`, `port` and `token_file` are ignored (the view is always on
 `127.0.0.1`, on the port you give or a free one, with no token) and so are `[display] mode` and `browser` (the script opens your default browser itself;
 `--no-open` stops it). `[display] zoom` still sets the text size.
