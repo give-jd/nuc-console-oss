@@ -3,6 +3,15 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Fixed
+
+- **Theme and density could not be switched back** without a reload: after choosing *compact* (or *wall*, or a theme) in the footer or on
+  the settings page, the option chosen before was plain text, not a link. Every option stays a link now, the chosen one marked.
+- **Key figures at the limit**: with 8 chosen, the others looked clickable but did nothing. They are dimmed now, each says why, and the
+  settings page says how to make room (untick one, then add another).
+
 ## [2.1.0] - 2026-10-03
 
 The desktop app, with packages for Windows, macOS and Linux built and tried on every release; the live app (`/app`) and a data API

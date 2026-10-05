@@ -285,6 +285,7 @@ SETTINGS = """
 .kchk li:hover{background:var(--surface-2)}
 .kchk li>a,.kchk li>span:first-child{flex:1;color:var(--fg);text-decoration:none}
 .kchk li>a:hover{color:var(--accent)}
+.kchk li>span[aria-disabled="true"]{color:var(--muted);opacity:.6;cursor:not-allowed}
 .kchk .box{font-family:var(--mono);color:var(--muted);min-width:1.4em;text-align:center}
 .kchk .on .box{color:var(--accent);font-weight:700}
 .kchk .o{margin-left:auto;font:600 .72em var(--mono);color:var(--accent);min-width:1.4em;text-align:right}

@@ -205,10 +205,9 @@ def set_url(field, back):
 
 
 def set_link(field, back, text, current, **data):
-    """A preference as a link (the chosen one is the plain, current text); data: the data-* attributes that say what it switches to."""
-    if current:
-        return f'<span class="lnk" aria-current="true">{html.escape(text)}</span>'
-    attrs = "".join(f' data-{k}="{html.escape(v)}"' for k, v in data.items())
+    """A preference as a link; data: the data-* attributes that say what it switches to. The chosen one is a link too, marked aria-current
+    (drawn as plain text): PREFS_JS switches the theme and the density in place and moves the mark, so every choice must stay clickable."""
+    attrs = "".join(f' data-{k}="{html.escape(v)}"' for k, v in data.items()) + (' aria-current="true"' if current else "")
     return f'<a class="lnk" data-set{attrs} href="{html.escape(set_url(field, back))}">{html.escape(text)}</a>'
 
 
@@ -1188,7 +1187,8 @@ class Server(http.server.ThreadingHTTPServer):
         def group(title, field, options, hint=""):
             opts = [(text, set_url(code, back), eff[field] == value, " data-set" + "".join(f' data-{k}="{esc(v)}"' for k, v in data.items()))
                     for text, code, value, data in options]
-            return (f'<div class="fs"><span class="lab">{esc(title)} {where(field)}</span>' + htmlview.seg(title, opts)
+            live = field in ("theme", "density")  # switched in place by PREFS_JS: the chosen one stays a link, to come back to it
+            return (f'<div class="fs"><span class="lab">{esc(title)} {where(field)}</span>' + htmlview.seg(title, opts, live)
                     + (f'<p class="hintl">{esc(hint)}</p>' if hint else "") + "</div>")
         theme = group("Theme", "theme", [(label.capitalize(), "t" + code, name, {"theme": name}) for name, label, code in THEMES])
         dens = group("Density", "density", [(label.capitalize(), "d" + code, name, {"density": name}) for name, label, code in DENSITIES],
@@ -1206,11 +1206,14 @@ class Server(http.server.ThreadingHTTPServer):
             new = [x for x in cur if x != kid] if on else cur + [kid]
             ok = bool(new) and len(new) <= prefs.MAX_KPIS
             inner = f'<span class="box" aria-hidden="true">{"✔" if on else "+"}</span> {label}'
+            why = f"all {prefs.MAX_KPIS} places are taken: untick one first" if new else "at least one key figure stays"
             link_ = (f'<a href="{href("k" + "_".join(prefs.KPI_CODES[x] for x in new))}" data-set>{inner}</a>' if ok
-                     else f'<span aria-disabled="true">{inner}</span>')
+                     else f'<span aria-disabled="true" title="{esc(why)}">{inner}</span>')
             boxes.append(f'<li class="{"on" if on else "off"}">{link_}' + (f'<span class="o">{cur.index(kid) + 1}</span>' if on else "") + "</li>")
+        full = len(cur) >= prefs.MAX_KPIS  # a ninth cannot be added: say so, or the + of the others looks broken
         kpis = (f'<div class="fs"><span class="lab">Key figures (at most {prefs.MAX_KPIS}, shown in the order chosen) {where("kpis")}</span>'
-                f'<ul class="kchk">{"".join(boxes)}</ul></div>')
+                + (f'<p class="hintl" id="kpi-full">All {prefs.MAX_KPIS} places are taken: untick one (✔) to make room, then add another (+).</p>'
+                   if full else "") + f'<ul class="kchk">{"".join(boxes)}</ul></div>')
         edit_href = esc(page_url(dict(here, view="", edit=True)))
         layout = (f'<div class="fs"><span class="lab">Layout {where("layout")}</span><div><a class="lnk" href="{edit_href}">Edit layout</a></div>'
                   '<p class="hintl">Move, resize and hide the cards of the overview. It is kept in this browser; a preset or Reset layout brings the preset\'s back.</p></div>')
