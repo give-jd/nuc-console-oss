@@ -308,7 +308,7 @@ def parity_page(view):
     import prefs
     import render
     import web
-    with golden.FrozenWorld() as world:
+    with golden.FrozenWorld(chat=golden.CHAT if view == "ai" else ()) as world:  # the AI screen with its chat: the log the app draws too
         srv = world.server
         srv.cache.clear()
         page = srv.app_page("", {"live": ["0"]} if view == "overview" else {"view": [view], "live": ["0"]})

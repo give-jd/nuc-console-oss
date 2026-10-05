@@ -1127,6 +1127,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     `details`: pass a list to receive the detail pages (sections that hid items, shown in full), see slides().
     `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
     in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
+    now = time.time() if now is None else now  # one clock for the frame: the problems and every card's ages and uptimes
     pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
@@ -1351,7 +1352,8 @@ def make_ctx(st, sm, pb, now=None):
     """The cards.Ctx of the KPI line from what a screen has read (snapshot(), the sampler's reading, the header's problems)."""
     ids = prefs.effective(ui_cfg())[0]["kpis"]
     net, cont, base = st["net"], st["cont"], st["baseline"]
-    ctx = cards.Ctx(s=sm, cont=cont, net=net, boot=st["boot"], problems=pb, cfg=CFG, now=now, baseline=base, new=new_ports(net, cont, base))
+    ctx = cards.Ctx(s=sm, cont=cont, net=net, boot=st["boot"], problems=pb, cfg=CFG, now=time.time() if now is None else now, baseline=base,
+                    new=new_ports(net, cont, base))
     for field, ask in (("health", lambda: health_data(7)), ("ai", ai_status)):  # only the KPIs that read them cost a read
         if field in ids:
             try:
@@ -1965,11 +1967,12 @@ def health_data(days):
     """health_build() of the last `days` days (1, 7 or 30), at most once per HEALTH_TTL per period: the console and every web request
     share it, so a key or a page never reads the history. A failure is kept for the same time (no retry on every key)."""
     days = days if days in HEALTH_DAYS else 7
+    src = (bool(DEMO), DEMO_OS, DEMO_HEALTH)  # where it was read: the demo's report is never the history's, nor one demo machine's another's
     with _HEALTH_LOCK:
         now = time.time()
         hit = _HEALTH.get(days)
-        if hit is None or not 0 <= now - hit["at"] < HEALTH_TTL:
-            hit = _HEALTH[days] = health_build(days, now)
+        if hit is None or hit.get("src", src) != src or not 0 <= now - hit["at"] < HEALTH_TTL:
+            hit = _HEALTH[days] = dict(health_build(days, now), src=src)
         return hit
 
 

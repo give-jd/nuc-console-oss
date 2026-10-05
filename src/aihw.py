@@ -5,6 +5,7 @@
   need_mb()  memory a model needs: weights + KV cache for the context + runtime overhead
   assess()   verdict gpu | partial | ram | slow | no for one model, with GPU layers, a speed range and a plain sentence
   recommend() the id of the model to suggest first
+  gpu_load() how busy each GPU is now and how much of its memory is in use (the AI page's MODEL USAGE): a measurement, every few seconds
 
   Linux    /proc/meminfo, /proc/cpuinfo, nvidia-smi (CSV), /sys/class/drm/card*/device (AMD VRAM, vendor ids)
   macOS    sysctl, vm_stat; Apple silicon = unified memory + Metal; Intel Macs: system_profiler SPDisplaysDataType -json
@@ -63,6 +64,9 @@ MAX_CARDS = 16              # /sys/class/drm/card0..15 are probed one by one (re
 MAX_ADAPTERS = 32           # HKLM\...\Class\{display}\0000..0031
 SAFE_DIRS = ("/usr/bin", "/usr/local/bin", "/bin", "/usr/sbin", "/sbin", "/usr/lib/wsl/lib", "/usr/local/nvidia/bin")
 NVIDIA_SMI = ["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"]
+NVIDIA_LOAD = ["--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"]
+IOREG = ["/usr/sbin/ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"]  # macOS: the GPUs' PerformanceStatistics, no root needed
+LOAD_TIMEOUT = 3            # seconds: gpu_load() runs every few seconds while the AI page is open
 DISPLAY_CLASS = r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
 CPU_KEY = r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
 VENDOR_IDS = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}  # PCI vendor ids (sysfs)
@@ -257,6 +261,38 @@ def parse_nvidia_smi(text):
         if m:
             out.append((m.group(1), int(m.group(2)) if m.group(2).isdigit() else None,
                         int(m.group(3)) if m.group(3).isdigit() else None))
+    return out
+
+
+def parse_nvidia_load(text):
+    """`nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits` -> [{"name", "busy_pct",
+    "used_mb", "total_mb"}]; a value the driver cannot give ('[N/A]', '[Not Supported]') is None, other lines are skipped."""
+    num = r"(\d+(?:\.\d+)?|\[[^\]]*\]|N/A)"
+    out = []
+    for line in (text or "").splitlines():
+        m = re.match(r"^\s*(.+?)\s*,\s*%s\s*,\s*%s\s*,\s*%s\s*$" % (num, num, num), line)
+        if m:
+            v = [float(x) if re.match(r"^\d", x) else None for x in m.groups()[1:]]
+            out.append({"name": _clean(m.group(1)) or "NVIDIA GPU", "busy_pct": v[0], "used_mb": v[1], "total_mb": v[2]})
+    return out
+
+
+def parse_ioreg_load(text):
+    """`ioreg -r -d 1 -w 0 -c IOAccelerator` (macOS) -> [{"name", "busy_pct", "used_mb", "total_mb"}], one per accelerator that reports its
+    PerformanceStatistics: "Device Utilization %" and the memory it has in use ("In use system memory" on Apple silicon, the VRAM in use on a
+    Mac with its own GPU); a GPU of unified memory has no total of its own (None)."""
+    out = []
+    for block in re.split(r"^\+-o ", text or "", flags=re.M):
+        stats = re.search(r'"PerformanceStatistics"\s*=\s*\{([^}]*)\}', block)
+        if not stats:
+            continue
+        kv = dict(re.findall(r'"([^"]{1,60})"\s*=\s*(\d+)', stats.group(1)))
+        busy = kv.get("Device Utilization %") or kv.get("GPU Activity(%)")
+        used = kv.get("In use system memory") or kv.get("vramUsedBytes")
+        total = kv.get("VRAM,totalMB")
+        name = re.search(r'"model"\s*=\s*<?"([^"]{1,80})"', block)
+        out.append({"name": _clean(name.group(1)) if name else "GPU", "busy_pct": float(busy) if busy is not None else None,
+                    "used_mb": round(int(used) / 2.0 ** 20, 1) if used is not None else None, "total_mb": float(total) if total else None})
     return out
 
 
@@ -526,6 +562,43 @@ def detect(plat=None, run=None, read=None):
     seen = set()
     hw["notes"] = [n for n in hw["notes"] if not (n in seen or seen.add(n))]
     return hw
+
+
+def gpu_load(plat=None, run=None, read=None):
+    """How busy the GPUs are now: {"gpus": [{"name", "busy_pct", "used_mb", "total_mb"}], "source": "nvidia-smi" | "sysfs" | "ioreg" | None,
+    "note": why there is nothing}. NVIDIA through nvidia-smi (Linux, Windows), AMD through sysfs (gpu_busy_percent, the VRAM in use), macOS
+    through ioreg (Apple silicon and the GPUs of Intel Macs). A value that cannot be read is None; never raises. run/read as in detect()."""
+    osname, run, read = _os_name(plat), run or _run, read or _read
+    try:
+        if osname in ("linux", "windows"):
+            pf = os.environ.get("ProgramFiles") or r"C:\Program Files"
+            for exe in ["nvidia-smi"] + ([ntpath.join(pf, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe")] if osname == "windows" else []):
+                rc, out = _call(run, [exe] + NVIDIA_LOAD, LOAD_TIMEOUT)
+                if rc is not None:
+                    rows = parse_nvidia_load(out) if rc == 0 else []
+                    if rows:
+                        return {"gpus": rows, "source": "nvidia-smi", "note": ""}
+                    break
+        if osname == "linux":
+            rows = []
+            for n in range(MAX_CARDS):
+                base = f"/sys/class/drm/card{n}/device/"
+                if VENDOR_IDS.get((_rd(read, base + "vendor") or "").strip().lower()) != "amd":
+                    continue
+                busy, used, total = (_int(_rd(read, base + f)) for f in ("gpu_busy_percent", "mem_info_vram_used", "mem_info_vram_total"))
+                rows.append({"name": _clean(_rd(read, base + "product_name")) or "AMD GPU", "busy_pct": float(busy) if busy is not None else None,
+                             "used_mb": _mb(used) if used is not None else None, "total_mb": _mb(total) if total is not None else None})
+            if rows:
+                return {"gpus": rows, "source": "sysfs", "note": ""}
+        if osname == "darwin":
+            rc, out = _call(run, IOREG, LOAD_TIMEOUT)
+            rows = parse_ioreg_load(out) if rc == 0 else []
+            if rows:
+                return {"gpus": rows, "source": "ioreg", "note": ""}
+            return {"gpus": [], "source": None, "note": "the GPU's load is not readable (ioreg)"}
+    except Exception as e:  # a measurement that fails is unknown, never an error on the page
+        return {"gpus": [], "source": None, "note": f"the GPU's load is unreadable ({e.__class__.__name__})"}
+    return {"gpus": [], "source": None, "note": "no GPU whose load can be read (NVIDIA with nvidia-smi, AMD on Linux, a Mac)"}
 
 
 _LOCK = threading.Lock()

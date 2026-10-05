@@ -907,6 +907,16 @@ class Qa(_Component):
         self.kind, self.q, self.answer, self.pending = "advice" if kind == "advice" else "you", _text(q), answer, bool(pending)
 
 
+class Log(_Component):
+    """The web's chat log: children (the ui.Qa of the exchanges, oldest first) in a box of its own height that scrolls and keeps its end, the
+    newest, in sight, so that the page does not grow with the chat. label: what it is, for a screen reader. The console has no chat: it draws
+    nothing."""
+    __slots__ = ("children", "label")
+
+    def __init__(self, children=(), label="chat"):
+        self.children, self.label = list(children), _text(label)
+
+
 # ---- the keymap: the ONE table that drives the console's key dispatch, every footer and the `?` help overlay ----------------------
 #
 # Key names are the ones render.decode_keys / render.win_key produce: up down left right pgup pgdn home end tab btab enter esc space,

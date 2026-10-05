@@ -119,8 +119,10 @@ class Shell(unittest.TestCase):
         self.assertTrue(self.tree.find("a", data_pause=True, data_key="Z"))
         sets = self.tree.find("a", data_set=True)
         themes = {a["data-theme"] for _, a, _ in sets if "data-theme" in a}
-        self.assertEqual(themes, {"dark", "light", "high-contrast"})  # the current one (auto) is not a link
-        self.assertEqual({a["data-density"] for _, a, _ in sets if "data-density" in a}, {"wall", "compact"})
+        self.assertEqual(themes, {"auto", "dark", "light", "high-contrast"})  # the current one too: PREFS_JS switches in place, the reader comes back
+        self.assertEqual({a["data-density"] for _, a, _ in sets if "data-density" in a}, {"wall", "desk", "compact"})
+        current = [(a.get("data-theme"), a.get("data-density")) for _, a, _ in sets if a.get("aria-current") == "true"]
+        self.assertEqual(sorted(current, key=str), [("auto", None), (None, "desk")])  # one chosen per group, marked
         for _, a, _ in sets:
             self.assertRegex(a["href"], r"^/\?set=[a-z0-9_]+&back=")
         self.assertIn("A−", self.body)
@@ -475,6 +477,29 @@ class Shell(unittest.TestCase):
         eight = "_".join(prefs.KPI_CODES[k] for k in prefs.KPI_IDS[:8])
         _, _, body = get(self.srv, f"/?view=settings&ui=1.k{eight}")
         self.assertNotIn(f"set=k{eight}_", body)       # a ninth cannot be added
+        t = Tree(body)
+        dim = t.find("span", aria_disabled="true")
+        self.assertEqual(len(dim), len(prefs.KPI_IDS) - 8)  # every other one is dimmed, and says why
+        self.assertTrue(all("untick one first" in a["title"] for _, a, _ in dim))
+        self.assertTrue(t.find("p", id="kpi-full"))     # ... and the page says how to make room
+        self.assertIn('.kchk li>span[aria-disabled="true"]', webcss.CSS)
+        _, _, body = get(self.srv, "/?view=settings&ui=1.kpb_in")
+        self.assertNotIn('id="kpi-full"', body)         # room left: nothing to say
+        _, _, body = get(self.srv, "/?view=settings&ui=1.kpb")
+        (_, a, _), = Tree(body).find("span", aria_disabled="true")
+        self.assertIn("at least one", a["title"])      # the last one stays
+
+    def test_the_settings_theme_and_density_stay_links_when_chosen(self):
+        """PREFS_JS switches the theme and the density in place: the chosen option must stay a link (marked aria-current), or the reader cannot
+        come back to it without a reload (compact, then desk again). The other groups reload the page: their chosen option is plain text."""
+        _, _, body = get(self.srv, "/?view=settings&ui=1.dc.tl")
+        t = Tree(body)
+        chosen = [a for _, a, _ in t.find("a", data_density="compact") if a.get("aria-current") == "true"]
+        self.assertEqual(len(chosen), 2)                # the settings' group and the footer's
+        self.assertTrue(all(a["href"].startswith("/?set=dc&back=") and "settings" in a["href"] for a in chosen))
+        self.assertEqual({x["data-density"] for _, x, _ in t.find("a", data_density=True)}, {"wall", "desk", "compact"})
+        self.assertTrue([x for x in t.find("a", data_theme="light") if x[1].get("aria-current") == "true"])
+        self.assertIn('aria-label="Start view"><span aria-current="true">Overview</span>', body)  # the start view's chosen option is not a link
 
     def test_about_install_and_portable(self):
         self.srv.cache.clear()
