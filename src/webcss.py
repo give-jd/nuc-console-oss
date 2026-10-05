@@ -302,10 +302,33 @@ SETTINGS = """
 .kchk .o{margin-left:auto;font:600 .72em var(--mono);color:var(--accent);min-width:1.4em;text-align:right}
 .expo pre{margin:0;padding:.7em .8em;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:.84em/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg)}
 .expo code.ck-v{font:.8em var(--mono);color:var(--muted);overflow-wrap:anywhere;display:block}
+.cfgl{display:grid;gap:.45em;min-width:0}
+.cfgs{border:1px solid var(--line);border-radius:6px;background:var(--surface);min-width:0}
+.cfgs>summary{padding:.5em .7em;cursor:pointer;font-weight:600;color:var(--fg-strong);overflow-wrap:anywhere}
+.cfgs>summary code{font:600 .9em var(--mono);color:var(--accent);margin-right:.4em}
+.cfgs[open]>summary{border-bottom:1px solid var(--line)}
+.cfgs>.hintl,.cfgs>.ck,.cfgf{margin:.6em .7em}
+.cfgf{display:grid;gap:.8em;min-width:0}
+.ck{display:grid;grid-template-columns:minmax(9em,13em) minmax(0,1fr);gap:.25em .8em;align-items:center;min-width:0}
+.ck .cn code{font:600 .88em var(--mono);color:var(--fg-strong);overflow-wrap:anywhere}
+.ck .hintl{grid-column:1/-1;line-height:1.45}
+.ck .hintl .sm{display:block;margin-top:.1em;font-family:var(--mono);font-size:.92em;overflow-wrap:anywhere}
+.ck code.cv{font:.88em var(--mono);color:var(--fg);overflow-wrap:anywhere}
+.ck.cko .cn code{color:var(--muted)}
+.cfgn{padding:.45em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);overflow-wrap:anywhere}
+.cfgn.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:var(--ok-bg)}
+.cfgn.bad{border-color:color-mix(in srgb,var(--warn) 50%,transparent);background:var(--warn-bg)}
+.ck.wide{grid-template-columns:minmax(0,1fr)}
+.ck input,.ck select,.cmap{width:100%;max-width:28em;padding:.25em .5em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
+.cmap{max-width:none;font:.86em/1.5 var(--mono);resize:vertical}
+pre.cmap{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg)}
+.ck input:focus-visible,.ck select:focus-visible,.cmap:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.cfgb{display:flex;justify-content:flex-end}
+.cfgb button.btn{font:inherit}
 .about{display:grid;grid-template-columns:6.8em minmax(0,1fr);gap:.65em .8em;margin:0;font-size:.92em}
 .about dt{color:var(--muted)}
 .about dd{margin:0;min-width:0;overflow-wrap:anywhere;line-height:1.6}
-@container app (max-width:45.7em){.kchk{grid-template-columns:minmax(0,1fr)}.about{grid-template-columns:minmax(0,1fr);gap:.1em}.about dd{margin-bottom:.6em}}
+@container app (max-width:45.7em){.ck{grid-template-columns:minmax(0,1fr)}.kchk{grid-template-columns:minmax(0,1fr)}.about{grid-template-columns:minmax(0,1fr);gap:.1em}.about dd{margin-bottom:.6em}}
 """
 
 # the layout editor (?edit=1, src/webjs.py BUILDER_JS): the bar above the grid, and the buttons of each card. The handles show only on a card that

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>demo-host · settings · nuc-console</title>
-<link rel="stylesheet" href="/s/app.db4c777a.css">
+<link rel="stylesheet" href="/s/app.ce000bfc.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
@@ -327,6 +327,407 @@ hidden =
 <span class="fs-st on">✔ on</span>
 </li>
 </ul>
+</section>
+<section class="sec" id="config" aria-labelledby="sec-cfg">
+<h3 class="sech" id="sec-cfg">config.ini</h3>
+<p class="hintl">What <code class="cmd">/nonexistent</code> sets, key by key, and what each one does. Read-only here (installed: config.ini is the administrator&#x27;s): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
+<div class="cfgl">
+<details class="cfgs" id="cfg-dashboard">
+<summary>
+<code>[dashboard]</code> Console and rotation</summary>
+<p class="hintl">The text console and the pages that take turns on a monitor with no keyboard (rotation, Details pages); the pace of every screen. A console that runs reads config.ini again when it starts.</p>
+<div class="ck cko" id="k-dashboard-sections">
+<span class="cn">
+<code>sections</code>
+</span>
+<code class="cv">attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks</code>
+<p class="hintl">The order of the overview&#x27;s sections, first to last (the console, the classic web page, and the web shell&#x27;s default preset). A section left out keeps its place at the end; one switched off under Screens and sections is not drawn. <span class="sm">comma-separated: attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks · default: all, in this order</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-mode">
+<span class="cn">
+<code>mode</code>
+</span>
+<code class="cv">overview</code>
+<p class="hintl">The console: overview = one screen, no keyboard needed; rotate = three pages that take turns (the arrow keys move through them). <span class="sm">overview | rotate · default overview</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-rotate_seconds">
+<span class="cn">
+<code>rotate_seconds</code>
+</span>
+<code class="cv">15</code>
+<p class="hintl">Seconds each page stays when pages take turns (rotate, the Details pages, a full-screen window); on the web shell&#x27;s wall page, the seconds between two scrolls. <span class="sm">3-600 · default 15</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-refresh_seconds">
+<span class="cn">
+<code>refresh_seconds</code>
+</span>
+<code class="cv">2</code>
+<p class="hintl">Seconds between two redraws of every screen and page (a page&#x27;s - / + links change it there for a while). Faster: livelier bars, a little more CPU. <span class="sm">1-10 · default 2</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-columns">
+<span class="cn">
+<code>columns</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">The console&#x27;s layout width in characters; 0 = the real console&#x27;s. Set it when the monitor shows less than the console believes it has: the layout is never larger than the real console. <span class="sm">0 (automatic) or 40-500 · default 0</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-rows">
+<span class="cn">
+<code>rows</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">The console&#x27;s layout height in lines; 0 = the real console&#x27;s. <span class="sm">0 (automatic) or 10-200 · default 0</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-spacing">
+<span class="cn">
+<code>spacing</code>
+</span>
+<code class="cv">1</code>
+<p class="hintl">1 = a blank line under each section title (more air, a few more rows); 0 = compact. The console and the classic web page. <span class="sm">0-1 · default 1</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-details">
+<span class="cn">
+<code>details</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: a monitor with no keyboard turns to Details pages that show in full what the overview cut (… +N more), then comes back; no: the overview alone, never rotating. <span class="sm">yes or no · default yes</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-overview_seconds">
+<span class="cn">
+<code>overview_seconds</code>
+</span>
+<code class="cv">45</code>
+<p class="hintl">How long the overview stays before the Details pages (details = yes). <span class="sm">10-600 · default 45</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-map_in_rotation">
+<span class="cn">
+<code>map_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the MAP screen, opened as far as it fits, joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-cpu_in_rotation">
+<span class="cn">
+<code>cpu_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the CPU screen joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-health_in_rotation">
+<span class="cn">
+<code>health_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the HEALTH screen joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-ui">
+<summary>
+<code>[ui]</code> Look and layout: everyone&#x27;s defaults</summary>
+<p class="hintl">What the console and every browser start with. A browser&#x27;s own choices (Appearance, above) and ?ui= in a link come first; a key that is not set falls to the preset, then to the built-in default.</p>
+<div class="ck cko" id="k-ui-web">
+<span class="cn">
+<code>web</code>
+</span>
+<code class="cv">app</code>
+<p class="hintl">The web interface served: app = the shell of cards (this page); classic = the older text pages, kept for one release. <span class="sm">app | classic · default app</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-theme">
+<span class="cn">
+<code>theme</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">auto follows the system&#x27;s light or dark mode; dark; light; high-contrast: the strongest colours. <span class="sm">auto | dark | light | high-contrast (or empty: not set) · default auto</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-density">
+<span class="cn">
+<code>density</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">wall: big type for a monitor across the room, small print hidden, lists cut to 3 lines; desk: the default; compact: more on one screen. <span class="sm">wall | desk | compact (or empty: not set) · default desk</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-start_view">
+<span class="cn">
+<code>start_view</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The screen the console and the web view open at. <span class="sm">overview | map | cpu | health | ai (or empty: not set) · default overview</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-preset">
+<span class="cn">
+<code>preset</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A ready-made layout, key figures and hidden cards: default; security (exposure and the firewall first); server (the system and the containers first); desktop (no containers, databases or web apps). layout, kpis and hidden below override it. <span class="sm">default | security | server | desktop (or empty: not set) · default default</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-order">
+<span class="cn">
+<code>order</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">severity: a card that needs attention moves up; fixed: the cards keep the layout&#x27;s order. On the console the cards keep their order unless this says severity. <span class="sm">severity | fixed (or empty: not set) · default severity</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-kpis">
+<span class="cn">
+<code>kpis</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Up to 8 key figures for the top row, in order, of: problems, internet, lan, beyond, db_lan, firewall, cpu, ram, disk, temp, load, containers, unhealthy, failed_units, ssh, tailnet, rx, tx, uptime, health, ai. Empty: the preset&#x27;s.</p>
+</div>
+<div class="ck cko" id="k-ui-layout">
+<span class="cn">
+<code>layout</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The cards that show, in order: name or name:width (1-4 columns on the web), of: attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks. Cards left out of layout and hidden are added at the end. Empty: the preset&#x27;s.</p>
+</div>
+<div class="ck cko" id="k-ui-hidden">
+<span class="cn">
+<code>hidden</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The cards that do not show (same names). none = nothing hidden; empty: the preset&#x27;s.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-display">
+<summary>
+<code>[display]</code> Display at login (macOS and Windows installations)</summary>
+<p class="hintl">How an installed nuc-console shows itself when you log in. The desktop app is its own window: of this section it uses zoom only.</p>
+<div class="ck cko" id="k-display-mode">
+<span class="cn">
+<code>mode</code>
+</span>
+<code class="cv">browser</code>
+<p class="hintl">browser: at every login it opens in a normal window of your browser; fullscreen: full screen, the overview and the Details pages taking turns (Alt+F4 / Cmd+Q closes it); none: it never opens by itself (a machine without a monitor). The installers apply it. <span class="sm">browser | fullscreen | none · default browser</span>
+</p>
+</div>
+<div class="ck cko" id="k-display-zoom">
+<span class="cn">
+<code>zoom</code>
+</span>
+<code class="cv">100</code>
+<p class="hintl">Text size of the web pages in percent (the A- / A+ links change it while you look). Bigger: fewer columns. <span class="sm">50-200 · default 100</span>
+</p>
+</div>
+<div class="ck cko" id="k-display-browser">
+<span class="cn">
+<code>browser</code>
+</span>
+<code class="cv">auto</code>
+<p class="hintl">The browser of the full-screen window: auto = Edge, then Chrome, then Firefox (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS); or the full path of a Chromium-based browser. <span class="sm">default auto</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-web">
+<summary>
+<code>[web]</code> Web view (an installation&#x27;s service)</summary>
+<p class="hintl">The optional web service of an installation, the dashboard&#x27;s only network listener. The desktop app and a portable run always serve 127.0.0.1 on a port of their own, without a token: they use the grid size and allowed_hosts only.</p>
+<div class="ck cko" id="k-web-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: an installation runs the web view as a service (off by default). <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-bind">
+<span class="cn">
+<code>bind</code>
+</span>
+<code class="cv">127.0.0.1</code>
+<p class="hintl">The address it listens on. 127.0.0.1 = this machine only: publish it with tailscale serve or a reverse proxy. Any other address needs token_file, or the service refuses to start. <span class="sm">default 127.0.0.1</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-port">
+<span class="cn">
+<code>port</code>
+</span>
+<code class="cv">8787</code>
+<p class="hintl">The TCP port it listens on (by default: http://127.0.0.1:8787). <span class="sm">1-65535 · default 8787</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-token_file">
+<span class="cn">
+<code>token_file</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A file with a secret of 16 characters or more (mode 0600, readable by the nuc-console user): every request must carry it. Never write the token itself in config.ini.</p>
+</div>
+<div class="ck cko" id="k-web-allowed_hosts">
+<span class="cn">
+<code>allowed_hosts</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, 127.0.0.1, the bind address, the hostname and *.ts.net always are.</p>
+</div>
+<div class="ck cko" id="k-web-columns">
+<span class="cn">
+<code>columns</code>
+</span>
+<code class="cv">200</code>
+<p class="hintl">Width of the classic web pages&#x27; grid in characters (a page can ask ?cols=). <span class="sm">60-300 · default 200</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-rows">
+<span class="cn">
+<code>rows</code>
+</span>
+<code class="cv">60</code>
+<p class="hintl">Height of that grid in lines. <span class="sm">20-120 · default 60</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-telegram">
+<summary>
+<code>[telegram]</code> Telegram alerts</summary>
+<p class="hintl">New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram page: the token is never in config.ini.</p>
+<div class="ck cko" id="k-telegram-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the notifier sends. The Telegram page can switch it on too, and cannot switch off a yes written here. <span class="sm">yes or no · default no · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-username">
+<span class="cn">
+<code>username</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Your Telegram @username (5-32 letters, digits, _): who may receive the messages. The pairing writes it. <span class="sm">the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-detail">
+<span class="cn">
+<code>detail</code>
+</span>
+<code class="cv">titles</code>
+<p class="hintl">titles: only a problem&#x27;s title leaves this machine; full: its text too (container names, ports), which then goes through Telegram&#x27;s servers. <span class="sm">titles | full · default titles · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-resolved">
+<span class="cn">
+<code>resolved</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: a message also when a problem is gone. <span class="sm">yes or no · default yes · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-web_actions">
+<span class="cn">
+<code>web_actions</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: the Telegram page may pair, switch on and off and send a test; no: it only shows (an administrator&#x27;s lock). <span class="sm">yes or no · default yes · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-ai">
+<summary>
+<code>[ai]</code> Local AI</summary>
+<p class="hintl">A small model on this machine that turns the HEALTH findings into advice and answers questions about the machine. It only reads and suggests: it never runs anything.</p>
+<div class="ck cko" id="k-ai-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the advisor is on, with the model below. The AI page&#x27;s on and off do the same without this file; a yes here wins. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-endpoint">
+<span class="cn">
+<code>endpoint</code>
+</span>
+<code class="cv">http://127.0.0.1:11434/v1</code>
+<p class="hintl">The OpenAI-compatible server the advisor asks (Ollama, llama.cpp server, LM Studio): on this machine, unless allow_remote = yes. <span class="sm">default http://127.0.0.1:11434/v1</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-model">
+<span class="cn">
+<code>model</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The model&#x27;s name as the server lists it, or a catalog id such as qwen3-8b. Empty: the server&#x27;s first.</p>
+</div>
+<div class="ck cko" id="k-ai-gpu">
+<span class="cn">
+<code>gpu</code>
+</span>
+<code class="cv">auto</code>
+<p class="hintl">auto: the model server nuc-console starts uses the GPU when the model fits there, all of it or some layers; no: it runs on the CPU. Applies when the server starts again (AI off, then on). <span class="sm">auto | no · default auto</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-allow_remote">
+<span class="cn">
+<code>allow_remote</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the endpoint may be on another machine, and the machine&#x27;s history goes there with each question. <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-timeout_s">
+<span class="cn">
+<code>timeout_s</code>
+</span>
+<code class="cv">120</code>
+<p class="hintl">Seconds an answer may take. <span class="sm">10-600 · default 120</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-web_actions">
+<span class="cn">
+<code>web_actions</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: the AI page and the AI screen may set a model up, switch the AI on and off, delete models and ask; no: they only show (an administrator&#x27;s lock). <span class="sm">yes or no · default yes · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-daily">
+<span class="cn">
+<code>daily</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the collector asks for one digest of the last 7 days a day (at low priority), shown on the HEALTH screen. It needs enabled = yes and the Health screen. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-webapps">
+<summary>
+<code>[webapps]</code> Web apps you expect</summary>
+<p class="hintl">One per line, name = port[, port...]: shown in WEB APPS as active, or DOWN when nothing listens there. A port listed here is an intended exposure: it no longer counts as a Docker port bypassing ufw.</p>
+<div class="ck wide">
+<pre class="cmap">admin-console = 9443
+shop-web = 8080</pre>
+</div>
+</details>
+<details class="cfgs" id="cfg-expose">
+<summary>
+<code>[expose]</code> Intended reach of services</summary>
+<p class="hintl">One per line, name or port = local | tailnet | lan | internet: the widest reach you intend. When the real reach is wider, ATTENTION raises over-exposed (the other alarms are never silenced by it). A name is a container, a compose service or project, a process, a systemd unit, a database name or kind, or a [webapps] name; a port is 8080 or 8080/udp. Several lines on one service: the most restrictive wins.</p>
+<div class="ck wide">
+<pre class="cmap">n8n = tailnet
+shop-db = local
+shop-web = lan</pre>
+</div>
+</details>
+</div>
 </section>
 <section class="sec" id="alerts" aria-labelledby="sec-alerts">
 <h3 class="sech" id="sec-alerts">Phone alerts</h3>

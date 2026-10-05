@@ -74,6 +74,29 @@ def on(feature):
     return CFG["features"].get(feature, True)
 
 ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
+
+
+def reload_config():
+    """config.ini read again into CFG, in place: every module holds this very dict and its parts, so they all see what the settings page just
+    wrote; the pace of the rotation with it. A file that cannot be read changes nothing (the page wrote one load() read back)."""
+    global MODE, ROTATE_S, REFRESH_S
+    new = nuc_config.load()
+    if new.get("config_error"):
+        return False
+    for k, v in new.items():
+        old = CFG.get(k)
+        if isinstance(old, dict) and isinstance(v, dict):
+            old.clear()
+            old.update(v)
+        elif isinstance(old, list) and isinstance(v, list):
+            old[:] = v
+        else:
+            CFG[k] = v
+    MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]
+    ROTATE_S, REFRESH_S = CFG["rotate_seconds"], CFG["refresh_seconds"]
+    return True
+
+
 WIDE = 200  # from this width up: containers in 2 columns, exposure and firewall side by side
 PAGES = tuple(n for n, ok in (("System", True), ("Network & firewall", on("exposure") or on("firewall")),
                               ("Boot", on("boot"))) if ok)
