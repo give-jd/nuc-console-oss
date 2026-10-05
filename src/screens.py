@@ -2080,20 +2080,75 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
 
 def ai_chat_nodes(snap, chat, acts):
     """The chat under the switch: what was asked and answered (chat: the Qa of the exchanges, oldest first, built by the page from the engine's
-    history), the question box, 'advice now', and why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
+    history) in a box that scrolls (ui.Log: the page does not grow with it), the question box, 'advice now', the button that clears the chat, and
+    why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
     c = snap["chat"]
     if acts is None and not chat:
         return []  # a page that only shows, with nothing asked yet: no heading over nothing
     ready = dd(snap.get("switch")).get("on") and snap["state"][0] != "working"
     asleep = not ready or bool(c["busy"])
-    out = [Head("CHAT", "ask the model about this machine (it reads this machine's history; AI, check before acting)")] + list(chat)
+    out = [Head("CHAT", "ask the model about this machine (it sees its state now and reads its history; AI, check before acting)")]
+    if chat:
+        out.append(ui.Log(chat))
     if acts is not None:
         out.append(_act(acts, "ask", "Ask", (), "", "ok", "", asleep, ("q", "ask: why is the disk filling up?", 500)))
+        clear = [_sp("·", "muted"), _act(acts, "clear", "Clear chat", (), "", None, "forget the questions and answers on this page")] if c["history"] else []
         out.append(Controls([_sp("advice now:", "muted")] + [_act(acts, "advise", label, [("days", d)], "", None, "", asleep)
-                                                              for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))]))
+                                                              for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))] + clear))
         if not ready:
             out.append(Msg("info", "the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
     return [Group(out)]
+
+
+def ai_pct(x):
+    """45.0 -> '45%', 2.46 -> '2.5%', None -> '?'."""
+    x = num(x)
+    return "?" if x is None else f"{x:.0f}%" if x >= 10 else f"{x:.1f}%"
+
+
+def ai_usage_nodes(snap):
+    """MODEL USAGE, beside the chat: what the model uses now, as the engine measured it (snap["usage"]: aiweb.usage_of): the models loaded (in
+    the GPU's memory, in RAM), the CPU and the memory of the model server's processes, how busy each GPU is. Nothing measured when the AI is
+    off; a value that cannot be read is '?', never a bar that looks fine."""
+    u = snap.get("usage")
+    head = Head("MODEL USAGE", "measured every few seconds while this page is open" + (" (demo: invented)" if dd(u).get("demo") else ""))
+    if not isinstance(u, dict):
+        return [head, Msg("info", "the AI is off: turn it on to see what the model uses")]
+    if u.get("measuring"):
+        return [head, Msg("info", "measuring…")]
+    pairs = []
+    models = u.get("models")
+    if isinstance(models, list) and models:
+        for m in models[:3]:
+            size, vram = num(m.get("size_mb")), num(m.get("vram_mb"))
+            where = ("all in the GPU's memory" if size and vram is not None and vram >= size * 0.99 else
+                     "all in RAM (on the CPU)" if size and vram == 0 else
+                     f"{ai_mb(vram)} in the GPU's memory, {ai_mb(size - vram)} in RAM" if size and vram is not None else "where: ?")
+            ctx = f" · context {int(m['ctx'])} tokens" if num(m.get("ctx")) else ""
+            pairs.append(("model", Line([_sp(hclean(m.get("name"), 60) or "?", None, True), _sp(f"  {ai_mb(size)} · {where}{ctx}", "muted")])))
+    elif isinstance(models, list):
+        pairs.append(("model", Line([_sp("none loaded now", "muted"), _sp(": it loads at the next question", "muted")])))
+    else:
+        pairs.append(("model", Line([_sp("?", "warn"), _sp(" the model server does not say what it has loaded" if u.get("running") else " the model server is not running", "muted")])))
+    pr = u.get("procs")
+    if isinstance(pr, dict):
+        share, cpu, threads = num(pr.get("share_pct")), num(pr.get("cpu_pct")), num(pr.get("threads"))
+        cores = f" · {cpu / 100:.1f} of {int(threads)} threads" if cpu is not None and threads else ""
+        pairs.append(("CPU", Line([Bar(None if share is None else share / 100, ai_pct(share), w=10, tone="accent"), _sp(cores, "muted")])))
+        mem, ram = num(pr.get("mem_mb")), num(pr.get("ram_mb"))
+        pairs.append(("RAM", Line([Bar(mem / ram if mem is not None and ram else None, ai_mb(mem), w=10, tone="accent"),
+                                   _sp(f" of {ai_mb(ram)}" if ram else "", "muted"), _sp(f" · {int(pr.get('n') or 0)} process" + ("es" if pr.get("n") != 1 else ""), "muted")])))
+    else:
+        pairs.append(("CPU", Line([_sp("?", "warn"), _sp(" no process of the model server is seen (started by another account?)", "muted")])))
+    gpus = u.get("gpus")
+    for g in (gpus or [])[:4]:
+        busy, used, total = num(g.get("busy_pct")), num(g.get("used_mb")), num(g.get("total_mb"))
+        mem = f" · {ai_mb(used)} of {ai_mb(total)} in use" if used is not None and total else f" · {ai_mb(used)} in use" if used is not None else ""
+        pairs.append(("GPU", Line([Bar(None if busy is None else busy / 100, ai_pct(busy), w=10, tone="accent"), _sp(" busy", "muted"),
+                                   _sp(mem, "muted"), _sp(" · " + (hclean(g.get("name"), 40) or "?"), "muted")])))
+    if not gpus:
+        pairs.append(("GPU", Line([_sp("?", "muted"), _sp(" " + (hclean(u.get("gpu_note"), 120) or "not read"), "muted")])))
+    return [head, KV(pairs)]
 
 
 def ai_models_web(rows, snap, sel, acts, links, windows):
@@ -2137,7 +2192,9 @@ def ai_model(data, st, snap, ch, rows, sel="", confirm="", acts=None, links=None
     if cat is None:
         return [ai_title(None, None)] + _msg("err" if data.get("err") else "info", data["msg"], None)
     hwd, ids = dd(cat.get("hw")), {r["id"] for r in rows}
-    out = [ai_title(rows, None), Group(ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links))] + ai_chat_nodes(snap, chat, acts)
+    out = [ai_title(rows, None), Group(ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links))]
+    talk = ai_chat_nodes(snap, chat, acts)
+    out.append(ui.Split(talk, [Group(ai_usage_nodes(snap))], 0, 0) if talk else Group(ai_usage_nodes(snap)))  # the chat, and beside it what the model uses
     hh, hb = ai_hw_kv(hwd)
     sh, sb = ai_status_kv(st, cat, ids)
     out.append(ui.Cols([(Group([hh] + hb), None), (Group([sh] + sb), None)]))

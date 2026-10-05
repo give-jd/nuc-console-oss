@@ -3,6 +3,21 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+
+- **The AI chat knows the machine now.** A question asked on the AI page carries the machine as its pages show it at that moment (the status,
+  the problems, the key figures, the busiest processes by name, the HEALTH findings) as compact JSON beside the question: the model can say why it
+  is slow right now, and it answers even before there is any history. Each answer says what it was built from. [docs/AI.md](docs/AI.md)
+- **Clear chat** on the AI page (`POST /ai/clear`, with the CSRF token like the other buttons).
+- **Model usage** on the AI page, beside the chat: the models the server has loaded and where (GPU memory or RAM), the CPU and memory of the
+  model server, and how busy each GPU is (`nvidia-smi`, `amdgpu`, `ioreg` on macOS). Measured every 3 s only while the page is open and the AI is on.
+
+### Fixed
+
+- **The AI chat no longer stretches the page**: its questions and answers are in a box of their own height that scrolls, the newest in sight.
+
 ## [2.1.0] - 2026-10-03
 
 The desktop app, with packages for Windows, macOS and Linux built and tried on every release; the live app (`/app`) and a data API

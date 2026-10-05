@@ -5,18 +5,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>demo-host · telegram · nuc-console</title>
+<title>demo-host · ai · nuc-console</title>
 <link rel="stylesheet" href="/s/app.cefeadd9.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
+<header class="topbar" data-card="__top" data-rev="78a50561ef">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?app=1" data-key="1">
 <kbd>1</kbd>Overview</a>
 <a href="/?app=1&amp;view=map" data-key="2">
-<kbd>2</kbd>Map</a>
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
 <a href="/?app=1&amp;view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
 <a href="/?app=1&amp;view=health" data-key="4">
@@ -24,7 +25,7 @@
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5">
+<a href="/?app=1&amp;view=ai" data-key="5" aria-current="page">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -32,69 +33,669 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings" aria-current="page">⚙︎</a>
+<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
+<div class="kpiblock" data-card="__kpis" data-rev="fba522a530">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?app=1#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view">
-<div class="vb" data-card="__view" data-rev="3deb61d27b">
-<div class="settings av" id="tg">
-<section class="sec" aria-labelledby="sec-tg">
-<h3 class="sech" id="sec-tg">Telegram alerts</h3>
-<p class="hintl">New and resolved ATTENTION problems of this machine on your phone, through a Telegram bot of your own. The machine only sends: it never reads your messages and opens no port.</p>
+<div class="vb" data-card="__view" data-rev="94a8c46a1b">
+<div class="scr av">
+<header class="st">
+<h2>AI</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">what this machine can run</span>
+</span>
+<span class="bit">
+<span class="t-muted">12 models</span>
+</span>
+<span class="bit">
+<span class="t-ok">✔ 10 fit</span>  <span class="t-accent">◐ 2 gpu+cpu</span>
+</span>
+</p>
+</header>
+<section class="grp">
 <div class="controls">
-<span class="pl d big">OFF</span>
-<span class="ci">off: no alert leaves this machine</span>
+<div class="ci">
+<span class="tag ok">● ON</span>
 </div>
-<dl class="about">
-<dt>sends to</dt>
-<dd>nobody yet: pair it below</dd>
-<dt>switched on</dt>
-<dd>no</dd>
-<dt>notifier</dt>
-<dd>running, takes this page's requests</dd>
-<dt>last sent</dt>
-<dd>never</dd>
-<dt>last error</dt>
-<dd>none</dd>
-<dt>content</dt>
-<dd>titles only ([telegram] detail = titles), resolved problems too</dd>
+<div class="ci">
+<span class="b">on: qwen3-4b runs here and answers at http://127.0.0.1:8080/v1</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/off">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<button class="bt bt-err" type="submit" title="stop the model server and turn the advisor off" data-key="e">Turn AI off</button>
+</form>
+</div>
+</div>
+<p class="ln">
+<span class="t-muted">models are downloaded to </span>
+<span class="mono">/var/lib/nuc-console/ai</span>
+<span class="t-muted"> · 5.0 GB downloaded · 412.0 GB free on that disk</span>
+</p>
+</section>
+<div class="split">
+<div class="sp-l">
+<section class="grp">
+<h3 class="sub">CHAT <span class="note">ask the model about this machine (it sees its state now and reads its history; AI, check before acting)</span>
+</h3>
+<div class="log" role="log" aria-label="chat">
+<div class="log-in">
+<div class="qa">
+<p class="q">
+<strong>you:</strong> why is the disk filling up?</p>
+<div class="advice">
+<p class="advice-head">ANSWER (AI, qwen3:4b) — check before acting</p>
+<p>/data grows by about 2 GB a day: shop-worker writes its logs there.</p>
+<p>Rotate them, then check again tomorrow.</p>
+<p class="advice-tools">queries: disk_forecast · and this machine&#x27;s state now</p>
+</div>
+</div>
+<div class="qa">
+<p class="q">
+<strong>you:</strong> advice on the last 7 days</p>
+<div class="advice advice-error">
+<p class="advice-head">ADVICE (AI) — not available</p>
+<p>the model server stopped answering</p>
+</div>
+</div>
+</div>
+</div>
+<form class="f" method="post" action="/ai/ask">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input class="q" type="text" name="q" maxlength="500" placeholder="ask: why is the disk filling up?" aria-label="ask: why is the disk filling up?" autocomplete="off"> <button class="bt bt-ok" type="submit">Ask</button>
+</form>
+<div class="controls">
+<div class="ci">
+<span class="t-muted">advice now:</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="days" value="1">
+<button class="bt" type="submit">last 24 h</button>
+</form>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="days" value="7">
+<button class="bt" type="submit">last 7 days</button>
+</form>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/advise">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="days" value="30">
+<button class="bt" type="submit">last 30 days</button>
+</form>
+</div>
+<div class="ci">
+<span class="t-muted">·</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/clear">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<button class="bt" type="submit" title="forget the questions and answers on this page">Clear chat</button>
+</form>
+</div>
+</div>
+</section>
+</div>
+<div class="sp-r">
+<section class="grp">
+<h3 class="sub">MODEL USAGE <span class="note">measured every few seconds while this page is open (demo: invented)</span>
+</h3>
+<dl class="kv">
+<dt>model</dt>
+<dd>
+<span class="b">qwen3-4b</span>
+<span class="t-muted">  2.8 GB · all in the GPU&#x27;s memory · context 4096 tokens</span>
+</dd>
+<dt>CPU</dt>
+<dd>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="3%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2.6" height="8"/>
+</svg>
+<span class="n">2.6%</span>
+<span class="t-muted"> · 0.4 of 16 threads</span>
+</dd>
+<dt>RAM</dt>
+<dd>
+<svg class="bar st-ok t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="2%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="2.2" height="8"/>
+</svg>
+<span class="n">690 MB</span>
+<span class="t-muted"> of 31.2 GB</span>
+<span class="t-muted"> · 2 processes</span>
+</dd>
+<dt>GPU</dt>
+<dd>
+<svg class="bar st-warn t-accent" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="73%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="73" height="8"/>
+</svg>
+<span class="n">73%</span>
+<span class="t-muted"> busy</span>
+<span class="t-muted"> · 3.4 GB of 12.0 GB in use</span>
+<span class="t-muted"> · NVIDIA GeForce RTX 3060</span>
+</dd>
 </dl>
 </section>
-<section class="sec" aria-labelledby="sec-tgp" id="tg-pair">
-<h3 class="sech" id="sec-tgp">Pair it with your Telegram</h3>
-<ol class="hintl">
-<li>In Telegram open <b>@BotFather</b>, send <b>/newbot</b>, choose a name and a username ending in <i>bot</i>, and copy the <b>token</b> it gives you. It is a password: whoever has it can write as your bot.</li>
-<li>Paste it below with your own <b>@username</b> (Telegram: Settings &gt; Username): only that person can pair.</li>
-<li>Press Pair, then open the link this page shows and press <b>Start</b>.</li>
-</ol>
-<form class="f" method="post" action="/telegram/pair">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="app=1&amp;view=telegram">
-<div class="fs">
-<label class="lab" for="tg-token">Bot token</label>
-<input class="q" id="tg-token" type="password" name="token" maxlength="100" autocomplete="off" required placeholder="123456789:AA…">
 </div>
-<div class="fs">
-<label class="lab" for="tg-user">Your Telegram @username</label>
-<input class="q" id="tg-user" type="text" name="username" maxlength="33" autocomplete="off" required placeholder="@your_name" value="">
 </div>
-<button class="bt on" type="submit">Pair</button>
-</form>
-<p class="hintl">The token goes to the notifier service, which keeps it where this web view cannot read it again. The same on the machine: <code class="cmd">sudo nuc-console-telegram --setup</code>.</p>
+<div class="cols">
+<div class="col">
+<section class="grp">
+<h3 class="sub">HARDWARE <span class="note">linux x86_64</span>
+</h3>
+<dl class="kv">
+<dt>CPU</dt>
+<dd>
+<span class="b">AMD Ryzen 7 5800X</span>
+<span class="t-muted"> · 8 cores / 16 threads</span>
+<span class="t-muted"> · AVX2</span>
+</dd>
+<dt>RAM</dt>
+<dd>
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="33%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="32.6" height="8"/>
+</svg>  21.0 GB free of 31.2 GB</dd>
+<dt>GPU</dt>
+<dd>
+<span class="b">NVIDIA GeForce RTX 3060</span>
+<span class="t-muted"> · CUDA</span>  <svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="8%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="8.3" height="8"/>
+</svg>  11.0 GB free of 12.0 GB</dd>
+</dl>
 </section>
+</div>
+<div class="col">
+<section class="grp">
+<h3 class="sub">STATUS</h3>
+<dl class="kv">
+<dt>advisor</dt>
+<dd>
+<span class="t-ok">✔ on</span>
+<span class="t-muted">  (turned on from the AI page or screen)</span>
+</dd>
+<dt>endpoint</dt>
+<dd>http://127.0.0.1:8080/v1</dd>
+<dt>server</dt>
+<dd>
+<span class="t-ok">✔ answering</span>
+<span class="t-muted"> · 1 model: qwen3-4b</span>
+</dd>
+<dt>model</dt>
+<dd>
+<span class="t-accent">●</span> <span class="b">qwen3-4b</span>
+<span class="t-muted">  in the catalog</span>
+</dd>
+<dt>runtime</dt>
+<dd>
+<span class="t-ok">✔ installed</span>
+<span class="t-muted"> (Ollama 0.35.0)</span>
+</dd>
+<dt>files</dt>
+<dd>
+<span class="t-muted mono">/var/lib/nuc-console/ai</span>
+</dd>
+</dl>
+</section>
+</div>
+</div>
+<section class="grp">
+<h3 class="sub">MODELS <span class="note">best first</span>
+</h3>
+<table class="tbl">
+<colgroup>
+<col class="c-name">
+<col class="c-params">
+<col class="c-size">
+<col class="c-need">
+<col class="c-verdict">
+<col class="c-tok">
+<col class="c-notes">
+<col class="c-use">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Model</th>
+<th class="p2" scope="col">Params</th>
+<th class="r n p2" scope="col">Size</th>
+<th class="r n p2" scope="col">Needs</th>
+<th scope="col">Verdict</th>
+<th class="r n p3" scope="col">Est tok/s</th>
+<th class="p3" scope="col">Notes</th>
+<th scope="col">
+</th>
+</tr>
+</thead>
+<tbody>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1">
+<span class="b">OpenAI gpt-oss 20B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">21B-A3.6B</span>
+</td>
+<td class="r n p2">11.8 GB</td>
+<td class="r n p2">12.5 GB</td>
+<td>
+<span class="tag accent">◐ GPU+CPU</span>
+</td>
+<td class="r n p3">36-66</td>
+<td class="p3">
+<span class="t-muted">fast for its size (MoE, 3.6B active); reasoning effort is a setting</span>
+</td>
+<td>
+<span class="t-muted">not pinned yet</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<span class="b">Qwen3 30B-A3B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">30.5B-A3.3B</span>
+</td>
+<td class="r n p2">18.2 GB</td>
+<td class="r n p2">19.3 GB</td>
+<td>
+<span class="tag accent">◐ GPU+CPU</span>
+</td>
+<td class="r n p3">19-37</td>
+<td class="p3">
+<span class="t-muted">fast on CPU (MoE: only 3.3B parameters work per token)</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="qwen3-30b-a3b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=phi-4&amp;app=1">
+<span class="b">Phi-4 14B</span>
+<span class="t-warn">  ★ recommended</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">14.7B</span>
+</td>
+<td class="r n p2">8.9 GB</td>
+<td class="r n p2">9.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">strong at reasoning and code; short context (16k)</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="phi-4">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1">
+<span class="b">Qwen3 14B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">14.8B</span>
+</td>
+<td class="r n p2">8.8 GB</td>
+<td class="r n p2">9.7 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">17-28</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="qwen3-14b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1">
+<span class="b">Qwen3 8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p2">4.9 GB</td>
+<td class="r n p2">5.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">thinking mode: /no_think turns it off</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="qwen3-8b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1">
+<span class="b">IBM Granite 3.3 8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">8.2B</span>
+</td>
+<td class="r n p2">4.9 GB</td>
+<td class="r n p2">5.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">31-51</td>
+<td class="p3">
+<span class="t-muted">long context (128k); tuned for business tasks</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="granite-3.3-8b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1">
+<span class="b">Phi-4-mini 3.8B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">3.8B</span>
+</td>
+<td class="r n p2">2.4 GB</td>
+<td class="r n p2">3.3 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">small and good at reasoning; long context</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="phi-4-mini">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1">
+<span class="b">Qwen3 4B</span>
+<span class="t-ok">  ✓ installed</span>
+<span class="t-accent">  ● active</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">4B</span>
+</td>
+<td class="r n p2">2.4 GB</td>
+<td class="r n p2">3.3 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">61-102</td>
+<td class="p3">
+<span class="t-muted">the default of nuc-console-ai: good advice in about 4 GB</span>
+</td>
+<td>
+<span class="t-ok">● in use</span>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1">
+<span class="b">SmolLM3 3B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">3.1B</span>
+</td>
+<td class="r n p2">1.9 GB</td>
+<td class="r n p2">2.7 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">81-135</td>
+<td class="p3">
+<span class="t-muted">small, multilingual, long context</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="smollm3-3b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1">
+<span class="b">IBM Granite 3.3 2B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">2.5B</span>
+</td>
+<td class="r n p2">1.6 GB</td>
+<td class="r n p2">2.5 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">96-160</td>
+<td class="p3">
+<span class="t-muted">very small; fine for short advice</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="granite-3.3-2b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1">
+<span class="b">Qwen3 1.7B</span>
+<span class="t-ok">  ✓ installed</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">1.7B</span>
+</td>
+<td class="r n p2">1.1 GB</td>
+<td class="r n p2">1.8 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">140-233</td>
+<td class="p3">
+<span class="t-muted">runs anywhere; thinking mode: /no_think</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="qwen3-1.7b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+<tr data-row>
+<td>
+<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1">
+<span class="b">Qwen3 0.6B</span>
+</a>
+</td>
+<td class="p2">
+<span class="t-muted">0.6B</span>
+</td>
+<td class="r n p2">400 MB</td>
+<td class="r n p2">1.1 GB</td>
+<td>
+<span class="tag ok">✔ FITS GPU</span>
+</td>
+<td class="r n p3">384-640</td>
+<td class="p3">
+<span class="t-muted">a toy: too small to give reliable advice</span>
+</td>
+<td>
+<form class="f" method="post" action="/ai/use">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="model" value="qwen3-0.6b">
+<button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
+</form>
+</td>
+</tr>
+</tbody>
+</table>
+<p class="ln"> <span class="t-warn">★</span>
+<span class="t-muted"> recommended</span>  ·  <span class="t-ok">✓</span>
+<span class="t-muted"> installed</span>  ·  <span class="t-accent">●</span>
+<span class="t-muted"> active</span>  ·  <span class="t-muted">tok/s: rough estimate</span>
+</p>
+</section>
+<div class="controls">
+<div class="ci">
+<span class="t-muted">manage:</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/delete-all">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<button class="bt bt-err" type="submit" title="asks first" data-key="X">delete everything</button>
+</form>
+</div>
+<div class="ci">
+<span class="t-muted">the runtime and every model (5.0 GB)</span>
+</div>
+</div>
 </div>
 </div>
 </main>
-<footer class="foot">text <a href="/?zoom=90&amp;app=1&amp;view=telegram">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;view=telegram">A+</a>
+<footer class="foot">refresh every <a href="/?view=ai&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;refresh=3&amp;app=1">+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26view%3Dtelegram">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26view%3Dtelegram">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26view%3Dtelegram">high contrast</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;pause=1&amp;app=1">pause</a>
+<span class="dot">·</span>
+<a class="lnk" href="/app?view=ai">live app</a>
+<span class="dot">·</span>text <a href="/?view=ai&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>
+<span class="grp">theme: <span class="lnk" aria-current="true">auto</span> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26app%3D1">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1%26view%3Dtelegram">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26view%3Dtelegram">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26app%3D1">wall</a> <span class="lnk" aria-current="true">desk</span> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26app%3D1">compact</a>
 </span>
-<span class="dot">·</span>Telegram setup<span class="upd">updated 14:13:20</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>
 <section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
 <a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
@@ -105,6 +706,48 @@
 <a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
 </header>
 <div class="keys">
+<section>
+<h3>AI</h3>
+<dl>
+<dt>
+<kbd>e</kbd>
+</dt>
+<dd>AI on/off</dd>
+<dt>
+<kbd>u</kbd>
+</dt>
+<dd>use model</dd>
+<dt>
+<kbd>x</kbd> <kbd>X</kbd>
+</dt>
+<dd>delete/delete all</dd>
+<dt>
+<kbd>c</kbd>
+</dt>
+<dd>cancel</dd>
+<dt>
+<kbd>y/n</kbd>
+</dt>
+<dd>answer a question</dd>
+</dl>
+</section>
+<section>
+<h3>Lists</h3>
+<dl>
+<dt>
+<kbd>↑↓</kbd>
+</dt>
+<dd>move</dd>
+<dt>
+<kbd>PgUp/PgDn/Home/End</kbd>
+</dt>
+<dd>page</dd>
+<dt>
+<kbd>Enter</kbd>
+</dt>
+<dd>details</dd>
+</dl>
+</section>
 <section>
 <h3>Everywhere</h3>
 <dl>

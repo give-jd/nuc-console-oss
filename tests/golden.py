@@ -156,8 +156,9 @@ class FrozenWorld(object):
     known. Everything is put back on exit: the same objects with the same contents (the tests of this repository change render.CFG in
     place and keep references to what is inside it)."""
 
-    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW, env=None):
+    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW, env=None, chat=()):
         self.cfg, self.mode, self.accepted, self.clock, self.env = cfg or {}, mode, accepted, Clock(now), env or {}
+        self.chat = chat  # the AI chat's exchanges, as the engine keeps them (CHAT), put into the engine of the server
         self._undo, self._tmp, self._server = [], None, None
 
     # -- patching, with a way back
@@ -282,6 +283,7 @@ class FrozenWorld(object):
             cfg = dict(nuc_config.load("/nonexistent")["web"], refresh_seconds=2)
             self._server = web.Server(("127.0.0.1", 0), cfg, "", demo=True)
             self._server.csrf = "csrf-token"  # random in every process: the page has the same one (web_text masks it anyway)
+            aiweb.engine().history.extend(dict(e) for e in self.chat)  # the server made the engine its pages read
         return self._server
 
     def page(self, query):
@@ -315,11 +317,11 @@ class Case(object):
     """One golden file. console: args are the arguments of `render.py --once --demo --color`; web: query is the query string of the page
     (the name starts with 'web-'). cfg: changes to the configuration; mode: render.MODE; accepted: see FrozenWorld; env: environment
     variables (NO_COLOR) the case sets."""
-    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted", "env")
+    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted", "env", "chat")
 
-    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=(), env=None):
+    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=(), env=None, chat=()):
         self.name, self.args, self.query, self.cfg, self.mode, self.accepted = name, tuple(args), query, cfg or {}, mode, accepted
-        self.env = env or {}
+        self.env, self.chat = env or {}, chat
 
     @property
     def filename(self):
@@ -330,7 +332,7 @@ class Case(object):
         return os.path.join(GOLDEN_DIR, self.filename)
 
     def render(self):
-        with FrozenWorld(self.cfg, self.mode, self.accepted, env=self.env) as world:
+        with FrozenWorld(self.cfg, self.mode, self.accepted, env=self.env, chat=self.chat) as world:
             return world.page(self.query) if self.query is not None else world.once(self.args)
 
 
@@ -345,6 +347,11 @@ SELECTED = {  # what a case selects: the key of a MAP row (graph.path_key of its
 ROTATION = {"map_in_rotation": True, "cpu_in_rotation": True, "health_in_rotation": True}  # the slides: ..., Map, CPU, Health
 LOCKED = {"ai": {"web_actions": False}}  # merged into the default [ai]
 CLASSIC = {"ui": {"web": "classic"}}  # [ui] web = classic: the classic pages (kept for one release); the default is the shell
+CHAT = (  # the AI chat after two exchanges: an answer from the state and one query, and an advice that failed (the page draws them in its log)
+    {"kind": "ask", "q": "why is the disk filling up?", "error": "", "at": NOW - 120,
+     "res": {"text": "/data grows by about 2 GB a day: shop-worker writes its logs there.\n\nRotate them, then check again tomorrow.",
+             "tools_used": ["disk_forecast"], "model": "qwen3:4b", "calls": [], "state": True}},
+    {"kind": "advise", "q": "advice on the last 7 days", "res": None, "error": "the model server stopped answering", "at": NOW - 60})
 ACCEPTED = (("container-exited", 1, "1 container exited with an error"),
             ("docker-bypass", 1, "1 Docker port bypassing ufw (DOCKER-USER empty)"))
 
@@ -457,6 +464,7 @@ def _cases():
                         ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
         add("web-shell-" + name, query=query)
     add("web-shell-ai-locked", query="app=1&view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
+    add("web-shell-ai-chat", query="app=1&view=ai", chat=CHAT)  # the chat in its box that scrolls, its Clear button, and beside it MODEL USAGE
     # the Telegram page: off and not paired (the steps and the form, with the masked CSRF token); locked by the admin: no form
     add("web-shell-telegram", query="app=1&view=telegram")
     add("web-shell-telegram-locked", query="app=1&view=telegram", cfg={"telegram": {"web_actions": False}})

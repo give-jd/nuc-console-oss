@@ -636,7 +636,7 @@ a.tg:hover{color:var(--fg-strong)}
 """
 MAP_VIEW = MAP_VIEW.replace("DEPTHS", "".join('.ob[data-depth="%d"]{padding-left:%.1fem}' % (d, 0.3 + 1.3 * d) for d in range(1, 13)))
 
-# the AI screen drawn from components (screens.ai_model; htmlview: Badge, Action, Controls, Question, Spec, Qa, Title, Cols, Split, Table): everything under
+# the AI screen drawn from components (screens.ai_model; htmlview: Badge, Action, Controls, Question, Spec, Qa, Log, Title, Cols, Split, Table): everything under
 # .av, which is also .scr (the panels, the table rows, the split). The buttons are forms that post to /ai/*: their look is here, their rules are the server's.
 AI_VIEW = """
 .av{display:grid;gap:var(--gap);min-width:0}
@@ -664,6 +664,8 @@ AI_VIEW = """
 .av table.tbl .bt{padding:.05em .7em;font-size:.92em;position:relative;z-index:1}
 .av input.q{font:inherit;width:min(42em,100%);padding:.3em .7em;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--fg-strong)}
 .av input.q:disabled{opacity:.55}
+.av .log{display:flex;flex-direction:column-reverse;max-height:min(30em,55vh);overflow-y:auto;overscroll-behavior:contain;margin:0 0 .7em;padding:0 .7em;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.av .log-in{padding:.2em 0}
 .av .qa{margin:.5em 0}
 .av .qa .q{margin:0 0 .35em}
 .av .pend{color:var(--muted)}
