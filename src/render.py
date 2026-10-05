@@ -1965,11 +1965,12 @@ def health_data(days):
     """health_build() of the last `days` days (1, 7 or 30), at most once per HEALTH_TTL per period: the console and every web request
     share it, so a key or a page never reads the history. A failure is kept for the same time (no retry on every key)."""
     days = days if days in HEALTH_DAYS else 7
+    src = (bool(DEMO), DEMO_OS, DEMO_HEALTH)  # where it was read: the demo's report is never the history's, nor one demo machine's another's
     with _HEALTH_LOCK:
         now = time.time()
         hit = _HEALTH.get(days)
-        if hit is None or not 0 <= now - hit["at"] < HEALTH_TTL:
-            hit = _HEALTH[days] = health_build(days, now)
+        if hit is None or hit.get("src", src) != src or not 0 <= now - hit["at"] < HEALTH_TTL:
+            hit = _HEALTH[days] = dict(health_build(days, now), src=src)
         return hit
 
 
