@@ -40,6 +40,8 @@ system warns the first time:
   one that runs, from a terminal or a script.
 - Links to anything but the dashboard (the docs, a project page) open in your browser, never in the window.
 - One app per user: starting it again shows the window of the one that runs.
+- **Settings** (the gear at the top right): the look of the dashboard, and **Screens and sections**, where each `[features]` switch (the Health
+  screen, the containers, the firewall...) is turned on or off in the app's `config.ini`, without a restart.
 
 On GNOME without the AppIndicator extension (Fedora's default) there is no tray icon: start the app again to show the window, and
 quit it with `nuc-console --quit`. Ubuntu, KDE, Xfce, Cinnamon and the others show it.

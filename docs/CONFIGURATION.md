@@ -23,6 +23,8 @@ web view is on `127.0.0.1`, on the port you give with `--port` / `-Port` or a fr
 ## `[features]` — switch sections on or off
 
 All default to `yes`. A disabled section is not drawn, raises no alarm and, for the collector-side ones, **its commands are never run as root**.
+The collector reads these switches again when `config.ini` changes (within 10 seconds, no restart); the screens of a running web view or console read them at
+their start. In a portable run and the desktop app the settings page turns them on and off itself ([WEB.md](WEB.md#the-settings-pages-switches)).
 
 | Key | Section | Runs as root |
 |---|---|---|

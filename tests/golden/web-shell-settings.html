@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>demo-host · settings · nuc-console</title>
-<link rel="stylesheet" href="/s/app.48894098.css">
+<link rel="stylesheet" href="/s/app.db4c777a.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
@@ -219,6 +219,114 @@ hidden =
 <div class="fs">
 <a class="lnk" data-set href="/?set=reset&amp;back=app%3D1%26view%3Dsettings">Reset to the defaults</a>
 </div>
+</section>
+<section class="sec" id="features" aria-labelledby="sec-feat">
+<h3 class="sech" id="sec-feat">Screens and sections</h3>
+<p class="hintl">Read-only here (installed: config.ini is the administrator&#x27;s): edit <b>[features]</b> in <code class="cmd">/nonexistent</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
+<ul class="feats">
+<li class="on" data-feature="map">
+<span class="ft">
+<b>Map screen</b> <span class="sm">who reaches what, and what is behind it</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="cpu">
+<span class="ft">
+<b>CPU screen</b> <span class="sm">per-core load, temperatures, the processes</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="health">
+<span class="ft">
+<b>Health screen</b> <span class="sm">which apps cause trouble over time; the collector keeps history.db</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="ai">
+<span class="ft">
+<b>AI screen</b> <span class="sm">the local model: what fits this machine, the chat</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="exposure">
+<span class="ft">
+<b>Exposure</b> <span class="sm">listening ports by scope, port alarms, Funnel</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="firewall">
+<span class="ft">
+<b>Firewall</b> <span class="sm">the firewall&#x27;s rules and recent drops</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="fail2ban">
+<span class="ft">
+<b>fail2ban</b> <span class="sm">jails and bans, inside Firewall</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="containers">
+<span class="ft">
+<b>Containers</b> <span class="sm">Docker containers and their health</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="databases">
+<span class="ft">
+<b>Databases</b> <span class="sm">database and broker ports, who connects</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="webapps">
+<span class="ft">
+<b>Web apps</b> <span class="sm">declared apps and the web listeners found</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="tailscale">
+<span class="ft">
+<b>Tailscale</b> <span class="sm">the tailnet&#x27;s peers</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="boot">
+<span class="ft">
+<b>Boot</b> <span class="sm">boot time, slowest and failed units, journal errors</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="docker_disk">
+<span class="ft">
+<b>Docker disk</b> <span class="sm">what Docker keeps on the disk</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="network_traffic">
+<span class="ft">
+<b>Network traffic</b> <span class="sm">per-interface throughput</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="sessions">
+<span class="ft">
+<b>Sessions</b> <span class="sm">logged-in users and SSH sessions</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="disks">
+<span class="ft">
+<b>Disks</b> <span class="sm">mounted filesystems</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="thermal">
+<span class="ft">
+<b>Thermal</b> <span class="sm">CPU and NVMe temperatures, throttling</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+</ul>
 </section>
 <section class="sec" aria-labelledby="sec-about">
 <h3 class="sech" id="sec-about">About this machine</h3>

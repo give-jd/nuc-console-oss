@@ -72,6 +72,8 @@ UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear")  # POST /ai/<action>
 AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
+SETTINGS_ACTIONS = ("feature",)  # POST /settings/<action>: the [features] switches of a portable run (the desktop app is one)
+POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS}
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 ZOOMS = (50, 67, 75, 90, 100, 110, 125, 150, 175, 200)  # text size steps (%), like a browser's: few values, bounded cache
 CACHE_MAX = 64       # rendered pages kept: map URLs have unbounded combinations, the least recently used goes first
@@ -196,6 +198,25 @@ KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", 
             "unhealthy": "containers", "failed_units": "boot", "ssh": "sessions", "tailnet": "tailscale", "rx": "network_traffic", "tx": "network_traffic"}
 KPI_VIEW = {"health": "health", "ai": "ai"}  # the key figures that open a screen
 STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "stale-net", "collector-boot")  # a collector that is not running
+FEATURE_WORDS = (  # the settings page's [features] switches, screens first: (key, title, what it is); every nuc_config.FEATURES once
+    ("map", "Map screen", "who reaches what, and what is behind it"),
+    ("cpu", "CPU screen", "per-core load, temperatures, the processes"),
+    ("health", "Health screen", "which apps cause trouble over time; the collector keeps history.db"),
+    ("ai", "AI screen", "the local model: what fits this machine, the chat"),
+    ("exposure", "Exposure", "listening ports by scope, port alarms, Funnel"),
+    ("firewall", "Firewall", "the firewall's rules and recent drops"),
+    ("fail2ban", "fail2ban", "jails and bans, inside Firewall"),
+    ("containers", "Containers", "Docker containers and their health"),
+    ("databases", "Databases", "database and broker ports, who connects"),
+    ("webapps", "Web apps", "declared apps and the web listeners found"),
+    ("tailscale", "Tailscale", "the tailnet's peers"),
+    ("boot", "Boot", "boot time, slowest and failed units, journal errors"),
+    ("docker_disk", "Docker disk", "what Docker keeps on the disk"),
+    ("network_traffic", "Network traffic", "per-interface throughput"),
+    ("sessions", "Sessions", "logged-in users and SSH sessions"),
+    ("disks", "Disks", "mounted filesystems"),
+    ("thermal", "Thermal", "CPU and NVMe temperatures, throttling"),
+)
 SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
 
 
@@ -364,7 +385,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         srv = self.server
         if u.path == "/healthz":
             return self._send(200, b"ok\n")
-        if u.path.startswith("/ai/") and u.path[4:] in AI_ACTIONS or u.path.startswith("/telegram/") and u.path[10:] in TG_ACTIONS:
+        area, _sep, act = u.path[1:].partition("/")
+        if act in POST_AREAS.get(area, ()):
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         api = u.path == API_PATH or u.path.startswith(API_PATH + "/")
         if u.path not in ("/", APP_PATH) and not u.path.startswith("/s/") and not api:
@@ -500,13 +522,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(304, extra=extra)
         self._send(200, blocks.encode(), "text/html; charset=utf-8", extra=extra)
 
-    def do_POST(self):  # noqa: N802 - the forms of the AI page and of the Telegram page, and nothing else
+    def do_POST(self):  # noqa: N802 - the forms of the AI page, of the Telegram page and of a portable run's settings, and nothing else
         u = urlsplit(self.path)
         area, sep, act = u.path[1:].partition("/")
-        if not sep or area not in ("ai", "telegram") or u.query:
+        if not sep or area not in POST_AREAS or u.query:
             return self._no()
         srv = self.server
-        if act not in (AI_ACTIONS if area == "ai" else TG_ACTIONS):
+        if act not in POST_AREAS[area]:
             return self._send(404, b"not found\n")
         # the same access as viewing: no token = loopback and a known Host name; a token = that token (constant time)
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
@@ -519,6 +541,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
         if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
             return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
+        if area == "settings" and not nuc_config.features_writable()[0]:
+            return self._send(403, ("config.ini is not this page's to write (%s): edit it, then restart\n" % nuc_config.features_writable()[1]).encode())
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site not in ("same-origin", "none"):
@@ -541,9 +565,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not hmac.compare_digest(((form.get("csrf") or [""])[0]).encode(), srv.csrf.encode()):
             return self._send(403, b"the form is not from this page (reload the page and try again)\n")
         try:
-            where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form)
+            where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form) if area == "telegram" else srv.settings_action(act, form)
         except BadRequest as e:
             return self._send(400, ("%s\n" % e).encode())
+        except OSError as e:  # the settings: config.ini could not be written (a full disk, a file made read-only meanwhile)
+            print("nuc-console web: config.ini not written: %r" % (e,), file=sys.stderr)
+            return self._send(500, b"config.ini could not be written (see the log)\n")
         self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
 
     def _no(self):
@@ -1243,7 +1270,36 @@ class Server(http.server.ThreadingHTTPServer):
                       f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
-        return View(f'<div class="settings">{appearance}{self.about_html(here)}</div>', [], vhere, False, legacy=False)
+        feats, forms = self.features_html(back)
+        return View(f'<div class="settings">{appearance}{feats}{self.about_html(here)}</div>', [], vhere, False, forms=forms, legacy=False)
+
+    def features_html(self, back):
+        """(the 'Screens and sections' block of the settings page, whether it has forms): every [features] switch with its state in words and a
+        symbol; in a portable run (the desktop app) a button that turns it on or off (a form posting to /settings/feature with the CSRF token),
+        in an installation the switches as they are and how to change them (config.ini is the administrator's: the page never writes it)."""
+        esc, feats = html.escape, render.CFG["features"]
+        ok, why = nuc_config.features_writable()
+        path = nuc_config.config_path()
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back)))
+        rows = []
+        for key, title, what in FEATURE_WORDS:
+            on = bool(feats.get(key, True))
+            state = f'<span class="fs-st {"on" if on else "off"}">{"✔ on" if on else "○ off"}</span>'
+            ctl = (f'<form class="f" method="post" action="/settings/feature">{hidden}<input type="hidden" name="name" value="{key}">'
+                   f'<input type="hidden" name="on" value="{"no" if on else "yes"}"><button class="btn{"" if on else " pri"}" type="submit">'
+                   f'{"Turn off" if on else "Turn on"}</button></form>' if ok else "")
+            rows.append(f'<li class="{"on" if on else "off"}" data-feature="{key}"><span class="ft"><b>{esc(title)}</b> <span class="sm">{esc(what)}</span></span>'
+                        f'{state}{ctl}</li>')
+        if ok:
+            note = (f'Saved in <code class="cmd">{esc(path)}</code> as you click (the rest of the file stays as it is): the screens follow at once, '
+                    'the collector within 10 seconds. A section that is off is not drawn, raises no alarm and is not collected.')
+        else:
+            restart = render.CMD.get("restart") or "restart nuc-console"
+            note = (f'Read-only here ({esc(why)}): edit <b>[features]</b> in <code class="cmd">{esc(path)}</code>, then '
+                    f'<code class="cmd">{esc(restart)}</code>.')
+        html_ = (f'<section class="sec" id="features" aria-labelledby="sec-feat"><h3 class="sech" id="sec-feat">Screens and sections</h3>'
+                 f'<p class="hintl">{note}</p><ul class="feats">{"".join(rows)}</ul></section>')
+        return html_, ok
 
     def about_html(self, here=None):
         """'About this machine': what the machine is and how it is set up, read-only (this page changes nothing on it)."""
@@ -1599,6 +1655,22 @@ class Server(http.server.ThreadingHTTPServer):
             self.cache.clear()  # the page that comes next shows what this did
         back = view_params(parse_qs(one("back", 400)))
         return page_url(dict({"view": "telegram"}, **{k: back[k] for k in HERE_KEYS})) + "#tg"
+
+    def settings_action(self, act, form):
+        """A [features] switch of the settings page (a portable run: do_POST checked that config.ini is this account's): the key is one of
+        nuc_config.FEATURES and the value yes or no, nothing else of the request is written. config.ini keeps every other line; the screens
+        follow at once, the collector within a cycle. -> the settings page again."""
+        one = lambda k, n=40: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        name, on = one("name"), one("on", 3)
+        if act != "feature" or name not in nuc_config.FEATURES or on not in ("yes", "no"):
+            raise BadRequest("a feature of [features] and yes or no are needed")
+        nuc_config.set_feature(name, on == "yes")
+        if name == "ai" and on == "no":  # the AI screen goes: the model server this process started goes too (no page would be left to stop it)
+            render.ai_engine().stop_server()
+        with self.lock:
+            self.cache.clear()  # what the pages show changes with it
+        back = view_params(parse_qs(one("back", 400)))
+        return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#features"
 
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).

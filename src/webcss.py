@@ -286,6 +286,17 @@ SETTINGS = """
 .kchk li>a,.kchk li>span:first-child{flex:1;color:var(--fg);text-decoration:none}
 .kchk li>a:hover{color:var(--accent)}
 .kchk li>span[aria-disabled="true"]{color:var(--muted);opacity:.6;cursor:not-allowed}
+.feats{display:grid;gap:.2em;margin:0;padding:0;list-style:none}
+.feats li{display:flex;flex-wrap:wrap;align-items:center;gap:.3em .9em;padding:.35em .4em;border-radius:5px;min-width:0}
+.feats li:hover{background:var(--surface-2)}
+.feats .ft{flex:1 1 18em;min-width:0;overflow-wrap:anywhere}
+.feats .ft b{color:var(--fg-strong);font-weight:600}
+.feats .fs-st{font:600 .82em var(--mono);min-width:4.2em}
+.feats .fs-st.on{color:var(--ok)}
+.feats .fs-st.off{color:var(--muted)}
+.feats li.off .ft b{color:var(--muted)}
+.feats form.f{margin:0}
+.feats button.btn{font:inherit;font-size:.9em}
 .kchk .box{font-family:var(--mono);color:var(--muted);min-width:1.4em;text-align:center}
 .kchk .on .box{color:var(--accent);font-weight:700}
 .kchk .o{margin-left:auto;font:600 .72em var(--mono);color:var(--accent);min-width:1.4em;text-align:right}

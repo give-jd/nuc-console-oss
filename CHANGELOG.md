@@ -13,6 +13,16 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **Clear chat** on the AI page (`POST /ai/clear`, with the CSRF token like the other buttons).
 - **Model usage** on the AI page, beside the chat: the models the server has loaded and where (GPU memory or RAM), the CPU and memory of the
   model server, and how busy each GPU is (`nvidia-smi`, `amdgpu`, `ioreg` on macOS). Measured every 3 s only while the page is open and the AI is on.
+- **Screens and sections on the settings page.** In a portable run and the desktop app, each `[features]` switch (the Health screen, containers,
+  firewall...) is turned on or off from the settings page: only that value of `config.ini` changes, the screens follow at once and the collector
+  within 10 seconds. In an installation the section shows the switches and how to change them (`config.ini` stays the administrator's).
+  [docs/WEB.md](docs/WEB.md#the-settings-pages-switches)
+- The collector reads `[features]` again when `config.ini` changes: a section switched on or off applies without a restart.
+
+### Changed
+
+- Writing a key of `config.ini` (the installers, `nuc-console-ai`, the notifier, the settings page) keeps the comment after the old value and
+  the file's permissions.
 
 ### Fixed
 
