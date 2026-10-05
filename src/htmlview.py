@@ -769,12 +769,15 @@ def ansi_card(lines):
     return note, '<pre class="tty" tabindex="0">' + to_html("\n".join(lines)) + "</pre>"
 
 
-def seg(label, options):
+def seg(label, options, live=False):
     """A group of links like a segmented control: options [(text, href or None, current, attrs)]. The chosen one is marked aria-current and is
-    not a link; an option with no href is shown dimmed (aria-disabled). attrs: extra attributes of a link (data-set, data-theme...)."""
+    not a link (live: it is a link too, for a choice a script switches in place, so that the reader can come back to it); an option with no
+    href is shown dimmed (aria-disabled). attrs: extra attributes of a link (data-set, data-theme...)."""
     out = []
     for text, href, current, attrs in options:
-        if current:
+        if current and live and href is not None:
+            out.append(f'<a href="{esc(href)}"{attrs} aria-current="true">{esc(text)}</a>')
+        elif current:
             out.append(f'<span aria-current="true">{esc(text)}</span>')
         elif href is None:
             out.append(f'<span aria-disabled="true">{esc(text)}</span>')
