@@ -253,9 +253,10 @@ def telegram_web(d=None):
 def telegram(cfg, d=None):
     """[telegram] as it is in force: config.ini with what the web view's Telegram page chose (web.json) laid over it. On when config.ini says
     enabled = yes OR the page turned it on (config's yes cannot be turned off from the page); the @username the page paired in place of
-    config.ini's. "by" says where "on" comes from: "config", "web" or "". `[telegram] web_actions = no` and a portable run: config.ini alone."""
+    config.ini's. "by" says where "on" comes from: "config", "web" or "". `[telegram] web_actions = no`: config.ini alone. A portable run (the
+    desktop app is one) is the same: its notifier is started beside its web view, as the same account."""
     t = dict(cfg["telegram"], by="config" if cfg["telegram"]["enabled"] else "")
-    if not t.get("web_actions", True) or PORTABLE:
+    if not t.get("web_actions", True):
         return t
     web = telegram_web(d)
     if web.get("username"):

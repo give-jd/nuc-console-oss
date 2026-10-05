@@ -154,10 +154,17 @@ rotate() {  # a log over 1 MB is kept once as .1
 }
 rotate "$LOGS/collector.log"
 rotate "$LOGS/web.log"
+rotate "$LOGS/notify.log"
 if [ "$(id -u)" -ne 0 ]; then
     echo "nuc-console: running without root: the sections that need it (firewall, containers, other users' processes) show less. sudo ./run.sh shows everything." >&2
 fi
 "$PY" -B "$HERE/src/collector.py" >>"$LOGS/collector.log" 2>&1 &
+PIDS="$PIDS $!"
+# the Telegram notifier (docs/TELEGRAM.md): beside the web view it takes the Telegram page's requests (pair, on, off, test) and keeps the
+# token in data/notify; in a terminal console it only sends, and while it is off it ends at once
+WEBVIEW=0
+[ "$VIEW" != web ] || WEBVIEW=1
+NUC_CONSOLE_WEB=$WEBVIEW "$PY" -B "$HERE/src/notify.py" >>"$LOGS/notify.log" 2>&1 &
 PIDS="$PIDS $!"
 
 # the baseline of the port alarms: created once the collector has written its first complete snapshot (a normal user's one is

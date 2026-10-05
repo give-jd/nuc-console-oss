@@ -34,7 +34,15 @@ then prints a link: `https://t.me/<your_bot>?start=<code>` (the page shows the s
 **3. Tap the link on your phone and press Start.** The machine notices it by itself, stores the chat and says *paired*. That is all: no numbers
 to type, no chat id to look up. The notifier is on from now on (`--off`, or *Switch off* on the page, switches it off).
 
-The notifier is a service of an **installed** nuc-console: a portable run (`run.sh` / `run.cmd`, [PORTABLE.md](PORTABLE.md)) does not start it.
+## In the desktop app and a portable run
+
+The [desktop app](DESKTOP.md) and a portable run (`run.sh` / `run.cmd`, [PORTABLE.md](PORTABLE.md)) start the notifier themselves, beside the
+web view, as your account: there is no service to install and no terminal to open. Open **⚙ settings › Phone alerts › Set up Telegram alerts**:
+the Telegram page shows the four steps (create the bot with @BotFather, paste its token and your @username, press Start in Telegram, **Send a
+test**), and the state of the alerts from then on. The token and the paired chat are kept in the data folder, in `notify/` (0711, files 0600:
+only your account can read them; Windows: `notify\private` in your own folder), the notifier's log is `logs/notify.log`. The notifier stops
+when you quit the app (or `run.sh`), and starts again with it. In a console in a terminal (`./run.sh --console`) it only sends: there is no
+page to pair from.
 
 ## From the web view
 

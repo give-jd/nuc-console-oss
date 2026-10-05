@@ -297,6 +297,10 @@ try {
         Say 'running without administrator rights: the sections that need them (firewall, other users'' processes, services) show less. Right-click run.cmd > Run as administrator shows everything.'
     }
     $collector = Start-Child (Join-Path $Src 'collector.py') @('--log', (Join-Path $Logs 'collector.log'))
+    # the Telegram notifier (docs/TELEGRAM.md): beside the web view it takes the Telegram page's requests (pair, on, off, test) and keeps the
+    # token in data\notify (the children inherit NUC_CONSOLE_WEB)
+    $env:NUC_CONSOLE_WEB = '1'
+    [void](Start-Child (Join-Path $Src 'notify.py') @('--log', (Join-Path $Logs 'notify.log')))
     $webLog = Join-Path $Logs 'web.log'
     if (Test-Path -LiteralPath $webLog) { Remove-Item -LiteralPath $webLog -Force }
     $web = Start-Child (Join-Path $Src 'web.py') @('--local', '--port', "$Port", '--log', $webLog)

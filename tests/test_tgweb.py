@@ -215,8 +215,9 @@ class Pairing(Base):
         self.assertIn("web_actions = no", self.eng.pair(TOKEN, "bob_99")[1])
         self.assertIn("web_actions = no", self.eng.request("test")[1])
         self.cfg["telegram"]["web_actions"] = True
-        with mock.patch.object(nuc_config, "PORTABLE", "/x"):
-            self.assertIn("portable", self.eng.request("on")[1])
+        with mock.patch.object(nuc_config, "PORTABLE", "/x"):  # a portable run (the desktop app): its notifier is started with it, nothing refused
+            self.notifier_alive(listening=False)
+            self.assertIn("quit nuc-console and start it again", self.eng.request("on")[1])
         self.notifier_alive(listening=False)
         self.assertIn("does not take this page's requests", self.eng.pair(TOKEN, "bob_99")[1])
         self.notifier_alive()
@@ -301,7 +302,7 @@ class Words(unittest.TestCase):
         state, line = tgweb.state_of(self.snap(failing=1))
         self.assertEqual(state, "failing")
         self.assertNotIn(SECRET, line)
-        self.assertEqual(tgweb.state_of(self.snap(portable=True))[0], "down")
+        self.assertEqual(tgweb.state_of(self.snap(portable=True))[0], "on", "a portable run sends too (the desktop app)")
 
     def test_the_job_line(self):
         self.assertEqual(tgweb.job_text({"state": "waiting", "username": "bob_99", "until": 130, "text": ""}, 10), "waiting for Start from @bob_99 (2 min left)")
@@ -421,6 +422,37 @@ class WebPage(Base):
     def test_the_settings_page_links_to_it(self):
         st, _h, body = self.request("GET", "/?view=settings")
         self.assertIn('href="/?view=telegram"', body)
+
+    def test_the_settings_page_says_whether_the_alerts_reach_a_phone_and_leads_to_the_setup(self):
+        _st, _h, body = self.request("GET", "/?view=settings")
+        block = body[body.index('<section class="sec" id="alerts"'):]
+        block = block[:block.index("</section>")]
+        self.assertIn('<span class="pl d big">OFF</span>', block)
+        self.assertIn('href="/?view=telegram#tg">Set up Telegram alerts</a>', block)
+        for step in ("@BotFather", "@username", "Start", "send a test"):
+            self.assertIn(step, block)
+        self.notifier_alive(enabled=True, paired=True, username="bob_99")
+        self.cfg["telegram"].update(enabled=True, username="bob_99")
+        self.srv.cache.clear()
+        _st, _h, body = self.request("GET", "/?view=settings")
+        self.assertIn('<span class="pl g big">ON</span> on: the ATTENTION changes go to @bob_99', body)
+        self.assertIn(">Telegram alerts</a>", body)
+
+    def test_a_portable_run_the_desktop_app_pairs_and_tests_from_the_page_too(self):
+        with mock.patch.object(nuc_config, "PORTABLE", os.path.dirname(self.dir)):
+            h, body = self.page()
+            self.assertIn('action="/telegram/pair"', body)
+            self.assertIn("readable only by your account", body)
+            self.assertNotIn("nuc-console-telegram", body, "no command of an installation")
+            self.assertIn("press <b>Send a test</b>", body)
+            st, _h, _ = self.post("pair", {"token": TOKEN, "username": "@bob_99"})
+            self.assertEqual(st, 303)
+            self.assertTrue(self.eng.wait())
+            self.notifier_takes_them()
+            self.assertEqual(notify.read_token(self.dir), TOKEN)
+            self.clock.t += notify.STALE_S + 1  # the notifier is gone: the page says how to bring it back in a portable run
+            _h, body = self.page()
+            self.assertIn("quit nuc-console and start it again: the notifier starts with it", body)
 
 
 if __name__ == "__main__":

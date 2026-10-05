@@ -7,6 +7,10 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Added
 
+- **Telegram alerts in the desktop app and a portable run.** The app (and `run.sh` / `run.cmd`) starts the Telegram notifier itself, beside the
+  web view, as your account: the Telegram page pairs your own bot and sends a test, with no service to install and no terminal. The settings page
+  has a **Phone alerts** block with the state of the alerts and a button to the Telegram page, which shows the four steps (create the bot, pair,
+  press Start, send a test). The token stays in the data folder's `notify/`, readable only by you. [docs/TELEGRAM.md](docs/TELEGRAM.md#in-the-desktop-app-and-a-portable-run)
 - **The AI chat knows the machine now.** A question asked on the AI page carries the machine as its pages show it at that moment (the status,
   the problems, the key figures, the busiest processes by name, the HEALTH findings) as compact JSON beside the question: the model can say why it
   is slow right now, and it answers even before there is any history. Each answer says what it was built from. [docs/AI.md](docs/AI.md)
