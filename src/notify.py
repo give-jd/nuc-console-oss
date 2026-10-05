@@ -11,7 +11,8 @@ THE MACHINE SENDS, NOTHING ELSE. What you can audit in this file:
 - the bot token lives in NOTIFY_DIR/token (0600, owned by the service user), never in config.ini, a log, status.json or an error;
 - the web view's Telegram page (src/tgweb.py) talks to the service through files, never through Telegram: it leaves requests in
   NOTIFY_DIR/inbox, where its account may create files and do nothing else (it cannot list or read them): store the pairing the page
-  made, switch on, switch off, send a test. The service reads and deletes each one, does it, says what it did in status.json and keeps the
+  made, switch on, switch off, send a test. In a portable run (run.sh / run.ps1, the desktop app) the notifier is started beside the web
+  view, as the same account, and its folder is data/notify (0711, secrets 0600, the inbox 0700). The service reads and deletes each one, does it, says what it did in status.json and keeps the
   page's choices in web.json (nuc_config.telegram() lays it over config.ini). `[telegram] web_actions = no` and it reads none.
 Off unless `[telegram] enabled = yes` in config.ini or the web page turned it on. The service is `notify.py` with no argument;
 `nuc-console-telegram` is the command line (`--help`).
@@ -723,10 +724,25 @@ class Notifier:
 
 
 def listening(cfg):
-    """The service takes the web page's requests: [telegram] web_actions (default yes), an installed nuc-console (not a portable run) and a web
-    view that runs here ([web] enabled; on macOS and Windows the web view is also the dashboard, unless [display] mode = none)."""
-    return bool(cfg["telegram"].get("web_actions", True)) and not nuc_config.PORTABLE and bool(
-        cfg["web"]["enabled"] or (not nuc_config.LINUX and cfg["display"]["mode"] != "none"))
+    """The service takes the web page's requests: [telegram] web_actions (default yes) and a web view that runs here. Installed: [web] enabled,
+    or on macOS and Windows the web view is also the dashboard, unless [display] mode = none. A portable run (the desktop app is one): run.sh /
+    run.ps1 start the notifier beside the web view and say so (NUC_CONSOLE_WEB=1); in a terminal console there is no page to listen to."""
+    if not cfg["telegram"].get("web_actions", True):
+        return False
+    if nuc_config.PORTABLE:
+        return os.environ.get("NUC_CONSOLE_WEB") == "1"
+    return bool(cfg["web"]["enabled"] or (not nuc_config.LINUX and cfg["display"]["mode"] != "none"))
+
+
+def portable_dirs(d):
+    """A portable run has no installer to make the notifier's folder: this account makes it, with the inbox the web view (the same account) leaves
+    its requests in (0700). An installation's folders are the installer's and are left as they are. Raises OSError."""
+    prepare_dir(d)
+    box = inbox_dir(d)
+    if not os.path.isdir(box):
+        os.makedirs(box, exist_ok=True)
+        if POSIX:
+            os.chmod(box, 0o700)
 
 
 class Service:
@@ -886,6 +902,11 @@ def serve(d=None, clock=time.time, sleep=time.sleep, records=None, transport=Non
         while True:
             cfg = nuc_config.load()  # the settings are read again every cycle
             svc.listening = listening(cfg)
+            if svc.listening and nuc_config.PORTABLE:
+                try:
+                    portable_dirs(d)
+                except OSError as e:  # said in the log; the page then sees no fresh status and says the notifier does not listen
+                    svc.say("cannot make the notifier's folder %s: %s" % (d, clean(redact(e), 120)))
             if svc.listening:
                 svc.requests(cfg)
             else:

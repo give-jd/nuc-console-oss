@@ -40,6 +40,8 @@ system warns the first time:
   one that runs, from a terminal or a script.
 - Links to anything but the dashboard (the docs, a project page) open in your browser, never in the window.
 - One app per user: starting it again shows the window of the one that runs.
+- **Phone alerts**: ⚙ settings › *Phone alerts* › *Set up Telegram alerts* walks you through a Telegram bot of your own (create it, pair it,
+  press Start, send a test); the app starts the notifier itself ([TELEGRAM.md](TELEGRAM.md#in-the-desktop-app-and-a-portable-run)).
 
 On GNOME without the AppIndicator extension (Fedora's default) there is no tray icon: start the app again to show the window, and
 quit it with `nuc-console --quit`. Ubuntu, KDE, Xfce, Cinnamon and the others show it.
@@ -56,7 +58,7 @@ service version instead ([docs/INSTALL.md](INSTALL.md)); the two do not share th
 | Its data: `config.ini`, state, baseline, history, logs | `~/.local/share/io.github.give-jd.nuc-console` | `~/Library/Application Support/io.github.give-jd.nuc-console` | `%LOCALAPPDATA%\io.github.give-jd.nuc-console` |
 
 The data folder is the portable run's `./data`: `config.ini` is copied there once (your edits stay), `config.ini.dist` beside it
-shows the new options of each version, and `logs/` holds `collector.log`, `web.log` and `desktop.log` (what the core printed, and
+shows the new options of each version, and `logs/` holds `collector.log`, `web.log`, `notify.log` (the Telegram notifier) and `desktop.log` (what the core printed, and
 what the app said). Uninstalling the app leaves it; delete it by hand to start afresh.
 
 The advice on screen names the portable commands (`./run.sh --accept`, `run.cmd -Accept`): in the app they are the core's, run with

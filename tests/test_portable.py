@@ -1350,8 +1350,14 @@ class RunSh(unittest.TestCase):
             self.assertIn("nuc-console", body)
             pidfile = os.path.join(self.dir, "data", "portable.pid")
             self.assertEqual(int(read(pidfile)), p.pid)
+            status = os.path.join(self.dir, "data", "notify", "status.json")  # the Telegram notifier, beside the web view: it takes the page's requests
+            deadline = time.time() + 30
+            while time.time() < deadline and not os.path.exists(status):
+                time.sleep(0.2)
+            self.assertTrue(json.loads(read(status))["listening"], read(os.path.join(self.dir, "data", "logs", "notify.log")))
+            self.assertTrue(os.path.isdir(os.path.join(self.dir, "data", "notify", "inbox")))
             kids = self.descendants(p.pid)
-            self.assertGreaterEqual(len(kids), 2, kids)  # the collector and the web view (and the baseline waiter)
+            self.assertGreaterEqual(len(kids), 3, kids)  # the collector, the notifier and the web view (and the baseline waiter)
             twice = subprocess.run([os.path.join(self.dir, "run.sh"), "--web", "--no-open"], cwd=self.dir, env=self.env, capture_output=True,
                                    text=True, timeout=60, stdin=subprocess.DEVNULL)
             self.assertEqual(twice.returncode, 1)

@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import ssl
 import sys
 import tempfile
@@ -1307,8 +1308,33 @@ class WebPage(Base):
                 self.assertTrue(REAL_LISTENING(cfg()))
                 self.assertFalse(REAL_LISTENING(cfg(mode="none")))
                 self.assertTrue(REAL_LISTENING(cfg(web=True, mode="none")))
-        with mock.patch.object(nuc_config, "PORTABLE", "/somewhere"):
-            self.assertFalse(REAL_LISTENING(cfg(web=True)))  # a portable run has no notifier service
+        with mock.patch.object(nuc_config, "PORTABLE", "/somewhere"):  # a portable run (the desktop app): run.sh / run.ps1 say whether a web view runs
+            with mock.patch.dict(os.environ, {"NUC_CONSOLE_WEB": "1"}):
+                self.assertTrue(REAL_LISTENING(cfg()))
+                self.assertFalse(REAL_LISTENING(cfg(actions=False)))
+            with mock.patch.dict(os.environ, {"NUC_CONSOLE_WEB": ""}):
+                self.assertFalse(REAL_LISTENING(cfg(web=True)), "a console in a terminal: no page to listen to")
+
+    def test_a_portable_run_makes_its_folders_and_the_page_pairs_it(self):
+        """The desktop app and run.sh / run.ps1: no installer made the notifier's folder; the notifier, started beside the web view (NUC_CONSOLE_WEB=1),
+        makes it (0711, the inbox 0700), takes the page's requests as the same account, and what the page chose (web.json) is in force."""
+        shutil.rmtree(self.dir)
+        self.config(enabled="no")
+        clock = Clock()
+        with mock.patch.object(nuc_config, "PORTABLE", os.path.dirname(self.dir)), mock.patch.object(notify, "listening", REAL_LISTENING), \
+                mock.patch.dict(os.environ, {"NUC_CONSOLE_WEB": "1"}), contextlib.redirect_stdout(io.StringIO()):
+            rc = notify.serve(self.dir, clock=clock, sleep=clock.sleep, records=lambda: [], transport=Fake(), cycles=1)
+            self.assertEqual(rc, 0)
+            self.assertTrue(os.path.isdir(notify.inbox_dir(self.dir)))
+            if POSIX:
+                self.assertEqual(stat.S_IMODE(os.stat(self.dir).st_mode), 0o711)
+                self.assertEqual(stat.S_IMODE(os.stat(notify.inbox_dir(self.dir)).st_mode), 0o700)
+            self.assertTrue(notify.read_status(self.dir)["listening"])
+            self.pair_request()
+            notify.serve(self.dir, clock=clock, sleep=clock.sleep, records=lambda: [], transport=Fake(), cycles=1)
+            t = nuc_config.telegram(nuc_config.load(), self.dir)
+        self.assertEqual(notify.read_token(self.dir), TOKEN)
+        self.assertEqual((t["enabled"], t["by"], t["username"]), (True, "web", "bob_99"), "the page's choice is in force in a portable run too")
 
     def test_a_pairing_made_on_the_page_is_stored_here_and_turned_on(self):
         self.config(enabled="no")

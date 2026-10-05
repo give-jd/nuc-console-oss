@@ -10,7 +10,8 @@ The token goes one way. This account (the web view's) cannot read the notifier's
 may create files and do nothing else (Linux: the folder is 2730 and the web unit is in its group; Windows: create only), and the notifier,
 another account, reads and deletes it, keeps the token where only it can read it, and says what it did in status.json (the request's id,
 ok, a sentence). The token is in this process only while a pairing runs, in that thread. One thing at a time; nothing here blocks a page.
-`[telegram] web_actions = no` refuses everything, and a portable run has no notifier to hand anything to.
+`[telegram] web_actions = no` refuses everything. In a portable run (the desktop app is one) the notifier is started beside the web view, as
+the same account, in data/notify: the same requests, the same answers.
 --demo: the same flow simulated in memory (nothing is sent, nothing is written).
 Standard library only, Python 3.8+.
 """
@@ -30,7 +31,7 @@ POLL_S = 10         # the longest wait of one getUpdates while pairing: Cancel t
 DEMO_START_S = 6.0  # the demo: somebody presses Start this long after the link appears
 DEMO_BOT = "demo_nuc_console_bot"
 LOCKED = "locked by config.ini ([telegram] web_actions = no): this page only shows; the command line still works"
-PORTABLE = "a portable run has no Telegram notifier: install nuc-console (docs/TELEGRAM.md)"
+RESTART_PORTABLE = "quit nuc-console and start it again: the notifier starts with it (its log: logs/notify.log)"
 START_CMD = {"linux": "sudo systemctl restart nuc-console-notify", "darwin": "sudo launchctl kickstart -k system/com.nuc-console.notify",
              "windows": "Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName notify (administrator PowerShell)"}
 CLI = {"linux": "sudo nuc-console-telegram", "darwin": "sudo nuc-console-telegram", "windows": "nuc-console-telegram.cmd (administrator prompt)"}
@@ -73,6 +74,10 @@ class Engine(object):
     def portable(self):
         return bool(nuc_config.PORTABLE) and not self.demo
 
+    def start_hint(self):
+        """How to start the notifier when it does not answer: the service's command, or in a portable run quitting and starting it again."""
+        return RESTART_PORTABLE if self.portable() else START_CMD[self.os_name()]
+
     def settings(self):
         """[telegram] in force (nuc_config.telegram): enabled, by ("config" | "web" | ""), username, detail, resolved, web_actions."""
         if self.demo:
@@ -112,12 +117,10 @@ class Engine(object):
         """Why nothing can be asked now, or None."""
         if self.locked():
             return LOCKED
-        if self.portable():
-            return PORTABLE
         if self.busy():
             return "wait: the last action is not finished"
         if need_notifier and not self.listening():
-            return "the notifier service does not take this page's requests now: start it (%s), then try again" % START_CMD[self.os_name()]
+            return "the notifier service does not take this page's requests now: start it (%s), then try again" % self.start_hint()
         return None
 
     # ------------------------------------------------------------------------------------------------------------------------- actions
@@ -221,7 +224,8 @@ class Engine(object):
 
     def _cannot(self, e):
         where = notify.inbox_dir(self.directory)
-        return ("cannot leave the request in %s (%s): the installer makes that folder; run it again" % (where, e.strerror or type(e).__name__))
+        fix = "quit nuc-console and start it again: the notifier makes that folder" if self.portable() else "the installer makes that folder; run it again"
+        return "cannot leave the request in %s (%s): %s" % (where, e.strerror or type(e).__name__, fix)
 
     def _send(self, action, **fields):
         """One request in the inbox: r-<ms>-<random>.json, created here (never replaced), 0640 (Linux: the folder's group is the
@@ -251,7 +255,7 @@ class Engine(object):
             if isinstance(req, dict) and req.get("id") == p["id"]:
                 ok, text = req.get("ok") is True, notify.clean(req.get("said") or ("done" if req.get("ok") else "refused"), 200)
             elif self.clock() - p["at"] > ANSWER_S:
-                ok, text = False, "the notifier did not answer: is it running? (%s)" % START_CMD[self.os_name()]
+                ok, text = False, "the notifier did not answer: is it running? (%s)" % self.start_hint()
             else:
                 return
             self.pending = None
@@ -266,7 +270,7 @@ class Engine(object):
         with self.lock:
             st = self.status()
             note = self.notice if self.notice and self.clock() - self.notice["at"] < NOTICE_S else None
-            return {"locked": self.locked(), "portable": self.portable(), "demo": self.demo, "os": self.os_name(),
+            return {"locked": self.locked(), "portable": self.portable(), "start": self.start_hint(), "demo": self.demo, "os": self.os_name(),
                     "settings": self.settings(), "status": st, "listening": self.listening(st), "job": dict(self.job) if self.job else None,
                     "pending": dict(self.pending) if self.pending else None, "notice": dict(note) if note else None, "busy": self.busy(),
                     "now": self.clock()}
@@ -345,8 +349,6 @@ def state_of(snap):
     t, st = snap["settings"], snap["status"]
     if not t["enabled"]:
         return "off", "off: no alert leaves this machine"
-    if snap["portable"]:
-        return "down", "on in config.ini, but a portable run sends no Telegram message"
     if st.get("paired") is False or not t["username"]:
         return "unpaired", "on, but not paired: no alert can reach a phone yet"
     if not _fresh(st, snap["now"]):

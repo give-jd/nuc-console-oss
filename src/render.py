@@ -887,9 +887,10 @@ if nuc_config.PORTABLE:
         "stale-containers": _again, "stale-net": _again,
         "net-sections": CMD["logs"] + "; the section name is in the message",
         "ufw-unreadable": "sudo ufw status verbose; log: " + CMD["logs"],
-        # the Telegram notifier is a service of an installed nuc-console: a portable run does not start it
-        "telegram-unpaired": "a portable run sends no Telegram message: install nuc-console (docs/TELEGRAM.md), or [telegram] enabled = no",
-        "telegram-failing": "a portable run sends no Telegram message: install nuc-console (docs/TELEGRAM.md), or [telegram] enabled = no",
+        # the Telegram notifier starts with the run (the desktop app too): the web view's Telegram page pairs and tests it, its log is a file
+        "telegram-unpaired": "pair it on the web view's Telegram page (settings > Phone alerts), or [telegram] enabled = no",
+        "telegram-failing": "the web view's Telegram page says why and sends a test (settings > Phone alerts); log: "
+                            + os.path.join(nuc_config.BASE_DIR, "logs", "notify.log"),
     }.items()})
 
 

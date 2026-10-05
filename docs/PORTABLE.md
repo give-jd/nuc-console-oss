@@ -39,7 +39,10 @@ It starts, as **you**:
 1. the collector (`src/collector.py`), in the background: it writes its snapshots to `data/run/`;
 2. the view: the terminal screen (`src/render.py`), or the browser view (`src/web.py --local`) on `127.0.0.1`, with no token (nothing but
    this machine can connect), and opens your default browser on it (`open` on macOS, `xdg-open` on Linux when there is a desktop, `Start-Process` on Windows);
-3. until the baseline of the port alarms exists, a small helper that tries to create it ([Port alarms](#port-alarms)).
+3. until the baseline of the port alarms exists, a small helper that tries to create it ([Port alarms](#port-alarms));
+4. the Telegram notifier (`src/notify.py`): beside the browser view it takes the Telegram page's requests (⚙ settings › *Phone alerts*: pair your
+   own bot, send a test, [TELEGRAM.md](TELEGRAM.md#in-the-desktop-app-and-a-portable-run)); in the terminal it only sends, and while the alerts are
+   off it ends at once.
 
 Everything it writes:
 
@@ -49,7 +52,8 @@ Everything it writes:
 | `data/config.ini.dist` | the newest defaults, refreshed at every start: `diff data/config.ini data/config.ini.dist` lists the options added by a newer version |
 | `data/run/` | the collector's snapshots (`net.json`, `containers.json`, `boot.json`, and `sensors.json` on macOS and Windows) |
 | `data/lib/` | `baseline.json` (the port alarms) and `accepted.json` (the problems you accepted) |
-| `data/logs/` | `collector.log`, `web.log` (the view in the browser), `baseline.log`; a `collector.log` over 1 MB is kept once as `.1` at the next start |
+| `data/notify/` | the Telegram notifier's: the bot token and the paired chat (0600, only your account), `status.json`, the page's requests in `inbox/` |
+| `data/logs/` | `collector.log`, `web.log` (the view in the browser), `notify.log` (the Telegram notifier), `baseline.log`; a `collector.log` over 1 MB is kept once as `.1` at the next start |
 | `data/portable.pid` | the process ID of the running copy; removed when it stops |
 | `python\` (Windows ZIP) | the Python, unpacked once on the first run (see [Python](#python)); on Linux and macOS `python/` is already unpacked in the archive and is only read |
 | `cache/` | what `nuc-console-update` downloaded; only exists once you used it |

@@ -5,6 +5,13 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ## [Unreleased]
 
+### Added
+
+- **Telegram alerts in the desktop app and a portable run.** The app (and `run.sh` / `run.cmd`) starts the Telegram notifier itself, beside the
+  web view, as your account: the Telegram page pairs your own bot and sends a test, with no service to install and no terminal. The settings page
+  has a **Phone alerts** block with the state of the alerts and a button to the Telegram page, which shows the four steps (create the bot, pair,
+  press Start, send a test). The token stays in the data folder's `notify/`, readable only by you. [docs/TELEGRAM.md](docs/TELEGRAM.md#in-the-desktop-app-and-a-portable-run)
+
 ### Fixed
 
 - **Theme and density could not be switched back** without a reload: after choosing *compact* (or *wall*, or a theme) in the footer or on

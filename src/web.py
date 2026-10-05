@@ -930,7 +930,7 @@ class Server(http.server.ThreadingHTTPServer):
         the clock readings that change on every read (the engine's now, the time of the notifier's status file: `listening` says what it means), so
         that the rev changes only with the state."""
         snap = tgweb.engine().snapshot()
-        forms = not (snap["locked"] or snap["portable"]) and snap["listening"]
+        forms = not snap["locked"] and snap["listening"]
         snap = dict(snap, status=dict(snap["status"] or {}))
         snap.pop("now", None)
         snap["status"].pop("ts", None)
@@ -1224,7 +1224,27 @@ class Server(http.server.ThreadingHTTPServer):
                       f'<code class="ck-v" id="cookie-v">{esc(cookie)}</code>'
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
-        return View(f'<div class="settings">{appearance}{self.about_html(here)}</div>', [], vhere, False, legacy=False)
+        return View(f'<div class="settings">{appearance}{self.alerts_html(here)}{self.about_html(here)}</div>', [], vhere, False, legacy=False)
+
+    def alerts_html(self, here):
+        """The settings page's 'Phone alerts' block: are the Telegram alerts on and do they reach a phone (the Telegram page's state, in words and
+        a pill), what the setup takes, and the way to the Telegram page, where the steps, the pairing and the test are."""
+        esc = html.escape
+        try:
+            snap = tgweb.engine().snapshot()
+            state, line = tgweb.state_of(snap)
+        except Exception as e:  # noqa: BLE001 - the block says it cannot tell, the page stays
+            print("nuc-console web: telegram state error: %r" % (e,), file=sys.stderr)
+            state, line = "down", "the notifier's state cannot be read"
+        pill, cls = {"on": ("ON", "g"), "off": ("OFF", "d"), "unpaired": ("NOT PAIRED", "y"), "failing": ("FAILING", "r"), "down": ("DOWN", "r")}[state]
+        go = esc(page_url(dict(here, view="telegram")) + "#tg")
+        label = "Telegram alerts" if state == "on" else "Set up Telegram alerts" if state in ("off", "unpaired") else "Check the Telegram alerts"
+        return ('<section class="sec" id="alerts" aria-labelledby="sec-alerts"><h3 class="sech" id="sec-alerts">Phone alerts</h3>'
+                '<p class="hintl">New and resolved ATTENTION problems of this machine on your phone, through a Telegram bot of your own (free, about '
+                'two minutes): create the bot with @BotFather, pair it with your @username, press Start, send a test. The Telegram page walks you '
+                'through it. The machine only sends: it never reads your messages.</p>'
+                f'<div class="fs"><span><span class="pl {cls} big">{pill}</span> {esc(line)}</span>'
+                f'<div><a class="btn pri" href="{go}">{esc(label)}</a></div></div></section>')
 
     def about_html(self, here=None):
         """'About this machine': what the machine is and how it is set up, read-only (this page changes nothing on it)."""
@@ -1259,8 +1279,6 @@ class Server(http.server.ThreadingHTTPServer):
         """The notifier as the settings say it: off, or what its status.json shows (render.telegram_state)."""
         if not render.telegram_on():
             return "off ([telegram] enabled = no)"
-        if nuc_config.PORTABLE:
-            return "on in config.ini, but a portable run sends no message: install nuc-console (docs/TELEGRAM.md)"
         state, why = render.telegram_state(time.time())
         return {"ok": "on, paired and sending", "unreadable": "on; this account cannot read its status",
                 "unpaired": "on, but not paired: pair it on the Telegram page", "down": "on, but the notifier is not running"}.get(
@@ -1641,7 +1659,7 @@ def telegram_view(srv, here):
     try:
         snap = tgweb.engine().snapshot()
         body = telegram_html(snap, srv.csrf, urlsplit(page_url(there)).query, there)
-        forms = not (snap["locked"] or snap["portable"]) and snap["listening"]
+        forms = not snap["locked"] and snap["listening"]
         busy = snap["busy"]
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: telegram render error:", repr(e)[:200], file=sys.stderr)
@@ -1657,7 +1675,7 @@ def telegram_html(snap, csrf, back, here):
     esc = html.escape
     t, st, job, os_name = snap["settings"], snap["status"], snap["job"], snap["os"]
     running = bool(job and job["state"] in tgweb.RUNNING)
-    can = not (snap["locked"] or snap["portable"]) and snap["listening"]
+    can = not snap["locked"] and snap["listening"]
     hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", csrf), ("back", back)))
 
     def button(action, label, cls="", title="", disabled=False):
@@ -1688,12 +1706,10 @@ def telegram_html(snap, csrf, back, here):
     if note:
         out.append(f'<div class="ctl"><div class="note {"ok" if note["ok"] else "bad"}" role="status">{esc(note["text"])}</div></div>')
     if snap["locked"]:
-        out.append(f'<p class="d">{esc(tgweb.LOCKED)}: {cmd(tgweb.CLI[os_name] + " --setup")}</p>')
-    elif snap["portable"]:
-        out.append(f'<p class="d">{esc(tgweb.PORTABLE)}</p>')
+        out.append(f'<p class="d">{esc(tgweb.LOCKED)}' + ("" if snap["portable"] else f': {cmd(tgweb.CLI[os_name] + " --setup")}') + "</p>")
     elif not snap["listening"]:
         out.append('<p class="d">the notifier service does not take this page\'s requests now (it is not running, or it started before they were '
-                   f'allowed): start it with {cmd(tgweb.START_CMD[os_name])}, then reload this page</p>')
+                   'allowed): ' + (esc(snap["start"]) if snap["portable"] else f'start it with {cmd(snap["start"])}') + ', then reload this page</p>')
     ts = lambda v: (time.strftime("%Y-%m-%d %H:%M", time.localtime(v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else "never")  # noqa: E731
     rows = [("sends to", "@" + esc(t["username"]) if t["username"] and st.get("paired") else "nobody yet: pair it below"),
             ("switched on", {"config": "in config.ini", "web": "on this page"}.get(t["by"], "no")),
@@ -1720,17 +1736,19 @@ def telegram_html(snap, csrf, back, here):
                    '<li>In Telegram open <b>@BotFather</b>, send <b>/newbot</b>, choose a name and a username ending in <i>bot</i>, and copy the '
                    '<b>token</b> it gives you. It is a password: whoever has it can write as your bot.</li>'
                    '<li>Paste it below with your own <b>@username</b> (Telegram: Settings &gt; Username): only that person can pair.</li>'
-                   '<li>Press Pair, then open the link this page shows and press <b>Start</b>.</li></ol>'
+                   '<li>Press Pair, then open the link this page shows and press <b>Start</b>.</li>'
+                   '<li>Once it says <i>paired</i>, press <b>Send a test</b> at the top of this page: the message reaches your phone in a few seconds.</li></ol>'
                    f'<form class="f" method="post" action="/telegram/pair">{hidden}'
                    '<div class="fs"><label class="lab" for="tg-token">Bot token</label>'
                    '<input class="q" id="tg-token" type="password" name="token" maxlength="100" autocomplete="off" required placeholder="123456789:AA…"></div>'
                    '<div class="fs"><label class="lab" for="tg-user">Your Telegram @username</label>'
                    f'<input class="q" id="tg-user" type="text" name="username" maxlength="33" autocomplete="off" required placeholder="@your_name" value="{esc(("@" + t["username"]) if t["username"] else "", quote=True)}"></div>'
                    '<button class="bt on" type="submit">Pair</button></form>'
-                   '<p class="hintl">The token goes to the notifier service, which keeps it where this web view cannot read it again. '
+                   + ('<p class="hintl">The token goes to the notifier, which keeps it in its own folder, readable only by your account. '
+                      if snap["portable"] else '<p class="hintl">The token goes to the notifier service, which keeps it where this web view cannot read it again. ')
                    + ("A new pairing replaces the old one, and the chat paired now is told. " if st.get("paired") else "")
-                   + f"The same on the machine: {cmd(cli)}.</p>")
-    elif not can:
+                   + ("" if snap["portable"] else f"The same on the machine: {cmd(cli)}.") + "</p>")
+    elif not can and not snap["portable"]:
         out.append(f'<p class="hintl">On the machine: {cmd(tgweb.CLI[os_name] + " --setup")} (docs/TELEGRAM.md).</p>')
     out.append("</section></div>")
     return "".join(out)
