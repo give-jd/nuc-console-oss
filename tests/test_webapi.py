@@ -187,6 +187,29 @@ class Api(unittest.TestCase):
         self.assertTrue(d["problems"]["items"], "the demo has problems")
         self.assertTrue(all(p["state"] in ("err", "warn") for p in d["problems"]["items"]))
 
+    def test_the_health_report_of_the_demo_is_never_one_read_without_it(self):
+        """The report is kept HEALTH_TTL per period: one read without the demo (no history: none) must not stand for the demo's, nor one demo
+        machine's for another's, or the Health badge goes missing for a minute (a test run that is slow enough saw it)."""
+        saved = (render.DEMO, render.DEMO_OS, dict(render._HEALTH))
+        self.addCleanup(lambda: (setattr(render, "DEMO", saved[0]), setattr(render, "DEMO_OS", saved[1]), render._HEALTH.clear(),
+                                 render._HEALTH.update(saved[2])))
+        built = []
+        real = render.health_build
+        with mock.patch.object(render, "health_build", side_effect=lambda days, now: built.append((render.DEMO, render.DEMO_OS)) or real(days, now)):
+            render._HEALTH.clear()
+            render.DEMO = False
+            render.health_data(7)
+            render.DEMO = True
+            self.assertIsNotNone(render.health_data(7)["report"], "the demo has its own")
+            render.DEMO_OS = "windows"
+            render.health_data(7)
+            render.health_data(7)
+        self.assertEqual(built, [(False, None), (True, None), (True, "windows")], "one per source, then the cache")
+        render.DEMO_OS = saved[1]
+        self.srv.cache.clear()
+        _h, d = self.doc("/api/v1/summary")
+        self.assertEqual(len(d["badges"]["health"]), 2)
+
     def test_the_summary_is_what_every_page_shows_above_its_screen(self):
         _h, d = self.doc("/api/v1/summary")
         self.assertEqual(set(d) - {"api", "view", "rev", "at"}, {"host", "status", "kpis", "stale", "restart", "problems", "badges"})
