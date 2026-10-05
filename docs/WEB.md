@@ -1,7 +1,7 @@
 # Web view
 
 The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)), and **`/app`** draws the screens from it in the browser, live, without a reload ([below](#the-live-app)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
-switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
+switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below), except the `[features]` switches of a portable run and of the desktop app, whose `config.ini` is your own file ([below](#the-settings-pages-switches)); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
 until then, no port is opened by this project.
@@ -120,7 +120,7 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 | `/` | the shell (every view above takes it: `/?view=cpu`); `?app=1` forces it when `[ui] web = classic`, `?app=0` gives the classic page |
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
 | `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?edit=1` (`/?app=1&edit=1` when `[ui] web = classic`). Only on the overview: with `app=0` or on another view it is ignored |
-| `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
+| `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **Screens and sections** (every `[features]` switch, on or off: in a portable run or the desktop app a button turns each one on or off, [below](#the-settings-pages-switches); in an installation they are shown with the file and the command that change them), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
 | `/?view=telegram` | the **Telegram page** (linked from the settings' About): whether the alerts are on and reach someone, the notifier's last message and error, **Switch on** / **Switch off**, **Send a test**, and the pairing (the steps, the bot token and your @username, then the link to press Start on, with **Cancel**). Forms unless `[telegram] web_actions = no`, a portable run, or a notifier that does not take requests ([below](#the-telegram-pages-buttons)). It reloads by itself only while a pairing waits or an answer is due. `&open=1`: a redirect to the `t.me` link of the pairing that waits (the page's *Open in Telegram*), else back to the page |
 | `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403`. The layout editor's links are fields too (`euat`: move ATTENTION one place earlier; [below](#edit-the-layout)) |
 | `/?set=<field>&frag=1` | what the preferences script sends: the same cookie, but the answer is `204` (no redirect, no body) with `Set-Cookie` and `X-Nuc-Prefs: <the canonical cookie string>`, which the script keeps in `localStorage`. `<field>` may also be that whole string (`1.tl.dw`): the script sends it back, once in a while, when the browser sent no cookie. Same checks as above |
@@ -219,6 +219,7 @@ The editor page does not reload by itself and has no pause link: a page that mov
 | shell pages | the hashes of `REFRESH_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | yes | `'none'` |
 | shell edit page (`?edit=1`) | the hashes of `KEYS_JS`, `PREFS_JS`, `BUILDER_JS` | `'self'` | no (no script there parses markup) | `'none'` |
 | shell AI page | the same three as the shell pages | `'self'` | yes | `'self'` (not when locked) |
+| shell settings page | the same three as the shell pages | `'self'` | yes | `'self'` in a portable run (its `[features]` switches), else `'none'` |
 | shell map graph | the same three as the shell pages and the graph script's | `'self'` | yes | `'none'` |
 | the live app (`/app`) | the hashes of `APP_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | `require-trusted-types-for 'script'; trusted-types 'none'` (it parses no markup at all) | `'self'` |
 
@@ -353,9 +354,23 @@ carries `csrf` (this process's random token) and `back` (the view to come back t
 - **Body**: `application/x-www-form-urlencoded` (else `415`), a `Content-Length` of at most **4 KB** (else `413`, not read; none or chunked: `400`), at most 20 fields.
 - **Values**: a model id must be one the catalog has (else `400`), a number is digits; a question is cleaned and cut by the advisor; nothing from a request
   reaches a path, a command line or a shell, and the files and the server they act on are the pinned ones.
-- **CSP**: the AI page has `form-action 'self'` (its forms post to this server and nowhere else); every other page, every error and every redirect has
-  `form-action 'none'`. There is still no script on the AI page, and `default-src 'none'`.
+- **CSP**: the AI page has `form-action 'self'` (its forms post to this server and nowhere else), and so do the Telegram page and a portable run's
+  settings page for theirs; every other page, every error and every redirect has `form-action 'none'`. There is still no script on the AI page, and `default-src 'none'`.
 - **The page after a post** is never an old cached one (a post clears the page cache); like every page it shows this process's state, the same for every viewer.
+
+## The settings page's switches
+
+In a portable run (`run.sh`, `run.cmd`) and in the desktop app, which is one, `config.ini` is your own file in your own folder and the web view runs as
+you: the settings page's **Screens and sections** turn each `[features]` switch on or off. The forms follow the AI page's rules above: the same access as
+viewing, the per-process CSRF token, `Origin` / `Referer` / `Sec-Fetch-Site`, a form body of at most 4 KB and 20 fields, Post/Redirect/Get (`303` to
+`/?view=settings#features`), `form-action 'self'` and `Referrer-Policy: same-origin` on that page only when it has them.
+
+| POST | Fields | Does |
+|---|---|---|
+| `/settings/feature` | `name` (one of the `[features]` keys), `on` = `yes` or `no` | writes `name = yes` or `no` in `[features]` of that `config.ini`: only that value changes, every other line and comment stays as it is, the file keeps its permissions. The screens follow at once; the collector reads the switches again within 10 seconds (a loop switched on starts, one switched off ends). Switching the AI screen off also stops the model server the web view started |
+
+In an installation the section only shows the switches, with the file and the command that change them, and a post is refused with `403`: `config.ini` is
+the administrator's (see [below](#why-there-is-no-configuration-editor)).
 
 ## The Telegram page's buttons
 
@@ -400,6 +415,8 @@ classic pages it is the only script; on the shell's graph page it comes with the
 
 `config.ini` is owned by root; the web process is unprivileged. Writing it from the browser would require either a root process listening on the network
 or a privileged helper — a large jump in risk for a file you change a few times a year. Edit it over SSH, then `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web`.
+A portable run and the desktop app are the one exception, for `[features]` only ([above](#the-settings-pages-switches)): there `config.ini` is the file of
+the account the web view runs as, so writing it is no jump in privilege.
 (The shell's [layout editor](#edit-the-layout) changes only the `nuc_ui` cookie of your browser, never `config.ini`; the settings page's Export block is what you paste there.
 The Telegram page does not write `config.ini` either: it asks the notifier, an unprivileged service, which keeps the page's choice in its own `web.json`.)
 

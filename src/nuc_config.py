@@ -8,6 +8,7 @@ A broken file never stops the dashboard: the problem goes to stderr and defaults
 import configparser
 import json
 import os
+import re
 import stat
 import sys
 import threading
@@ -278,14 +279,36 @@ def current():
         return _CURRENT
 
 
+_SET_LOCK = threading.Lock()  # two threads of one process (two clicks on the settings page) never write the file at once
+
+
+def _new_value(old, value):
+    """The line `old` (`key = value  # comment`) with only its value changed: the key as it was written, and the comment after the value
+    kept in its column when there is room."""
+    at = old.index("=") + 1
+    line = old[:at].rstrip() + " " + value
+    m = re.search(r"\s+([#;].*)$", old[at:])
+    if not m:
+        return line
+    col = at + m.start(1)
+    return (line.ljust(col) if len(line) < col else line + "  ") + m.group(1)
+
+
 def set_key(path, section, key, value):
-    """Writes `key = value` in [section] of an ini file, keeping every comment and every other line; adds what is missing.
-    Used by the installers' --display option: the admin's other edits are never touched."""
+    """Writes `key = value` in [section] of an ini file, keeping every comment (the one after the old value too) and every other line; adds
+    what is missing. The file keeps its permissions. Used by the installers' --display option, the AI setup, the notifier and the settings
+    page of a portable run: the admin's other edits are never touched."""
+    with _SET_LOCK:
+        _set_key(path, section, key, value)
+
+
+def _set_key(path, section, key, value):
     try:
         with open(path, encoding="utf-8-sig") as f:
             lines = f.read().splitlines()
+        mode = stat.S_IMODE(os.stat(path).st_mode)
     except FileNotFoundError:
-        lines = []
+        lines, mode = [], None
     header = lambda ln: ln.strip()[1:ln.strip().index("]")].strip().lower() if ln.strip().startswith("[") and "]" in ln else None  # noqa: E731
     is_key = lambda ln: ln.split("=", 1)[0].strip().lower() == key.lower() and "=" in ln and not ln.lstrip().startswith(("#", ";"))  # noqa: E731
     out, inside, done = [], False, False
@@ -300,7 +323,7 @@ def set_key(path, section, key, value):
                 done = True
             inside = h == section.lower()
         elif inside and not done and is_key(ln):
-            ln, done = f"{key} = {value}", True
+            ln, done = _new_value(ln, value), True
         out.append(ln)
     if inside and not done:
         out.append(f"{key} = {value}")
@@ -309,7 +332,35 @@ def set_key(path, section, key, value):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(out) + "\n")
+    if mode is not None:
+        os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+def config_path():
+    """The config.ini this process reads: $NUC_CONSOLE_CONFIG, else the default (a portable run: the one in its folder)."""
+    return os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
+
+
+def features_writable(path=None):
+    """(True, "") when the settings page may switch [features]: a portable run (the desktop app is one), whose config.ini is this account's own
+    file in its own folder; else (False, why). An installation's config.ini is the administrator's, and the web view never writes it."""
+    path = path or config_path()
+    if not PORTABLE:
+        return False, "installed: config.ini is the administrator's"
+    folder = os.path.dirname(os.path.abspath(path))
+    if not os.access(folder, os.W_OK) or (os.path.exists(path) and not os.access(path, os.W_OK)):
+        return False, "config.ini cannot be written by this account"
+    return True, ""
+
+
+def set_feature(name, on, path=None):
+    """[features] name = yes | no in this process's config.ini (set_key: the rest of the file as it was), and in current() at once. The collector
+    reads it again within a cycle (collector.reload_features). ValueError for a name that is not a feature."""
+    if name not in FEATURES:
+        raise ValueError("not a feature: %r" % (name,))
+    set_key(path or config_path(), "features", name, "yes" if on else "no")
+    current()["features"][name] = bool(on)
 
 
 if __name__ == "__main__":  # for the installers: --get SECTION KEY (the value in force) | --set FILE SECTION KEY VALUE

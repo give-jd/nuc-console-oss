@@ -3,6 +3,21 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+
+- **Screens and sections on the settings page.** In a portable run and the desktop app, each `[features]` switch (the Health screen, containers,
+  firewall...) is turned on or off from the settings page: only that value of `config.ini` changes, the screens follow at once and the collector
+  within 10 seconds. In an installation the section shows the switches and how to change them (`config.ini` stays the administrator's).
+  [docs/WEB.md](docs/WEB.md#the-settings-pages-switches)
+- The collector reads `[features]` again when `config.ini` changes: a section switched on or off applies without a restart.
+
+### Changed
+
+- Writing a key of `config.ini` (the installers, `nuc-console-ai`, the notifier, the settings page) keeps the comment after the old value and
+  the file's permissions.
+
 ## [2.1.0] - 2026-10-03
 
 The desktop app, with packages for Windows, macOS and Linux built and tried on every release; the live app (`/app`) and a data API

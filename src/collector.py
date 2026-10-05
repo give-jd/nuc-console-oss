@@ -1767,8 +1767,8 @@ def ai_daily_loop(cfg=None, sleep=time.sleep, wall=time.time, run=None, stop=Non
         print("ai digest:" if ok else "ai digest failed:", msg, file=sys.stdout if ok else sys.stderr)
 
 
-def sensors_loop():
-    while True:
+def sensors_loop(stop=None):
+    while not (stop and stop()):
         try:
             write_atomic(collect_sensors(), OUT_SENSORS)
         except Exception as e:  # noqa: BLE001 - the thread must not die: the file goes stale and the renderer flags it
@@ -1794,6 +1794,51 @@ def loops():
     return out
 
 
+# ---- [features] read again: the settings page of a portable run (the desktop app) writes them; an admin's edit is picked up too -------
+_THREADS = {}  # each loop function -> the thread that runs it
+
+
+def _loop_stops():
+    """The loops that end when their feature is switched off (the others read OFF at every pass: a section that is off is not collected)."""
+    return {history_loop: lambda: "health" in OFF, sensors_loop: lambda: not sensors_on(), ai_daily_loop: lambda: not ai_daily_on()}
+
+
+def start_loops():
+    """Starts every loop loops() wants that is not running: at the start, and again when [features] changed."""
+    stops = _loop_stops()
+    for fn in loops():
+        t = _THREADS.get(fn)
+        if t is not None and t.is_alive():
+            continue
+        t = threading.Thread(target=fn, kwargs={"stop": stops[fn]} if fn in stops else {}, daemon=True)
+        t.start()
+        _THREADS[fn] = t
+
+
+def config_stamp(path=None):
+    """What says config.ini changed (its time and size), None when there is none."""
+    try:
+        st = os.stat(path or nuc_config.config_path())
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def reload_features(path=None):
+    """[features] read again into CFG and OFF, in place (every function reads them at each pass). A file that cannot be read changes nothing:
+    its defaults (everything on) are not what the user wrote. -> True when the switches changed."""
+    cfg = nuc_config.load(path or nuc_config.config_path())
+    new = cfg["features"]
+    if cfg.get("config_error") or new == CFG["features"]:
+        return False
+    CFG["features"].clear()
+    CFG["features"].update(new)
+    OFF.clear()
+    OFF.update(k for k, v in new.items() if not v)
+    print("[features] changed in config.ini: off now: %s" % (", ".join(sorted(OFF)) or "nothing"), file=sys.stderr)
+    return True
+
+
 def once():
     """`--once`: every state file's content in one document ("sensors" on macOS and Windows only)."""
     out = {"containers": collect(), "net": collect_net(), "boot": None if {"boot", "docker_disk"} <= OFF else collect_boot()}
@@ -1811,14 +1856,20 @@ def main():
         print(json.dumps(once(), indent=1))
         return
     os.makedirs(nuc_config.RUN_DIR, exist_ok=True)  # systemd creates it (RuntimeDirectory); launchd and Task Scheduler do not
-    for fn in loops():
-        threading.Thread(target=fn, daemon=True).start()
+    stamp = config_stamp()
+    _THREADS.clear()  # this process's loops: none runs yet
+    start_loops()
     while True:
         try:
             data = collect()
         except Exception as e:  # docker down or unexpected output: the state carries the error, the loop goes on
             data = {"ts": time.time(), "error": repr(e)[:200], "containers": []}
         write_atomic(data)
+        now = config_stamp()
+        if now != stamp:  # config.ini changed: its [features] apply from the next pass (a loop switched on starts, one switched off ends)
+            stamp = now
+            if reload_features():
+                start_loops()
         time.sleep(INTERVAL_S)
 
 
