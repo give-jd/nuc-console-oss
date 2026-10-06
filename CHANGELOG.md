@@ -3,7 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.3.0] - 2026-10-06
+
+The AI page works in the desktop app and the live app: *Turn AI on* asks its question and goes on, a click no longer selects a model or
+jumps to the top, and the question box always takes a question. It says whether the model is in memory and what it is doing, keeps the chat
+across restarts and shows the whole prompt each answer was sent. A minor version: nothing is removed and nothing needs doing after the update
+(`config.ini` is kept). Still Python 3.8+, standard library only.
 
 ### Added
 
@@ -569,6 +574,7 @@ with who actually connects; boot health, temperatures and throttling, disks, tra
 new, changed or vanished port (`sudo nuc-console-accept`). A small root collector and an unprivileged renderer; `[features]` switches
 every section; optional helper scripts `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` (never run by the installer).
 
+[2.3.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.5.0...v2.0.0
