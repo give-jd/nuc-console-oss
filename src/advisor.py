@@ -52,6 +52,8 @@ TOKEN_BUDGET, CHARS_PER_TOKEN = 2500, 4   # the report in the prompt: ~2500 toke
 TEMPERATURE = 0.2
 MAX_TOKENS_ADVISE, MAX_TOKENS_ASK = 700, 600
 MAX_TOOL_CALLS = 3
+PROMPT_MAX = 16000             # characters of a prompt kept with its answer, for the page that shows it (the whole prompt, as a rule)
+PROMPT_ROLES = ("request", "system", "tools", "user", "assistant", "tool")
 MAX_TOOL_CHARS = 3500          # one tool result, as sent back to the model
 MAX_ROWS = 25
 MIN_INTERVAL = 10.0            # seconds between the end of one generation and the start of the next (cache hits are free)
@@ -98,6 +100,14 @@ def clean_text(s, cap=MAX_TEXT):
     s = _ANSI.sub("", s).replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
     s = re.sub(r"\n{3,}", "\n\n", _CTRL.sub("", s)).strip()
     return s if len(s) <= cap else s[:max(0, cap - 1)].rstrip() + "…"
+
+
+def clean_block(s, cap=MAX_TEXT):
+    """Untrusted multi-line text shown as it was sent (a prompt): no escape sequences, no control or bidi characters, line breaks kept, capped;
+    unlike clean_text nothing else is taken out."""
+    s = _ANSI.sub("", s if isinstance(s, str) else ("" if s is None else str(s)))
+    s = _CTRL.sub("", s.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    "))
+    return s if len(s) <= cap else s[:max(0, cap - 1)] + "…"
 
 
 def clean_line(s, cap=120):
@@ -916,6 +926,11 @@ def web_switch(cfg, path=None):
 
 # --------------------------------------------------------------------------------------------------------------- advise
 
+def advise_messages(compact):
+    """The messages of a request for advice on a compact report (compact_report()): the instructions, then the report as data."""
+    return [{"role": "system", "content": ADVISE_SYSTEM}, {"role": "user", "content": ADVISE_PREAMBLE + compact}]
+
+
 def advise(report, cfg, cached_only=False, fresh=False):
     """-> {"text", "model", "at", "cites"}: advice on a health.report() dict. Raises AdvisorError (Busy, Disabled, ...).
     The same report and model give the cached answer at once (fresh=True: always a new one, for the daily digest).
@@ -938,8 +953,7 @@ def advise(report, cfg, cached_only=False, fresh=False):
         timeout = _timeout(cfg)
         info = endpoint_info(ai.get("endpoint"), bool(ai.get("allow_remote")))
         model = _model(cfg, info, timeout)
-        msg = chat(info, model, [{"role": "system", "content": ADVISE_SYSTEM},
-                                 {"role": "user", "content": ADVISE_PREAMBLE + compact}], None, MAX_TOKENS_ADVISE, timeout)
+        msg = chat(info, model, advise_messages(compact), None, MAX_TOKENS_ADVISE, timeout)
         text = clean_text(_content(msg))
         if not text:
             raise AdvisorError("the model returned no text: try again, or use a bigger model")
@@ -1318,10 +1332,12 @@ def _native_calls(msg):
     return out
 
 
-def ask(question, conn, cfg, now=None, state=None):
-    """-> {"text", "tools_used": [names], "model", "calls": [{"tool", "args", "ok"}], "state": bool}: an answer built from the machine's state now
-    (state: machine_state(), sent with the question as data; None: none) and the predefined read-only queries on the history (`conn`, opened
-    read-only; None: there is no history, the tools say so). Raises AdvisorError (Busy, Disabled, ...)."""
+def ask(question, conn, cfg, now=None, state=None, progress=None):
+    """-> {"text", "tools_used": [names], "model", "calls": [{"tool", "args", "ok"}], "state": bool, "prompt": prompt_view() of the last request}:
+    an answer built from the machine's state now (state: machine_state(), sent with the question as data; None: none) and the predefined
+    read-only queries on the history (`conn`, opened read-only; None: there is no history, the tools say so). progress(text): told what it is
+    doing (asking the model, reading the history), from the thread that asks. Raises AdvisorError (Busy, Disabled, ...); one raised after the
+    model was asked carries .prompt, what it was sent."""
     q = clean_line(question, MAX_QUESTION)
     if not q:
         raise AdvisorError("empty question")
@@ -1333,14 +1349,56 @@ def ask(question, conn, cfg, now=None, state=None):
         timeout = _timeout(cfg)
         info = endpoint_info(ai.get("endpoint"), bool(ai.get("allow_remote")))
         model = _model(cfg, info, timeout)
-        return _ask_loop(q, conn, info, model, timeout, now if now is not None else time.time(), state_text(state))
+        sent = {}
+        try:
+            return _ask_loop(q, conn, info, model, timeout, now if now is not None else time.time(), state_text(state), progress, sent)
+        except AdvisorError as e:
+            if sent:
+                e.prompt = prompt_view(sent["msgs"], sent["tools"], _request(info, model, MAX_TOKENS_ASK))
+            raise
 
 
-def _ask_loop(q, conn, info, model, timeout, now, state=""):
+def _request(info, model, max_tokens):
+    """The first line of a prompt as the page shows it: where it went and with what settings."""
+    return "POST %s://%s:%d%s/chat/completions · model %s · temperature %s · at most %d tokens of answer" % (
+        info["scheme"], info["host"], info["port"], info["base"], model, TEMPERATURE, max_tokens)
+
+
+def prompt_view(messages, tools=False, request=""):
+    """The messages of one request to the model -> [{"role", "text"}]: what the page shows as 'the prompt': the request line, then each
+    message as the model read it (an assistant's tool calls written out after its text), the tools it was offered as functions after the
+    instructions. Every text cleaned (clean_block), PROMPT_MAX characters in all (what is past it is cut, and says so). Pure."""
+    out = [("request", request)] if request else []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        text = _content(m)
+        for tc in m.get("tool_calls") or [] if isinstance(m.get("tool_calls"), list) else []:
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if isinstance(fn, dict):
+                text += ("\n" if text else "") + "calls %s(%s)" % (clean_line(fn.get("name"), 40), clean_line(fn.get("arguments"), 300))
+        role = m.get("role") if m.get("role") in PROMPT_ROLES else "?"
+        out.append((role, text))
+        if role == "system" and tools:
+            out.append(("tools", "Offered as functions (OpenAI tools: name, arguments, what it does):\n" + _catalogue()))
+    view, left = [], PROMPT_MAX
+    for role, text in out:
+        t = clean_block(text, left)
+        view.append({"role": role, "text": t})
+        left -= len(t)
+        if left <= 0:
+            view.append({"role": "?", "text": "(the rest is cut: %d characters are kept)" % PROMPT_MAX})
+            break
+    return view
+
+
+def _ask_loop(q, conn, info, model, timeout, now, state="", progress=None, sent=None):
     key = (info["host"], info["port"], model)
     native = _TOOLS_OK.get(key) is not False
     started, calls = time.monotonic(), []
     repaired = False
+    sent = {} if sent is None else sent
+    say = progress or (lambda _text: None)
     said = STATE_PREAMBLE + state + "\n\nQuestion: " + q if state else q  # the state is data, beside the question: never in the instructions
 
     def start(native_tools):
@@ -1349,6 +1407,7 @@ def _ask_loop(q, conn, info, model, timeout, now, state=""):
 
     def run(name, args):
         known = isinstance(name, str) and name in TOOLS
+        say("reading the history: %s" % (clean_line(name, 40) if known else "an unknown query"))
         out = run_tool(conn, name, args if args is not None else {"_invalid": 1}, now)
         calls.append({"tool": name if known else "?", "args": _obj(args) if known else {}, "ok": '"error"' not in out[:12]})
         return out
@@ -1361,8 +1420,11 @@ def _ask_loop(q, conn, info, model, timeout, now, state=""):
         force = len(calls) >= MAX_TOOL_CALLS
         if force and msgs[-1].get("content") != FORCE_NOTE:
             msgs.append({"role": "user", "content": FORCE_NOTE})
+        offered = native and not force
+        sent.update(msgs=list(msgs), tools=offered)
+        say("asking the model" + (" again, with what %s returned" % ", ".join(sorted({c["tool"] for c in calls})) if calls else ""))
         try:
-            msg = chat(info, model, msgs, _specs() if native and not force else None, MAX_TOKENS_ASK, min(timeout, left))
+            msg = chat(info, model, msgs, _specs() if offered else None, MAX_TOKENS_ASK, min(timeout, left))
         except ToolsUnsupported:
             if native and not calls:  # try once: the server rejects `tools`, so speak the JSON protocol instead
                 _TOOLS_OK[key] = native = False
@@ -1400,7 +1462,7 @@ def _ask_loop(q, conn, info, model, timeout, now, state=""):
         if not answer:
             raise AdvisorError("the model returned no text: try again, or use a bigger model")
         return {"text": answer, "tools_used": [c["tool"] for c in calls if c["tool"] != "?"], "model": clean_line(model, 80), "calls": calls,
-                "state": bool(state)}
+                "state": bool(state), "prompt": prompt_view(sent["msgs"], sent["tools"], _request(info, model, MAX_TOKENS_ASK))}
     raise AdvisorError("the model did not answer within %d turns: try again, or use a bigger model" % (MAX_TOOL_CALLS + 4))
 
 

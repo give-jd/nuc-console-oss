@@ -851,6 +851,28 @@ class Ask(Base):
         self.assertEqual(asst["tool_calls"][0]["function"]["name"], "events")
         self.assertEqual(json.loads(asst["tool_calls"][0]["function"]["arguments"]), {"kind": "crash", "days": 7})
 
+    def test_the_answer_carries_the_prompt_of_the_last_request_and_says_what_it_does(self):
+        self.srv.queue += [tool_calls(("events", {"kind": "crash", "days": 7})), completion("chromium.")]
+        said = []
+        res = advisor.ask("which app crashes most?", self.conn, self.cfg, NOW, progress=said.append)
+        self.assertEqual(said, ["asking the model", "reading the history: events", "asking the model again, with what events returned"])
+        last = self.srv.posts()[-1]["body"]
+        p = res["prompt"]
+        self.assertEqual([m["role"] for m in p], ["request", "system", "tools", "user", "assistant", "tool"])
+        self.assertTrue(p[0]["text"].startswith("POST http://127.0.0.1:%d/v1/chat/completions · model tiny-model · temperature 0.2" % self.srv.port))
+        self.assertEqual(p[1]["text"], last["messages"][0]["content"])
+        self.assertEqual(p[5]["text"], last["messages"][3]["content"])
+        self.assertEqual(p[4]["text"], 'calls events({"kind": "crash", "days": 7})')
+
+    def test_a_question_that_fails_after_the_model_was_asked_carries_its_prompt(self):
+        self.srv.queue.append(completion(""))
+        with self.assertRaises(advisor.AdvisorError) as e:
+            self.ask("is it up?")
+        self.assertEqual([m["role"] for m in e.exception.prompt][-1], "user")
+        with self.assertRaises(advisor.AdvisorError) as e:
+            advisor.ask("", self.conn, self.cfg, NOW)
+        self.assertFalse(hasattr(e.exception, "prompt"), "nothing was sent")
+
     def test_answer_without_a_tool_call_is_marked(self):
         self.srv.queue.append(completion("I think so."))
         res = self.ask()
@@ -1008,6 +1030,23 @@ class Ask(Base):
 
 
 # ------------------------------------------------------------------------------------------------------------------ screens
+
+class Prompt(unittest.TestCase):
+    """prompt_view(): the messages of a request as the page shows them, cleaned and capped."""
+
+    def test_cleaned_lines_kept_and_capped(self):
+        msgs = [{"role": "system", "content": "rules"}, {"role": "user", "content": "a\x1b[2J\nb\u202e"}, {"role": "weird", "content": ["x"]}, "junk",
+                {"role": "assistant", "content": None, "tool_calls": [{"function": {"name": "events", "arguments": '{"days": 7}'}}, "junk"]}]
+        p = advisor.prompt_view(msgs, True, "POST x")
+        self.assertEqual([m["role"] for m in p], ["request", "system", "tools", "user", "?", "assistant"])
+        self.assertEqual(p[3]["text"], "a\nb")
+        self.assertEqual(p[5]["text"], 'calls events({"days": 7})')
+        self.assertIn("top_apps(", p[2]["text"])
+        with mock.patch.object(advisor, "PROMPT_MAX", 10):
+            p = advisor.prompt_view([{"role": "user", "content": "x" * 50}, {"role": "user", "content": "y"}])
+        self.assertEqual(p, [{"role": "user", "text": "x" * 9 + "…"}, {"role": "?", "text": "(the rest is cut: 10 characters are kept)"}])
+        self.assertEqual(advisor.clean_block("a\tb\r\nc\x07"), "a    b\nc")
+
 
 class State(unittest.TestCase):
     """What the chat's model is given of the machine now (machine_state): cleaned, capped, the least important cut first."""

@@ -283,7 +283,7 @@ class Components(unittest.TestCase):
 
     def test_what_is_for_the_web_only_draws_nothing_on_the_console(self):
         for node in (ui.Action("/ai/use", "use"), ui.Controls([ui.Span("x"), ui.Action("/ai/off", "off")]), ui.Qa("you", "why?", ui.Advice("h")),
-                     ui.Log([ui.Qa("you", "why?")])):
+                     ui.Log([ui.Qa("you", "why?")]), ui.Prompt("why?", [("user", "why?")])):
             self.assertEqual(ansi.render(node, 80), ([], False))
         self.assertEqual(ansi.inline(ui.Action("/ai/use", "use")), "")
 
@@ -294,6 +294,49 @@ class Components(unittest.TestCase):
         self.assertLess(out.index("first &lt;q&gt;"), out.index("second"))
         self.assertTrue(out.endswith("</div></div>"))
         self.assertIn(".av .log{display:flex;flex-direction:column-reverse;", webcss_text(), "its end, the newest, stays in sight")
+
+    def test_an_exchange_says_when_and_links_to_its_prompt_and_the_prompt_keeps_its_lines(self):
+        out = htmlview.html(ui.Qa("you", "why?", ui.Advice("h"), key="0123456789ab", note="06 Oct 14:02 · in 9 s", prompt_href="/?view=ai&prompt=0123456789ab"))
+        self.assertTrue(out.startswith('<div class="qa" data-k="qa-0123456789ab">'), "kept in place by its key when the page is redrawn")
+        self.assertIn('<p class="qa-f"><span class="d">06 Oct 14:02 · in 9 s</span> · <a href="/?view=ai&amp;prompt=0123456789ab">the prompt it was sent</a></p>', out)
+        self.assertNotIn("qa-f", htmlview.html(ui.Qa("you", "why?", prompt_href="javascript:alert(1)")), "only a link of this server")
+        wait = htmlview.html(ui.Qa("you", "why?", None, True, wait="reading the history: events · 9 s"))
+        self.assertIn('<p class="pend">reading the history: events · 9 s</p>', wait)
+        p = htmlview.html(ui.Prompt("you: <why>?", [("system", "rules\n<b>\x1b[31m"), ("user", "é?")], "/?view=ai"))
+        self.assertIn("2 parts, 16 characters", p)
+        self.assertIn('<pre class="pm-t">rules\n&lt;b&gt;?[31m</pre>', p, "lines kept, markup and escapes inert")
+        self.assertIn('<span>for: you: &lt;why&gt;?</span><a class="pm-x" href="/?view=ai">close ✕</a>', p)
+
+    def test_the_question_box_is_never_disabled_only_its_button(self):
+        out = htmlview.html(ui.Action("/ai/ask", "Ask", (), "", "ok", "", True, ("q", "ask", 500)))
+        self.assertRegex(out, r'<input class="q" [^>]*autocomplete="off"> <button class="bt bt-ok" type="submit" disabled>Ask</button>')
+
+    def test_the_models_line_says_whether_it_is_loaded_where_and_what_it_does(self):
+        acts = screens.AiActs("tok", "view=ai")
+        base = {"chat": {"pending": None}}
+
+        def line(ms, now=1000.0, **kw):
+            nodes = screens.ai_model_lines(dict(base, model=ms, **kw), acts, now)
+            return nodes, " ".join(getattr(x, "text", "") for n in nodes for x in n.items)
+
+        self.assertEqual(line({"state": "off"})[0], [])
+        nodes, text = line({"state": "ready", "model": "qwen3-8b", "row": {"size_mb": 5000.0, "vram_mb": 5000.0, "ctx": 4096}})
+        self.assertIn("qwen3-8b is in memory, all in the GPU's memory (4.9 GB) · context 4096 tokens", text)
+        self.assertEqual(nodes[0].items[1], ui.Badge("✔ LOADED", "ok"))
+        self.assertIn("all in RAM, on the CPU", line({"state": "ready", "model": "m", "row": {"size_mb": 900.0, "vram_mb": 0}})[1])
+        self.assertIn("1000 MB in the GPU's memory, 1000 MB in RAM", line({"state": "ready", "model": "m", "row": {"size_mb": 2000.0, "vram_mb": 1000.0}})[1])
+        nodes, text = line({"state": "unloaded", "model": "m", "load": True})
+        self.assertIn("is not in memory now", text)
+        self.assertEqual([x.label for x in nodes[0].items if isinstance(x, ui.Action)], ["Load it now"])
+        self.assertEqual([x for x in line({"state": "unloaded", "model": "m", "load": False})[0][0].items if isinstance(x, ui.Action)], [])
+        self.assertIn("· 1 min 05 s so far", line({"state": "loading", "model": "m", "since": 935.0})[1])
+        self.assertIn("nothing answers at http://127.0.0.1:9/v1", line({"state": "down", "endpoint": "http://127.0.0.1:9/v1"})[1])
+        self.assertEqual(line({"state": "unknown"})[0][0].items[1], ui.Badge("? UNKNOWN", "muted"), "never a reassuring green")
+        pend = {"pending": {"started": 990.0, "step": "reading the history: events"}}
+        nodes, text = line({"state": "ready", "model": "m"}, chat=pend)
+        self.assertEqual(nodes[0].items[1], ui.Badge("✎ ANSWERING", "accent"))
+        self.assertIn("m is answering · 10 s so far · reading the history: events", text)
+        self.assertIn("m is being loaded into memory, then it answers", line({"state": "unloaded", "model": "m"}, chat=pend)[1])
 
     def test_cols_once_clips_where_the_lines_are_put_side_by_side_only(self):
         left = ui.Group([ui.Line([ui.Span("aaaa")], clip=10), ui.Head("H")])

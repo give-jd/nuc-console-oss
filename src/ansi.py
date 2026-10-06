@@ -701,6 +701,7 @@ _DRAW = {
     ui.Action: lambda n, w: ([], False),  # the web's buttons, controls and chat: the console has keys and its own lines
     ui.Controls: lambda n, w: ([], False),
     ui.Qa: lambda n, w: ([], False),
+    ui.Prompt: lambda n, w: ([], False),
     ui.Log: lambda n, w: ([], False),
     ui.Title: lambda n, w: ([_title_line(n, w)], False),
     ui.Seg: lambda n, w: ([inline(n)], False),

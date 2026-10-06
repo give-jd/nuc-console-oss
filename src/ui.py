@@ -95,6 +95,11 @@ def safe(s):
     return CTRL.sub("?", str(s))
 
 
+def _block(s):
+    """Text of several lines (a prompt): like safe(), but a line break stays one."""
+    return "\n".join(safe(x) for x in str("" if s is None else s).split("\n"))
+
+
 def plural(n, word):
     """'1 rule', '2 rules': English count + noun (regular plurals only)."""
     return f"{n} {word}" + ("" if n == 1 else "s")
@@ -854,7 +859,8 @@ class Action(_Component):
     fields [(name, value)] (the CSRF token, the page to come back to, a model id: whatever the server's handler checks), labelled label. key: the
     key of the keymap that does the same (data-key); tone: ok, err or accent (the look of the button); title: what it will do, as a tooltip;
     disabled: drawn but not clickable (a job is running). ask: (name, placeholder, maxlength) puts a text box before the button (a question to
-    type). The console has the keys: it draws nothing."""
+    type; the box is never disabled, only the button: the next question can be typed while the model is busy). The console has the keys: it
+    draws nothing."""
     __slots__ = ("action", "label", "fields", "key", "tone", "title", "disabled", "ask")
 
     def __init__(self, action, label, fields=(), key="", tone=None, title="", disabled=False, ask=None):
@@ -898,13 +904,31 @@ class Spec(_Component):
         self.h, self.lw, self.actions = None if h is None else int(h), int(lw), list(actions)
 
 
+QA_WAIT = "the model is writing the answer (a small model on a slow CPU may need a minute; this page updates by itself)"
+
+
 class Qa(_Component):
     """One exchange of the web's chat: kind ('you' or 'advice'), q (the question) and its answer, a ui.Advice, or None while pending (the model
-    is still writing it). The console has no chat: it draws nothing."""
-    __slots__ = ("kind", "q", "answer", "pending")
+    is still writing it). key: the exchange's id (the page keeps it in place by it); wait: what the waiting line says (what the model is doing
+    now); note: when it was answered and in how long; prompt_href: the page that shows the whole prompt the model was sent for it (None: not
+    known). The console has no chat: it draws nothing."""
+    __slots__ = ("kind", "q", "answer", "pending", "key", "wait", "note", "prompt_href")
 
-    def __init__(self, kind, q, answer=None, pending=False):
+    def __init__(self, kind, q, answer=None, pending=False, key="", wait=QA_WAIT, note="", prompt_href=None):
         self.kind, self.q, self.answer, self.pending = "advice" if kind == "advice" else "you", _text(q), answer, bool(pending)
+        self.key, self.wait, self.note = _text(key), _text(wait), _text(note)
+        self.prompt_href = None if prompt_href is None else str(prompt_href)
+
+
+class Prompt(_Component):
+    """What the model was sent for one exchange of the chat, every message whole, as the model read it: title (the question), messages
+    [(role, text)] (request, system, tools, user, assistant, tool) and close_href, where the link that closes it goes. The console has no chat:
+    it draws nothing."""
+    __slots__ = ("title", "messages", "close_href")
+
+    def __init__(self, title, messages=(), close_href=None):
+        self.title, self.messages = _text(title), [(_text(r), _block(t)) for r, t in messages]
+        self.close_href = None if close_href is None else str(close_href)
 
 
 class Log(_Component):

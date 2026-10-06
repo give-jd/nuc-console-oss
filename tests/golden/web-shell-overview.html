@@ -1,4 +1,4 @@
-<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-gMDiO7Zanq/63YheBcjutjOj/JOPwUBCJtora+LuI1c=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-9GZYHRyC/l+um9jeWR6HmXZOs7IkgpqRthuNvzvX+oY=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
 <html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
 <head>
@@ -9,7 +9,7 @@
 <meta http-equiv="refresh" content="2">
 </noscript>
 <title>demo-host · overview · nuc-console</title>
-<link rel="stylesheet" href="/s/app.ce000bfc.css">
+<link rel="stylesheet" href="/s/app.44b6dfbf.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="c04f169b2e">
@@ -1525,8 +1525,9 @@
 </script>
 <script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
 // the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
-// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
-// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+// focus over the elements marked data-row and Enter follows the focused row's link; a click on such a row, anywhere but on a link, a
+// button or a field of it, follows its link too (no overlay: a table row is no containing block in every engine). Keys with Ctrl, Alt
+// or Meta, keys typed into a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -1571,6 +1572,11 @@
     else if (!help && k === "Enter") hit = follow();
     if (!hit && !e.repeat) hit = press(k, help || document);
     if (hit) e.preventDefault();
+  });
+  document.addEventListener("click", e => {  // a click on a row, not on a link, a button or a field of it, nor to select text: the row's link
+    if (e.defaultPrevented || e.button || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || String(window.getSelection() || "")) return;
+    const row = e.target.closest("[data-row]"), link = row && row.querySelector("a[href]");
+    if (link && !e.target.closest("a[href], button, input, select, textarea, label, summary")) link.click();
   });
 })();
 </script>

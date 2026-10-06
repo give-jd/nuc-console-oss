@@ -308,10 +308,11 @@ def parity_page(view):
     import prefs
     import render
     import web
-    with golden.FrozenWorld(chat=golden.CHAT if view == "ai" else ()) as world:  # the AI screen with its chat: the log the app draws too
+    shown = golden.CHAT[0]["id"]  # the AI screen with its chat (the log the app draws too) and the whole prompt of its first answer
+    with golden.FrozenWorld(chat=golden.CHAT if view == "ai" else ()) as world:
         srv = world.server
         srv.cache.clear()
-        page = srv.app_page("", {"live": ["0"]} if view == "overview" else {"view": [view], "live": ["0"]})
+        page = srv.app_page("", {"live": ["0"]} if view == "overview" else dict({"view": [view], "live": ["0"]}, **({"prompt": [shown]} if view == "ai" else {})))
         r = srv.cfg["refresh_seconds"]
         here = {k: v for k, v in web.view_params({}).items() if k in web.HERE_KEYS}
         kpis = ""
@@ -347,7 +348,7 @@ def parity_page(view):
                 p = web.view_params({"view": ["map"]})
                 nodes = srv.api_map(here, web.map_mode({k: p[k] for k in web.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]
             else:
-                nodes = srv.api_ai(here, "", "")["nodes"]
+                nodes = srv.api_ai(here, "", "", shown)["nodes"]
             box = {"cpu": "scr scr-cpu", "health": "hv", "map": "scr mapv", "ai": "scr av"}[view]
             screen = '<div class="%s">' % box + "".join(htmlview.html(n) for n in nodes) + "</div>"
     html_text = str(page).replace('<div class="kpiblock" id="kpis"></div>', '<div class="kpiblock" id="kpis"></div><!--END-KPIS-->', 1)

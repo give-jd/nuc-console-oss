@@ -10,9 +10,13 @@
               folder, the GPU unless [ai] gpu = no); it serves every installed model, keeps the one in use loaded, ends with the process, and there
               is only ever one
   chat        a question (advisor.ask, with the machine's state now: the program that owns the process binds it) or "advice now"
-              (advisor.advise), answered in the background; the last few are kept in memory until the chat is cleared
+              (advisor.advise), answered in the background, each kept with the whole prompt the model was sent; the last HISTORY_MAX are
+              kept in CHAT_FILE in the AI folder (this account's only), so that a restart does not lose them, until the chat is cleared
+  model       what the model is doing (model_state): the server starting, the model loading, loaded and ready (where: the GPU's memory, RAM),
+              not loaded now (Ollama lets it go after a while without a question: "load it now" loads it again), nothing answering
   switch      on/off, the model and the endpoint of the server started here: web.json in the AI folder (advisor.effective_cfg lays it
-              over config.ini, which these programs never write)
+              over config.ini, which these programs never write, except [ai] enabled = no in a portable run, whose config.ini is the
+              user's own: turning AI off works there even when config.ini turned it on)
   usage       what the model uses now (the AI page's MODEL USAGE): the CPU and memory of the model server's processes, the models it has
               loaded and where (Ollama's /api/ps: in the GPU's memory or in RAM), how busy the GPU is (aihw.gpu_load). Measured in a thread of
               its own every USAGE_S, only while the AI is on and a page has asked for the snapshot within USAGE_IDLE_S
@@ -29,10 +33,12 @@ import http.client
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -42,7 +48,9 @@ import aiollama
 import aisetup
 import nuc_config
 
-HISTORY_MAX = 10          # questions and advice kept (memory only)
+HISTORY_MAX = 50          # questions and advice kept, shown and written to CHAT_FILE (the oldest go first)
+CHAT_FILE = "chat.json"   # in the AI folder: the chat, mode 0600 (the questions, the answers and the prompts: the machine's state); the demo writes none
+CHAT_MAX_BYTES = 4 * 2 ** 20   # a bigger file is not this module's: it is not read
 NOTICE_S = 120            # a notice (the result of the last action) stays on the page this long
 LOCK_FILE = "job.lock"    # in the AI folder: a download or a delete is running, in this process or in the other one (web view / console)
 LOCK_STALE_S = 90         # a lock nobody has touched this long is a dead process's; a live job touches it every HEARTBEAT_S
@@ -59,8 +67,11 @@ USAGE_S = 3.0             # the model's usage is measured this often ...
 USAGE_IDLE_S = 30.0       # ... while a page has asked for the snapshot within this long (nobody looking: nothing is measured)
 SERVER_NAMES = ("ollama", "ollama.exe", "ollama_llama_server", "ollama_llama_se", "ollama_llama_server.exe")  # a server this process did not start
 
-VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server"}
+VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server",
+        "load": "loading"}
+WORKING = ("use", "download", "start", "load")   # the jobs the switch says 'working' about (and that can be cancelled)
 DEMO_RUNTIME = {"linux": "linux-amd64", "windows": "windows-amd64", "darwin": "darwin"}  # the build each demo machine would download
+DEMO_REQUEST = "POST http://127.0.0.1:8080/v1/chat/completions · model demo · temperature 0.2 · at most %d tokens of answer (demo: nothing is sent)"
 LOCKED = "locked by config.ini ([ai] web_actions = no): the page and the screen only show"
 ASKING = "asking the model: the answer appears below (a small model on a slow CPU may need a minute)"
 
@@ -70,22 +81,24 @@ class Engine(object):
     blocks (a job or an answer runs in its own thread). Tests give the folder, the catalog and the hooks; the demo gives demo=True."""
 
     def __init__(self, demo=False, directory=None, runtime=None, models=None, allow_loopback_http=False, cfg_fn=None, hw_fn=None,
-                 report_fn=None, history_fn=None, popen=subprocess.Popen, state_fn=None, probe=None):
+                 report_fn=None, history_fn=None, popen=subprocess.Popen, state_fn=None, probe=None, cfg_off_fn=None, cfg_writable_fn=None):
         self.demo, self._dir, self.allow_loopback_http, self.popen = demo, directory, allow_loopback_http, popen
         self.runtime = runtime if runtime is not None else aisetup.RUNTIME
         self.models = models if models is not None else aisetup.MODELS
         self.cfg_fn, self.hw_fn, self.report_fn, self.history_fn = cfg_fn or default_cfg, hw_fn or aisetup._hardware, report_fn or default_report, \
             history_fn or advisor._open_history
         self.state_fn = state_fn or default_state
+        self.cfg_off_fn, self.cfg_writable_fn = cfg_off_fn or default_cfg_off, cfg_writable_fn or default_cfg_writable
         self.probe = probe or UsageProbe()     # what the usage is read with (tests: a fake)
-        self.usage, self._usage_seen, self._usage_thread, self._usage_stop = None, 0.0, None, threading.Event()
+        self.usage, self._usage_seen, self._usage_thread, self._usage_stop, self._usage_wake = None, 0.0, None, threading.Event(), threading.Event()
         self.usage_s = USAGE_S
         self.start_wait, self.stop_grace, self.demo_step = START_WAIT_S, STOP_GRACE_S, DEMO_STEP_S  # tests shorten them
         self.load_wait, self.answer_wait, self.poll_s = LOAD_WAIT_S, ANSWER_WAIT_S, POLL_S
         self.lock = threading.RLock()
         self.version = 0                       # +1 at every change a page may show: the catalog is read again
         self.job = self.notice = self.pending = None
-        self.history = collections.deque(maxlen=HISTORY_MAX)
+        self.history, self.history_max, self._chat_read = collections.deque(), HISTORY_MAX, False  # read from CHAT_FILE at the first use
+        self._chat_write, self._chat_warned = threading.Lock(), False
         self.progress_hook = None              # tests: called (with the job) at every chunk of a download
         self._cancel, self._job_thread, self._chat_thread = threading.Event(), None, None
         self.child = self.child_info = self.last_exit = None
@@ -150,12 +163,24 @@ class Engine(object):
         if blocked:
             return blocked
         if not on and (self.cfg().get("ai") or {}).get("enabled"):
-            return self._result(False, "the advisor is on by config.ini ([ai] enabled = yes): set it to no there to turn it off")
+            done, why = self._cfg_off()
+            if not done:
+                return self._result(False, "the advisor is on by config.ini ([ai] enabled = yes): set it to no there to turn it off"
+                                    + (" (%s)" % why if why else ""))
         try:
             self._web(lambda st: st.update(enabled=bool(on)))
         except aisetup.SetupError as e:
             return self._result(False, str(e))
         return self._result(True, "the advisor is " + ("on" if on else "off"))
+
+    def _cfg_off(self):
+        """config.ini's [ai] enabled = no, where this process may write it (a portable run: the user's own file) -> (done, why not)."""
+        if self.demo:
+            return False, "the demo does not write config.ini"
+        try:
+            return self.cfg_off_fn()
+        except (OSError, ValueError) as e:
+            return False, "config.ini could not be written: %s" % aisetup.safe(getattr(e, "strerror", None) or e, 120)
 
     def turn_off(self):
         """AI off: the advisor is turned off and the model server this process started is stopped."""
@@ -241,7 +266,7 @@ class Engine(object):
                 return self._result(False, "busy: %s. Wait for it, or cancel it" % job_text(self.job, False))
             now = time.time()
             self.job = {"kind": kind, "model": model_id or "", "state": "running", "phase": "starting", "step": "", "done": 0, "total": 0, "rate": 0.0,
-                        "error": "", "note": "", "started": now, "ended": None, "mark": (now, 0)}
+                        "error": "", "note": "", "started": now, "ended": None, "mark": (now, 0), "phase_at": now}
             self._cancel = threading.Event()
             job = self.job
             self._job_thread = threading.Thread(target=self._run_job, args=(job, work), daemon=True)
@@ -270,6 +295,7 @@ class Engine(object):
             with self.lock:
                 job.update(state=state, error=error, ended=time.time(), phase="")
                 self.version += 1
+            self._usage_wake.set()  # what the server has loaded now is measured at once, not in a few seconds
         text = job_text(job, False)
         self._result(state != "failed", error and "%s: %s" % (text, error) or (job["note"] or text))
 
@@ -304,7 +330,7 @@ class Engine(object):
         with self.lock:
             if not (self.job and self.job["state"] == "running"):
                 return self._result(False, "nothing to cancel")
-            if self.job["kind"] not in ("download", "use", "start"):
+            if self.job["kind"] not in WORKING:
                 return self._result(False, "%s cannot be cancelled: it ends in a moment" % job_text(self.job, False))
             self._cancel.set()
         return self._result(True, "cancelling: what was fetched is kept")
@@ -379,7 +405,8 @@ class Engine(object):
         """Progress: the job's bytes done out of total, its phase, the speed over the last second or more; the lock is touched, the hook called."""
         now = time.time()
         with self.lock:
-            job["done"], job["total"], job["phase"] = done, total, phase
+            job["done"], job["total"] = done, total
+            _set_phase(job, phase)
             t0, d0 = job["mark"]
             if now - t0 >= 1.0:
                 job["rate"], job["mark"] = (job["done"] - d0) / (now - t0), (now, job["done"])
@@ -444,14 +471,16 @@ class Engine(object):
         if not aisetup.is_verified(d, arch, a["sha256"], a["size"]):  # by the stamp: a verified archive is never fetched again
             later = 0 if aisetup.model_ready(d, m) else aisetup.model_bytes(m)
             with self.lock:
-                job["total"], job["step"], job["phase"] = a["size"] + later, "runtime", "downloading"
+                job["total"], job["step"] = a["size"] + later, "runtime"
+                _set_phase(job, "downloading")
             aisetup.download(a["url"], arch, a["sha256"], a["size"], allow_loopback_http=self.allow_loopback_http,
                              progress=self._progress(job, 0, a["size"] + later), cancel=self._cancel.is_set)
             aisetup.record(d, arch, a["sha256"])
             with self.lock:
                 job["done"] = a["size"]
         with self.lock:
-            job["step"], job["phase"] = "runtime", "unpacking"
+            job["step"] = "runtime"
+            _set_phase(job, "unpacking")
         aisetup.unpack_runtime(d, rt, cancel=self._cancel.is_set)
         return True
 
@@ -462,7 +491,8 @@ class Engine(object):
             return False
         with self.lock:
             base = job["done"] if job.get("step") == "runtime" else 0
-            job["step"], job["phase"] = m["id"], "downloading"
+            job["step"] = m["id"]
+            _set_phase(job, "downloading")
             if not job["total"] or job["total"] < base:
                 job["total"] = base + aisetup.model_bytes(m)
         est = aisetup.model_bytes(m)
@@ -568,6 +598,34 @@ class Engine(object):
             raise
         self._web(lambda st: st.update(model=m["id"]))
 
+    def load_model(self):
+        """Load the model of the server started here into memory now: Ollama lets a model go after a while without a question, and the next
+        question would wait for it to be loaded first. A job like the others (it can be cancelled; the server goes on loading what it began)."""
+        blocked = self._refuse()
+        if blocked:
+            return blocked
+        if self.demo:
+            srv = self._dstate().get("server")
+            mid = srv["model"] if srv else ""
+        else:
+            with self.lock:
+                mid = (self.child_info or {}).get("model") if self._child_alive() else ""
+        if not mid:
+            return self._result(False, "no model server with a model runs here: turn AI on first")
+        return self._start_job("load", mid, lambda job: self._demo_load(job) if self.demo else self._work_load(job, mid))
+
+    def _work_load(self, job, mid):
+        with self.lock:
+            info = self.child_info if self._child_alive() else None
+            _set_phase(job, "loading")
+        if info is None:
+            raise aisetup.SetupError("the model server stopped: turn AI on again")
+        try:
+            aiollama.Api(aiollama.base_of(info["endpoint"])).load(mid, cancel=self._cancel.is_set, timeout=self.load_wait)
+        except aisetup.SetupError as e:
+            raise aisetup.SetupError("%s could not be loaded: %s" % (mid, aisetup.safe(e, 300)))
+        job["note"] = "%s is loaded: it answers at once" % mid
+
     def _work_use(self, job, m):
         """What the user asked for when they chose a model: it is there, it runs, the advisor asks it."""
         self._check_fit(job, m)
@@ -617,7 +675,7 @@ class Engine(object):
             self._server_for_files(job, own=True)
         with self.lock:
             info = self.child_info
-            job["phase"] = "loading"
+            _set_phase(job, "loading")
         try:
             aiollama.Api(aiollama.base_of(info["endpoint"])).load(m["id"], cancel=self._cancel.is_set, timeout=self.load_wait)
         except aisetup.Cancelled:
@@ -639,7 +697,7 @@ class Engine(object):
         with self.lock:
             if self._child_alive():
                 raise aisetup.SetupError("the model server started here is already running (pid %d): stop it first" % self.child.pid)
-            job["phase"] = "starting"
+            _set_phase(job, "starting")
         if not aisetup.runtime_ready(d, runtime):
             raise aisetup.SetupError("the model server is not installed in %s: download a model first" % d)
         old = advisor.read_web_state(self.web_path()).get("endpoint")
@@ -810,11 +868,12 @@ class Engine(object):
 
     def stop_usage(self):
         self._usage_stop.set()
+        self._usage_wake.set()
 
     def shutdown(self):
         """The process is ending: the server it started ends with it, and a download in the way is stopped."""
         self._cancel.set()
-        self._usage_stop.set()
+        self.stop_usage()
         self._stop_child()
         self._unclaim()
 
@@ -844,38 +903,93 @@ class Engine(object):
         with self.lock:
             if self.pending:
                 return self._result(False, "busy: an answer is being written; wait for it")
-            self.pending = {"kind": kind, "q": label, "started": time.time()}
+            now = time.time()
+            self.pending = {"kind": kind, "q": label, "started": now, "id": new_id(), "step": "", "step_at": now}
             self._chat_thread = threading.Thread(target=self._chat_run, args=(kind, label, work), daemon=True)
             ok = self._result(True, ASKING)
             self._chat_thread.start()
         return ok
 
+    def _step(self, text):
+        """What the answer being written is doing now (advisor.ask's progress): the page shows it under the question."""
+        with self.lock:
+            if self.pending:
+                self.pending.update(step=advisor.clean_line(text, 160), step_at=time.time())
+
     def _chat_run(self, kind, label, work):
-        res, error = None, ""
+        res, error, prompt = None, "", None
         try:
             res = work()
         except advisor.AdvisorError as e:
-            error = advisor.clean_line(str(e), 300)
+            error, prompt = advisor.clean_line(str(e), 300), getattr(e, "prompt", None)
         except Exception as e:  # noqa: BLE001
             print("nuc-console ai: chat error: %r" % (e,), file=sys.stderr)
             error = "unexpected error: %s (see the service log)" % type(e).__name__
         finally:
+            if isinstance(res, dict):
+                res = dict(res)
+                prompt = res.pop("prompt", None) or prompt
             with self.lock:
-                self.history.append({"kind": kind, "q": label, "res": res, "error": error, "at": time.time()})
+                self._chat_load()
+                pend, now = self.pending or {}, time.time()
+                self.history.append(chat_entry({"id": pend.get("id"), "kind": kind, "q": label, "res": res, "error": error, "at": now,
+                                                "took": now - pend.get("started", now), "prompt": prompt}))
+                while len(self.history) > self.history_max:
+                    self.history.popleft()
                 self.pending = None
                 if self.notice and self.notice["text"] == ASKING:  # the answer is on the page: "asking the model" is no longer true
                     self.notice = None
                 self.version += 1
+            self._save_chat()
+            self._usage_wake.set()
 
     def clear_chat(self):
-        """Forget the questions and answers kept so far (an answer still being written stays, and shows when it is done)."""
+        """Forget the questions and answers kept so far, and the file that keeps them (an answer still being written stays, and shows when it
+        is done). The page asks first."""
         blocked = self._refuse()
         if blocked:
             return blocked
         with self.lock:
+            self._chat_load()
             n = len(self.history)
             self.history.clear()
+        self._save_chat()
         return self._result(True, "the chat is cleared" if n else "the chat was already empty")
+
+    # the chat on disk: CHAT_FILE in the AI folder, read once, written after every answer (the demo keeps it in memory only)
+    def chat_path(self):
+        return os.path.join(self.directory, CHAT_FILE)
+
+    def _chat_load(self):
+        """The chat CHAT_FILE kept, read the first time it is needed (under self.lock), before what this process added since."""
+        if self._chat_read:
+            return
+        self._chat_read = True
+        if self.demo:
+            return
+        try:
+            old = read_chat(self.chat_path())
+        except Exception as e:  # noqa: BLE001 - a chat that cannot be read is an empty one
+            print("nuc-console ai: the chat could not be read: %r" % (e,), file=sys.stderr)
+            return
+        for e in reversed(old):
+            self.history.appendleft(e)
+        while len(self.history) > self.history_max:
+            self.history.popleft()
+
+    def _save_chat(self):
+        """CHAT_FILE as the chat is now (no file when it is empty). A folder this account may not write keeps the chat in memory, as before."""
+        if self.demo:
+            return
+        with self._chat_write:
+            with self.lock:
+                entries = list(self.history)
+            try:
+                write_chat(self.chat_path(), entries)
+            except OSError as e:
+                if not self._chat_warned:
+                    self._chat_warned = True
+                    print("nuc-console ai: the chat is kept in memory only, %s cannot be written: %s" % (self.chat_path(), e.strerror or e), file=sys.stderr)
 
     def state(self):
         """The machine's state now (advisor.machine_state(), from the program that owns this process: bind(state=...)), or None when it cannot
@@ -906,7 +1020,7 @@ class Engine(object):
                 raise
             conn = None  # no history yet (a new install, the HEALTH screen off): the state now still answers, and the tools say there is none
         try:
-            return advisor.ask(q, conn, cfg, state=state)
+            return advisor.ask(q, conn, cfg, state=state, progress=self._step)
         finally:
             if conn is not None:
                 conn.close()
@@ -917,8 +1031,12 @@ class Engine(object):
         if not ok:
             raise advisor.Disabled(why)
         report = self.report_fn(days)
+        self._step("asking the model about the HEALTH findings of the last %s" % ("day" if days == 1 else "%d days" % days))
         res = dict(advisor.advise(report, cfg, fresh=True))
         res["stored"] = False
+        info = advisor.endpoint_info(cfg["ai"].get("endpoint"), bool(cfg["ai"].get("allow_remote")))
+        res["prompt"] = advisor.prompt_view(advisor.advise_messages(advisor.compact_report(report)[0]), False,
+                                            advisor._request(info, res.get("model") or "?", advisor.MAX_TOKENS_ADVISE))
         if advisor.store_writable():  # the shared advice the screens show: only where this account may write it
             try:
                 res["stored"] = bool(advisor.save_shared(res, report, days))
@@ -938,7 +1056,9 @@ class Engine(object):
                 job["eta"] = int((job["total"] - job["done"]) / job["rate"]) if job["rate"] > 0 and job["total"] > job["done"] else None
             running = bool(job and job["state"] == "running")
             server = self._server_view()
-            chat = {"busy": bool(self.pending), "pending": dict(self.pending) if self.pending else None, "history": list(self.history)}
+            self._chat_load()
+            history = [dict({k: v for k, v in e.items() if k != "prompt"}, prompt_n=len(e.get("prompt") or [])) for e in self.history]
+            chat = {"busy": bool(self.pending), "pending": dict(self.pending) if self.pending else None, "history": history}
             notice = dict(self.notice) if self.notice and time.time() - self.notice["at"] < NOTICE_S else None
             ai = self.ecfg()["ai"] if not self.demo else {}
             snap = {"job": job, "server": server, "chat": chat, "notice": notice, "busy": running or chat["busy"] or server["starting"] or server["stopping"],
@@ -949,7 +1069,15 @@ class Engine(object):
                 snap["ai"] = {"endpoint": server["endpoint"], "model": web.get("model") or self.demo_state["model"]}
             snap["state"] = state_of(snap)
             snap["usage"] = None if not usage else self._demo_usage(server) if self.demo else self._usage_now(server, snap["switch"])
+            snap["model"] = model_state(snap, self.models)
             return snap
+
+    def prompt_of(self, entry_id):
+        """The prompt the model was sent for the chat entry with this id ([] when there is none), and its question: (prompt, entry or None)."""
+        with self.lock:
+            self._chat_load()
+            e = next((x for x in self.history if x.get("id") == entry_id), None)
+            return (list(e.get("prompt") or []), dict(e, prompt=None)) if e else ([], None)
 
     # ------------------------------------------------------------------------------------------------------------------------ the usage
     def _usage_now(self, server, switch):
@@ -970,7 +1098,8 @@ class Engine(object):
             u = self.measure_usage()
             with self.lock:
                 self.usage = u
-            self._usage_stop.wait(self.usage_s)
+            self._usage_wake.wait(self.usage_s)  # every usage_s, or at once when a job or an answer has just ended
+            self._usage_wake.clear()
         with self.lock:
             self.usage = None  # nobody looks: what was measured goes stale, and is measured again when a page comes back
 
@@ -985,15 +1114,27 @@ class Engine(object):
             except Exception:  # noqa: BLE001
                 endpoint = ""
         p = self.probe
-        return usage_of(_try(p.procs, []), root, _try(lambda: p.loaded(endpoint), None), _try(p.gpu, None), p.threads(), _try(p.ram_mb, None))
+        answers = None
+        try:
+            models = p.loaded(endpoint)
+            answers = True if models is not None else None
+        except OSError:  # nothing answers there: the server is not running
+            models, answers = None, False
+        except Exception as e:  # noqa: BLE001
+            print("nuc-console ai: usage: %r" % (e,), file=sys.stderr)
+            models = None
+        return dict(usage_of(_try(p.procs, []), root, models, _try(p.gpu, None), p.threads(), _try(p.ram_mb, None)), answers=answers)
 
     def switch(self):
+        """advisor.web_switch(), and can_off: turning it off works from here (not when config.ini turned it on and this process may not write it)."""
         if self.demo:
             st = self._dstate()
             web = st.get("web") or {}
             on = bool(web["enabled"]) if "enabled" in web else bool(st["enabled"])
-            return {"on": on, "by": "web" if on else "", "locked": self.locked()}
-        return advisor.web_switch(self.cfg(), self.web_path())
+            return {"on": on, "by": "web" if on else "", "locked": self.locked(), "can_off": True}
+        sw = dict(advisor.web_switch(self.cfg(), self.web_path()))
+        sw["can_off"] = sw["by"] != "config" or bool(_try(self.cfg_writable_fn, False))
+        return sw
 
     def _server_view(self):
         starting = bool(self.job and self.job["state"] == "running" and self.job["kind"] == "start")
@@ -1071,7 +1212,8 @@ class Engine(object):
             return False
         total, base = sum(s_ for _n, s_ in todo), 0
         with self.lock:
-            job["total"], job["phase"] = total, "downloading"
+            job["total"] = total
+            _set_phase(job, "downloading")
         for name, size in todo:
             with self.lock:
                 job["step"] = name
@@ -1099,12 +1241,19 @@ class Engine(object):
             st["server"] = None
             for phase, steps in (("starting", 1), ("loading", 4)):
                 with self.lock:
-                    job["phase"] = phase
+                    _set_phase(job, phase)
                 for _ in range(steps):
                     self._demo_sleep_step()
             st["server"] = {"pid": 4242, "model": m["id"], "endpoint": aisetup.endpoint_for(aisetup.DEFAULT_PORT), "since": time.time()}
         st.setdefault("web", {}).update(enabled=True, model=m["id"])
         job["note"] = "%s is in use (demo: nothing was downloaded or started)" % m["id"]
+
+    def _demo_load(self, job):
+        with self.lock:
+            _set_phase(job, "loading")
+        for _ in range(4):
+            self._demo_sleep_step()
+        job["note"] = "%s is loaded (demo: nothing was loaded)" % job["model"]
 
     def _demo_delete(self, job, m):
         st = self._dstate()
@@ -1139,13 +1288,17 @@ class Engine(object):
         job["note"] = "the model server runs (demo: nothing was started)"
 
     def _demo_answer(self, q):
+        self._step("asking the model")
         time.sleep(self.demo_step * 4)
         st = self.state() or {}
         seen = ("It was given this machine's state now: %s, %d problem%s, %d key figures, the busiest processes (%s)."
                 % (st.get("status") or "?", len(st.get("problems") or []), "" if len(st.get("problems") or []) == 1 else "s", len(st.get("figures") or []),
                    ", ".join(p.get("name", "?") for p in (st.get("top_cpu") or [])[:3]) or "none read") if st else "No state of the machine could be read.")
         return {"text": "Demo answer. A real answer comes from the local model, built from this machine's state now and read-only queries on its "
-                        "history.\n\n%s\n\nYou asked: %s" % (seen, q), "tools_used": ["top_apps"], "model": "demo", "calls": [], "state": bool(st)}
+                        "history.\n\n%s\n\nYou asked: %s" % (seen, q), "tools_used": ["top_apps"], "model": "demo", "calls": [], "state": bool(st),
+                "prompt": advisor.prompt_view([{"role": "system", "content": advisor.ASK_SYSTEM},
+                                               {"role": "user", "content": advisor.STATE_PREAMBLE + advisor.state_text(st) + "\n\nQuestion: " + q if st else q}],
+                                              True, DEMO_REQUEST % advisor.MAX_TOKENS_ASK)}
 
     def _demo_usage(self, server):
         """What the demo machine's model would use: invented, from the demo's catalog (its model and its GPU) and the clock, nothing measured."""
@@ -1170,12 +1323,14 @@ class Engine(object):
         u = usage_of(procs, 4242, [{"name": aiollama_name(m) if m else server["model"], "size_mb": float(size), "vram_mb": float(vram), "ctx": aisetup.DEFAULT_CTX}],
                      {"gpus": gpu_rows, "source": "demo" if gpu_rows else None, "note": "" if gpu_rows else "no GPU whose load can be read"},
                      threads, (hw.get("ram") or {}).get("total_mb"))
-        return dict(u, running=True, demo=True)
+        return dict(u, running=True, demo=True, answers=True)
 
     def _demo_advice(self, days):
+        self._step("asking the model about the HEALTH findings of the last %s" % ("day" if days == 1 else "%d days" % days))
         time.sleep(self.demo_step * 4)
         return {"text": "Demo advice for the last %d day%s. A real one comes from the local model and the HEALTH findings; the one you see here is not." % (days, "" if days == 1 else "s"),
-                "model": "demo", "at": int(time.time()), "cites": [], "stored": False}
+                "model": "demo", "at": int(time.time()), "cites": [], "stored": False,
+                "prompt": advisor.prompt_view(advisor.advise_messages('{"days":%d,"findings":[]}' % days), False, DEMO_REQUEST % advisor.MAX_TOKENS_ADVISE)}
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ usage
@@ -1214,9 +1369,9 @@ class UsageProbe(object):
             return None
         try:
             status, obj = aiollama.Api(aiollama.base_of(endpoint), timeout=2.0).call("GET", "/api/ps", timeout=2.0)
-        except (OSError, aiollama.SetupError, ValueError, http.client.HTTPException):  # nothing answers (yet): unknown, quietly
+        except (aiollama.SetupError, ValueError, http.client.HTTPException):  # an answer that is not one: unknown, quietly
             return None
-        return parse_ps(obj) if status == 200 else None
+        return parse_ps(obj) if status == 200 else None  # OSError (nothing answers there) is the caller's: the server is down
 
     @staticmethod
     def gpu():
@@ -1275,6 +1430,167 @@ def usage_of(procs, root=None, models=None, gpu=None, threads=None, ram_mb=None,
             "gpus": [x for x in g.get("gpus") or [] if isinstance(x, dict)] if gpu is not None else None, "gpu_note": str(g.get("note") or "")}
 
 
+# ------------------------------------------------------------------------------------------------------------------------------ chat
+
+CHAT_ID = re.compile(r"[0-9a-f]{12}")
+
+
+def new_id():
+    """A chat entry's id: 12 hex digits (the page's links name an entry by it)."""
+    return os.urandom(6).hex()
+
+
+def _count(v):
+    """A whole number of seconds from a clock reading or a duration (a float, an int); None for anything else."""
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v < 2 ** 40 else None
+
+
+def chat_prompt(v):
+    """A prompt as advisor.prompt_view() gives it -> the same, checked and cleaned again ([] for anything else): it is read back from a file."""
+    out, left = [], advisor.PROMPT_MAX + 200
+    for m in v[:40] if isinstance(v, list) else []:
+        if isinstance(m, dict) and isinstance(m.get("text"), str) and left > 0:
+            t = advisor.clean_block(m["text"], left)
+            out.append({"role": m.get("role") if m.get("role") in advisor.PROMPT_ROLES else "?", "text": t})
+            left -= len(t)
+    return out
+
+
+def chat_entry(e):
+    """One exchange of the chat -> the entry as the engine keeps and writes it, every field checked and cleaned (a file is read back, and its
+    text came from a model): {"id", "kind": "ask" | "advise", "q", "res": the answer (advisor.ask's or advise()'s, less its prompt) or None,
+    "error", "at", "took" (seconds), "prompt": what the model was sent ([]: nothing, or not known)}. None for what is not one."""
+    if not isinstance(e, dict) or e.get("kind") not in ("ask", "advise") or not isinstance(e.get("q"), str):
+        return None
+    out = {"id": e["id"] if isinstance(e.get("id"), str) and CHAT_ID.fullmatch(e["id"]) else new_id(), "kind": e["kind"],
+           "q": advisor.clean_line(e["q"], advisor.MAX_QUESTION + 40), "res": None, "error": advisor.clean_line(e.get("error"), 300) if e.get("error") else "",
+           "at": _count(e.get("at")) or 0, "took": _count(e.get("took")), "prompt": chat_prompt(e.get("prompt"))}
+    r = e.get("res")
+    if isinstance(r, dict) and isinstance(r.get("text"), str):
+        res = {"text": advisor.clean_text(r["text"]), "model": advisor.clean_line(r.get("model") or "?", 80)}
+        if "tools_used" in r:  # an answer to a question (advisor.parts tells the two apart by it)
+            names = r["tools_used"] if isinstance(r["tools_used"], list) else []
+            res["tools_used"] = [advisor.clean_line(t, 40) for t in names[:8] if isinstance(t, str)]
+            res["state"] = bool(r.get("state"))
+            res["calls"] = [{"tool": advisor.clean_line(c.get("tool"), 40), "ok": bool(c.get("ok")),
+                             "args": advisor.clean_line(c["args"] if isinstance(c.get("args"), str) else json.dumps(c.get("args"), sort_keys=True, default=str), 200)}
+                            for c in (r.get("calls") or [])[:8] if isinstance(c, dict)] if isinstance(r.get("calls"), list) else []
+        if "cites" in r:  # advice
+            res["cites"] = [advisor.clean_line(c, 120) for c in (r["cites"] if isinstance(r["cites"], list) else [])[:12] if isinstance(c, str)]
+            res["stored"] = bool(r.get("stored"))
+            if _count(r.get("at")):
+                res["at"] = _count(r["at"])
+        out["res"] = res
+    elif not out["error"]:
+        out["error"] = "no answer"
+    return out
+
+
+def read_chat(path):
+    """The chat CHAT_FILE holds, oldest first, every entry checked (chat_entry: one that is not is left out). [] when there is no file, or it is not
+    what write_chat() writes: bigger than CHAT_MAX_BYTES, not a regular file of this account (or root), writable by others (advisor._read_json)."""
+    data = advisor._read_json(path, CHAT_MAX_BYTES)
+    if not isinstance(data, dict) or data.get("v") != 1 or not isinstance(data.get("chat"), list):
+        return []
+    return [e for e in (chat_entry(x) for x in data["chat"][-HISTORY_MAX:]) if e]
+
+
+def write_chat(path, entries):
+    """CHAT_FILE with these entries (no file when there are none): a temporary file in the same folder, mode 0600, then os.replace (a reader sees
+    the old chat or the new one). The oldest go first when it would be bigger than CHAT_MAX_BYTES. Raises OSError."""
+    if not entries:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        return
+    chat = [e for e in (chat_entry(x) for x in entries) if e]
+    raw = json.dumps({"v": 1, "chat": chat}, separators=(",", ":"))
+    while len(raw) > CHAT_MAX_BYTES and len(chat) > 1:
+        chat = chat[1:]
+        raw = json.dumps({"v": 1, "chat": chat}, separators=(",", ":"))
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".chat-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(raw)
+        os.chmod(tmp, 0o600)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:  # Windows: a reader has the file open this very moment
+                if not nuc_config.WINDOWS or attempt == 19:
+                    raise
+                time.sleep(0.05)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ model
+
+def _tagged(name):
+    """An Ollama model name with its tag ('qwen3-8b' -> 'qwen3-8b:latest'), as /api/ps lists it."""
+    n = str(name or "")
+    return n if ":" in n.rsplit("/", 1)[-1] else n + ":latest"
+
+
+def model_state(snap, catalog=(), now=None):
+    """What the model is doing, for the line under the switch -> {"state", "model", "since", "row", "endpoint", "load"}:
+      off        the AI is off and no server runs here: nothing is loaded
+      starting   the model server is starting (since: when it began)
+      loading    the model is being loaded into memory (since)
+      fetching   it is being downloaded to be used (the switch's line has the progress)
+      ready      it is loaded (row: what /api/ps says of it: size_mb, vram_mb, ctx): a question is answered at once
+      unloaded   the server runs but does not hold it now (Ollama lets a model go after 5 minutes without a question): the next question
+                 loads it first; load: a 'load it now' button can do it (a server started here, nothing else running)
+      down       nothing answers at the endpoint
+      checking   not measured yet (the usage is measured every few seconds while the AI page is open)
+      unknown    the server does not say what it holds (not an Ollama?), or nobody measured it (the console)
+    model: the catalog id (or the name config.ini gives) the advisor asks. snap: the engine's snapshot, with its usage; catalog: the models, whose
+    `ollama` names /api/ps may list instead of their ids. Pure."""
+    now = time.time() if now is None else now
+    job, srv, sw, u = snap.get("job") or {}, snap.get("server") or {}, snap.get("switch") or {}, snap.get("usage")
+    ai = snap.get("ai") or {}
+    model = srv.get("model") or ai.get("model") or ""
+    endpoint = srv.get("endpoint") or ai.get("endpoint") or ""
+    out = {"state": "unknown", "model": model, "since": None, "row": None, "endpoint": endpoint, "load": False}
+    if job.get("state") == "running" and job.get("kind") in ("use", "start", "load"):  # a download alone does not touch the model in use
+        phase = job.get("phase") or "starting"
+        out.update(model=job.get("model") or model, since=job.get("phase_at") or job.get("started"))
+        out["state"] = phase if phase in ("starting", "loading") else "fetching"
+        return out
+    if not sw.get("on") and not srv.get("running"):
+        out["state"] = "off"
+        return out
+    if not isinstance(u, dict):
+        return out
+    if u.get("measuring"):
+        out["state"] = "checking"
+        return out
+    loaded = u.get("models")
+    if not isinstance(loaded, list):
+        out["state"] = "down" if u.get("answers") is False else "unknown"
+        return out
+    names = {_tagged(model)}
+    names |= {_tagged(m.get("ollama")) for m in catalog if isinstance(m, dict) and m.get("id") == model and m.get("ollama")}
+    mine = next((r for r in loaded if isinstance(r, dict) and _tagged(r.get("name")) in names), None)
+    if mine is None and not model and loaded:  # config.ini names no model: the server's first one answers
+        mine = loaded[0]
+    if mine is not None:
+        out.update(state="ready", row=mine, model=model or mine.get("name") or "")
+        return out
+    out["state"] = "unloaded"
+    out["others"] = [r.get("name") for r in loaded if isinstance(r, dict) and r.get("name")][:3]
+    out["load"] = bool(srv.get("running") and srv.get("model") and not snap.get("locked"))
+    return out
+
+
 # ------------------------------------------------------------------------------------------------------------------------------ module
 
 _ENGINE, _ENGINE_LOCK = None, threading.Lock()
@@ -1293,6 +1609,24 @@ def bind(cfg=None, report=None, state=None):
 def default_state():
     """The machine's state now, as bind(state=...) gives it (advisor.machine_state()); None when nobody bound one."""
     return _BIND["state"]() if "state" in _BIND else None
+
+
+def default_cfg_writable():
+    """True when this process may write config.ini's [ai] enabled (a portable run: the user's own file, as the settings page writes it)."""
+    return bool(nuc_config.features_writable()[0])
+
+
+def default_cfg_off():
+    """[ai] enabled = no in this process's config.ini, where it may write it (default_cfg_writable), and in the config it reads at once
+    -> (True, "") or (False, why not)."""
+    ok, why = nuc_config.features_writable()
+    if not ok:
+        return False, why
+    nuc_config.set_key(nuc_config.config_path(), "ai", "enabled", "no")
+    for cfg in (nuc_config.current(), default_cfg()):
+        if isinstance(cfg.get("ai"), dict):
+            cfg["ai"]["enabled"] = False
+    return True, ""
 
 
 def default_cfg():
@@ -1361,7 +1695,7 @@ def job_text(job, progress=True):
     what = "%s%s" % (VERB.get(kind, kind), " " + model if model else "")
     if state in ("failed", "cancelled", "done"):
         return "%s %s" % (what, state)
-    if not progress or kind not in ("use", "download", "start"):
+    if not progress or kind not in WORKING:
         return what
     step, phase, total, done = job.get("step"), job.get("phase"), job.get("total") or 0, job.get("done") or 0
     part = "runtime" if step == "runtime" else "model"
@@ -1390,7 +1724,7 @@ def state_of(snap):
     top. working: a job runs (download, start); running: the advisor is on and the server this process started is up; on: it is on and asks a
     server that was not started here (config.ini's, yours); error: the server started here ended by itself."""
     job, srv, on = snap["job"], snap["server"], snap["switch"]["on"]
-    if job and job["state"] == "running" and job["kind"] in ("use", "download", "start"):
+    if job and job["state"] == "running" and job["kind"] in WORKING:
         return "working", job_text(job)
     if on and srv["running"]:
         return "running", "on: %s runs here and answers at %s" % (srv["model"] or "the model server", srv["endpoint"])
@@ -1400,6 +1734,12 @@ def state_of(snap):
     if on:
         return "on", "on: the advisor asks %s%s" % (snap["ai"]["endpoint"], " (%s)" % snap["ai"]["model"] if snap["ai"]["model"] else "")
     return "off", "off" + ("; the model server started here still runs" if srv["running"] else "")
+
+
+def _set_phase(job, phase):
+    """A job's phase, and when it began (what the model's line counts from: 'loading, 40 s so far')."""
+    if job.get("phase") != phase:
+        job["phase"], job["phase_at"] = phase, time.time()
 
 
 def minutes(seconds):

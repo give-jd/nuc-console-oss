@@ -94,7 +94,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view">
-<div class="vb" data-card="__view" data-rev="5966d8e5db">
+<div class="vb" data-card="__view" data-rev="08be458982">
 <div class="scr av">
 <header class="st">
 <h2>AI</h2>
@@ -121,7 +121,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/off">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <button class="bt bt-err" type="submit" title="stop the model server and turn the advisor off" data-key="e">Turn AI off</button>
 </form>
 </div>
@@ -140,27 +140,86 @@
 <span class="mono">/var/lib/nuc-console/ai</span>
 <span class="t-muted"> · 5.0 GB downloaded · 412.0 GB free on that disk</span>
 </p>
-<div class="ask" role="group" aria-label="question">
-<p>Delete the runtime and every downloaded model (5.0 GB)? You can download them again later.</p>
-<div class="ask-b">
-<form class="f" method="post" action="/ai/delete-all">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
-<input type="hidden" name="confirm" value="yes">
-<button class="bt bt-err" type="submit" data-key="y">Yes, delete everything</button>
-</form>
-<a class="btn" href="/?view=ai&amp;app=1" data-key="n">No</a>
-</div>
-</div>
 </section>
 <div class="split">
 <div class="sp-l">
 <section class="grp">
-<h3 class="sub">CHAT <span class="note">ask the model about this machine (it sees its state now and reads its history; AI, check before acting)</span>
+<h3 class="sub">CHAT <span class="note">ask the model about this machine (it sees its state now and reads its history; AI, check before acting) · 2 kept</span>
 </h3>
+<div class="log" role="log" aria-label="chat">
+<div class="log-in">
+<div class="qa" data-k="qa-0123456789ab">
+<p class="q">
+<strong>you:</strong> why is the disk filling up?</p>
+<div class="advice">
+<p class="advice-head">ANSWER (AI, qwen3:4b) — check before acting</p>
+<p>/data grows by about 2 GB a day: shop-worker writes its logs there.</p>
+<p>Rotate them, then check again tomorrow.</p>
+<p class="advice-tools">queries: disk_forecast · and this machine&#x27;s state now</p>
+</div>
+<p class="qa-f">
+<span class="d">21 Sep 14:11 · in 14 s</span> · <a href="/?view=ai&amp;app=1#prompt">the prompt it was sent</a>
+</p>
+</div>
+<div class="qa" data-k="qa-fedcba987654">
+<p class="q">
+<strong>you:</strong> advice on the last 7 days</p>
+<div class="advice advice-error">
+<p class="advice-head">ADVICE (AI) — not available</p>
+<p>the model server stopped answering</p>
+</div>
+<p class="qa-f">
+<span class="d">21 Sep 14:12 · in 3 s</span>
+</p>
+</div>
+</div>
+</div>
+<section class="prompt" id="prompt">
+<h3 class="sub">PROMPT <span class="note">the whole request the model was sent, as it read it: 5 parts, 426 characters</span>
+</h3>
+<p class="pm-q">
+<span>for: you: why is the disk filling up?</span>
+<a class="pm-x" href="/?view=ai&amp;app=1">close ✕</a>
+</p>
+<div class="pm">
+<p class="pm-r">
+<span class="tag">request</span> <span class="d">112 characters</span>
+</p>
+<pre class="pm-t">POST http://127.0.0.1:8080/v1/chat/completions · model qwen3:4b · temperature 0.2 · at most 600 tokens of answer</pre>
+</div>
+<div class="pm">
+<p class="pm-r">
+<span class="tag">system</span> <span class="d">109 characters</span>
+</p>
+<pre class="pm-t">You are a careful sysadmin assistant built into a monitoring console.
+Rules:
+1. Use ONLY what the state says.</pre>
+</div>
+<div class="pm">
+<p class="pm-r">
+<span class="tag">user</span> <span class="d">121 characters</span>
+</p>
+<pre class="pm-t">Current state of this machine, as JSON:
+{&quot;host&quot;:&quot;demo-host&quot;,&quot;status&quot;:&quot;2 PROBLEMS&quot;}
+
+Question: why is the disk filling up?</pre>
+</div>
+<div class="pm">
+<p class="pm-r">
+<span class="tag">assistant</span> <span class="d">32 characters</span>
+</p>
+<pre class="pm-t">calls disk_forecast({&quot;days&quot;: 7})</pre>
+</div>
+<div class="pm">
+<p class="pm-r">
+<span class="tag">tool</span> <span class="d">52 characters</span>
+</p>
+<pre class="pm-t">{&quot;disks&quot;:[{&quot;mount&quot;:&quot;/data&quot;,&quot;grows_gb_per_day&quot;:2.1}]}</pre>
+</div>
+</section>
 <form class="f" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input class="q" type="text" name="q" maxlength="500" placeholder="ask: why is the disk filling up?" aria-label="ask: why is the disk filling up?" autocomplete="off"> <button class="bt bt-ok" type="submit">Ask</button>
 </form>
 <div class="controls">
@@ -170,7 +229,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="days" value="1">
 <button class="bt" type="submit">last 24 h</button>
 </form>
@@ -178,7 +237,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="days" value="7">
 <button class="bt" type="submit">last 7 days</button>
 </form>
@@ -186,9 +245,19 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="days" value="30">
 <button class="bt" type="submit">last 30 days</button>
+</form>
+</div>
+<div class="ci">
+<span class="t-muted">·</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/clear">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
+<button class="bt" type="submit" title="delete the questions, the answers and their prompts (asks first)">Clear chat</button>
 </form>
 </div>
 </div>
@@ -330,7 +399,7 @@
 <tbody>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1">
+<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">OpenAI gpt-oss 20B</span>
 </a>
 </td>
@@ -352,7 +421,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 30B-A3B</span>
 </a>
 </td>
@@ -371,7 +440,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="qwen3-30b-a3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -379,7 +448,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=phi-4&amp;app=1">
+<a href="/?view=ai&amp;sel=phi-4&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Phi-4 14B</span>
 <span class="t-warn">  ★ recommended</span>
 </a>
@@ -399,7 +468,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="phi-4">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -407,7 +476,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 14B</span>
 </a>
 </td>
@@ -426,7 +495,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="qwen3-14b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -434,7 +503,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 8B</span>
 </a>
 </td>
@@ -453,7 +522,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="qwen3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -461,7 +530,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1">
+<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">IBM Granite 3.3 8B</span>
 </a>
 </td>
@@ -480,7 +549,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="granite-3.3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -488,7 +557,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1">
+<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Phi-4-mini 3.8B</span>
 </a>
 </td>
@@ -507,7 +576,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="phi-4-mini">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -515,7 +584,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 4B</span>
 <span class="t-ok">  ✓ installed</span>
 <span class="t-accent">  ● active</span>
@@ -539,7 +608,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1">
+<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">SmolLM3 3B</span>
 </a>
 </td>
@@ -558,7 +627,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="smollm3-3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -566,7 +635,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1">
+<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">IBM Granite 3.3 2B</span>
 </a>
 </td>
@@ -585,7 +654,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="granite-3.3-2b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -593,7 +662,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 1.7B</span>
 <span class="t-ok">  ✓ installed</span>
 </a>
@@ -613,7 +682,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="qwen3-1.7b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -621,7 +690,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1&amp;prompt=0123456789ab">
 <span class="b">Qwen3 0.6B</span>
 </a>
 </td>
@@ -640,7 +709,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <input type="hidden" name="model" value="qwen3-0.6b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -661,7 +730,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai&amp;app=1&amp;prompt=0123456789ab">
 <button class="bt bt-err" type="submit" title="asks first" data-key="X">delete everything</button>
 </form>
 </div>

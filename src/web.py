@@ -70,8 +70,8 @@ RETRY_MS = 3000      # what a stream tells the client to wait before it reconnec
 ASSET_FILES = {"%s.%s.css" % (name, sha[:8]): (body, ctype) for name, (body, ctype, sha) in webcss.ASSETS.items()}  # /s/<name>.<sha8>.<ext>
 ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the hash: a changed sheet is another URL
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
-AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear")  # POST /ai/<action>
-AI_CONFIRMS = ("on", "delete", "delete-all")  # the question a page asks before it does that (?view=ai&confirm=...)
+AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear", "load")  # POST /ai/<action>
+AI_CONFIRMS = ("on", "delete", "delete-all", "clear")  # the question a page asks before it does that (?view=ai&confirm=...)
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 SETTINGS_ACTIONS = ("feature", "config")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS}
@@ -555,6 +555,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError as e:  # the settings: config.ini could not be written (a full disk, a file made read-only meanwhile)
             print("nuc-console web: config.ini not written: %r" % (e,), file=sys.stderr)
             return self._send(500, b"config.ini could not be written (see the log)\n")
+        if (self.headers.get("Accept") or "").split(",")[0].strip().lower() == webapi.JSON_TYPE.split(";")[0]:
+            return self._json(200, {"to": where})  # the live app's form, sent by its script: where the page goes next (a question to ask first...)
         self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
 
     def _no(self):
@@ -581,7 +583,8 @@ def view_params(q):
     view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
     report does not have), pause=1 no reload.
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
-    confirm=on|delete|delete-all the question the page asks first (page() drops one that does not apply; on and delete are about sel).
+    confirm=on|delete|delete-all|clear the question the page asks first (page() drops one that does not apply; on and delete are about sel),
+    prompt= the id of the chat's exchange whose whole prompt is shown (page() drops one the chat does not have).
     view=telegram: the Telegram page (pair this machine with your bot, switch the alerts, test); open=1 there: a redirect to the t.me link of the
     pairing that waits (Handler._tg_open).
     edit=1: the layout editor (the shell's overview in edit mode; with app=0 or another view it is dropped).
@@ -611,7 +614,8 @@ def view_params(q):
             "z": gzoom(num("z")),
             "sort": one("sort") if view == "cpu" and one("sort") in screens.CPU_SORTS[1:] else "",
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
-            **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else ""} if view == "ai" else {})}
+            **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else "",
+                "prompt": one("prompt") if aiweb.CHAT_ID.fullmatch(one("prompt")) else ""} if view == "ai" else {})}
 
 
 APP_VIEWS = ("cpu", "health", "map", "ai")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
@@ -638,7 +642,7 @@ def view_url(p):
 def app_url(p):
     """The address of a screen of the live app for view_params() p: the screen and the parameters it takes, the defaults left out."""
     view = p["view"] if p["view"] in APP_VIEWS else ""
-    keep = {"cpu": ("sort", "sel"), "health": ("period", "sel"), "map": ("open", "shut", "all", "sel", "only"), "ai": ("sel", "confirm")}.get(view, ())
+    keep = {"cpu": ("sort", "sel"), "health": ("period", "sel"), "map": ("open", "shut", "all", "sel", "only"), "ai": ("sel", "confirm", "prompt")}.get(view, ())
     q = {"view": view}
     q.update((k, ".".join(p[k]) if k in ("open", "shut") and not isinstance(p[k], str) else p[k]) for k in keep if k in p)
     return APP_PATH + ("?" + urlencode([(k, "1" if v is True else v) for k, v in q.items() if v not in (0, False, None, "")]) if any(
@@ -770,13 +774,10 @@ class Server(http.server.ThreadingHTTPServer):
             rows = screens.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
-            confirm = state.get("confirm", "")
-            if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
-                    or confirm == "delete-all" and not any(m["installed"] for m in rows):
-                confirm = ""
-            norm = {"sel": sel, "pause": pause, "confirm": confirm, "version": aiweb.version()}
-            key = ("ai", zoom, r, sel, pause, confirm, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
-            return serve(key, min(r / 2, 1.0), lambda sh: self.ai_page(here, sel, pause, confirm, zoom, r, sh))  # a job's progress moves: never older than a second
+            confirm, prompt = ai_asked(rows, sel, state.get("confirm", ""), state.get("prompt", ""))
+            norm = {"sel": sel, "pause": pause, "confirm": confirm, "prompt": prompt, "version": aiweb.version()}
+            key = ("ai", zoom, r, sel, pause, confirm, prompt, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
+            return serve(key, min(r / 2, 1.0), lambda sh: self.ai_page(here, sel, pause, confirm, zoom, r, sh, prompt))  # a job's progress moves: never older than a second
         if view == "telegram":  # the shell only (uses_shell); a pairing that waits, an answer of the notifier: a new page
             norm = {"version": tgweb.version()}
             return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
@@ -878,12 +879,9 @@ class Server(http.server.ThreadingHTTPServer):
         if name == "ai":
             rows = screens.ai_rows(render.ai_data()["cat"])
             sel = p["sel"] if p["sel"] in {m["id"] for m in rows} else ""
-            confirm = p.get("confirm", "")
-            if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
-                    or confirm == "delete-all" and not any(m["installed"] for m in rows):
-                confirm = ""
-            return self.cached(("api", name, sel, confirm, aiweb.version()), min(r / 2, 1.0),
-                               lambda: webapi.document(name, self.api_ai(here, sel, confirm), time.time()))
+            confirm, prompt = ai_asked(rows, sel, p.get("confirm", ""), p.get("prompt", ""))
+            return self.cached(("api", name, sel, confirm, prompt, aiweb.version()), min(r / 2, 1.0),
+                               lambda: webapi.document(name, self.api_ai(here, sel, confirm, prompt), time.time()))
         return self.cached(("api", name, tgweb.version()), min(r / 2, 1.0), lambda: webapi.document(name, self.api_telegram(), time.time()))
 
     def api_overview(self, r):
@@ -948,13 +946,15 @@ class Server(http.server.ThreadingHTTPServer):
         nodes = map_nodes(G, st, sel, map_here(here, st, sel, False), here, False, found)
         return {"sel": sel, "node": found.get("node"), "counts": graph.counts(G), "nodes": nodes}
 
-    def api_ai(self, here, sel, confirm):
-        """The AI screen's fields: its components (their ui.Action buttons carry the CSRF token: a client posts them as they are), the engine's state,
-        and the CSRF token (none when [ai] web_actions = no locks the page)."""
+    def api_ai(self, here, sel, confirm, prompt=""):
+        """The AI screen's fields: its components (their ui.Action buttons carry the CSRF token: a client posts them as they are), the engine's state
+        (the chat's prompts are not in it: prompt=<id> puts the one of that exchange in the nodes), and the CSRF token (none when [ai] web_actions = no
+        locks the page)."""
         eng = render.ai_engine()
         snap = eng.snapshot(usage=True)
-        nodes = ai_nodes(self, dict({"view": "ai", "sel": sel, "pause": False}, **here), sel, confirm, snap, eng)
-        return {"sel": sel, "confirm": "" if snap["locked"] else confirm, "engine": snap, "csrf": None if snap["locked"] else self.csrf, "nodes": nodes}
+        nodes = ai_nodes(self, dict({"view": "ai", "sel": sel, "pause": False}, **here), sel, confirm, snap, eng, prompt)
+        return {"sel": sel, "confirm": "" if snap["locked"] else confirm, "prompt": prompt, "engine": snap, "csrf": None if snap["locked"] else self.csrf,
+                "nodes": nodes}
 
     def api_telegram(self):
         """The Telegram page's fields: the engine's state (never the bot's token) and, when its buttons work, the CSRF token and their actions. Less
@@ -1665,7 +1665,7 @@ class Server(http.server.ThreadingHTTPServer):
             bar.append(html.escape(render.KIOSK_HINT))
         return doc(body, bar, refresh=not pause, tools=tools, vhere=hhere)
 
-    def ai_page(self, here, sel, pause, confirm, zoom, r, shell=False):
+    def ai_page(self, here, sel, pause, confirm, zoom, r, shell=False, prompt=""):
         """The AI page: the AI switch and what it is doing at the top, the chat under it (the model answers as soon as the server does), then what
         this machine can run: the models as a table (a button per model: use it), their details, the hardware and the status. Forms post to /ai/*
         (see do_POST); the page reloads by itself only while something runs, so that a question being typed is not lost. The URL holds the whole
@@ -1688,13 +1688,14 @@ class Server(http.server.ThreadingHTTPServer):
             return doc("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", [dash, "read-only"], refresh=False)
         ahere = dict({"view": "ai", "sel": sel, "pause": pause}, **here)
         if shell:  # the shell draws the screen itself: the components of screens.py, as HTML (the forms are the ones of the classic page)
-            return View(ai_native(self, ahere, sel, confirm, snap, eng), [], ahere, bool(not pause and live), forms=not snap["locked"], wait=2 if snap["busy"] else 0,
-                        legacy=False)
+            return View(ai_native(self, ahere, sel, confirm, snap, eng, prompt), [], ahere, bool(not pause and live), forms=not snap["locked"],
+                        wait=2 if snap["busy"] else 0, legacy=False)
         cols, rows = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), []
         try:
             data, pb = render.ai_state(self.smp)
             rows = screens.ai_rows(data["cat"])
             ui = AiUi(snap, eng.choice() if not snap["locked"] else None, data["cat"], rows, sel, confirm, self.csrf, urlsplit(page_url(ahere)).query, ahere)
+            ui.prompt = ai_prompt_node(eng, prompt, ahere)
             body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname(), ui)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
@@ -1828,14 +1829,21 @@ class Server(http.server.ThreadingHTTPServer):
                 raise BadRequest("a number of days is needed")
             eng.advise(int(one("days", 3)))
             anchor = "#ask"
-        elif act == "clear":
-            eng.clear_chat()
+        elif act == "clear":  # the chat goes for good: asked first
+            if yes:
+                eng.clear_chat()
+            else:
+                confirm = "clear"
             anchor = "#ask"
+        elif act == "load":
+            eng.load_model()
         with self.lock:
             self.cache.clear()  # the page that comes next shows what this did
         back = view_params(parse_qs(one("back", 400)))
         here = {k: back[k] for k in HERE_KEYS}
-        return page_url(dict({"view": "ai", "sel": sel or (back.get("sel") if back.get("view") == "ai" else ""), "confirm": confirm}, **here)) + anchor
+        ai = back.get("view") == "ai"
+        return page_url(dict({"view": "ai", "sel": sel or (back.get("sel") if ai else ""), "confirm": confirm,
+                              "prompt": back.get("prompt", "") if ai and act != "clear" else ""}, **here)) + anchor
 
 
 def telegram_view(srv, here):
@@ -2000,36 +2008,75 @@ def health_native(smp, days, sel, here):
         return '<p class="sm">the health screen could not be drawn (see the service log)</p>'
 
 
-def ai_chat_nodes(snap):
+def ai_chat_nodes(snap, prompt_url=None, now=None):
     """The chat of the engine's snapshot as ui.Qa nodes, oldest first: the question, and the answer as a ui.Advice (advisor.parts: escaped by the renderer,
-    cleaned and capped by the advisor) or, while the model is still writing it, the waiting line. A question that failed shows why."""
-    out = []
+    cleaned and capped by the advisor) or, while the model is still writing it, what it is doing and for how long. A question that failed shows why.
+    Each says when it was answered and in how long, and links to its whole prompt (prompt_url(id) -> the page that shows it; None: no link)."""
+    out, now = [], time.time() if now is None else now
     for e in snap["chat"]["history"]:
         p = advisor.parts(e["res"] if e["res"] else {"error": e["error"] or "no answer"})
-        out.append(ui.Qa(e["kind"], e["q"], ui.Advice(p["head"], p["paras"], p["notes"], p["kind"]) if p else None))
+        when = time.strftime("%d %b %H:%M", time.localtime(e["at"])) if e.get("at") else ""
+        note = " · ".join(x for x in (when, "in " + screens.ai_secs(e["took"]) if e.get("took") is not None else "") if x)
+        link = prompt_url(e["id"]) if prompt_url and e.get("prompt_n") and e.get("id") else None
+        out.append(ui.Qa(e["kind"], e["q"], ui.Advice(p["head"], p["paras"], p["notes"], p["kind"]) if p else None, key=e.get("id") or "", note=note,
+                         prompt_href=link))
     pend = snap["chat"]["pending"]
-    return out + ([ui.Qa(pend["kind"], pend["q"], None, True)] if pend else [])
+    if pend:
+        took = screens.ai_secs(now - pend["started"]) if pend.get("started") else ""
+        wait = "%s%s (a small model on a slow CPU may need a minute; this page updates by itself)" % (pend.get("step") or "the model is writing the answer",
+                                                                                                        " · " + took if took else "")
+        out.append(ui.Qa(pend["kind"], pend["q"], None, True, key=pend.get("id") or "", wait=wait))
+    return out
 
 
-def ai_nodes(srv, ahere, sel, confirm, snap, eng):
-    """The AI screen's components for the web (screens.ai_model): the switch and its progress, the chat, the hardware and the status, the models
-    with their buttons (ui.Action: each posts to /ai/* with the CSRF token and the page to come back to; none when the page is locked), the details.
-    ahere: the page's parameters. The page and the data API draw these."""
+def ai_asked(rows, sel, confirm, prompt):
+    """The question a page asks first and the prompt it shows, as far as they apply (confirm=delete: sel is installed, on: a model is selected,
+    delete-all: something is installed, clear: the chat has something; prompt: an exchange of the chat with a prompt) -> (confirm, prompt)."""
+    hist = None
+    if confirm == "clear" or prompt:
+        try:
+            hist = render.ai_engine().snapshot()["chat"]["history"]
+        except Exception:  # noqa: BLE001 - no engine: nothing to clear or to show
+            hist = []
+    if confirm == "delete" and not any(m["id"] == sel and m["installed"] for m in rows) or confirm == "on" and not sel \
+            or confirm == "delete-all" and not any(m["installed"] for m in rows) or confirm == "clear" and not hist:
+        confirm = ""
+    if prompt and not any(e.get("id") == prompt and e.get("prompt_n") for e in hist or []):
+        prompt = ""
+    return confirm, prompt
+
+
+def ai_prompt_node(eng, prompt, ahere):
+    """The ui.Prompt of the exchange `prompt` (an id the chat has: ai_asked checked it), closed by a link to the page without it; None for ''."""
+    if not prompt:
+        return None
+    msgs, e = eng.prompt_of(prompt)
+    if not e or not msgs:
+        return None
+    return ui.Prompt(("advice: " if e["kind"] == "advise" else "you: ") + e["q"], [(m["role"], m["text"]) for m in msgs], page_url(ahere, prompt=""))
+
+
+def ai_nodes(srv, ahere, sel, confirm, snap, eng, prompt=""):
+    """The AI screen's components for the web (screens.ai_model): the switch and its progress, the model's state, the chat (and the whole prompt of
+    one exchange, when prompt names it), the hardware and the status, the models with their buttons (ui.Action: each posts to /ai/* with the CSRF
+    token and the page to come back to; none when the page is locked), the details. ahere: the page's parameters. The page and the data API draw these."""
     data, _pb = render.ai_state(srv.smp)
     rows = screens.ai_rows(data["cat"])
     locked = snap["locked"]
-    acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(ahere)).query)
-    links = screens.AiLinks(lambda mid: page_url(ahere, sel="" if mid == sel else mid), page_url(ahere, sel=""), page_url(ahere))
+    there = dict(ahere, prompt=prompt)
+    acts = None if locked else screens.AiActs(srv.csrf, urlsplit(page_url(there)).query)
+    links = screens.AiLinks(lambda mid: page_url(there, sel="" if mid == sel else mid), page_url(there, sel=""), page_url(there))
+    chat = ai_chat_nodes(snap, lambda eid: page_url(ahere, prompt="" if eid == prompt else eid) + "#prompt")
     return screens.ai_model(data, render.ai_status(), snap, None if locked else eng.choice(), rows, sel, "" if locked else confirm, acts, links,
-                            ai_chat_nodes(snap))
+                            chat, ai_prompt_node(eng, prompt, ahere))
 
 
-def ai_native(srv, ahere, sel, confirm, snap, eng):
+def ai_native(srv, ahere, sel, confirm, snap, eng, prompt=""):
     """The AI screen of the shell, drawn from components (screens.ai_model, the model the console draws from too): the switch and its progress, the
     chat, the hardware and the status, the models as a table with their buttons, the details, what can be deleted. Every button is a form that posts
     to /ai/* with the CSRF token and the page to come back to, as on the classic page; a locked page has none. ahere: the page's parameters."""
     try:
-        return '<div class="scr av">' + "".join(htmlview.html(n) for n in ai_nodes(srv, ahere, sel, confirm, snap, eng)) + "</div>"
+        return '<div class="scr av">' + "".join(htmlview.html(n) for n in ai_nodes(srv, ahere, sel, confirm, snap, eng, prompt)) + "</div>"
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the AI screen could not be drawn (see the service log)</p>'
@@ -2043,6 +2090,7 @@ class AiUi(object):
         self.snap, self.ch, self.cat, self.rows, self.sel, self.confirm, self.csrf, self.back, self.here = snap, choice, cat or {}, rows, sel, confirm, csrf, back, here
         self.locked = snap["locked"]
         self.working = bool(snap["job"] and snap["job"]["state"] == "running")  # a job runs: its buttons wait (the engine would say "busy")
+        self.prompt = None  # the ui.Prompt of the exchange whose prompt the page shows
 
     def form(self, action, label, fields=(), cls="", title="", disabled=False):
         """One button: a form that posts to /ai/<action> with the CSRF token and the view to come back to (ids and numbers only in `fields`)."""
@@ -2130,6 +2178,7 @@ def ai_control_html(ui):
     if state == "working":
         out.append('<div class="row"><progress max="100" value="%d"></progress> %s</div>' % (job["pct"], "%d%%" % job["pct"]) if job["phase"] == "downloading" and job["total"]
                    else '<div class="row"><progress max="100"></progress></div>')
+    out += [htmlview.html(n) for n in screens.ai_model_lines(snap, None if ui.locked else screens.AiActs(ui.csrf, ui.back))]
     if not ui.locked and state == "off" and ch:
         t = ui.row(ch["target"])
         name, size = esc(t["name"]) if t else "", ch["size"]
@@ -2157,6 +2206,10 @@ def ai_control_html(ui):
         elif ui.confirm == "delete" and t:
             what = "Delete the files of <strong>%s</strong> (%s)? You can download it again later." % (esc(t["name"]), esc(screens.ai_mb(t["size_mb"])))
             yes = ui.form("delete", "Yes, delete", (("model", ui.sel), ("confirm", "yes")), "off")
+        elif ui.confirm == "clear":
+            n = len(snap["chat"]["history"])
+            what = "Clear the chat? Its %d question%s and answer%s, and the prompts they were sent, are deleted for good." % (n, "s" * (n != 1), "s" * (n != 1))
+            yes = ui.form("clear", "Yes, clear the chat", (("confirm", "yes"),), "off")
         elif ui.confirm == "delete-all":
             what = "Delete the runtime and every downloaded model (%s)? You can download them again later." % esc(aisetup.fmt_size((cat.get("space") or {}).get("used")) if (cat.get("space") or {}).get("used") else "nothing")
             yes = ui.form("delete-all", "Yes, delete everything", (("confirm", "yes"),), "off")
@@ -2176,18 +2229,24 @@ def ai_chat_html(ui):
     out = ['<section class="chat" id="chat"><div class="hs">CHAT · ask the model about this machine (it sees its state now and reads its history; AI, check before acting)</div>']
     for e in chat["history"]:
         res = advisor.html(e["res"]) if e["res"] else advisor.html({"error": e["error"] or "no answer"})
-        out.append(f'<div class="qa"><p class="q"><strong>{"advice" if e["kind"] == "advise" else "you"}:</strong> {esc(e["q"])}</p>{res}</div>')
+        link = (f' <a href="{esc(page_url(ui.here, prompt=e["id"]) + "#prompt")}">the prompt it was sent</a>' if e.get("prompt_n") and e.get("id") else "")
+        out.append(f'<div class="qa"><p class="q"><strong>{"advice" if e["kind"] == "advise" else "you"}:</strong> {esc(e["q"])}</p>{res}'
+                   + (f'<p class="d">{link}</p>' if link else "") + "</div>")
     if chat["pending"]:
         out.append(f'<div class="qa"><p class="q"><strong>{"advice" if chat["pending"]["kind"] == "advise" else "you"}:</strong> {esc(chat["pending"]["q"])}</p>'
-                   '<p class="d">the model is writing the answer (a small model on a slow CPU may need a minute; this page reloads by itself)</p></div>')
+                   f'<p class="d">{esc(chat["pending"].get("step") or "the model is writing the answer")} (a small model on a slow CPU may need a minute; '
+                   'this page reloads by itself)</p></div>')
+    if ui.prompt is not None:
+        out.append(htmlview.html(ui.prompt))
     if not ui.locked:
         dis = "" if ready and not chat["busy"] else " disabled"
         hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", ui.csrf), ("back", ui.back)))
         out.append(f'<form class="f ask" id="ask" method="post" action="/ai/ask">{hidden}<input class="q" type="text" name="q" maxlength="500" size="60" '
-                   f'placeholder="ask: why is the disk filling up?" autocomplete="off"{dis}> <button class="bt on" type="submit"{dis}>Ask</button></form>')
+                   f'placeholder="ask: why is the disk filling up?" autocomplete="off"> <button class="bt on" type="submit"{dis}>Ask</button></form>')
         out.append('<div class="adv">advice now: ' + " ".join(ui.form("advise", label, (("days", d),), "", "", not ready or bool(chat["busy"]))
                                                              for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days")))
-                   + (" · " + ui.form("clear", "Clear chat", (), "", "forget the questions and answers on this page") if chat["history"] else "") + "</div>")
+                   + (" · " + ui.form("clear", "Clear chat", (), "", "delete the questions, the answers and their prompts (asks first)") if chat["history"] else "")
+                   + "</div>")
         if not ready:
             out.append('<p class="d">%s</p>' % ("the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
     out.append("</section>")
