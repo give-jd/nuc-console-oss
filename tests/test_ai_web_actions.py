@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -182,7 +183,7 @@ class UseModel(Base):
         self.assertEqual(loads, [{"model": "tiny"}], "loaded once, before the job says it is done")
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {"enabled": True, "model": "tiny", "endpoint": srv["endpoint"]})
         snap = self.eng.snapshot()
-        self.assertEqual(snap["switch"], {"on": True, "by": "web", "locked": False})
+        self.assertEqual(snap["switch"], {"on": True, "by": "web", "locked": False, "can_off": True})
         self.assertEqual(snap["state"][0], "running")
         self.assertIn("tiny runs here and answers at %s" % srv["endpoint"], snap["state"][1])
         self.assertEqual(self.eng.ecfg()["ai"]["model"], "tiny")
@@ -769,9 +770,9 @@ def alive(pid):
 
 class Switch(Base):
     def test_on_and_off_in_web_json_and_the_switch_says_who_decides(self):
-        self.assertEqual(self.eng.snapshot()["switch"], {"on": False, "by": "", "locked": False})
+        self.assertEqual(self.eng.snapshot()["switch"], {"on": False, "by": "", "locked": False, "can_off": True})
         self.assertTrue(self.eng.set_enabled(True)[0])
-        self.assertEqual(self.eng.snapshot()["switch"], {"on": True, "by": "web", "locked": False})
+        self.assertEqual(self.eng.snapshot()["switch"], {"on": True, "by": "web", "locked": False, "can_off": True})
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {"enabled": True})
         self.assertTrue(self.eng.ecfg()["ai"]["enabled"])
         self.assertFalse(self.cfg["ai"]["enabled"], "config.ini's own is not touched")
@@ -782,11 +783,50 @@ class Switch(Base):
 
     def test_config_ini_yes_cannot_be_turned_off_from_here(self):
         self.cfg["ai"]["enabled"] = True
-        self.assertEqual(self.eng.snapshot()["switch"], {"on": True, "by": "config", "locked": False})
+        self.assertEqual(self.eng.snapshot()["switch"], {"on": True, "by": "config", "locked": False, "can_off": False})
         ok, text = self.eng.set_enabled(False)
         self.assertFalse(ok)
         self.assertIn("on by config.ini", text)
         self.assertTrue(self.eng.set_enabled(True)[0], "turning on what is on is harmless")
+
+    def test_where_this_process_may_write_config_ini_off_turns_off_what_config_ini_turned_on(self):
+        self.cfg["ai"]["enabled"] = True
+        wrote = []
+
+        def off():
+            wrote.append(True)
+            self.cfg["ai"]["enabled"] = False
+            return True, ""
+        self.eng.cfg_off_fn, self.eng.cfg_writable_fn = off, lambda: True
+        self.assertEqual(self.eng.snapshot()["switch"], {"on": True, "by": "config", "locked": False, "can_off": True})
+        ok, text = self.eng.turn_off()
+        self.assertTrue(ok, text)
+        self.assertEqual(wrote, [True])
+        self.assertEqual(self.eng.snapshot()["switch"]["on"], False)
+        self.eng.cfg_off_fn = lambda: (False, "config.ini cannot be written by this account")
+        self.cfg["ai"]["enabled"] = True
+        ok, text = self.eng.set_enabled(False)
+        self.assertFalse(ok)
+        self.assertIn("(config.ini cannot be written by this account)", text)
+
+    def test_config_ini_is_written_only_in_a_portable_run_and_only_its_key(self):
+        path = os.path.join(self.tmp, "config.ini")  # NUC_CONSOLE_CONFIG
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("[ai]\n# the advisor\nenabled = yes\nmodel = tiny\n")
+        with mock.patch.object(nuc_config, "PORTABLE", False):
+            self.assertFalse(aiweb.default_cfg_writable())
+            self.assertFalse(aiweb.default_cfg_off()[0])
+        with open(path, encoding="utf-8") as f:
+            self.assertIn("enabled = yes", f.read(), "an installation's config.ini is the administrator's")
+        cur = {"ai": {"enabled": True}}
+        with mock.patch.object(nuc_config, "PORTABLE", True), mock.patch.object(nuc_config, "current", return_value=cur), \
+                mock.patch.dict(aiweb._BIND, {"cfg": lambda: cur}):
+            self.assertTrue(aiweb.default_cfg_writable())
+            self.assertEqual(aiweb.default_cfg_off(), (True, ""))
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertEqual(text, "[ai]\n# the advisor\nenabled = no\nmodel = tiny\n")
+        self.assertFalse(cur["ai"]["enabled"], "the process reads it at once")
 
     def test_the_lock_refuses_every_action_and_changes_nothing(self):
         self.install()
@@ -794,7 +834,7 @@ class Switch(Base):
         n = len(self.httpd.requests)
         for call in (lambda: self.eng.set_enabled(True), lambda: self.eng.turn_on("tiny"), self.eng.turn_on, lambda: self.eng.use_model("tiny"), self.eng.turn_off,
                      lambda: self.eng.download("other"), self.eng.cancel, lambda: self.eng.delete("tiny"), self.eng.delete_all, self.eng.start_server,
-                     self.eng.stop_server, lambda: self.eng.ask("why?"), lambda: self.eng.advise(7)):
+                     self.eng.stop_server, lambda: self.eng.ask("why?"), lambda: self.eng.advise(7), self.eng.load_model, self.eng.clear_chat):
             ok, text = call()
             self.assertFalse(ok)
             self.assertIn("locked by config.ini ([ai] web_actions = no)", text)
@@ -819,6 +859,18 @@ class Server(Base):
         ok, text = self.eng.start_server(name)
         self.assertTrue(ok, text)
         return self.job()
+
+    def test_load_it_now_loads_the_model_of_the_server_started_here(self):
+        self.assertEqual(self.eng.load_model(), (False, "no model server with a model runs here: turn AI on first"))
+        self.install()
+        self.start()
+        before = len([r for r in fo.requests_seen(self.d) if r["path"] == "/api/generate"])
+        ok, text = self.eng.load_model()
+        self.assertTrue(ok, text)
+        job = self.job()
+        self.assertEqual((job["kind"], job["state"], job["error"], job["note"]), ("load", "done", "", "tiny is loaded: it answers at once"))
+        loads = [r["body"] for r in fo.requests_seen(self.d) if r["path"] == "/api/generate"]
+        self.assertEqual(loads[before:], [{"model": "tiny"}])
 
     def test_start_runs_the_server_as_a_child_on_loopback_loads_the_model_and_stop_ends_it(self):
         self.install()
@@ -1058,7 +1110,8 @@ class Chat(Base):
         self.assertEqual(chat["history"][-1]["res"]["text"], "late")
         self.assertEqual(len(chat["history"]), 1, "the refused one was never asked")
 
-    def test_the_last_ten_are_kept_oldest_first(self):
+    def test_the_last_ones_are_kept_oldest_first(self):
+        self.eng.history_max = 10
         for i in range(12):
             self.model.queue.append(ta.completion("a%d" % i))
             advisor._reset_limits()
@@ -1199,6 +1252,82 @@ class Chat(Base):
         self.assertEqual(self.eng.clear_chat(), (False, aiweb.LOCKED))
         self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1)
 
+    def test_the_chat_is_kept_in_the_ai_folder_and_read_again_after_a_restart(self):
+        self.model.queue += [ta.tool_calls(("events", {"kind": "crash"})), ta.completion("chromium crashed most.")]
+        self.eng.ask("which app crashes?")
+        e = self.chat()["history"][-1]
+        path = os.path.join(self.d, aiweb.CHAT_FILE)
+        self.assertTrue(os.path.isfile(path))
+        if POSIX:
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600, "the questions, the answers and the machine's state: this account's only")
+        again = aiweb.Engine(directory=self.d, models=self.models, cfg_fn=lambda: self.cfg, state_fn=lambda: None)
+        self.addCleanup(again.shutdown)
+        h = again.snapshot()["chat"]["history"]
+        self.assertEqual([(x["id"], x["q"], x["res"]["text"], x["res"]["tools_used"]) for x in h],
+                         [(e["id"], "which app crashes?", "chromium crashed most.", ["events"])])
+        self.assertEqual(again.prompt_of(e["id"])[0], self.eng.prompt_of(e["id"])[0])
+        self.assertEqual(again.clear_chat(), (True, "the chat is cleared"))
+        self.assertFalse(os.path.exists(path), "cleared: no file is left")
+
+    def test_a_folder_that_cannot_be_written_keeps_the_chat_in_memory(self):
+        self.model.queue.append(ta.completion("fine"))
+        with mock.patch.object(aiweb, "write_chat", side_effect=PermissionError(13, "Permission denied")), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.eng.ask("is it up?")
+            self.assertEqual(self.chat()["history"][-1]["res"]["text"], "fine")
+        self.assertIn("kept in memory only", err.getvalue())
+
+    def test_each_answer_keeps_the_whole_prompt_the_model_was_sent(self):
+        self.eng.state_fn = lambda: dict(self.STATE)
+        self.model.queue += [ta.tool_calls(("events", {"kind": "crash"})), ta.completion("chromium crashed most.")]
+        self.eng.ask("which app crashes?")
+        e = self.chat()["history"][-1]
+        self.assertNotIn("prompt", e, "the snapshot says how many parts there are; a page asks for the prompt itself")
+        msgs, entry = self.eng.prompt_of(e["id"])
+        self.assertEqual(e["prompt_n"], len(msgs))
+        self.assertEqual(entry["q"], "which app crashes?")
+        self.assertEqual([m["role"] for m in msgs], ["request", "system", "tools", "user", "assistant", "tool"])
+        sent = self.model.posts()[-1]["body"]["messages"]  # the last request holds the whole conversation
+        self.assertEqual([msgs[1]["text"], msgs[3]["text"], msgs[5]["text"]], [sent[0]["content"], sent[1]["content"], sent[3]["content"]])
+        self.assertIn(advisor.STATE_PREAMBLE, msgs[3]["text"])
+        self.assertIn('calls events({"kind": "crash"})', msgs[4]["text"])
+        self.assertIn("model tiny-model", msgs[0]["text"])
+        self.assertIn("events(", msgs[2]["text"], "the tools it was offered, by name and arguments")
+        self.assertEqual(self.eng.prompt_of("000000000000"), ([], None))
+
+    def test_an_answer_that_failed_keeps_the_prompt_it_was_sent(self):
+        self.model.queue.append(ta.completion(""))
+        self.eng.ask("is it up?")
+        e = self.chat()["history"][-1]
+        self.assertIsNone(e["res"])
+        self.assertTrue(e["error"])
+        msgs, _e = self.eng.prompt_of(e["id"])
+        self.assertEqual([m["role"] for m in msgs][-1], "user")
+        self.assertEqual(msgs[-1]["text"], "is it up?")
+
+    def test_advice_keeps_its_prompt_too(self):
+        self.model.queue.append(ta.completion("Check memory."))
+        self.eng.advise(7)
+        e = self.chat()["history"][-1]
+        msgs, _e = self.eng.prompt_of(e["id"])
+        self.assertEqual([m["role"] for m in msgs], ["request", "system", "user"])
+        self.assertEqual(msgs[2]["text"], self.model.posts()[-1]["body"]["messages"][1]["content"])
+
+    def test_what_the_answer_is_doing_is_said_while_it_is_written(self):
+        release, step = threading.Event(), ""
+        self.model.queue += [ta.tool_calls(("events", {"kind": "crash"})), {"body": ta.completion("done."), "wait": release}]
+        self.eng.ask("which app crashes?")
+        gate = threading.Event()
+        for _ in range(1000):
+            step = (self.eng.snapshot()["chat"]["pending"] or {}).get("step", "")
+            if "again" in step:
+                break
+            gate.wait(0.01)
+        self.assertEqual(step, "asking the model again, with what events returned")
+        release.set()
+        e = self.chat()["history"][-1]
+        self.assertEqual(e["res"]["text"], "done.")
+        self.assertIsInstance(e["took"], int)
+
     def test_a_bug_ends_the_answer_not_the_thread(self):
         with mock.patch.object(advisor, "ask", side_effect=RuntimeError("secret detail")), contextlib.redirect_stderr(io.StringIO()):
             self.eng.ask("boom?")
@@ -1206,6 +1335,96 @@ class Chat(Base):
         self.assertIn("unexpected error: RuntimeError", e["error"])
         self.assertNotIn("secret detail", e["error"], "the detail goes to the log, not to the page")
         self.assertFalse(self.eng.snapshot()["chat"]["busy"])
+
+
+# ------------------------------------------------------------------------------------------------------------------- the chat file
+
+class ChatFile(unittest.TestCase):
+    """CHAT_FILE: what is written is read back cleaned, and a file that is not what write_chat() writes is not read."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.path = os.path.join(self.tmp, aiweb.CHAT_FILE)
+
+    ENTRY = {"kind": "ask", "q": "why\x1b[31m?", "error": "", "at": 1700000000.7, "took": 3.2,
+             "res": {"text": "ok\x07", "tools_used": ["events"], "model": "m", "calls": [{"tool": "events", "args": {"days": 1.5}, "ok": True}], "state": True},
+             "prompt": [{"role": "user", "text": "a\nb\x1b[2J"}, {"role": "evil", "text": "x"}, "junk"]}
+
+    def test_what_is_written_is_read_back_cleaned(self):
+        aiweb.write_chat(self.path, [self.ENTRY, {"kind": "nope", "q": "x"}])
+        got = aiweb.read_chat(self.path)
+        self.assertEqual(len(got), 1, "what is not an exchange is left out")
+        g = got[0]
+        self.assertEqual((g["q"], g["res"]["text"], g["at"], g["took"], g["error"]), ("why?", "ok", 1700000000, 3, ""))
+        self.assertEqual(g["prompt"], [{"role": "user", "text": "a\nb"}, {"role": "?", "text": "x"}])
+        self.assertEqual(g["res"]["calls"], [{"tool": "events", "ok": True, "args": '{"days": 1.5}'}], "a float is text: the file is read without floats")
+        self.assertRegex(g["id"], "^[0-9a-f]{12}$")
+        self.assertEqual(aiweb.read_chat(self.path), got, "the same file reads the same")
+
+    def test_a_file_that_is_not_this_modules_is_not_read(self):
+        for raw in (b"not json", b'{"v": 2, "chat": []}', b"[1]", b'{"v": 1, "chat": {}}', b'{"v": 1, "chat": [{"at": 1.5}]}'):
+            with open(self.path, "wb") as f:
+                f.write(raw)
+            self.assertEqual(aiweb.read_chat(self.path), [], raw)
+        aiweb.write_chat(self.path, [self.ENTRY])
+        with mock.patch.object(aiweb, "CHAT_MAX_BYTES", 100):
+            self.assertEqual(aiweb.read_chat(self.path), [], "bigger than this module writes")
+        if POSIX:
+            os.chmod(self.path, 0o666)
+            self.assertEqual(aiweb.read_chat(self.path), [], "others may write it: nothing in it is trusted")
+        self.assertEqual(aiweb.read_chat(os.path.join(self.tmp, "none")), [])
+
+    def test_no_exchange_no_file_and_the_oldest_go_first_when_it_is_too_big(self):
+        aiweb.write_chat(self.path, [])
+        self.assertFalse(os.path.exists(self.path))
+        many = [dict(self.ENTRY, q="q%d" % i, res=dict(self.ENTRY["res"], text="x" * 400)) for i in range(10)]
+        with mock.patch.object(aiweb, "CHAT_MAX_BYTES", 3000):
+            aiweb.write_chat(self.path, many)
+            got = aiweb.read_chat(self.path)
+        self.assertLess(len(got), 10)
+        self.assertEqual(got[-1]["q"], "q9", "the newest stay")
+
+
+# ---------------------------------------------------------------------------------------------------------------- the model's state
+
+class ModelState(unittest.TestCase):
+    """aiweb.model_state(): what the line under the switch says the model is doing, from the snapshot alone."""
+
+    CAT = [{"id": "qwen3-8b", "ollama": "qwen3:8b"}]
+
+    def snap(self, **kw):
+        s = {"job": None, "server": {"running": True, "model": "qwen3-8b", "endpoint": "http://127.0.0.1:9/v1"}, "switch": {"on": True}, "locked": False,
+             "ai": {"model": "qwen3-8b", "endpoint": "http://127.0.0.1:9/v1"}, "usage": {"models": [], "answers": True}}
+        s.update(kw)
+        return s
+
+    def state(self, **kw):
+        return aiweb.model_state(self.snap(**kw), self.CAT, now=1000.0)
+
+    def test_each_state(self):
+        job = {"state": "running", "kind": "use", "model": "qwen3-8b", "phase": "loading", "phase_at": 990.0, "started": 900.0}
+        self.assertEqual((self.state(job=job)["state"], self.state(job=job)["since"]), ("loading", 990.0))
+        self.assertEqual(self.state(job=dict(job, phase="starting"))["state"], "starting")
+        self.assertEqual(self.state(job=dict(job, phase="downloading"))["state"], "fetching")
+        self.assertEqual(self.state(job=dict(job, kind="delete"))["state"], "unloaded", "a delete is not about loading")
+        self.assertEqual(self.state(job=dict(job, kind="download", phase="downloading"))["state"], "unloaded", "nor is a download of another model")
+        self.assertEqual(self.state(switch={"on": False}, server={"running": False})["state"], "off")
+        row = {"name": "qwen3-8b:latest", "size_mb": 5000.0, "vram_mb": 5000.0, "ctx": 4096}
+        got = self.state(usage={"models": [row], "answers": True})
+        self.assertEqual((got["state"], got["row"], got["load"]), ("ready", row, False))
+        self.assertEqual(self.state(usage={"models": [dict(row, name="qwen3:8b")]})["state"], "ready", "the library's name is the same model")
+        got = self.state(usage={"models": [dict(row, name="other:latest")]})
+        self.assertEqual((got["state"], got["others"], got["load"]), ("unloaded", ["other:latest"], True))
+        self.assertTrue(self.state()["load"], "the server runs here without it: it can be loaded now")
+        self.assertFalse(self.state(locked=True)["load"])
+        self.assertFalse(self.state(server={"running": False, "model": ""})["load"], "a server started elsewhere is not this page's to load")
+        self.assertEqual(self.state(usage={"models": None, "answers": False})["state"], "down")
+        self.assertEqual(self.state(usage={"models": None, "answers": None})["state"], "unknown")
+        self.assertEqual(self.state(usage={"measuring": True})["state"], "checking")
+        self.assertEqual(self.state(usage=None)["state"], "unknown", "nobody measured: never a reassuring 'loaded'")
+        got = self.state(server={"running": False}, ai={"model": "", "endpoint": "http://127.0.0.1:11434/v1"}, usage={"models": [row]})
+        self.assertEqual((got["state"], got["model"]), ("ready", "qwen3-8b:latest"), "config.ini names no model: the server's first one answers")
 
 
 # ------------------------------------------------------------------------------------------------------------------------ usage
@@ -1268,7 +1487,13 @@ class Usage(unittest.TestCase):
             for ep in ("http://192.0.2.1:11434/v1", "https://127.0.0.1:1/v1", "", None):
                 self.assertIsNone(aiweb.UsageProbe.loaded(ep))
         with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertIsNone(aiweb.UsageProbe.loaded("http://127.0.0.1:%d/v1" % free_port()))
+            with self.assertRaises(OSError, msg="nothing answers: the caller says the server is down"):
+                aiweb.UsageProbe.loaded("http://127.0.0.1:%d/v1" % free_port())
+            eng = aiweb.Engine(directory=tempfile.mkdtemp(), cfg_fn=lambda: dict(nuc_config.load("/nonexistent"), ai=dict(
+                nuc_config.load("/nonexistent")["ai"], endpoint="http://127.0.0.1:%d/v1" % free_port())), state_fn=lambda: None)
+            self.addCleanup(shutil.rmtree, eng.directory, True)
+            u = eng.measure_usage()
+        self.assertEqual((u["models"], u["answers"]), (None, False))
         self.assertEqual(err.getvalue(), "", "a server that is not up yet is not an error in the log")
 
     def engine(self, probe, on=True):
@@ -1400,7 +1625,7 @@ class Demo(unittest.TestCase):
         self.assertGreater(sp["used"], 2_000_000_000)
         self.assertEqual(sp["free"], aiweb.DEMO_FREE)
         snap = self.eng.snapshot()
-        self.assertEqual(snap["switch"], {"on": True, "by": "web", "locked": False})
+        self.assertEqual(snap["switch"], {"on": True, "by": "web", "locked": False, "can_off": True})
         self.assertEqual((snap["server"]["running"], snap["server"]["model"]), (True, "qwen3-4b"))
         self.assertEqual(snap["state"][0], "running")
         st = self.eng.demo_status("windows")
@@ -1597,7 +1822,8 @@ class WebUse(WebBase):
             self.assertEqual(f["back"], "view=ai", action)
         uses = {f["model"] for a, f in self.forms(body) if a == "use"}
         self.assertEqual(uses, {"tiny", "other"}, "one button per model")
-        self.assertRegex(body, r'<input class="q" type="text" name="q" maxlength="500"[^>]* disabled>')   # the box wakes up when the AI is on
+        self.assertRegex(body, r'<input class="q" type="text" name="q" maxlength="500"[^>]*autocomplete="off"> <button class="bt on" type="submit" disabled>Ask')
+        # the box takes a question at any time; the button wakes up when the AI is on
         self.assertIn("turn AI on to ask", body)
         self.assertIn("models are downloaded to", body)
         self.assertIn(html.escape(self.d), body)
@@ -1809,12 +2035,54 @@ class WebSecurity(WebBase):
         self.assertEqual(self.post("clear", csrf=False)[0], 403)
         self.assertEqual(self.post("clear", headers={"Origin": "http://203.0.113.9"})[0], 403)
         self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1, "a refused post changes nothing")
-        self.assertTrue(self.go("clear").endswith("#ask"))
+        where = self.go("clear")
+        self.assertEqual(where, "/?view=ai&confirm=clear#ask", "the chat goes for good: the page asks first")
+        self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1)
+        body = self.page("/?app=1&view=ai&confirm=clear")
+        self.assertIn("Clear the chat? Its 1 question and answer, and the prompts they were sent, are deleted for good.", body)
+        self.assertIsNotNone(self.form(body, "clear", confirm="yes"))
+        self.assertTrue(self.go("clear", {"confirm": "yes"}).endswith("#ask"))
         self.assertEqual(self.eng.snapshot()["chat"]["history"], [])
         self.assertEqual(self.notice(), "the chat is cleared")
         body = self.page("/?app=1&view=ai")
         self.assertNotIn('class="log"', body)
         self.assertNotIn('action="/ai/clear"', body, "nothing to clear: no button")
+
+    def test_the_live_app_is_told_where_to_go_next_instead_of_a_redirect(self):
+        st, h, body = self.post("delete", {"model": "tiny"}, headers={"Accept": "application/json"})
+        self.assertEqual((st, h["Content-Type"]), (200, "application/json; charset=utf-8"))
+        self.assertEqual(json.loads(body), {"to": "/?view=ai&sel=tiny&confirm=delete"}, "the question it asks first, which the app shows")
+        st, h, _b = self.post("delete", {"model": "tiny"})
+        self.assertEqual((st, h["Location"]), (303, "/?view=ai&sel=tiny&confirm=delete"), "a form without the script: the redirect, as always")
+        self.assertEqual(self.post("delete", {"model": "tiny"}, csrf=False, headers={"Accept": "application/json"})[0], 403, "the same checks")
+
+    def test_the_whole_prompt_of_an_answer_is_shown_on_request_and_never_in_the_engines_state(self):
+        e = aiweb.chat_entry({"kind": "ask", "q": "why <slow>?", "at": 0, "res": {"text": "busy", "tools_used": [], "model": "m", "calls": [], "state": True},
+                              "prompt": [{"role": "system", "text": "rules <b>"}, {"role": "user", "text": "line one\nline two"}]})
+        self.eng.history.append(e)
+        body = self.page("/?app=1&view=ai")
+        self.assertIn('<a href="/?view=ai&amp;app=1&amp;prompt=%s#prompt">the prompt it was sent</a>' % e["id"], body)
+        self.assertNotIn("rules &lt;b&gt;", body)
+        body = self.page("/?app=1&view=ai&prompt=%s" % e["id"])
+        self.assertIn('<section class="prompt" id="prompt">', body)
+        self.assertIn('<pre class="pm-t">line one\nline two</pre>', body)
+        self.assertIn("rules &lt;b&gt;", body)
+        self.assertIn("for: you: why &lt;slow&gt;?", body)
+        self.assertNotIn('class="prompt"', self.page("/?app=1&view=ai&prompt=000000000000"), "an exchange the chat does not have: nothing")
+        self.assertNotIn('class="prompt"', self.page("/?app=1&view=ai&prompt=../../etc"), "not an id: dropped")
+        st, _h, doc = self.get("/api/v1/ai?prompt=%s" % e["id"])
+        d = json.loads(doc)
+        self.assertEqual((st, d["prompt"]), (200, e["id"]))
+        self.assertNotIn("rules", json.dumps(d["engine"]), "the engine's state carries no prompt: only the nodes of the one asked for")
+        self.assertIn("line one\\nline two", doc)
+        self.assertIn("rules &lt;b&gt;", self.page("/?app=0&view=ai&prompt=%s" % e["id"]), "the classic page shows it too")
+
+    def test_clear_asks_only_when_there_is_a_chat_and_load_is_a_post_like_the_others(self):
+        self.assertNotIn("Clear the chat?", self.page("/?app=1&view=ai&confirm=clear"))
+        with mock.patch.object(self.eng, "load_model", return_value=(True, "x")) as load:
+            self.assertEqual(self.post("load", csrf=False)[0], 403)
+            self.assertEqual(self.go("load"), "/?view=ai")
+        load.assert_called_once_with()
 
     def test_the_server_gives_the_engine_the_machine_as_its_pages_show_it(self):
         self.assertEqual(aiweb._BIND["state"], self.srv.machine_state)

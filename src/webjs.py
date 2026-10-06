@@ -7,7 +7,7 @@ fixed by tests/jsrules.py (no markup built from data, no eval, no cookie, no con
 and tests/test_webjs.py runs those rules on every script.
 
     REFRESH_JS   partial refresh: polls the page's fragment and swaps in the cards whose revision changed (~12 KB)
-    KEYS_JS      keyboard: clicks the links the server marked with data-key, moves over the rows of a list (~3 KB)
+    KEYS_JS      keyboard: clicks the links the server marked with data-key, moves over the rows of a list; a click on a row follows its link (~3.5 KB)
     PREFS_JS     preferences: theme and density without a reload, the browser-side copy, the "Copy" button (~4 KB)
     BUILDER_JS   layout editor, only on ?edit=1 pages: drag, resize, hide, with a keyboard alternative, saved at every change (~12 KB)
 
@@ -45,7 +45,8 @@ Blocks: every card is an element with data-card="<id>" and data-rev="<revision>"
     clock), "__kpis" (the KPI row) and "__view" (the body and toolbar of the Map, CPU, Health and AI pages: one block). A fragment holds the same blocks in the same order as the page; if the set or the order
     differs (a card appeared, went or moved) REFRESH_JS reloads the page. Inside a block:
     data-k="<key>"      a stable key (links, rows, details): focus and the open state of <details> survive a refresh by it
-    data-row            a row of a list: KEYS_JS moves the focus over them and Enter follows the link of the focused row
+    data-row            a row of a list: KEYS_JS moves the focus over them and Enter follows the link of the focused row; a click on the row
+                        (not on a link, a button or a field in it) follows its first link
     <details data-k>    its open state is kept as the reader left it
                         (the Health screen: each finding is div.fd[data-k="f-<id>"] holding details[data-k]; the period links are a[data-key="d|w|m"])
                         (the AI screen, div.scr.av: every button is a form posting to /ai/* with its hidden csrf and back fields, and carries data-key from the
@@ -334,8 +335,9 @@ _REFRESH = r"""// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS
 
 _KEYS = r"""// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
 // the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
-// focus over the elements marked data-row and Enter follows the focused row's link. Keys with Ctrl, Alt or Meta, keys typed into
-// a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+// focus over the elements marked data-row and Enter follows the focused row's link; a click on such a row, anywhere but on a link, a
+// button or a field of it, follows its link too (no overlay: a table row is no containing block in every engine). Keys with Ctrl, Alt
+// or Meta, keys typed into a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -380,6 +382,11 @@ _KEYS = r"""// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key pres
     else if (!help && k === "Enter") hit = follow();
     if (!hit && !e.repeat) hit = press(k, help || document);
     if (hit) e.preventDefault();
+  });
+  document.addEventListener("click", e => {  // a click on a row, not on a link, a button or a field of it, nor to select text: the row's link
+    if (e.defaultPrevented || e.button || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || String(window.getSelection() || "")) return;
+    const row = e.target.closest("[data-row]"), link = row && row.querySelector("a[href]");
+    if (link && !e.target.closest("a[href], button, input, select, textarea, label, summary")) link.click();
   });
 })();
 """

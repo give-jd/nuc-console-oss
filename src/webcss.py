@@ -556,7 +556,6 @@ svg.meter .m-user{fill:var(--ok)}svg.meter .m-system{fill:var(--err)}svg.meter .
 .scr table.tbl tr{position:relative}
 .scr table.tbl tr[data-row]{cursor:pointer}
 .scr table.tbl tr[data-row] td:first-child a{color:inherit;text-decoration:none}
-.scr table.tbl tr[data-row] td:first-child a::after{content:"";position:absolute;inset:0}
 .scr table.tbl tr[data-row]:hover td,.scr table.tbl tr[data-row]:focus-within td{background:var(--surface-2)}
 .scr table.tbl tr.t-sel td{background:var(--accent-bg);color:var(--fg-strong)}
 .scr table.tbl td:last-child{width:100%;white-space:normal;overflow-wrap:anywhere}
@@ -704,6 +703,12 @@ AI_VIEW = """
 .av .qa{margin:.5em 0}
 .av .qa .q{margin:0 0 .35em}
 .av .pend{color:var(--muted)}
+.av .qa-f{margin:.3em 0 0;font-size:.86em;color:var(--muted)}
+.av .prompt{margin:0 0 .7em;padding:.6em .8em;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg)}
+.av .pm-q{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.3em 1em;margin:0 0 .5em;color:var(--fg-strong);overflow-wrap:anywhere}
+.av .pm{margin:.5em 0 0}
+.av .pm-r{margin:0 0 .2em}
+.av .pm-t{margin:0;padding:.5em .7em;max-height:24em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:.82em/1.45 var(--mono);background:var(--surface-2);border-radius:4px}
 .av .advice{padding:.75em 1em;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}
 .av .advice p{margin:.35em 0;overflow-wrap:anywhere}
 .av .advice-head{margin:0 0 .5em;color:var(--accent);font:600 .86em var(--mono)}

@@ -94,7 +94,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view">
-<div class="vb" data-card="__view" data-rev="5966d8e5db">
+<div class="vb" data-card="__view" data-rev="90468b6f2a">
 <div class="scr av">
 <header class="st">
 <h2>AI</h2>
@@ -140,24 +140,40 @@
 <span class="mono">/var/lib/nuc-console/ai</span>
 <span class="t-muted"> · 5.0 GB downloaded · 412.0 GB free on that disk</span>
 </p>
-<div class="ask" role="group" aria-label="question">
-<p>Delete the runtime and every downloaded model (5.0 GB)? You can download them again later.</p>
-<div class="ask-b">
-<form class="f" method="post" action="/ai/delete-all">
-<input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
-<input type="hidden" name="confirm" value="yes">
-<button class="bt bt-err" type="submit" data-key="y">Yes, delete everything</button>
-</form>
-<a class="btn" href="/?view=ai&amp;app=1" data-key="n">No</a>
-</div>
-</div>
 </section>
 <div class="split">
 <div class="sp-l">
 <section class="grp">
-<h3 class="sub">CHAT <span class="note">ask the model about this machine (it sees its state now and reads its history; AI, check before acting)</span>
+<h3 class="sub">CHAT <span class="note">ask the model about this machine (it sees its state now and reads its history; AI, check before acting) · 2 kept</span>
 </h3>
+<div class="log" role="log" aria-label="chat">
+<div class="log-in">
+<div class="qa" data-k="qa-0123456789ab">
+<p class="q">
+<strong>you:</strong> why is the disk filling up?</p>
+<div class="advice">
+<p class="advice-head">ANSWER (AI, qwen3:4b) — check before acting</p>
+<p>/data grows by about 2 GB a day: shop-worker writes its logs there.</p>
+<p>Rotate them, then check again tomorrow.</p>
+<p class="advice-tools">queries: disk_forecast · and this machine&#x27;s state now</p>
+</div>
+<p class="qa-f">
+<span class="d">21 Sep 14:11 · in 14 s</span> · <a href="/?view=ai&amp;app=1&amp;prompt=0123456789ab#prompt">the prompt it was sent</a>
+</p>
+</div>
+<div class="qa" data-k="qa-fedcba987654">
+<p class="q">
+<strong>you:</strong> advice on the last 7 days</p>
+<div class="advice advice-error">
+<p class="advice-head">ADVICE (AI) — not available</p>
+<p>the model server stopped answering</p>
+</div>
+<p class="qa-f">
+<span class="d">21 Sep 14:12 · in 3 s</span>
+</p>
+</div>
+</div>
+</div>
 <form class="f" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
 <input type="hidden" name="back" value="view=ai&amp;app=1">
@@ -190,6 +206,28 @@
 <input type="hidden" name="days" value="30">
 <button class="bt" type="submit">last 30 days</button>
 </form>
+</div>
+<div class="ci">
+<span class="t-muted">·</span>
+</div>
+<div class="ci">
+<form class="f" method="post" action="/ai/clear">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<button class="bt" type="submit" title="delete the questions, the answers and their prompts (asks first)">Clear chat</button>
+</form>
+</div>
+</div>
+<div class="ask" role="group" aria-label="question">
+<p>Clear the chat? Its 2 questions and answers, and the prompts they were sent, are deleted for good.</p>
+<div class="ask-b">
+<form class="f" method="post" action="/ai/clear">
+<input type="hidden" name="csrf" value="<csrf>">
+<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="confirm" value="yes">
+<button class="bt bt-err" type="submit" data-key="y">Yes, clear the chat</button>
+</form>
+<a class="btn" href="/?view=ai&amp;app=1" data-key="n">No</a>
 </div>
 </div>
 </section>

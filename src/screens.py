@@ -2049,10 +2049,11 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
         pass
     elif state == "working":
         items.append(_act(acts, "cancel", "Cancel", (), "c", "err", "stop it: what was fetched is kept"))
-    elif dd(snap.get("switch")).get("by") == "config":
+    elif dd(snap.get("switch")).get("by") == "config" and not dd(snap.get("switch")).get("can_off"):
         items.append(_sp("on by config.ini ([ai] enabled = yes): turn it off there", "muted"))
     elif dd(snap.get("switch")).get("on"):
-        items.append(_act(acts, "off", "Turn AI off", (), "e", "err", "stop the model server and turn the advisor off"))
+        items.append(_act(acts, "off", "Turn AI off", (), "e", "err", "stop the model server and turn the advisor off"
+                          + (" ([ai] enabled = no in config.ini)" if dd(snap.get("switch")).get("by") == "config" else "")))
     else:
         items.append(_act(acts, "on", "Turn AI on", (), "e", "ok", "set up the model and start it"))
     out = [Controls([x for x in items if x is not None])]
@@ -2064,6 +2065,7 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
     elif state == "working" and job:  # no total yet (or a step that has none): a moving bar and what is known; the status text says what it does
         got = job.get("done") or 0
         out.append(Line([Bar(None, f"{ai_mb(got / 2 ** 20)} so far" if got else "", w=AI_BAR, tone="accent", busy=True)]))
+    out += ai_model_lines(snap, acts)
     if not snap["locked"] and state == "off":
         said = ai_choice_line(ch, rows)
         if said is not None:
@@ -2078,7 +2080,76 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
     return out + ([q] if q is not None else [])
 
 
-def ai_chat_nodes(snap, chat, acts):
+AI_MODEL = {"starting": ("◌ STARTING", "accent"), "loading": ("◌ LOADING", "accent"), "fetching": ("↓ NOT HERE YET", "accent"), "ready": ("✔ LOADED", "ok"),
+            "answering": ("✎ ANSWERING", "accent"), "unloaded": ("○ NOT LOADED", "warn"), "down": ("✖ NOT RUNNING", "err"), "checking": ("… CHECKING", "muted"),
+            "unknown": ("? UNKNOWN", "muted")}
+AI_UNLOAD = "the server lets a model go after 5 minutes without a question"
+
+
+def ai_secs(x):
+    """Seconds -> '8 s', '1 min 05 s', '1 h 02 min'; '' for None."""
+    x = num(x)
+    if x is None:
+        return ""
+    s = max(0, int(x))
+    return f"{s} s" if s < 60 else f"{s // 60} min {s % 60:02d} s" if s < 3600 else f"{s // 3600} h {s % 3600 // 60:02d} min"
+
+
+def ai_loaded_where(row):
+    """Where a loaded model sits, from /api/ps (aiweb.parse_ps): 'all in the GPU's memory (2.8 GB)', 'all in RAM, on the CPU (2.8 GB)', or the split."""
+    row = dd(row)
+    size, vram = num(row.get("size_mb")), num(row.get("vram_mb"))
+    ctx = f" · context {int(row['ctx'])} tokens" if num(row.get("ctx")) else ""
+    if size and vram is not None and vram >= size * 0.99:
+        return f"all in the GPU's memory ({ai_mb(size)}){ctx}"
+    if size and vram == 0:
+        return f"all in RAM, on the CPU ({ai_mb(size)}){ctx}"
+    if size and vram is not None:
+        return f"{ai_mb(vram)} in the GPU's memory, {ai_mb(size - vram)} in RAM{ctx}"
+    return f"where: ?{ctx}"
+
+
+def ai_model_lines(snap, acts, now=None):
+    """The model's line under the switch (the engine's model_state): is it loaded, and where; is it starting, loading, answering (with how long so
+    far and what it is doing); 'Load it now' when the server runs here without it. Nothing when the AI is off. Web only (Controls)."""
+    ms = dd(snap.get("model"))
+    st, model = ms.get("state"), hclean(ms.get("model"), 60) or "the model"
+    if not st or st == "off":
+        return []
+    now = time.time() if now is None else now
+    since = ai_secs(now - ms["since"]) if num(ms.get("since")) else ""
+    pend = dd(dd(snap.get("chat")).get("pending"))
+    if pend and st in ("ready", "unloaded", "checking", "unknown"):  # a question is being answered: that is what it does now
+        took = ai_secs(now - pend["started"]) if num(pend.get("started")) else ""
+        what = hclean(pend.get("step"), 160) or "asking the model"
+        st, text = "answering", (f"{model} is being loaded into memory, then it answers" if st == "unloaded" else f"{model} is answering") + \
+            (f" · {took} so far" if took else "") + f" · {what}"
+    elif st == "starting":
+        text = "the model server is starting" + (f" · {since} so far" if since else "")
+    elif st == "loading":
+        text = f"{model} is being loaded into memory" + (f" · {since} so far" if since else "") + ": it answers as soon as it is in"
+    elif st == "fetching":
+        text = f"{model} is not loaded: it is being set up (the line above says how far)"
+    elif st == "ready":
+        text = f"{model} is in memory, {ai_loaded_where(ms.get('row'))}: a question is answered at once"
+    elif st == "unloaded":
+        others = [hclean(x, 40) for x in ms.get("others") or [] if x]
+        text = f"{model} is not in memory now ({AI_UNLOAD})" + (f"; the server holds {', '.join(others)}" if others else "") + \
+            ": the next question loads it first, which takes a while"
+    elif st == "down":
+        text = f"nothing answers at {hclean(ms.get('endpoint'), 80) or 'the endpoint'}: the model server is not running"
+    elif st == "checking":
+        text = "checking what the model server has loaded…"
+    else:
+        text = "the model server does not say whether it has the model loaded (it is not an Ollama?)"
+    mark, tone = AI_MODEL.get(st, AI_MODEL["unknown"])
+    items = [_sp("model", "muted"), Badge(mark, tone), _sp(text)]
+    if ms.get("load") and st == "unloaded":
+        items.append(_act(acts, "load", "Load it now", (), "", "accent", "load the model into memory now: the next question is answered at once"))
+    return [Controls([x for x in items if x is not None])]
+
+
+def ai_chat_nodes(snap, chat, acts, confirm="", links=None, prompt=None):
     """The chat under the switch: what was asked and answered (chat: the Qa of the exchanges, oldest first, built by the page from the engine's
     history) in a box that scrolls (ui.Log: the page does not grow with it), the question box, 'advice now', the button that clears the chat, and
     why the box is asleep when it is. The box works when the AI is on and its server is not starting."""
@@ -2087,14 +2158,21 @@ def ai_chat_nodes(snap, chat, acts):
         return []  # a page that only shows, with nothing asked yet: no heading over nothing
     ready = dd(snap.get("switch")).get("on") and snap["state"][0] != "working"
     asleep = not ready or bool(c["busy"])
-    out = [Head("CHAT", "ask the model about this machine (it sees its state now and reads its history; AI, check before acting)")]
+    n = len(c["history"])
+    out = [Head("CHAT", "ask the model about this machine (it sees its state now and reads its history; AI, check before acting)"
+                + (f" · {n} kept" if n else ""))]
     if chat:
         out.append(ui.Log(chat))
+    if prompt is not None:
+        out.append(prompt)
     if acts is not None:
         out.append(_act(acts, "ask", "Ask", (), "", "ok", "", asleep, ("q", "ask: why is the disk filling up?", 500)))
-        clear = [_sp("·", "muted"), _act(acts, "clear", "Clear chat", (), "", None, "forget the questions and answers on this page")] if c["history"] else []
+        clear = [_sp("·", "muted"), _act(acts, "clear", "Clear chat", (), "", None, "delete the questions, the answers and their prompts (asks first)")] if n else []
         out.append(Controls([_sp("advice now:", "muted")] + [_act(acts, "advise", label, [("days", d)], "", None, "", asleep)
                                                               for d, label in ((1, "last 24 h"), (7, "last 7 days"), (30, "last 30 days"))] + clear))
+        if confirm == "clear" and n and links is not None:
+            out.append(Question(f"Clear the chat? Its {n} question{'s' if n != 1 else ''} and answer{'s' if n != 1 else ''}, and the prompts they were sent, "
+                                "are deleted for good.", _act(acts, "clear", "Yes, clear the chat", [("confirm", "yes")], "y", "err"), links.no))
         if not ready:
             out.append(Msg("info", "the model is still starting: the box wakes up when it answers" if snap["state"][0] == "working" else "turn AI on to ask"))
     return [Group(out)]
@@ -2184,16 +2262,17 @@ def ai_models_web(rows, snap, sel, acts, links, windows):
     return [ui.Split([Group(table)], [Group([ai_spec(chosen, windows, None, [a for a in do if a is not None]), close])], 0, 0)]
 
 
-def ai_model(data, st, snap, ch, rows, sel="", confirm="", acts=None, links=None, chat=()):
+def ai_model(data, st, snap, ch, rows, sel="", confirm="", acts=None, links=None, chat=(), prompt=None):
     """The AI screen for the web, nothing cut: the title, the switch with what it is doing and the question that waits, the chat, the hardware and
     the status side by side, the models with the details of the selected one, and what can be deleted. snap: the engine's snapshot, ch: its choice
-    (None: locked), acts: the AiActs of the forms (None: the page only shows: no form, no button), links: the AiLinks, chat: [ui.Qa]."""
+    (None: locked), acts: the AiActs of the forms (None: the page only shows: no form, no button), links: the AiLinks, chat: [ui.Qa], prompt: the
+    ui.Prompt of the exchange whose prompt is shown (under the chat), or None."""
     cat = data["cat"]
     if cat is None:
         return [ai_title(None, None)] + _msg("err" if data.get("err") else "info", data["msg"], None)
     hwd, ids = dd(cat.get("hw")), {r["id"] for r in rows}
     out = [ai_title(rows, None), Group(ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links))]
-    talk = ai_chat_nodes(snap, chat, acts)
+    talk = ai_chat_nodes(snap, chat, acts, confirm, links, prompt)
     out.append(ui.Split(talk, [Group(ai_usage_nodes(snap))], 0, 0) if talk else Group(ai_usage_nodes(snap)))  # the chat, and beside it what the model uses
     hh, hb = ai_hw_kv(hwd)
     sh, sb = ai_status_kv(st, cat, ids)

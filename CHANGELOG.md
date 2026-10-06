@@ -3,6 +3,38 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+
+- **The model's line on the AI page**, under the switch: whether the model is in memory and where (all in the GPU's memory, in RAM, or split),
+  starting, loading or answering with how long so far and what it is doing (asking the model, reading the history), not loaded now (Ollama lets
+  a model go after 5 minutes without a question) with **Load it now**, or not running. What the server does not say is `UNKNOWN`, never a
+  reassuring `LOADED`. [docs/AI.md](docs/AI.md#from-the-browser-and-the-console)
+- **The prompt it was sent**, under every answer of the chat: the whole request the model read, part by part (where it went and with what
+  settings, the instructions, the tools offered, the question with the machine's state, each query and what came back). An answer that failed
+  keeps it too. `?view=ai&prompt=<id>`, and `prompt=` in `/api/v1/ai`. [docs/WEB.md](docs/WEB.md)
+
+### Changed
+
+- **The chat is kept**: the last 50 questions and answers, with their prompts, are in `chat.json` in the AI folder (mode 0600), so a restart of the
+  web view or of the desktop app no longer loses them; **Clear chat** asks first, then deletes them and the file.
+- **Turn AI off works when `config.ini` turned it on**, in a portable run and the desktop app (whose `config.ini` is yours): it sets `[ai] enabled = no`
+  there. An installation's `config.ini` stays the administrator's.
+- The question box of the chat takes a question at any time; only its **Ask** button waits while the model is busy or the AI is off.
+- A post of the live app's buttons is answered with where the page goes next (`{"to": ...}`, after the same checks) instead of a redirect.
+
+### Fixed
+
+- **The live app could not turn the AI on**: with no model chosen yet, *Turn AI on* asks first about the recommended model, and that question
+  (like *delete its files*, *delete everything*) never showed in `/app`, so the button seemed to do nothing. The app now shows it.
+- **A click in the live app no longer jumps to the top of the page**: selecting a model, opening a prompt or answering a question keeps the page
+  where it was, and brings what it opened into sight; only another screen starts at its top.
+- **A click anywhere could select a model** (and move the page, and miss the question box and the buttons) in a web engine that does not position
+  what a table row holds against the row (the desktop app's window is the system's own engine): the rows of the AI, CPU and other tables were made
+  clickable by a link stretched over the row, which such an engine stretches over the whole page. The keyboard script now follows a row's link on a
+  click instead, and nothing is stretched.
+
 ## [2.2.0] - 2026-10-06
 
 The settings page edits the desktop app's configuration: every key of `config.ini` with what it does, the screens and sections switched on

@@ -71,7 +71,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?view=map&as=graph` | the MAP as a **graph**: circles and lines, like Obsidian's graph view (the **tree \| graph** switch on the MAP page). Zones, ports, processes, containers and remote addresses are circles coloured by state and sized by how connected they are; seen links are solid, declared dashed, same-network dotted. A click on a circle selects it (details pane, its neighbours highlighted); `local=1` / `local=2` show only it and what is 1 or 2 links away, `only=1` the paths to a problem, `ext=0` hides remote addresses, `stacks=1` adds the compose projects, `z=50`…`300` zooms without a script. With the script: drag a circle (it stays where you put it, double-click to release it), drag the background to pan, mouse wheel or pinch to zoom, `+` `-` `0` and arrows on the keyboard; the view survives the page's refresh. At most 400 circles are drawn ("+N more" says what is left out) |
 | `/?view=cpu` | the **CPU** screen (the **cpu** link in the bottom bar): processor, per-core load, frequency and temperature, processes. `sort=mem` / `time` / `pid` / `user` (CPU% by default), `sel=<pid>` the details of one process (each row is a link). Process names only, never command lines. Off with `[features] cpu = no` |
 | `/?view=health` | the **HEALTH** page (the **health** link in the bottom bar): the findings over the history kept by the collector, top CPU and memory apps per day, events, noisy and new log templates, disks, hot hours, boots. `period=1` / `7` / `30` (days, 7 by default), `sel=<finding id>` the details and fix of one finding (each finding is a link), `pause=1` no reload. Names and counts only ([HEALTH.md](HEALTH.md)). In a narrow window or on the wall density the tables of top CPU and memory, logs and disks drop their least important columns (the `wprio` of each `Col`, hidden by container queries on the panel) instead of scrolling sideways. Off with `[features] health = no` |
-| `/?view=ai` | the **AI** page (the **ai** link in the bottom bar): the AI switch and what it is doing (a download with its progress, the model server starting), the chat, the hardware found (RAM, GPU memory) and, for each local model, whether it fits (GPU, GPU+CPU, RAM, slow, too big), a rough speed, the commands of the command line and a **use this model** button; `sel=<model id>` its details, `pause=1` no reload, `confirm=on\|delete\|delete-all` the question the page asks before it does that. It has forms (below) unless `[ai] web_actions = no` locks it ([AI.md](AI.md)). It reloads by itself only while something runs (a download, a start, an answer), every 2 s, so that a question being typed is not lost. Off with `[features] ai = no` |
+| `/?view=ai` | the **AI** page (the **ai** link in the bottom bar): the AI switch and what it is doing (a download with its progress, the model server starting), the chat, the hardware found (RAM, GPU memory) and, for each local model, whether it fits (GPU, GPU+CPU, RAM, slow, too big), a rough speed, the commands of the command line and a **use this model** button; `sel=<model id>` its details, `pause=1` no reload, `confirm=on\|delete\|delete-all\|clear` the question the page asks before it does that, `prompt=<id>` the whole prompt the model was sent for that answer of the chat. It has forms (below) unless `[ai] web_actions = no` locks it ([AI.md](AI.md)). It reloads by itself only while something runs (a download, a start, an answer), every 2 s, so that a question being typed is not lost. Off with `[features] ai = no` |
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 | `/api/v1/...` | the **data API**, with either interface: every screen as JSON, and as a stream of Server-Sent Events ([below](#the-data-api)) |
@@ -264,7 +264,7 @@ and Telegram pages stay their forms (below), which a client posts as a page does
 | `/api/v1/cpu?sort=&sel=` | the CPU screen (`sort` cpu, mem, time, pid or user; `sel` a pid: its details) |
 | `/api/v1/health?period=&sel=` | the HEALTH screen (`period` 1, 7 or 30 days; `sel` a finding's id) |
 | `/api/v1/map?sel=&open=&shut=&all=&only=` | the MAP as a tree (the parameters of the page), `node` (the selected row's node) and `counts` |
-| `/api/v1/ai?sel=&confirm=` | the AI screen, `engine` (the state of the downloads, the server and the chat: what the page shows) and `csrf` |
+| `/api/v1/ai?sel=&confirm=&prompt=` | the AI screen, `engine` (the state of the downloads, the server, the model (`model`: loaded, loading, not loaded...) and the chat, without the prompts: what the page shows) and `csrf`; `prompt=<id>` puts the whole prompt of that answer in the nodes (`Prompt`) |
 | `/api/v1/telegram` | `engine` (the pairing and the notifier's state: never the bot's token), `csrf` and the `actions` its buttons post to |
 | `/api/v1/summary` | what every page shows above its screen: `host`, `status`, `kpis`, `stale` (a collector's data is old or missing) with the `restart` command, the number of `problems` and the tabs' `badges` (`map`: its problems, `health`: errors and warnings, `ai`: on, down or unknown); the overview carries the same fields |
 | `/api/v1/stream?view=<view>&…` | Server-Sent Events: each message is that view's document (the same parameters). `view` may be given up to 3 times (a screen and the summary): each message is then one of them, its `view` says which |
@@ -309,7 +309,7 @@ sheet, themes, densities, keys and help. The shell has a **live app** link in it
 | Path | What |
 |---|---|
 | `/app` | the overview: the key figures and every card, in the order your layout gives them |
-| `/app?view=cpu&sort=&sel=`, `?view=health&period=&sel=`, `?view=map&sel=&open=&shut=&all=&only=`, `?view=ai&sel=&confirm=` | the other screens, with the parameters of their pages |
+| `/app?view=cpu&sort=&sel=`, `?view=health&period=&sel=`, `?view=map&sel=&open=&shut=&all=&only=`, `?view=ai&sel=&confirm=&prompt=` | the other screens, with the parameters of their pages |
 | `/app?…&live=0` | the page as it is now, with no stream (a snapshot: a screenshot, the browser check) |
 
 The settings, the Telegram page, the MAP as a graph, a card in full and the layout editor are the shell's: a link to them leaves the app. The
@@ -324,7 +324,9 @@ narrower rule (`tests/jsrules.py`, policy `app`): it creates elements, but only 
 tags (no `script`, `style`, `iframe`, `object`, `img`...) and only attributes from a fixed list (no `on…`, `style`, `src`), text only as text,
 never markup (`innerHTML`, `DOMParser` stay banned, and the page's CSP has `trusted-types 'none'`: no policy can hand markup to the parser);
 it opens one `EventSource`, behind a door that only opens `/api/v1/stream`; it fetches only `/api/v1/…` and posts only to `/ai/…` and
-`/telegram/…`, without following the redirect; and it changes the address only to `/app…` with `history`.
+`/telegram/…` (asking for JSON, never following a redirect: the `to` of the answer is drawn in the page only when it is one of its own screens); and
+it changes the address only to `/app…` with `history`. Another screen starts at its top; the same screen with other parameters (a model selected,
+the prompt of an answer shown, a question asked first) keeps the page where it was and brings what it opened into sight.
 
 ## The AI page's buttons
 
@@ -340,9 +342,12 @@ it opens one `EventSource`, behind a door that only opens `/api/v1/stream`; it f
 | `/ai/delete-all` | `confirm=yes` | deletes the model server and every model; the same |
 | `/ai/ask` | `q` (500 characters at most) | a question, answered by the model in the background |
 | `/ai/advise` | `days` = 1, 7 or 30 | advice on the HEALTH findings of that period, written now |
-| `/ai/clear` | | forgets the chat's questions and answers (kept in memory only; an answer still being written stays) |
+| `/ai/clear` | `confirm=yes` | deletes the chat's questions, answers and prompts, and `chat.json` (an answer still being written stays); without `confirm=yes` it only redirects to the question |
+| `/ai/load` | | loads the model of the server started here into memory again (Ollama lets it go after 5 minutes without a question) |
 
-Every one answers **303** to `/?view=ai...` (Post/Redirect/Get: a reload never posts twice); the work runs in a background thread, the page shows it. Every form
+Every one answers **303** to `/?view=ai...` (Post/Redirect/Get: a reload never posts twice); the work runs in a background thread, the page shows it. A
+post that asks for `Accept: application/json` (the live app's script) gets `200` and `{"to": "/?view=ai..."}`, the same address, after the same
+checks: the app draws it in the page (a question asked first, `confirm=`, shows at once) instead of following a redirect. Every form
 carries `csrf` (this process's random token) and `back` (the view to come back to: parsed again, never used as an address).
 
 - **Same access as viewing**: no token = loopback and a known `Host` name (else `421`); with a token, that token as a bearer or cookie (else `401`). Behind

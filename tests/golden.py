@@ -349,10 +349,16 @@ ROTATION = {"map_in_rotation": True, "cpu_in_rotation": True, "health_in_rotatio
 LOCKED = {"ai": {"web_actions": False}}  # merged into the default [ai]
 CLASSIC = {"ui": {"web": "classic"}}  # [ui] web = classic: the classic pages (kept for one release); the default is the shell
 CHAT = (  # the AI chat after two exchanges: an answer from the state and one query, and an advice that failed (the page draws them in its log)
-    {"kind": "ask", "q": "why is the disk filling up?", "error": "", "at": NOW - 120,
+    {"id": "0123456789ab", "kind": "ask", "q": "why is the disk filling up?", "error": "", "at": NOW - 120, "took": 14,
      "res": {"text": "/data grows by about 2 GB a day: shop-worker writes its logs there.\n\nRotate them, then check again tomorrow.",
-             "tools_used": ["disk_forecast"], "model": "qwen3:4b", "calls": [], "state": True}},
-    {"kind": "advise", "q": "advice on the last 7 days", "res": None, "error": "the model server stopped answering", "at": NOW - 60})
+             "tools_used": ["disk_forecast"], "model": "qwen3:4b", "calls": [], "state": True},
+     "prompt": [{"role": "request", "text": "POST http://127.0.0.1:8080/v1/chat/completions · model qwen3:4b · temperature 0.2 · at most 600 tokens of answer"},
+                {"role": "system", "text": "You are a careful sysadmin assistant built into a monitoring console.\nRules:\n1. Use ONLY what the state says."},
+                {"role": "user", "text": 'Current state of this machine, as JSON:\n{"host":"demo-host","status":"2 PROBLEMS"}\n\nQuestion: why is the disk filling up?'},
+                {"role": "assistant", "text": 'calls disk_forecast({"days": 7})'},
+                {"role": "tool", "text": '{"disks":[{"mount":"/data","grows_gb_per_day":2.1}]}'}]},
+    {"id": "fedcba987654", "kind": "advise", "q": "advice on the last 7 days", "res": None, "error": "the model server stopped answering", "at": NOW - 60,
+     "took": 3, "prompt": []})
 ACCEPTED = (("container-exited", 1, "1 container exited with an error"),
             ("docker-bypass", 1, "1 Docker port bypassing ufw (DOCKER-USER empty)"))
 
@@ -466,6 +472,8 @@ def _cases():
         add("web-shell-" + name, query=query)
     add("web-shell-ai-locked", query="app=1&view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
     add("web-shell-ai-chat", query="app=1&view=ai", chat=CHAT)  # the chat in its box that scrolls, its Clear button, and beside it MODEL USAGE
+    add("web-shell-ai-chat-prompt", query="app=1&view=ai&prompt=0123456789ab", chat=CHAT)  # the whole prompt of an answer, under the chat
+    add("web-shell-ai-confirm-clear", query="app=1&view=ai&confirm=clear", chat=CHAT)  # Clear chat asks first
     # the Telegram page: off and not paired (the steps and the form, with the masked CSRF token); locked by the admin: no form
     add("web-shell-telegram", query="app=1&view=telegram")
     add("web-shell-telegram-locked", query="app=1&view=telegram", cfg={"telegram": {"web_actions": False}})

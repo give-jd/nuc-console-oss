@@ -60,7 +60,7 @@ class Rules(unittest.TestCase):
         for name, js in webjs.SCRIPTS.items():
             self.assertLess(len(js.encode("ascii")), jsrules.POLICIES[name].max_bytes, name)
         # the four together stay small: what a page that needs all of them inlines
-        self.assertLess(sum(len(js) for js in webjs.SCRIPTS.values()), 30 * 1024)
+        self.assertLess(sum(len(js) for js in webjs.SCRIPTS.values()), 31 * 1024)
 
     def test_there_is_one_door_to_the_network(self):
         for name in ("refresh", "prefs", "builder"):

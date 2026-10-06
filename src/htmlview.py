@@ -95,7 +95,11 @@ AI_CSS = (".pl.g{background:#3fb950;color:#0d1117}.pl.c{background:#39c5cf;color
           ".bt.off,.bt.del,.bt.stop{background:#8e1519;border-color:#da3633;color:#fff}.bt.use{padding:0 8px}.bt:disabled{opacity:.4;cursor:not-allowed}"
           ".cf{margin:6px 0;padding:6px 10px;border-left:3px solid #d29922;background:#161b22}.cf .bt{margin-left:6px}"
           ".chat .q{margin:2px 0}.chat .qa{margin:8px 0}input.q{font:inherit;color:#c9d1d9;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:3px 8px;width:min(70ch,100%)}"
-          "input.q:disabled{opacity:.5}.chat .adv{margin:6px 0}.mg{margin:10px 0;color:#8b949e}.mt .ac{padding-left:1ch}")
+          "input.q:disabled{opacity:.5}.chat .adv{margin:6px 0}.mg{margin:10px 0;color:#8b949e}.mt .ac{padding-left:1ch}"
+          # the model's line (screens.ai_model_lines) and the whole prompt of an answer (ui.Prompt)
+          ".ctl .controls{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;margin:2px 0}.ctl .tag{padding:0 8px;border:1px solid #30363d;border-radius:4px}"
+          ".prompt{margin:8px 0;padding:6px 10px;border-left:3px solid #58a6ff;background:#161b22}.prompt h3{font-size:1em;margin:0 0 4px}.pm-q{margin:0 0 6px}"
+          ".pm-x{margin-left:16px}.pm-r{margin:6px 0 2px}.pm-t{margin:0;max-height:24em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1117;padding:4px 8px}")
 
 
 def to_html(text):
@@ -518,10 +522,14 @@ def _advice_html(a):
 
 # ---- the components of the AI screen (ui.py: Badge, Action, Controls, Question, Spec, Qa) ------------------------------------------------
 #   <span class="tag ok|warn|err|accent">     Badge (a verdict: its symbol is in the text)
-#   <form class="f" method="post" action="/ai/..">   Action: hidden inputs, an optional <input class="q" name>, <button class="bt bt-TONE" data-key>
+#   <form class="f" method="post" action="/ai/..">   Action: hidden inputs, an optional <input class="q" name> (never disabled: a question can be
+#                                    typed while the model is busy; the button waits), <button class="bt bt-TONE" data-key>
 #   <div class="controls"><div class="ci">   Controls          <div class="ask" role="group">   Question: <p>, the yes form, <a class="btn" data-key="n">No
 #   <section class="spec"><dl class="spec-dl">   Spec: values in <code class="cmd"> when whole, in a tone class otherwise, a 'do' row of Actions
-#   <div class="qa"><p class="q">   Qa: the question, then the answer as an Advice block or the waiting line
+#   <div class="qa" data-k="qa-ID"><p class="q">   Qa: the question, then the answer as an Advice block or the waiting line, then <p class="qa-f">: when, and
+#                                    the link to the prompt it was sent
+#   <section class="prompt" id="prompt">   Prompt: <p class="pm-q"> the question and the close link, a <div class="pm"> per message: <p class="pm-r">
+#                                    its role as a tag, <pre class="pm-t"> its text
 #   <div class="log" role="log"><div class="log-in">   Log: the chat's exchanges in a box that scrolls, its end in sight
 
 _BADGE_CLASS = {"ok": "ok", "warn": "warn", "err": "err", "accent": "accent", "muted": ""}
@@ -540,7 +548,7 @@ def _action_html(a):
     ask = ""
     if a.ask is not None:
         name, hint, most = a.ask
-        ask = f'<input class="q" type="text" name="{_e(name)}" maxlength="{int(most)}" placeholder="{_e(hint)}" aria-label="{_e(hint)}" autocomplete="off"{off}> '
+        ask = f'<input class="q" type="text" name="{_e(name)}" maxlength="{int(most)}" placeholder="{_e(hint)}" aria-label="{_e(hint)}" autocomplete="off"> '
     attrs = ' type="submit"' + (f' title="{_e(a.title)}"' if a.title else "") + (f' data-key="{_e(a.key)}"' if a.key else "") + off
     return (f'<form class="f" method="post" action="{_e(a.action)}">{hidden}{ask}<button{_cls("bt", "bt-" + a.tone if a.tone else "")}{attrs}>{_e(a.label)}</button></form>')
 
@@ -567,10 +575,24 @@ def _spec_html(sp):
 
 
 def _qa_html(q):
-    wait = ('<p class="pend">the model is writing the answer (a small model on a slow CPU may need a minute; this page updates by itself)</p>'
-            if q.pending and q.answer is None else "")
-    return (f'<div class="qa"><p class="q"><strong>{"advice" if q.kind == "advice" else "you"}:</strong> {_e(q.q)}</p>'
-            + (html(q.answer) if q.answer is not None else "") + wait + "</div>")
+    wait = f'<p class="pend">{_e(q.wait)}</p>' if q.pending and q.answer is None else ""
+    link = _href(q.prompt_href)
+    foot = [f'<span class="d">{_e(q.note)}</span>'] if q.note else []
+    if link:
+        foot.append(f'<a href="{_e(link)}">the prompt it was sent</a>')
+    key = f' data-k="qa-{_e(q.key)}"' if q.key else ""
+    return (f'<div class="qa"{key}><p class="q"><strong>{"advice" if q.kind == "advice" else "you"}:</strong> {_e(q.q)}</p>'
+            + (html(q.answer) if q.answer is not None else "") + wait + (f'<p class="qa-f">{" · ".join(foot)}</p>' if foot else "") + "</div>")
+
+
+def _prompt_html(p):
+    msgs = "".join(f'<div class="pm"><p class="pm-r"><span class="tag">{_e(role)}</span> <span class="d">{len(text)} characters</span></p>'
+                   f'<pre class="pm-t">{chr(10).join(_e(x) for x in text.split(chr(10)))}</pre></div>' for role, text in p.messages)  # its lines kept
+    link = _href(p.close_href)
+    close = f'<a class="pm-x" href="{_e(link)}">close ✕</a>' if link else ""
+    total = sum(len(t) for _r, t in p.messages)
+    return (f'<section class="prompt" id="prompt"><h3 class="sub">PROMPT <span class="note">the whole request the model was sent, as it read it: '
+            f'{len(p.messages)} parts, {total} characters</span></h3><p class="pm-q"><span>for: {_e(p.title)}</span>{close}</p>{msgs}</section>')
 
 
 _HTML = {
@@ -580,6 +602,7 @@ _HTML = {
     ui.Question: _question_html,
     ui.Spec: _spec_html,
     ui.Qa: _qa_html,
+    ui.Prompt: _prompt_html,
     ui.Log: lambda n: (f'<div class="log" role="log" aria-label="{_e(n.label)}"><div class="log-in">' + "".join(html(c) for c in n.children)
                        + "</div></div>"),
     ui.Title: _title_html,

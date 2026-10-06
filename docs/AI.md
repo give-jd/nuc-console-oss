@@ -112,7 +112,9 @@ one that fits but slows the PC is set up with a warning.
 **AI on / off.** The switch at the top of the page, a key on the screen (`e`). *Turn AI on* uses the model chosen before (the page's, else `[ai] model`
 of `config.ini` if the catalog has it); if none was chosen it **asks first**, naming the recommended model and the size to download, and does nothing before
 you say yes (web: a small second form, *Yes* / *No*; console: `y` / `n`). *Turn AI off* stops the model server that was started from here and turns
-the advisor off. What it is doing is always on the screen:
+the advisor off. When `config.ini` turned it on (`[ai] enabled = yes`) a portable run and the desktop app, whose `config.ini` is your own, set it to `no`
+there (that line only, as the settings page does); an installation's `config.ini` is the administrator's, and the page says so instead. What it is
+doing is always on the screen:
 
 | State | Means |
 |---|---|
@@ -121,10 +123,27 @@ the advisor off. What it is doing is always on the screen:
 | `ON` | the advisor is on and the model answers (`tiny runs here and answers at http://127.0.0.1:8080/v1`), or it is on and asks a server that was not started here (`config.ini`'s, Ollama...) |
 | `ERROR` | the model server stopped by itself: the exit status and its last lines are shown |
 
-**Chat** (web page, right under the switch; on the console `questions: web page or nuc-console-ask`). A question box (500 characters at most) and the last ten
-questions and answers of this web process, newest last, in a box of its own height that scrolls (the page does not grow with the chat); they are kept in
-memory only, and **Clear chat** forgets them (an answer still being written stays). The model answers in the background, never while a page is being
-built, and the box wakes up when the server answers. With a question the web page gives the model **the machine as its pages show it now**: the status,
+**The model's line** (web page, under the switch, while the AI is on) says whether the model is in memory and what it is doing, from what the
+server itself says (`/api/ps`, read every 3 seconds while the page is open):
+
+| Model | Means |
+|---|---|
+| `STARTING` / `LOADING` | the model server is starting, the model is being loaded into memory: with how long so far |
+| `LOADED` | it is in memory, and where (all in the GPU's memory, all in RAM, or split), with its context: a question is answered at once |
+| `ANSWERING` | it is writing an answer: for how long, and what it is doing (`asking the model`, `reading the history: events`, `asking the model again, with what events returned`); `being loaded into memory, then it answers` when it was not in memory |
+| `NOT LOADED` | the server runs but does not hold it now: Ollama lets a model go after 5 minutes without a question, and the next question loads it again first, which takes a while. **Load it now** loads it at once (a job like the others: **Cancel** stops it) |
+| `NOT RUNNING` | nothing answers at the endpoint |
+| `UNKNOWN` / `CHECKING` | the server does not say what it holds (it is not an Ollama), or it has not been read yet: never a reassuring `LOADED` |
+
+**Chat** (web page, right under the switch; on the console `questions: web page or nuc-console-ask`). A question box (500 characters at most) and the last 50
+questions and answers, newest last, in a box of its own height that scrolls (the page does not grow with the chat), each with when it was answered and in
+how long. They are kept in `chat.json` in the AI folder (mode 0600: the questions, the answers and what the model was sent are this account's only; a
+file that is bigger than 4 MB, writable by others or not this account's is not read), so a restart of the web view or of the desktop app does not lose
+them; **Clear chat** deletes them, file included, after a question (an answer still being written stays). The model answers in the background, never while a
+page is being built; the question box takes a question at any time, its **Ask** button wakes up when the server answers.
+**The prompt it was sent**, under each answer, shows the whole request the model read, part by part: where it went and with what settings, the
+instructions, the tools it was offered, the question with the machine's state, and each query it made with what came back (16,000 characters at most);
+an answer that failed keeps the prompt it was sent too. With a question the web page gives the model **the machine as its pages show it now**: the status,
 the problems, the key figures, the busiest processes (names, CPU and memory: never a command line) and the HEALTH findings, as compact JSON (2,400
 characters at most: the least important parts are cut first, the problems last); so it can answer "why is it slow right now?" even with no history yet,
 and an answer says what it was built from ("from this machine's state now", or the queries it made and the state). **advice now** (last 24 hours, 7 days, 30 days) writes a fresh advice on the HEALTH findings of
@@ -152,7 +171,8 @@ advisor off; *delete everything* stops the server first.
 | **Cancel** | `c` | stops the download, the pull or the start that runs |
 | **delete its files** (details) | `x` | deletes one model's files, after the question |
 | **delete everything** (bottom) | `X` | deletes the server and every model, after the question |
-| the question box, **advice now**, **Clear chat** | | chat (web only) |
+| the question box, **advice now**, **Clear chat**, **the prompt it was sent** | | chat (web only) |
+| **Load it now** (the model's line) | | loads the model into memory again (web only) |
 | | `Enter`, `↑` `↓`... | details, moving |
 
 `[ai] web_actions = no` removes all of it: the page and the screen say "locked by config.ini", show no button and take no key, and a post is refused.

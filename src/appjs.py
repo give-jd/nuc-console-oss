@@ -34,12 +34,15 @@ THE NETWORK
 
     GET  /api/v1/<view>?<params>                     call(): when the stream cannot be opened (503: too many), every refresh interval
     GET  /api/v1/stream?view=<view>&view=summary...  stream(): Server-Sent Events, one document per change
-    POST /ai/<action>, /telegram/<action>             call(url, form): the forms of the screens (CSRF token in their hidden fields);
-                                                      the answer is a redirect, which is not followed: the stream brings the change
+    POST /ai/<action>, /telegram/<action>             call(url, form): the forms of the screens (CSRF token in their hidden fields), with
+                                                      Accept: application/json; the answer is {"to": the address the page goes to next},
+                                                      followed in the page when the app draws it (a question asked first: ?confirm=), never
+                                                      a redirect; the stream brings the change
 
 A link to "/?..." that the app draws (overview, cpu, health, map as a tree, ai, with the parameters those screens take) is followed in
 the page (history.pushState to "/app?..."); any other link (settings, Telegram, the graph, a card in full) leaves the app for the shell.
-"""
+Another screen starts at its top; the same screen with other parameters keeps the page where it was (a model selected, the prompt of an
+answer shown), and brings what it opened into sight when it is off screen (#prompt, section.spec)."""
 import base64
 import hashlib
 
@@ -75,7 +78,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   const BADGE = {ok: "ok", warn: "warn", err: "err", accent: "accent", muted: ""};
   const RANK = {err: 0, down: 0, warn: 1, unknown: 2, ok: 3, info: 4};
   const VIEWS = new Set(["", "cpu", "health", "map", "ai"]);
-  const KEEP = {"": [], cpu: ["sort", "sel"], health: ["period", "sel"], map: ["open", "shut", "all", "sel", "only"], ai: ["sel", "confirm"]};
+  const KEEP = {"": [], cpu: ["sort", "sel"], health: ["period", "sel"], map: ["open", "shut", "all", "sel", "only"], ai: ["sel", "confirm", "prompt"]};
   const SAFE_HREF = /^(?:\/(?!\/)|[?#]|https?:\/\/)[^\s\\"'<>]*$/, SAFE_PATH = /^\/[a-z][a-z0-9\/-]*$/, CTRL = /[\u0000-\u001f\u007f-\u009f]/g;
   let cfg = {};
   try { cfg = JSON.parse(cfgNode.textContent || "{}"); } catch (err) { return; }
@@ -290,7 +293,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   function action(a) {
     if (!SAFE_PATH.test(String(a.action))) return null;
     const ask = a.ask ? [el("input", {class: "q", type: "text", name: tx(a.ask[0]), maxlength: a.ask[2], placeholder: tx(a.ask[1]), "aria-label": tx(a.ask[1]),
-      autocomplete: "off", disabled: !!a.disabled}), " "] : null;
+      autocomplete: "off"}), " "] : null;
     return el("form", {class: "f", method: "post", action: a.action}, (a.fields || []).map(([k, v]) => el("input", {type: "hidden", name: tx(k), value: tx(v)})), ask,
       el("button", {class: cls("bt", a.tone ? "bt-" + a.tone : ""), type: "submit", title: a.title ? tx(a.title) : null, "data-key": a.key ? tx(a.key) : null,
         disabled: !!a.disabled}, tx(a.label)));
@@ -302,8 +305,18 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     return el("section", {class: "spec"}, el("h3", {class: "sub"}, "DETAILS"), el("p", {class: "spec-t"}, tx(sp.title)), el("dl", {class: "spec-dl"}, rows, acts));
   }
   function qa(q) {
-    const wait = q.pending && !q.answer ? el("p", {class: "pend"}, "the model is writing the answer (a small model on a slow CPU may need a minute; this page updates by itself)") : null;
-    return el("div", {class: "qa"}, el("p", {class: "q"}, el("strong", {}, q.kind === "advice" ? "advice:" : "you:"), " " + tx(q.q)), q.answer ? draw(q.answer) : null, wait);
+    const wait = q.pending && !q.answer ? el("p", {class: "pend"}, tx(q.wait)) : null, link = href(q.prompt_href);
+    const foot = [q.note ? el("span", {class: "d"}, tx(q.note)) : null, q.note && link ? " \u00b7 " : null, link ? el("a", {href: link}, "the prompt it was sent") : null];
+    return el("div", {class: "qa", "data-k": q.key ? "qa-" + tx(q.key) : null}, el("p", {class: "q"}, el("strong", {}, q.kind === "advice" ? "advice:" : "you:"), " " + tx(q.q)),
+      q.answer ? draw(q.answer) : null, wait, q.note || link ? el("p", {class: "qa-f"}, foot) : null);
+  }
+  function prompt(p) {  // htmlview._prompt_html: every message whole, its line breaks kept
+    const msgs = p.messages || [], n = t => Array.from(say(t)).length, close = href(p.close_href);
+    const block = t => say(t).split("\n").map(x => x.replace(CTRL, "?")).join("\n");
+    return el("section", {class: "prompt", id: "prompt"}, el("h3", {class: "sub"}, "PROMPT ", el("span", {class: "note"}, "the whole request the model was sent, as it read it: "
+      + msgs.length + " parts, " + msgs.reduce((a, [, t]) => a + n(t), 0) + " characters")), el("p", {class: "pm-q"}, el("span", {}, "for: " + tx(p.title)),
+      close ? el("a", {class: "pm-x", href: close}, "close \u2715") : null), msgs.map(([role, t]) => el("div", {class: "pm"}, el("p", {class: "pm-r"},
+      el("span", {class: "tag"}, tx(role)), " ", el("span", {class: "d"}, n(t) + " characters")), el("pre", {class: "pm-t"}, block(t)))));
   }
   function title(t) {
     const segs = (t.seg ? [t.seg] : []).concat(t.segs || []);
@@ -353,6 +366,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
         x.yes ? action(x.yes) : null, href(x.no_href) ? el("a", {class: "btn", href: href(x.no_href), "data-key": "n"}, "No") : null));
       case "Spec": return spec(x);
       case "Qa": return qa(x);
+      case "Prompt": return prompt(x);
       case "Log": return el("div", {class: "log", role: "log", "aria-label": tx(x.label)}, el("div", {class: "log-in"}, (x.children || []).map(draw)));
       case "Title": return title(x);
       case "Seg": return seg(x.label, x.options || []);
@@ -418,7 +432,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
 
   // ---- the screens --------------------------------------------------------------------------------------------------------------
   const docs = {}, docFor = {};  // the documents known, and the parameters of the screen each was drawn for
-  let route = parse(location.search), paused = false;
+  let route = parse(location.search), paused = false, reveal = "";
   function parse(search) {  // "/app?view=cpu&sort=mem" -> {view, params}: the parameters that screen takes, nothing else
     const q = new URLSearchParams(search || ""), view = q.get("view") || "";
     const params = new URLSearchParams();
@@ -531,6 +545,12 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     const grid = view === "overview";
     if (app.getAttribute("class") !== (grid ? "grid" : "view")) app.setAttribute("class", grid ? "grid" : "view");
     into(app, grid ? overview(doc) : screen(doc, view));
+    const shown = reveal === "prompt" ? document.getElementById("prompt") : reveal ? app.querySelector("section.spec") : null;
+    reveal = "";
+    if (shown) {  // what the click opened, in sight: whole when it fits, else from its top
+      const box = shown.getBoundingClientRect(), room = window.innerHeight;
+      if (box.top < 0 || box.bottom > room) shown.scrollIntoView({block: box.height > room ? "start" : "nearest"});
+    }
     const clock = document.querySelector("time.clock"), upd = document.querySelector("footer .upd");
     if (doc.at) {
       const d = new Date(doc.at * 1000), p = n => (n < 10 ? "0" : "") + n, hms = p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
@@ -543,7 +563,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   // ---- the network: the stream, the documents, the forms ---------------------------------------------------------------------------
   const call = (url, form) => {  // the only door to the network: this server's data API, and the forms of its screens
     if (typeof url !== "string" || !(form ? /^\/(ai|telegram)\/[a-z-]+$/.test(url) : url.startsWith("/api/v1/"))) return Promise.reject(new Error("refused"));
-    return fetch(url, form ? {method: "POST", body: form, credentials: "same-origin", cache: "no-store", redirect: "manual"} : {credentials: "same-origin", cache: "no-store", redirect: "error"});
+    return fetch(url, form ? {method: "POST", body: form, credentials: "same-origin", cache: "no-store", redirect: "manual", headers: {"Accept": "application/json"}} : {credentials: "same-origin", cache: "no-store", redirect: "error"});
   };
   const stream = url => {  // the one stream: this server's data API
     if (typeof url !== "string" || !url.startsWith("/api/v1/stream?")) throw new Error("refused");
@@ -598,13 +618,26 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     } catch (err) { show("stale since " + clockOf(lastOk)); }
     if (again !== false) timer = setTimeout(() => { if (!source) listen(); }, period);
   }
-  function go(r, push) {  // a screen of the app: drawn from what is known, then from its stream
+  function go(r, push, hash) {  // a screen of the app: drawn from what is known, then from its stream. Another screen starts at its top; the same
+    // screen with other parameters (a model selected, a question asked first) stays where it was, and what it opened is brought into sight
+    const moved = !route || route.view !== r.view;
     route = r;
+    reveal = hash === "prompt" ? "prompt" : !moved && r.params.get("sel") ? "spec" : "";
     if (push) history.pushState(null, "", appUrl(r));
     for (const k of Object.keys(docs)) if (k !== "summary" && k !== "overview" && (k !== name(r) || docFor[k] !== r.params.toString())) delete docs[k];
     paint();
     listen();
-    if (push) window.scrollTo(0, 0);
+    if (push && moved) window.scrollTo(0, 0);
+  }
+  function follow(to) {  // an address of a screen the app draws ("/?..." or "/app?..."): drawn in the page -> true; anything else -> false
+    const [path, hash] = String(to).split("#");
+    if (!(path.startsWith("/?") || path.startsWith("/app?") || path === "/app")) return false;
+    const q = new URLSearchParams(path.replace(/^\/(app)?\?/, "").replace(/^\/app$/, "")), view = q.get("view") || "";
+    for (const k of q.keys()) if (k !== "view" && KEEP[view] && KEEP[view].indexOf(k) < 0 && !(k === "period" && q.get(k) === "0") && q.get(k) !== "") return false;  // a parameter only the shell knows
+    const r = parse(q.toString());
+    if (!r) return false;
+    if (appUrl(r) !== appUrl(route) || hash) go(r, true, hash);
+    return true;
   }
 
   document.addEventListener("click", e => {
@@ -620,14 +653,8 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
       if (paused) close(); else listen();
       return;
     }
-    const a = e.target.closest("a[href]"), to = a ? a.getAttribute("href") || "" : "";
-    if (!a || !(to.startsWith("/?") || to.startsWith("/app?") || to === "/app")) return;
-    const q = new URLSearchParams(to.replace(/^\/(app)?\?/, "").replace(/^\/app$/, "")), view = q.get("view") || "";
-    const r = parse(q.toString());
-    for (const k of q.keys()) if (k !== "view" && KEEP[view] && KEEP[view].indexOf(k) < 0 && !(k === "period" && q.get(k) === "0") && q.get(k) !== "") return;  // a parameter only the shell knows
-    if (!r) return;
-    e.preventDefault();
-    go(r, true);
+    const a = e.target.closest("a[href]");
+    if (a && follow(a.getAttribute("href") || "")) e.preventDefault();
   }, true);
   document.addEventListener("submit", e => {  // a form of a screen: posted in the background, its effect comes with the stream
     const f = e.target.closest("form"), to = f ? f.getAttribute("action") || "" : "";
@@ -636,8 +663,10 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     const body = new URLSearchParams(new FormData(f)), b = f.querySelector("button");
     if (b) b.setAttribute("disabled", "");
     call(to, body).then(r => {
-      if (r.type === "opaqueredirect" || r.ok) { const q = f.querySelector("input.q"); if (q) q.value = ""; return null; }
-      return r.text().then(t => show(t.trim().slice(0, 200) || "refused"));
+      if (!(r.type === "opaqueredirect" || r.ok)) return r.text().then(t => show(t.trim().slice(0, 200) || "refused"));
+      const q = f.querySelector("input.q");
+      if (q) q.value = "";
+      return r.type === "opaqueredirect" ? null : r.json().then(j => { if (j && typeof j.to === "string") follow(j.to); });  // where the page goes next: a question to answer first
     }).catch(() => show("the action could not be sent")).finally(() => { if (b) b.removeAttribute("disabled"); listen(); });
   }, true);
   window.addEventListener("popstate", () => { const r = parse(location.search); if (r) go(r, false); });

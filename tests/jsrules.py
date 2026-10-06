@@ -143,7 +143,8 @@ CANON_CALL = re.compile(
     r'  const call = \(url, form\) => \{[^\n]*\n'
     r'    if \(typeof url !== "string" \|\| !\(form \? /\^\\/\(ai\|telegram\)\\/\[a-z-\]\+\$/\.test\(url\) : url\.startsWith\("/api/v1/"\)\)\) '
     r'return Promise\.reject\(new Error\("refused"\)\);\n'
-    r'    return fetch\(url, form \? \{method: "POST", body: form, credentials: "same-origin", cache: "no-store", redirect: "manual"\} : '
+    r'    return fetch\(url, form \? \{method: "POST", body: form, credentials: "same-origin", cache: "no-store", redirect: "manual", '
+    r'headers: \{"Accept": "application/json"\}\} : '
     r'\{credentials: "same-origin", cache: "no-store", redirect: "error"\}\);\n  \};')
 CANON_STREAM = re.compile(
     r'  const stream = url => \{[^\n]*\n'
@@ -177,8 +178,9 @@ POLICIES = {
         events={"DOMContentLoaded", "click", "visibilitychange", "online", "pointerdown", "keydown", "wheel", "resize", "load"},
         location={"reload"}, storage={"sessionStorage": (2, {"setItem", "getItem"})}),
     "keys": Policy(
-        "keys", 3584, 60, selectors={"a[data-key], button[data-key]", "[data-row]", "[data-grab]", "#help:target", "a[href]"},
-        attrs_read={"data-key", "aria-disabled", "tabindex"}, events={"DOMContentLoaded", "keydown"}),
+        "keys", 4096, 66, selectors={"a[data-key], button[data-key]", "[data-row]", "[data-grab]", "#help:target", "a[href]",
+                                     "a[href], button, input, select, textarea, label, summary"},
+        attrs_read={"data-key", "aria-disabled", "tabindex"}, events={"DOMContentLoaded", "keydown", "click"}),
     "prefs": Policy(
         "prefs", 4864, 70, ids={"export"}, selectors={"a[data-set]", "[data-copy]"},
         attrs_read={"data-theme", "data-density", "data-copy", "data-done", "data-fail", "data-prefs", "data-prefs-src", "href"},
@@ -195,9 +197,9 @@ POLICIES = {
         location=()),
     # src/appjs.py: the live app. Its DOM contract is its docstring (the page web.py app_page serves)
     "app": Policy(
-        "app", 48 * 1024, 640, ids={"app", "cfg", "doc", "kpis", "stale"},
+        "app", 48 * 1024, 640, ids={"app", "cfg", "doc", "kpis", "prompt", "stale"},
         selectors={".host", ".kl", ".kv", ".status", "[data-pause]", "[data-state]", "a[href]", "article.card[data-card]", "button", "footer .upd", "form",
-                   "input.q", "nav.tabs", "summary", "time.clock"},
+                   "input.q", "nav.tabs", "section.spec", "summary", "time.clock"},
         attrs_read={"action", "class", "data-card", "data-k", "data-problem", "data-static", "href"},
         attrs_write={"aria-pressed", "class", "disabled"}, classes_set={"busy", "chg", "paused", "stale"},
         events={"DOMContentLoaded", "click", "error", "load", "message", "open", "popstate", "resize", "submit", "visibilitychange"},
