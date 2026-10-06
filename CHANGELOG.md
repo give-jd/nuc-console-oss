@@ -3,7 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.2.0] - 2026-10-06
+
+The settings page edits the desktop app's configuration: every key of `config.ini` with what it does, the screens and sections switched on
+and off, and Telegram alerts set up and tried without a terminal. The AI chat knows the machine it runs on, scrolls in its own box and can
+be cleared, with the model's CPU, GPU and memory beside it. A minor version: nothing is removed and nothing needs doing after the update
+(`config.ini` is kept). Still Python 3.8+, standard library only.
 
 ### Added
 
@@ -532,6 +537,7 @@ with who actually connects; boot health, temperatures and throttling, disks, tra
 new, changed or vanished port (`sudo nuc-console-accept`). A small root collector and an unprivileged renderer; `[features]` switches
 every section; optional helper scripts `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` (never run by the installer).
 
+[2.2.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/give-jd/nuc-console-oss/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.5.0...v2.0.0
 [1.5.0]: https://github.com/give-jd/nuc-console-oss/compare/v1.4.0...v1.5.0
