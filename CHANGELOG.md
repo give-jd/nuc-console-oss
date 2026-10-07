@@ -8,6 +8,7 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ### Security
 
 - **A named pipe left in the Telegram inbox no longer stalls the notifier.**
+- **An archive of the AI engine can no longer write outside its folder through a chain of links.**
 
 ## [2.3.0] - 2026-10-06
 
