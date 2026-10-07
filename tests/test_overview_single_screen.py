@@ -9,8 +9,10 @@ import sys
 import time
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # golden.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import collector  # noqa: E402
+import golden  # noqa: E402  (FrozenWorld: the default configuration, whatever another test left in render.CFG)
 import render  # noqa: E402
 import ansi  # noqa: E402
 
@@ -30,11 +32,9 @@ def fx():
 
 class OverviewSingleScreen(unittest.TestCase):
     def setUp(self):
-        self.saved = (render.CFG["spacing"], render.CFG["details"])
-        render.CFG["spacing"], render.CFG["details"] = 1, True
-
-    def tearDown(self):
-        render.CFG["spacing"], render.CFG["details"] = self.saved
+        world = golden.FrozenWorld(cfg={"spacing": 1, "details": True})
+        world.__enter__()
+        self.addCleanup(world.__exit__, None, None, None)
 
     def test_busy_host_fits_one_screen_without_details(self):
         cont, net, boot = fx()
