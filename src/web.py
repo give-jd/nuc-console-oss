@@ -13,6 +13,10 @@ with a redirect (src/aiweb.py does the work in the background), and those of the
 Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` / `[telegram] web_actions = no` to lock.
 Binding to anything but loopback requires a token (fail closed). The data API (`/api/v1/...`, src/webapi.py) gives what the screens show as JSON,
 and their changes as Server-Sent Events (`/api/v1/stream`), behind the same checks; it changes nothing. See docs/WEB.md.
+
+This file holds the Server (the pages of the shell, the caches, the data API, the actions of the forms), View, Page and main. The rest of the web view is
+in weburl.py (the address of a page), webhttp.py (the Handler and the security code), webpages.py (the Telegram, HEALTH and AI pages) and webmap.py (the
+MAP): docs/DESIGN.md "Code layout".
 """
 import base64
 import hashlib
