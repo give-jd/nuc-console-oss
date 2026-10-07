@@ -25,6 +25,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
@@ -168,8 +169,8 @@ class AiPage(unittest.TestCase):
         csp = h["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
         self.assertNotIn("script-src", csp)                                  # still no script on this page
-        self.assertEqual(csp, web.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
-        self.assertEqual(csp, web.CSP.replace("form-action 'none'", "form-action 'self'"))
+        self.assertEqual(csp, webhttp.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
+        self.assertEqual(csp, webhttp.CSP.replace("form-action 'none'", "form-action 'self'"))
         self.assertEqual(h["Referrer-Policy"], "same-origin")                # so that the browser's Origin on a post is the real one, not "null"
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
         self.assertNotIn("<script", body.lower())
@@ -221,7 +222,7 @@ class AiPage(unittest.TestCase):
         render.CFG["ai"]["web_actions"] = False
         st, h, body = get(self.srv, "/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP, "form-action 'none' again")
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP, "form-action 'none' again")
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
         self.assertNotIn("<form", body)
         self.assertNotIn("<input", body)

@@ -22,6 +22,7 @@ import graphlayout  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
@@ -175,7 +176,7 @@ class GraphPage(unittest.TestCase):
         self.assertIs(same, plain)
         for word in ("stacks=", "ext=", "local=", "z=", "as="):
             self.assertNotIn(word, re.sub(r'<span class="mv">.*?</span>', "", plain))
-        self.assertEqual(getattr(plain, "csp", web.CSP), web.CSP)
+        self.assertEqual(getattr(plain, "csp", webhttp.CSP), webhttp.CSP)
 
     def test_the_selection_follows_the_toggle(self):
         G = self.graph()
@@ -474,7 +475,7 @@ class GraphPage(unittest.TestCase):
             self.srv.cache.clear()
 
     def test_the_csp_pins_the_one_script_of_the_graph_page(self):
-        self.assertEqual(web.page_csp([graphjs.SCRIPT]), web.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
+        self.assertEqual(webhttp.page_csp([graphjs.SCRIPT]), webhttp.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
         fake = "/* nuc-console ✓ */ document.documentElement.dataset.ok = '1';"
         with self.script(fake):
             st, h, page = get(self.srv, "/?view=map&as=graph&sel=" + key("ct:shop-db-1"))
@@ -485,7 +486,7 @@ class GraphPage(unittest.TestCase):
         self.assertTrue(page.endswith("</footer><script>" + fake + "</script></html>"))
         self.assertEqual(page.count("<script"), 1)
         digest = base64.b64encode(hashlib.sha256(d.scripts[0].encode("utf-8")).digest()).decode()
-        self.assertEqual(h["Content-Security-Policy"], web.CSP + f"; script-src 'sha256-{digest}'")
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP + f"; script-src 'sha256-{digest}'")
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"], h["Referrer-Policy"], h["X-Frame-Options"]),
                          ("no-store", "nosniff", "no-referrer", "DENY"))
@@ -494,14 +495,14 @@ class GraphPage(unittest.TestCase):
         self.assertIsNone(re.search(r"\son[a-z]+=", page))                          # no inline event handler
         for st, h, body in others:                                                  # no other page has a script
             self.assertEqual(st, 200)
-            self.assertEqual(h["Content-Security-Policy"], web.CSP)
+            self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
             self.assertNotIn("script-src", h["Content-Security-Policy"])
             self.assertNotIn("<script", body.lower())
         with self.script(fake):                                                     # the script never comes from the request
             for path in ("/?view=map&as=graph&sel=%3Cscript%3E", "/?view=map&as=graph&ext=0&only=1&z=50&x=</script>"):
                 st, h, body = get(self.srv, path)
                 self.assertEqual(Drawing(body).scripts, [fake], path)
-                self.assertEqual(h["Content-Security-Policy"], web.page_csp([fake]))
+                self.assertEqual(h["Content-Security-Policy"], webhttp.page_csp([fake]))
 
     def test_the_real_script_can_be_inlined(self):
         """Inline, the script ends at the first '</script' and '<!--' changes how the browser reads it: neither may be in it."""
@@ -514,7 +515,7 @@ class GraphPage(unittest.TestCase):
         with self.script(""):
             st, h, page = get(self.srv, "/?view=map&as=graph")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
         self.assertNotIn("<script", page.lower())
         self.assertNotIn("<noscript>", page)                                         # no script to reload it: the meta refresh does
         self.assertIn('<meta http-equiv="refresh" content="2">', page)
@@ -675,7 +676,7 @@ class GraphPage(unittest.TestCase):
         self.assertNotIn("Traceback", body)
         self.assertIn("secret detail", err.getvalue())
         self.assertNotIn("<script", body)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
         self.assertIn('<meta http-equiv="refresh" content="2">', body)               # no script: the plain refresh
         self.assertIn("dashboard", body)
         self.assertEqual(params(link(body, "tree"))["as"], "")
@@ -703,7 +704,7 @@ class GraphPage(unittest.TestCase):
             render.CFG["features"]["map"] = flag
         self.assertIn("map disabled in config.ini", off)
         self.assertNotIn("<svg", off)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
 
 
 class Pure(unittest.TestCase):
