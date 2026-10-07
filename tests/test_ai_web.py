@@ -25,6 +25,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -68,7 +69,7 @@ def link(page, text):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 def plain(page):
@@ -318,11 +319,11 @@ class AiPage(unittest.TestCase):
     # ---- parameters -------------------------------------------------------------------------------------------------------------------
 
     def test_invalid_parameters_are_dropped(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("view=ai")["view"], "ai")
         self.assertEqual(q("view=ai&sel=qwen3-4b")["sel"], "qwen3-4b")       # any text: the page checks it against the catalog
-        self.assertEqual(len(q("view=ai&sel=" + "a" * 5000)["sel"]), web.AI_SEL_MAX)
-        self.assertEqual(web.AI_SEL_MAX, screens.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
+        self.assertEqual(len(q("view=ai&sel=" + "a" * 5000)["sel"]), weburl.AI_SEL_MAX)
+        self.assertEqual(weburl.AI_SEL_MAX, screens.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
         self.assertEqual(q("view=map&sel=qwen3-4b")["sel"], "")              # the map's sel stays ten hex digits
         self.assertEqual(q("view=cpu&sel=qwen3-4b")["sel"], "")
         self.assertEqual(q("sel=qwen3-4b")["sel"], "")
@@ -391,8 +392,8 @@ class AiPage(unittest.TestCase):
         self.assertLessEqual(len(self.srv.cache), web.CACHE_MAX)
         self.assertLessEqual(len(keys), 2)                                   # paused or not: a junk selection is the empty one
         self.assertNotIn("junk", "".join(str(k) for k in self.srv.cache))
-        first = self.srv.page(**web.view_params(web.parse_qs("view=ai")))
-        self.assertIs(self.srv.page(**web.view_params(web.parse_qs("view=ai"))), first)    # within r/2: the same render
+        first = self.srv.page(**weburl.view_params(web.parse_qs("view=ai")))
+        self.assertIs(self.srv.page(**weburl.view_params(web.parse_qs("view=ai"))), first)    # within r/2: the same render
 
     # ---- hostile data -----------------------------------------------------------------------------------------------------------------
 

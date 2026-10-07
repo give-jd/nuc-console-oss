@@ -308,13 +308,14 @@ def parity_page(view):
     import prefs
     import render
     import web
+    import weburl
     shown = golden.CHAT[0]["id"]  # the AI screen with its chat (the log the app draws too) and the whole prompt of its first answer
     with golden.FrozenWorld(chat=golden.CHAT if view == "ai" else ()) as world:
         srv = world.server
         srv.cache.clear()
         page = srv.app_page("", {"live": ["0"]} if view == "overview" else dict({"view": [view], "live": ["0"]}, **({"prompt": [shown]} if view == "ai" else {})))
         r = srv.cfg["refresh_seconds"]
-        here = {k: v for k, v in web.view_params({}).items() if k in web.HERE_KEYS}
+        here = {k: v for k, v in weburl.view_params({}).items() if k in weburl.HERE_KEYS}
         kpis = ""
         if view == "overview":
             body = srv.api_overview(r)
@@ -345,8 +346,8 @@ def parity_page(view):
             elif view == "health":
                 nodes = web.health_nodes(srv.smp, 7, "", dict({"view": "health", "period": 0, "sel": "", "pause": False}, **here))
             elif view == "map":
-                p = web.view_params({"view": ["map"]})
-                nodes = srv.api_map(here, web.map_mode({k: p[k] for k in web.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]
+                p = weburl.view_params({"view": ["map"]})
+                nodes = srv.api_map(here, weburl.map_mode({k: p[k] for k in weburl.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]
             else:
                 nodes = srv.api_ai(here, "", "", shown)["nodes"]
             box = {"cpu": "scr scr-cpu", "health": "hv", "map": "scr mapv", "ai": "scr av"}[view]

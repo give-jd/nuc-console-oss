@@ -22,6 +22,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -62,7 +63,7 @@ def link(page, text):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 def plain(page):
@@ -289,14 +290,14 @@ class HealthPage(unittest.TestCase):
     # ---- parameters -------------------------------------------------------------------------------------------------------------------
 
     def test_invalid_parameters_are_dropped(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("view=health")["period"], 0)
         self.assertEqual([q("view=health&period=%s" % x)["period"] for x in ("1", "7", "30", "2", "0", "-1", "31", "x", "1.0", "%C2%B2", "", "7" * 5000)],
                          [1, 7, 30, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         self.assertNotIn("period", q("view=map&period=30"))                  # not the map's
         self.assertNotIn("period", q("period=30"))
         self.assertEqual(q("view=health&sel=cpu-hog:chrome")["sel"], "cpu-hog:chrome")  # any text: the page checks it against the report
-        self.assertEqual(len(q("view=health&sel=" + "a" * 5000)["sel"]), web.HEALTH_SEL_MAX)
+        self.assertEqual(len(q("view=health&sel=" + "a" * 5000)["sel"]), weburl.HEALTH_SEL_MAX)
         self.assertEqual(q("view=map&sel=cpu-hog:chrome")["sel"], "")        # the map's sel stays ten hex digits
         self.assertEqual(q("view=map&sel=0123456789")["sel"], "0123456789")
         self.assertEqual((q("view=HEALTH")["view"], q("view=health")["view"], q("view=healthy")["view"]), ("", "health", ""))
@@ -387,8 +388,8 @@ class HealthPage(unittest.TestCase):
         self.assertLessEqual(len(self.srv.cache), web.CACHE_MAX)
         self.assertLessEqual(len(keys), 3 * 2)                               # 3 periods x paused or not: a junk selection is the empty one
         self.assertNotIn("junk", "".join(str(k) for k in self.srv.cache))
-        first = self.srv.page(**web.view_params(web.parse_qs("view=health")))
-        self.assertIs(self.srv.page(**web.view_params(web.parse_qs("view=health"))), first)    # within r/2: the same render
+        first = self.srv.page(**weburl.view_params(web.parse_qs("view=health")))
+        self.assertIs(self.srv.page(**weburl.view_params(web.parse_qs("view=health"))), first)    # within r/2: the same render
 
     # ---- hostile data -----------------------------------------------------------------------------------------------------------------
 

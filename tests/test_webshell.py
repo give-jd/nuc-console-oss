@@ -19,6 +19,7 @@ import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 import webcss  # noqa: E402
 import webjs  # noqa: E402
 from test_web import get_any as get, serve  # noqa: E402
@@ -353,9 +354,9 @@ class Shell(unittest.TestCase):
             self.assertIn(q, css)
         for d in ("wall", "desk", "compact"):
             self.assertIn(f'html[data-density="{d}"]', css)
-        for z in web.ZOOMS:
+        for z in weburl.ZOOMS:
             self.assertIn(f"html.z{z}{{", css)
-        self.assertEqual(sorted(webcss.ZOOMS), sorted(web.ZOOMS))
+        self.assertEqual(sorted(webcss.ZOOMS), sorted(weburl.ZOOMS))
         self.assertIn("@container app", css)
         legacy = webcss.themed("".join(webcss.LEGACY_SOURCES))
         self.assertEqual(webcss.HEX.findall(legacy), [], "a colour of htmlview's palette that webcss.REMAP does not map")
@@ -1177,7 +1178,7 @@ class Builder(unittest.TestCase):
         self.assertIn(".gz125 #gsvg{width:125%}", webcss.CSS)
         self.assertRegex(get(self.srv, "/?app=1&view=map&as=graph")[2], r'<html [^>]*class="[^"]*\bgzfit\b')
         self.assertNotIn("style", webjs.FRAG_ATTRS)
-        self.assertEqual(web.GZOOMS, webcss.GZOOMS)
+        self.assertEqual(weburl.GZOOMS, webcss.GZOOMS)
 
     def test_the_builder_script_is_on_the_edit_page_only(self):
         for path in ("/?app=1", "/?app=1&view=settings", "/?card=exposure", "/?app=1&view=map", "/?app=1&view=ai", "/?app=1&view=cpu", "/?app=1&pause=1",

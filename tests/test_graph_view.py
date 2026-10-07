@@ -22,6 +22,7 @@ import graphlayout  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -49,7 +50,7 @@ def get(srv, path="/"):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 def key(nid):
@@ -169,8 +170,8 @@ class GraphPage(unittest.TestCase):
     @classic_default()
     def test_tree_mode_ignores_the_graph_parameters(self):
         """The graph's filters mean nothing to the tree: not in its links, not in its cache key (the very same page)."""
-        plain = self.srv.page(**web.view_params(web.parse_qs("view=map&all=1")))
-        same = self.srv.page(**web.view_params(web.parse_qs("view=map&all=1&as=tree&stacks=1&ext=0&local=2&z=200&sel=")))
+        plain = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1")))
+        same = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1&as=tree&stacks=1&ext=0&local=2&z=200&sel=")))
         self.assertIs(same, plain)
         for word in ("stacks=", "ext=", "local=", "z=", "as="):
             self.assertNotIn(word, re.sub(r'<span class="mv">.*?</span>', "", plain))
@@ -521,7 +522,7 @@ class GraphPage(unittest.TestCase):
     # ---- bounds ------------------------------------------------------------------------------------------------------
 
     def test_parameters_are_validated(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual([q(s)["as"] for s in ("as=graph", "as=GRAPH", "as=tree", "as=graph2", "as=", "")], ["graph", "", "", "", "", ""])
         self.assertEqual([q(s)["stacks"] for s in ("stacks=1", "stacks=yes", "stacks=0", "stacks=2")], [True, False, False, False])
         self.assertEqual([q(s)["ext"] for s in ("ext=0", "ext=1", "ext=off", "ext=", "ext=00")], ["0", "", "", "", ""])
@@ -529,7 +530,7 @@ class GraphPage(unittest.TestCase):
                          [1, 2, 0, 0, 0, 0, 0])
         self.assertEqual([q(s)["z"] for s in ("z=100", "z=50", "z=1", "z=999999", "z=99999999", "z=130", "z=x", "z=²", "z=-50", "")],
                          [0, 50, 50, 300, 0, 125, 0, 0, 0, 0])
-        self.assertTrue(all(z in web.GZOOMS for z in web.GZOOMS))
+        self.assertTrue(all(z in weburl.GZOOMS for z in weburl.GZOOMS))
         for s in ("sel=<script>", "sel=0123456789a", "sel=ABCDEF0123"):
             self.assertEqual(q(s)["sel"], "")
         G = self.graph()

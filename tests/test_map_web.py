@@ -15,6 +15,7 @@ import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -56,7 +57,7 @@ def link(page, text):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 class MapPage(unittest.TestCase):
@@ -181,15 +182,15 @@ class MapPage(unittest.TestCase):
         self.assertIn("no longer on the map", gone)
 
     def test_invalid_parameters_are_dropped(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         good = "0123456789"
         self.assertEqual(q("open=" + good + ".zz.0123.ABCDEF0123.<x>." + good)["open"], (good,))
         self.assertEqual(q("sel=<script>")["sel"], "")
         self.assertEqual(q("sel=" + good + "0")["sel"], "")
         self.assertEqual((q("view=MAP")["view"], q("view=map")["view"], q("all=yes")["all"], q("only=2")["only"]), ("", "map", False, False))
         many = ".".join("%010x" % i for i in range(1000))
-        self.assertEqual(len(q("open=" + many)["open"]), web.MAX_KEYS)
-        self.assertEqual(q("shut=" + many)["shut"], tuple("%010x" % i for i in range(web.MAX_KEYS)))
+        self.assertEqual(len(q("open=" + many)["open"]), weburl.MAX_KEYS)
+        self.assertEqual(q("shut=" + many)["shut"], tuple("%010x" % i for i in range(weburl.MAX_KEYS)))
         plain = rows_of(self.page("/?view=map"))
         for path in ("/?view=map&open=" + many, "/?view=map&shut=" + many + "&all=1", "/?view=map&sel=" + "a" * 5000,
                      "/?view=map&zoom=99999999999999999999&refresh=-1&cols=x&open=%3Cscript%3E", "/?view=map&open=&shut=&sel=",
@@ -209,7 +210,7 @@ class MapPage(unittest.TestCase):
         try:
             far = [r["key"] for r in every[web.UNIVERSE:] if r["kids"] and r["depth"]]   # real branches past the limit
             self.assertTrue(far)
-            many = ".".join("%010x" % i for i in range(web.MAX_KEYS - 1))          # room for one real key
+            many = ".".join("%010x" % i for i in range(weburl.MAX_KEYS - 1))          # room for one real key
             plain = self.page("/?view=map&all=1")
             bogus = self.page("/?view=map&all=1&shut=" + many)
             self.assertNotIn("0000000001", bogus)
@@ -286,21 +287,21 @@ class MapPage(unittest.TestCase):
     @classic_default()
     def test_cache_is_bounded(self):
         for i in range(web.CACHE_MAX * 2):
-            self.srv.page(**web.view_params(web.parse_qs("view=map&sel=%010x" % i)))
+            self.srv.page(**weburl.view_params(web.parse_qs("view=map&sel=%010x" % i)))
         self.srv.page(cols=100)
         self.assertEqual(len(self.srv.cache), web.CACHE_MAX)
         self.assertIn(next(reversed(self.srv.cache)), self.srv.cache)
         self.assertEqual(next(reversed(self.srv.cache))[:2], (100, 0))              # the latest stays, the oldest went
         self.assertNotIn("%010x" % 0, "".join(str(k) for k in self.srv.cache))
-        first = self.srv.page(**web.view_params(web.parse_qs("view=map")))
-        self.assertIs(self.srv.page(**web.view_params(web.parse_qs("view=map"))), first)  # within r/2: the same render
+        first = self.srv.page(**weburl.view_params(web.parse_qs("view=map")))
+        self.assertIs(self.srv.page(**weburl.view_params(web.parse_qs("view=map"))), first)  # within r/2: the same render
 
     def test_cache_is_bounded_in_size_too(self):
-        one = len(self.srv.page(**web.view_params(web.parse_qs("view=map&all=1"))))
+        one = len(self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1"))))
         orig, web.CACHE_CHARS = web.CACHE_CHARS, one * 3                               # room for three pages
         try:
             for i in range(10):
-                self.srv.page(**web.view_params(web.parse_qs("view=map&all=1&sel=%010x" % i)))
+                self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1&sel=%010x" % i)))
             self.assertLessEqual(self.srv.cache_chars(), web.CACHE_CHARS)
             self.assertIn("%010x" % 9, str(next(reversed(self.srv.cache))))            # the latest stays, the oldest went
             web.CACHE_CHARS = 1                                                        # a page bigger than the limit is still served
