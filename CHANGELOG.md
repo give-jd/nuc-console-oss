@@ -11,6 +11,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **The collector unit is hardened further**: `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `ProtectKernelModules`, `ProtectClock`,
   `ProtectHostname`, `SystemCallArchitectures=native`. Not added, because they would break what only root can do: a capability list, `ProtectKernelTunables`,
   `ProtectControlGroups`, `RestrictNamespaces` (`nsenter` into the containers), `ProtectSystem=strict`, `MemoryDenyWriteExecute`.
+- **What the local web view does not defend is now written down** ([SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md)): on portable, macOS and Windows it has no token, so another
+  local account can post its CSRF token to the AI, Telegram and (portable, desktop) settings forms. What defends and what to set today are there, and the desktop
+  app's adoption of an earlier core by its pid file is listed as a [known limitation](docs/DESKTOP.md).
 
 ## [2.3.0] - 2026-10-06
 
