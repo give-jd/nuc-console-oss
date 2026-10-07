@@ -13,6 +13,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import ansi  # noqa: E402
 import web  # noqa: E402
+import webmap  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
@@ -172,7 +173,7 @@ class Web(unittest.TestCase):
         """view_url() writes a view as the links of the pages do, so that the redirect and a click on the same view agree."""
         q = lambda s: weburl.view_url(weburl.view_params(web.parse_qs(s)))  # noqa: E731
         self.assertEqual(q(""), "/")
-        self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), weburl.page_url(dict(web.map_here({k: 0 for k in weburl.HERE_KEYS}, web.graph.State(
+        self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), weburl.page_url(dict(webmap.map_here({k: 0 for k in weburl.HERE_KEYS}, web.graph.State(
             open=("aaaaaaaaaa", "bbbbbbbbbb")), "", False))))
         self.assertEqual(q("view=cpu&sort=cpu"), "/?view=cpu")                                       # the default is not written
         self.assertEqual(q("fit=1&kiosk=1&rotate=1&cols=220&rows=64"), "/?cols=220&rows=64&fit=1&rotate=1&kiosk=1")

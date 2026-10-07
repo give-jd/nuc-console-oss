@@ -22,6 +22,7 @@ import graphlayout  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import webmap  # noqa: E402
 import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -362,8 +363,8 @@ class GraphPage(unittest.TestCase):
         for k, n in d.nodes.items():
             self.assertRegex(k, HEX)
             self.assertEqual(n["id"], "n-" + k)
-            self.assertIn(n["cls"][1], web.STATES)
-            self.assertIn(n["cls"][2][2:], web.KINDS)
+            self.assertIn(n["cls"][1], webmap.STATES)
+            self.assertIn(n["cls"][2][2:], webmap.KINDS)
             c = n["circle"]
             for a in ("cx", "cy", "r"):
                 self.assertRegex(c[a], NUMBER)
@@ -374,7 +375,7 @@ class GraphPage(unittest.TestCase):
             self.assertEqual(params(n["href"])["sel"], k)
             self.assertEqual(params(n["href"])["as"], "graph")
             self.assertTrue(n["title"])
-            self.assertLessEqual(len(n["text"]), web.LABEL_MAX + 2)
+            self.assertLessEqual(len(n["text"]), webmap.LABEL_MAX + 2)
         for e in d.edges:
             self.assertRegex(e["data-a"], HEX)
             self.assertIn(e["data-a"], d.nodes)                                     # every endpoint is a drawn node
@@ -382,14 +383,14 @@ class GraphPage(unittest.TestCase):
             ev = e["cls"][1]
             self.assertIn(ev, ("seen", "declared", "possible", "bind", "reach"))
             self.assertTrue(set(e["cls"][2:]) <= {"bad", "nb"}, e["cls"])
-            self.assertEqual(e.get("marker-end"), f"url(#ah-{ev})" if ev in web.ARROWS else None)
+            self.assertEqual(e.get("marker-end"), f"url(#ah-{ev})" if ev in webmap.ARROWS else None)
             pts = [float(e[a]) for a in ("x1", "y1", "x2", "y2")]
             for a in ("x1", "y1", "x2", "y2"):
                 self.assertRegex(e[a], NUMBER)
             self.assertTrue(0 <= pts[0] <= w and 0 <= pts[2] <= w and 0 <= pts[1] <= h and 0 <= pts[3] <= h)
             a, b = d.nodes[e["data-a"]]["circle"], d.nodes[e["data-b"]]["circle"]
             ax, ay, ar, bx, by, br = (float(v) for v in (a["cx"], a["cy"], a["r"], b["cx"], b["cy"], b["r"]))
-            gap = web.ARROW_GAP if ev in web.ARROWS else 0
+            gap = webmap.ARROW_GAP if ev in webmap.ARROWS else 0
             if math.hypot(bx - ax, by - ay) > ar + br + gap + 1:                    # shortened to the circles' edges
                 self.assertAlmostEqual(math.hypot(pts[0] - ax, pts[1] - ay), ar, delta=0.15)
                 self.assertAlmostEqual(math.hypot(pts[2] - bx, pts[3] - by), br + gap, delta=0.15)
@@ -419,15 +420,15 @@ class GraphPage(unittest.TestCase):
         xy = {"a": (100.0, 100.0), "b": (150.0, 100.0), "c": (100.0, 300.0)}           # a and b too close for two labels below
         rad = {"a": 8.0, "b": 8.0, "c": 8.0}
         texts = {"a": "shop-web-1", "b": "shop-db-1", "c": "alone"}
-        spots = web.place_labels(["a", "b", "c"], xy, rad, texts)
+        spots = webmap.place_labels(["a", "b", "c"], xy, rad, texts)
         self.assertEqual(spots["a"], (100.0, 120.0, ""))                               # the first one keeps the default
         self.assertEqual(spots["c"], (100.0, 320.0, ""))
         self.assertNotEqual(spots["b"], (150.0, 120.0, ""))                            # the second one moves away
-        w = len(texts["a"]) * web.LABEL_CHAR_W
+        w = len(texts["a"]) * webmap.LABEL_CHAR_W
         bx, by, side = spots["b"]
         if side == "":
             self.assertTrue(by < 100 or abs(bx - 100) >= w)
-        self.assertEqual(web.place_labels(["a", "b", "c"], xy, rad, texts), spots)      # deterministic
+        self.assertEqual(webmap.place_labels(["a", "b", "c"], xy, rad, texts), spots)      # deterministic
 
     def test_selection_marks_the_neighbours_and_dims_the_rest(self):
         G = self.graph()
@@ -607,9 +608,9 @@ class GraphPage(unittest.TestCase):
             only = self.draw("/?view=map&as=graph&only=1")
         finally:
             render.map_graph, graphlayout.layout = saved_graph, saved_layout
-        self.assertEqual(len(d.nodes), web.GRAPH_NODES)
-        self.assertIn(f"+{len(ids) - web.GRAPH_NODES} more not drawn: show problems only, or select a node and its local graph", page)
-        self.assertEqual(sizes[0], (web.GRAPH_NODES, 2000, 1400))                     # the drawing grows with the nodes
+        self.assertEqual(len(d.nodes), webmap.GRAPH_NODES)
+        self.assertIn(f"+{len(ids) - webmap.GRAPH_NODES} more not drawn: show problems only, or select a node and its local graph", page)
+        self.assertEqual(sizes[0], (webmap.GRAPH_NODES, 2000, 1400))                     # the drawing grows with the nodes
         self.check_contract(d)
         for nid in ids - {x for x in ids if x.startswith("ext:")}:                    # problems, zones, ports, containers first
             self.assertTrue(key(nid) in d.nodes, nid)
@@ -617,8 +618,8 @@ class GraphPage(unittest.TestCase):
         self.assertEqual(kept, addrs[:len(kept)])                                     # then the remote addresses seen last
         self.assertNotIn(oldest, d.nodes)
         self.assertIn("sel", sel.nodes[oldest]["cls"])                                # a selected node is always drawn
-        self.assertEqual(len(sel.nodes), web.GRAPH_NODES)
-        self.assertLess(len(only.nodes), web.GRAPH_NODES)                             # problems only: everything fits again
+        self.assertEqual(len(sel.nodes), webmap.GRAPH_NODES)
+        self.assertLess(len(only.nodes), webmap.GRAPH_NODES)                             # problems only: everything fits again
 
     def test_hostile_names_stay_inert(self):
         saved = render.map_graph
@@ -654,7 +655,7 @@ class GraphPage(unittest.TestCase):
         self.check_contract(d)
         n = d.nodes[key("ct:shop-db-1")]
         self.assertEqual(n["title"], graph.safe(EVIL) + " · " + graph.safe(EVIL))  # the full name in the tooltip, made safe
-        self.assertEqual(n["text"], graph.safe(EVIL)[:web.LABEL_MAX - 1] + "…")       # cut under the circle
+        self.assertEqual(n["text"], graph.safe(EVIL)[:webmap.LABEL_MAX - 1] + "…")       # cut under the circle
 
     # ---- failure -----------------------------------------------------------------------------------------------------
 
@@ -709,18 +710,18 @@ class GraphPage(unittest.TestCase):
 
 class Pure(unittest.TestCase):
     def test_canvas_grows_with_the_nodes(self):
-        self.assertEqual(web.canvas(0), (1000, 700))
-        self.assertEqual(web.canvas(60), (1000, 700))
-        self.assertEqual(web.canvas(web.GRAPH_NODES), (2000, 1400))
-        sizes = [web.canvas(n)[0] for n in range(0, web.GRAPH_NODES + 50, 10)]
+        self.assertEqual(webmap.canvas(0), (1000, 700))
+        self.assertEqual(webmap.canvas(60), (1000, 700))
+        self.assertEqual(webmap.canvas(webmap.GRAPH_NODES), (2000, 1400))
+        sizes = [webmap.canvas(n)[0] for n in range(0, webmap.GRAPH_NODES + 50, 10)]
         self.assertEqual(sizes, sorted(sizes))
         self.assertLessEqual(max(sizes), 2000)
 
     def test_spot_keeps_positions_inside(self):
-        self.assertEqual(web.spot((float("nan"), 3), 1000, 700), (500, 350))
-        self.assertEqual(web.spot(None, 1000, 700), (500, 350))
-        self.assertEqual(web.spot((-5, 9999), 1000, 700), (20, 666))
-        self.assertEqual([web.f1(v) for v in (1.0, 1.04, 1.05, 12.345, 0)], ["1", "1", "1.1", "12.3", "0"])
+        self.assertEqual(webmap.spot((float("nan"), 3), 1000, 700), (500, 350))
+        self.assertEqual(webmap.spot(None, 1000, 700), (500, 350))
+        self.assertEqual(webmap.spot((-5, 9999), 1000, 700), (20, 666))
+        self.assertEqual([webmap.f1(v) for v in (1.0, 1.04, 1.05, 12.345, 0)], ["1", "1", "1.1", "12.3", "0"])
 
 
 if __name__ == "__main__":
