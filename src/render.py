@@ -4,8 +4,6 @@
 On macOS and Windows there is no text console to take over: `--kiosk` writes the same screen as an HTML file and shows it
 in a full-screen browser (see kiosk()); host metrics come from hostinfo.py instead of /proc.
 """
-import collections
-import glob
 import json
 import os
 import re
@@ -23,6 +21,7 @@ import cards  # same directory: the card registry and the KPI model
 import ansi  # same directory: the console's drawing of the components
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
+import hostdata  # same directory: what is read from the machine and the collector's files
 import display  # same directory: the browser behind --kiosk and --open
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
@@ -46,14 +45,17 @@ LINUX, WINDOWS, MACOS = nuc_config.LINUX, nuc_config.WINDOWS, nuc_config.MACOS
 if not LINUX:
     import hostinfo
 
-STATE = os.environ.get("NUC_CONSOLE_STATE", os.path.join(nuc_config.RUN_DIR, "containers.json"))
-NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "net.json"))
-BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
-BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
 CFG = nuc_config.current()  # the process's one configuration dict (tests and --demo change it in place)
-# names that moved out of this file and that src/web.py still reads as `render.X` (web.py is split on its own branch): delete a line when
-# web.py imports the name from the module it lives in. Nothing else re-exports.
-KIOSK_HINT = display.KIOSK_HINT
+# names that moved out of this file and that src/web.py still reads as `render.X` (web.py is split on its own branch): `__getattr__` answers
+# them from the module they live in, at the time of the read. Delete a line when web.py imports the name from there. Nothing else re-exports.
+WEB_COMPAT = {"KIOSK_HINT": "display", "Sampler": "hostdata"}
+
+
+def __getattr__(name):
+    mod = WEB_COMPAT.get(name)
+    if mod is None:
+        raise AttributeError(f"module 'render' has no attribute {name!r}")
+    return getattr(sys.modules[mod], name)
 # the commands the advice on screen refers to, in the words of this OS
 if WINDOWS:
     ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
@@ -128,274 +130,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + c(90, f"  … +{hidden}")]
 
 
-THROTTLE_WINDOW_S = 60
-
-
-def read_file(path):
-    try:
-        with open(path) as f:
-            return f.read().strip()
-    except OSError:
-        return None
-
-
-def hwmon_dir(name):
-    return next((h for h in glob.glob("/sys/class/hwmon/hwmon*") if read_file(h + "/name") == name), None)
-
-
-def read_thermal():
-    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None}.
-
-    The maximum is the sensor's own (temp1_max: CPU package, NVMe composite), not a constant of ours.
-    """
-    out = {}
-    for key, name in (("cpu", "coretemp"), ("nvme", "nvme")):
-        h = hwmon_dir(name)
-        t, mx = (read_file(f"{h}/temp1_input"), read_file(f"{h}/temp1_max")) if h else (None, None)
-        if t and mx:
-            out[key] = (int(t) / 1000, int(mx) / 1000)
-    # the counters are per logical CPU and differ a lot: the sum only serves to see that it *changes*;
-    # the readable figure is the package's total throttling time (the maximum across CPUs)
-    base = "/sys/devices/system/cpu/cpu*/thermal_throttle/package_throttle_"
-    counts = [x for x in (read_file(f) for f in glob.glob(base + "count")) if x and x.isdigit()]
-    times = [x for x in (read_file(f) for f in glob.glob(base + "total_time_ms")) if x and x.isdigit()]
-    out["throttle"] = sum(int(x) for x in counts) if counts else None
-    out["throttle_s"] = max(int(x) for x in times) / 1000 if times else None
-    cur = [read_file(f) for f in glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq")]
-    mx = read_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-    cur = [int(x) for x in cur if x and x.isdigit()]
-    out["clk"] = (sum(cur) / len(cur) / 1e6, int(mx) / 1e6) if cur and mx and mx.isdigit() else None
-    return out
-
-
-def parse_netdev(text):
-    """/proc/net/dev -> {interface: (rx_bytes, tx_bytes)} without loopback and container virtual interfaces."""
-    out = {}
-    for ln in text.splitlines()[2:]:
-        name, _, rest = ln.partition(":")
-        name, f = name.strip(), rest.split()
-        if name and len(f) >= 9 and not name.startswith(NET_SKIP):
-            out[name] = (int(f[0]), int(f[8]))
-    return out
-
-
-def parse_sessions(loginctl_text, ss_text):
-    """Local sessions (loginctl) and ssh clients connected now (peers of established connections on port 22)."""
-    local = []
-    for ln in loginctl_text.splitlines():
-        p = ln.split()
-        # SESSION UID USER SEAT LEADER CLASS TTY: class 'manager' is the user's systemd instance, not a session
-        if len(p) >= 6 and p[5] in ("user", "greeter"):
-            local.append({"user": p[2], "tty": p[6] if len(p) > 6 and p[6] != "-" else ""})
-    ssh = []
-    for ln in ss_text.splitlines():
-        f = ln.split()
-        if len(f) >= 4:
-            ssh.append(f[3].rpartition(":")[0].strip("[]"))
-    return {"local": local, "ssh": sorted(set(ssh))}
-
-
-_CACHE = {}
-_THREADS = {}
-
-
-_SLEEP = time.sleep  # the background threads' own: a test that swaps render.time for a fake clock must not have them move it
-
-
-def cached(key, ttl, fn):
-    """Last value of fn(), recomputed in a background thread every ttl seconds (None until the first one exists).
-
-    Sessions and disks use subprocess and statvfs, which can hang (timeout, stuck network mount): in the drawing loop
-    they would freeze the clock and the screen. If fn() raises, the value becomes None: the block says "unavailable"."""
-    if key not in _THREADS:
-        def loop():
-            while True:
-                try:
-                    _CACHE[key] = fn()
-                except Exception:  # noqa: BLE001 - data unavailable: the block will say so, the thread does not die
-                    _CACHE[key] = None
-                _SLEEP(ttl)
-        _THREADS[key] = threading.Thread(target=loop, daemon=True, name=f"cache-{key}")
-        _THREADS[key].start()
-    return _CACHE.get(key)
-
-
-def read_sessions():
-    if not LINUX:
-        return hostinfo.sessions()
-
-    def run(*a):
-        r = subprocess.run(list(a), capture_output=True, text=True, timeout=3)
-        if r.returncode != 0:  # failed != "none": the block must say "unavailable", not reassure
-            raise RuntimeError(f"{a[0]} rc={r.returncode}")
-        return r.stdout
-    return parse_sessions(run("loginctl", "list-sessions", "--no-legend"),
-                          run("ss", "-tnH", "state", "established", "( sport = :22 )"))
-
-
-def parse_mounts(text):
-    """/proc/mounts -> [(mountpoint, fstype)] of real filesystems only, once per device."""
-    seen, out = set(), []
-    for ln in text.splitlines():
-        f = ln.split()
-        if len(f) >= 3 and f[2] in REAL_FS and f[0] not in seen and not f[1].startswith("/var/lib/docker"):
-            seen.add(f[0])
-            out.append((f[1].replace("\\040", " "), f[2]))
-    return out
-
-
-def read_filesystems():
-    if not LINUX:
-        return hostinfo.filesystems()
-    with open("/proc/mounts") as f:
-        mounts = parse_mounts(f.read())
-    out = []
-    for mp, _ in mounts:
-        try:
-            st = os.statvfs(mp)
-        except OSError:
-            continue
-        total = st.f_blocks * st.f_frsize
-        if total:
-            out.append({"mount": mp, "used": (st.f_blocks - st.f_bfree) * st.f_frsize, "total": total})
-    return out
-
-
-class Sampler:
-    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls.
-
-    sample() is the one place the dashboard reads the host from. Besides the per-core CPU, the thermal sensors, the interfaces, the
-    sessions and the filesystems it holds the figures of the SYSTEM block and of the System page, so that --demo can replace all of
-    them (demo.sampler_data) and no block calls /proc, statvfs or hostinfo while it draws:
-      "mem"        {"MemTotal", "MemAvailable", "Cached", "SwapTotal", "SwapFree"} in bytes, or None (not readable: drawn as ?)
-      "disk_root"  (used, total, label) of the system volume, or None
-      "uptime"     seconds since boot, or None
-      "load"       ['0.12', '0.30', '0.25']; [] where the OS has no load average (Windows); None when it could not be read"""
-
-    def __init__(self):
-        self.cpu = self._cpu()
-        self.hist = collections.deque(maxlen=64)  # (instant, throttling counter)
-        self.net_prev = (time.monotonic(), self._netdev())
-        self.net_hist = {}  # interface -> (rx deque, tx deque) of bytes/s
-
-    @staticmethod
-    def _netdev():
-        try:
-            if not LINUX:
-                return hostinfo.net_counters()
-            with open("/proc/net/dev") as f:
-                return parse_netdev(f.read())
-        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
-            return {}
-
-    @staticmethod
-    def _cpu():
-        if not LINUX:
-            try:
-                return hostinfo.cpu_times()
-            except (OSError, ValueError, AttributeError):  # no per-core figures: the CPU bars are left out, nothing invented
-                return {}
-        out = {}
-        with open("/proc/stat") as f:
-            for line in f:
-                if line.startswith("cpu") and line[3].isdigit():
-                    p = line.split()
-                    v = list(map(int, p[1:9]))
-                    out[p[0]] = (sum(v) - v[3] - v[4], sum(v))  # busy = everything except idle+iowait
-        return out
-
-    def sample(self):
-        cpu = self._cpu()
-        per = {k: (cpu[k][0] - self.cpu[k][0]) / max(cpu[k][1] - self.cpu[k][1], 1)
-               for k in cpu if k in self.cpu}
-        self.cpu = cpu
-        now_m, cur = time.monotonic(), self._netdev()
-        dt = max(now_m - self.net_prev[0], 0.001)
-        net = {}
-        for name, (rx, tx) in cur.items():
-            prx, ptx = self.net_prev[1].get(name, (rx, tx))
-            hrx, htx = self.net_hist.setdefault(name, (collections.deque(maxlen=NET_HIST), collections.deque(maxlen=NET_HIST)))
-            hrx.append(max(0, rx - prx) / dt)
-            htx.append(max(0, tx - ptx) / dt)
-            net[name] = {"rx": hrx[-1], "tx": htx[-1], "rx_tot": rx, "tx_tot": tx, "hist_rx": list(hrx), "hist_tx": list(htx)}
-        self.net_prev = (now_m, cur)
-        for gone in [n for n in self.net_hist if n not in cur]:
-            del self.net_hist[gone]  # interface gone: if it comes back it starts from zero, not from an old history
-        th = read_thermal()
-        now = time.monotonic()
-        if th["throttle"] is not None:
-            self.hist.append((now, th["throttle"]))
-            old = next(((t, n) for t, n in self.hist if now - t <= THROTTLE_WINDOW_S), None)
-            # events in the last minute; None while the history is too short to tell
-            rec = th["throttle"] - old[1] if old and now - old[0] >= 10 else None
-            th["recent"] = rec if rec is None or rec >= 0 else None  # falling sum = a CPU went offline: invalid figure
-        return {"cpu": per, "thermal": th if on("thermal") else {}, "net": net if on("network_traffic") else {},
-                "sessions": cached("sessions", 10, read_sessions) if on("sessions") else None,
-                "fs": cached("fs", 30, read_filesystems) if on("disks") else None,
-                "mem": read_host(meminfo), "disk_root": read_host(root_disk), "uptime": read_host(uptime_s), "load": read_load()}
-
-
-def meminfo():
-    if not LINUX:
-        return hostinfo.meminfo()
-    d = {}
-    with open("/proc/meminfo") as f:
-        for line in f:
-            k, v = line.split(":")
-            d[k] = int(v.split()[0]) * 1024
-    return d
-
-
-def loadavg():
-    """['0.12', '0.30', '0.25'], or None where the OS has no load average (Windows)."""
-    if not LINUX:
-        return hostinfo.loadavg()
-    with open("/proc/loadavg") as f:
-        return f.read().split()[:3]
-
-
-def uptime_s():
-    if not LINUX:
-        return hostinfo.uptime()
-    with open("/proc/uptime") as f:
-        return float(f.read().split()[0])
-
-
-def root_disk():
-    """(used, total, label) of the system volume."""
-    if not LINUX:
-        return hostinfo.root_disk()
-    st = os.statvfs("/")
-    return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, "/"
-
-
-def read_host(fn):
-    """fn() for a Sampler figure: its value, or None when the host cannot give it (the screen draws `?`, whatever /proc, sysctl or the
-    Windows API raised: one unreadable figure must not take the SYSTEM block, or the frame, down)."""
-    try:
-        return fn()
-    except Exception:  # noqa: BLE001 - the answer is "unknown", never a traceback in the middle of the dashboard
-        return None
-
-
-def read_load():
-    """The Sampler's "load" (see loadavg()): [] where the OS has no load average (Windows), None when it has one but it could not be read."""
-    try:
-        load = loadavg()
-    except Exception:  # noqa: BLE001 - same rule as read_host()
-        return None
-    return [] if load is None else load if len(load) == 3 else None
-
-
-def swap_figures(m):
-    """(used, total) bytes of the swap from a Sampler's "mem": None when there is no swap (or no figures)."""
-    try:
-        total, free = m["SwapTotal"], m["SwapFree"]
-        return (total - free, total) if total else None
-    except (KeyError, TypeError):
-        return None
-
-
 def unavail_msg(d, key, prefix="unavailable"):
     """Line for a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
     m = cards.unavail(d, key, prefix)
@@ -421,7 +155,7 @@ def page_sistema(s, w, cont=None):
     m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), cards.disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
     lines = [f" up {cards.fmt_up(up)}" + (f"   load {cards.fmt_load(load)}" if load != [] else ""), ""]
     bw = max(10, min(60, w - 40))
-    ram, swap = cards.ram_figures(m), swap_figures(m)
+    ram, swap = cards.ram_figures(m), hostdata.swap_figures(m)
     lines.append(f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}  cache {human(m.get('Cached'))}" if ram
                  else f" RAM   {c(33, '?')}")
     if swap:
@@ -438,20 +172,7 @@ def page_sistema(s, w, cont=None):
     for i in range(0, len(cells), ncol):
         lines.append("".join(pad(x, cw) for x in cells[i:i + ncol]))
     lines.append("")
-    return lines + (containers_block(cont if cont is not None else load_containers(), w) if on("containers") else [])
-
-
-def load_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
-
-
-def load_containers(path=None):
-    d = load_json(path or STATE)
-    return d if isinstance(d, dict) and isinstance(d.get("containers"), list) else None
+    return lines + (containers_block(cont if cont is not None else hostdata.load_containers(), w) if on("containers") else [])
 
 
 def fmt_ports(ports):
@@ -478,7 +199,7 @@ def container_box(proj, cts, w):
 def containers_block(data, w, now=None):
     now = now or time.time()
     if data is None:
-        return [c(31, " collector not running: no state in " + STATE)]
+        return [c(31, " collector not running: no state in " + hostdata.STATE)]
     lines = []
     if data.get("absent"):
         return [msg("info", "docker not installed on this machine")]
@@ -508,9 +229,6 @@ def containers_block(data, w, now=None):
 
 NAMEW = 36
 NCOL3 = 225  # from this width the single screen uses three columns
-NET_SKIP = ("lo", "veth", "br-")  # container virtual interfaces: noise
-NET_HIST = 30  # history samples for the traffic sparklines
-REAL_FS = ("ext4", "ext3", "xfs", "btrfs", "vfat", "f2fs", "zfs", "ntfs3", "exfat", "nfs", "nfs4", "cifs")
 BOOT_WINDOW_S = 900  # a container started within 15 min of boot "started with the boot"
 
 
@@ -577,7 +295,7 @@ def tight(lines):
 def page_boot(b, w, body_h, now=None):
     now = now or time.time()
     if b is None:
-        return ["", msg("err", "boot collector not running: no state in " + BOOT_STATE)]
+        return ["", msg("err", "boot collector not running: no state in " + hostdata.BOOT_STATE)]
     head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > cards.BOOT_STALE_S else []
     up = now - b.get("btime", now)
     wide = w >= WIDE
@@ -603,10 +321,10 @@ def page_boot(b, w, body_h, now=None):
 
 def load_baseline(path=None):
     """valid dict | None if missing | 'corrotta' (corrupt) if it exists but is unreadable (not 'missing': must be flagged)."""
-    path = path or BASELINE
+    path = path or hostdata.BASELINE
     if not os.path.exists(path):
         return None
-    d = load_json(path)
+    d = hostdata.load_json(path)
     return d if isinstance(d, dict) and isinstance(d.get("ports"), dict) else "corrotta"
 
 
@@ -615,11 +333,11 @@ def accept_baseline(if_missing=False, path=None, now=None):
 
     Refuses a stale or partial state: it would bless as normal what could not be measured.
     """
-    path, now = path or BASELINE, now or time.time()
+    path, now = path or hostdata.BASELINE, now or time.time()
     if if_missing and isinstance(load_baseline(path), dict):
         print("baseline already present: left untouched")
         return 0
-    net, cont = load_json(NET_STATE), load_containers()
+    net, cont = hostdata.load_json(hostdata.NET_STATE), hostdata.load_containers()
     if (not isinstance(net, dict) or now - net.get("ts", 0) > cards.NET_STALE_S or exposure_partial(net)
             or cont is None or now - cont.get("ts", 0) > STALE_S):
         print("network/container state missing, stale or incomplete: baseline not created", file=sys.stderr)
@@ -966,7 +684,7 @@ def load_accepted(path=None):
 
 
 def current_problem_records():
-    smp = Sampler()
+    smp = hostdata.Sampler()
     time.sleep(0.5)
     st, sm = snapshot(200), smp.sample()
     return problem_records(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
@@ -1100,7 +818,7 @@ def firewall_block(net, w, max_rules=None):
 
 def page_rete(net, cont, w, now=None, baseline=False):
     if net is None:
-        return ["", msg("err", "network collector not running: no state in " + NET_STATE)]
+        return ["", msg("err", "network collector not running: no state in " + hostdata.NET_STATE)]
     now = now or time.time()
     pb = safe_problems(net, cont, now, baseline=baseline)
     new = new_ports(net, cont, baseline)
@@ -1562,7 +1280,7 @@ def snapshot(w):
         import demo
         cont, net, boot, base = demo.snapshot(os_name=DEMO_OS)
         return dict(cont=cont, net=net, boot=boot, baseline=base)
-    return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
+    return dict(cont=hostdata.load_containers(), net=hostdata.load_json(hostdata.NET_STATE), boot=hostdata.load_json(hostdata.BOOT_STATE), baseline=load_baseline())
 
 
 def host_sample(smp):
@@ -1630,7 +1348,7 @@ def map_once(argv, w, h):
     --select TEXT: the cursor on the first row whose name contains TEXT (any case), opening the branches above it;
     --details: the details pane of the selected row (Enter); --only: problems only (p)."""
     opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
-    G, pb = map_graph(None if DEMO else Sampler())
+    G, pb = map_graph(None if DEMO else hostdata.Sampler())
     mv = MapView()
     mv.st.only, mv.details = "--only" in argv, "--details" in argv
     exp = opt("--expand")
@@ -1724,7 +1442,7 @@ def cpu_data(feed, settle=0.0):
                 r = None
             return r if isinstance(r, dict) else {}
         raw_cpu, raw_pr = read(feed.cs, "cpu"), read(feed.ps, "process")
-        sens = load_json(SENSORS) if cpu_os() != "linux" else None
+        sens = hostdata.load_json(SENSORS) if cpu_os() != "linux" else None
     cpu, extra = cpu_merge(raw_cpu, sens, now)
     pl = [p for p in (raw_pr.get("procs") if isinstance(raw_pr.get("procs"), list) else []) if isinstance(p, dict) and isinstance(p.get("pid"), int) and not isinstance(p["pid"], bool)]
     total = dd(raw_pr.get("total"))
@@ -1770,7 +1488,7 @@ def cpu_topology(ids):
         return {}
     key = tuple(ids)
     if key not in _TOPO:
-        got = {i: read_file(f"/sys/devices/system/cpu/cpu{i}/topology/core_id") for i in ids}
+        got = {i: hostdata.read_file(f"/sys/devices/system/cpu/cpu{i}/topology/core_id") for i in ids}
         _TOPO[key] = {i: int(v) for i, v in got.items() if v and v.lstrip("-").isdigit()}
     return _TOPO[key]
 
@@ -1845,7 +1563,7 @@ def cpu_once(argv, w, h):
     cv.details = "--details" in argv
     if opt("--select"):
         cpu_select(cpu_rows(d["procs"]["procs"], cv.sort), cv, opt("--select"))
-    return cpu_screen(d, cpu_problems(None if DEMO else Sampler()), cv, w, h)[0]
+    return cpu_screen(d, cpu_problems(None if DEMO else hostdata.Sampler()), cv, w, h)[0]
 
 
 def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
@@ -1925,7 +1643,7 @@ def once(argv):
             return 2
         out = ai_once(argv, w, h)
     else:
-        smp = None if DEMO else Sampler()  # the demo reads nothing from this machine (render_screen)
+        smp = None if DEMO else hostdata.Sampler()  # the demo reads nothing from this machine (render_screen)
         if smp:
             smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
             time.sleep(0.5)
@@ -2151,7 +1869,7 @@ def health_once(argv, w, h):
         return None
     hv = HealthView(int(opt("--period") or 7))
     hv.details = "--details" in argv
-    data, pb = health_state(None if DEMO else Sampler(), hv.days)
+    data, pb = health_state(None if DEMO else hostdata.Sampler(), hv.days)
     if opt("--select"):
         health_select(health_findings(data["report"]), hv, opt("--select"))
     return health_screen(data, pb, hv, w, h)[0]
@@ -2391,7 +2109,7 @@ def ai_once(argv, w, h):
     opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
     av = AiView()
     av.details = "--details" in argv
-    data, pb = ai_state(None if DEMO else Sampler())
+    data, pb = ai_state(None if DEMO else hostdata.Sampler())
     if opt("--select"):
         ai_select(ai_rows(data["cat"]), av, opt("--select"))
     return ai_screen(data, pb, av, w, h, wait=AI_PROBE_TIMEOUT + 0.5)[0]
@@ -2467,7 +2185,7 @@ def kiosk_file(argv, base, cols, rows):
     path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
     w, h = cols, rows  # a browser page: every column is usable (no Linux console last-column quirk)
     print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
-    smp, t0, browser, started, cmd, cpu_feed = Sampler(), time.time(), None, 0.0, None, None
+    smp, t0, browser, started, cmd, cpu_feed = hostdata.Sampler(), time.time(), None, 0.0, None, None
     while True:
         try:
             st, sm = snapshot(w), smp.sample()
@@ -2641,7 +2359,7 @@ def main(argv):
         return kiosk(argv)
     if "--open" in argv:
         return open_in_browser(argv)
-    smp = Sampler()
+    smp = hostdata.Sampler()
     fd = sys.stdin.fileno() if sys.stdin else -1
     old = termios.tcgetattr(fd) if termios and fd >= 0 and os.isatty(fd) else None
     win_keys = WINDOWS and fd >= 0 and os.isatty(fd)

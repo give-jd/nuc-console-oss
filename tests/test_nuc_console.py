@@ -1,3 +1,4 @@
+import collections
 import json
 import os
 import sys
@@ -10,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpe
 import collector  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import cardlines  # noqa: E402
 import ui  # noqa: E402
 import exposure  # noqa: E402
@@ -165,7 +167,7 @@ class Render(unittest.TestCase):
         self.assertIn("collector not running", render.containers_block(None, 100)[0])
 
     def test_frame_fits_screen_and_paginates(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         w, h = 100, 20
         sl = render.slides(smp.sample(), CONT, NET, w, h - 2)
@@ -191,7 +193,7 @@ class Render(unittest.TestCase):
         self.assertEqual(render.fmt_ports([{"p": 9, "s": "100.64.0.3"}, {"p": 1, "s": "lo"}]), "100.64.0.3:9 lo:1")
 
     def test_broken_state_file_does_not_crash_frame(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         broken = {"ts": time.time(), "containers": [{}]}
         sl = render.slides(smp.sample(), broken, NET, 100, 30)
         self.assertIn("error on page System", "\n".join("\n".join(x[3]) for x in sl))
@@ -201,7 +203,7 @@ class Render(unittest.TestCase):
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump([1, 2], f)
-        self.assertIsNone(render.load_containers(f.name))
+        self.assertIsNone(hostdata.load_containers(f.name))
         os.unlink(f.name)
 
     def test_fw_verdicts(self):
@@ -312,7 +314,7 @@ class Render(unittest.TestCase):
         self.assertTrue(any("ufw off" in t for _, t in off))
 
     def test_header_shows_status_and_fits(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         sl = render.slides(smp.sample(), CONT, NET, 100, 30)
         f = render.frame(sl[0], 0, len(sl), 100, 32, render.problems(NET, CONT)).split("\x1b[K\r\n")
         self.assertIn("PROBLEMS", f[0])
@@ -401,8 +403,8 @@ class Render(unittest.TestCase):
         import json
         json.dump(dict(NET, ts=time.time()), open(net, "w"))   # fresh now: the fixtures date from the import, minutes ago on a slow runner
         json.dump(dict(CONT, ts=time.time()), open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(render.accept_baseline(path=bl), 0)
@@ -415,7 +417,7 @@ class Render(unittest.TestCase):
                 self.assertEqual(render.accept_baseline(path=os.path.join(d, "b2.json")), 1)  # unknown state: does not write
             self.assertFalse(os.path.exists(os.path.join(d, "b2.json")))
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
 
     def test_baseline_detects_service_and_filter_changes(self):
         """Review: a change of service or rule on the same port used to raise no alarm."""
@@ -460,8 +462,8 @@ class Render(unittest.TestCase):
         d = tempfile.mkdtemp()
         net, state = os.path.join(d, "net.json"), os.path.join(d, "c.json")
         json.dump(CONT, open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             import contextlib
             import io
@@ -471,7 +473,7 @@ class Render(unittest.TestCase):
                     self.assertEqual(render.accept_baseline(path=os.path.join(d, "b.json")), 1, label)
                 self.assertFalse(os.path.exists(os.path.join(d, "b.json")), label)
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
         env = dict(os.environ, NUC_CONSOLE_NET="/nonexistent", NUC_CONSOLE_STATE="/nonexistent",
                    NUC_CONSOLE_BASELINE=os.path.join(d, "x", "b.json"))
         r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..", "src", "render.py"), "--accept"],
@@ -487,15 +489,15 @@ class Render(unittest.TestCase):
         self.assertIn("41641/u:LAN", keys)                                           # fixed: tracked
 
     def test_thermal_hotplug_and_narrow_line(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         now = time.monotonic()
         smp.hist.append((now - 30, 1000))
-        orig = render.read_thermal
-        render.read_thermal = lambda: {"cpu": (50.0, 105.0), "throttle": 900, "throttle_s": 1.0, "clk": (2.6, 4.9)}
+        orig = hostdata.read_thermal
+        hostdata.read_thermal = lambda: {"cpu": (50.0, 105.0), "throttle": 900, "throttle_s": 1.0, "clk": (2.6, 4.9)}
         try:
             self.assertIsNone(smp.sample()["thermal"]["recent"])                     # CPU offline: falling counter, never negative
         finally:
-            render.read_thermal = orig
+            hostdata.read_thermal = orig
         th = {"cpu": (50.0, 105.0), "clk": (2.6, 4.9)}
         for mw in (40, 60, 90):
             self.assertTrue(all(ansi.vlen(x) <= mw or mw < 40 for x in render.thermal_lines(th, 10, mw)))
@@ -503,7 +505,7 @@ class Render(unittest.TestCase):
         self.assertNotIn("clock", "\n".join(render.thermal_lines(th, 10, 55)))      # when narrow the clock goes first
 
     def test_overview_fits_small_console_and_never_wider(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "recent": 0, "clk": (2.6, 4.9)}
@@ -518,7 +520,7 @@ class Render(unittest.TestCase):
         self.assertTrue(all(ansi.vlen(x) <= 100 for x in lines))
 
     def test_overview_fits_one_screen(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         for w, h in ((100, 30), (120, 33), (160, 40), (240, 67)):
@@ -673,7 +675,7 @@ class Render(unittest.TestCase):
         self.assertNotIn("in use now", compact)                                    # compact levels: one line per database
 
     def test_overview_uses_available_space_and_shrinks(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "throttle_s": 469.0, "recent": 0}
@@ -737,7 +739,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         big = dict(real, rules=real["rules"] + [{"to": f"{3000 + i}/tcp", "action": "ALLOW IN", "from": "192.168.0.0/24"} for i in range(20)]
                    + [{"to": f"{3000 + i}/tcp (v6)", "action": "ALLOW IN", "from": "Anywhere (v6)"} for i in range(20)]
                    + [{"to": f"{i}/tcp", "action": "ALLOW OUT", "from": "Anywhere"} for i in range(20)])
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "throttle_s": 1.0, "recent": 0}
@@ -761,8 +763,8 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         dev = ("Inter-|   Receive                                                |  Transmit\n face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
                "    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0\n  eth0: 5000 10 0 0 0 0 0 0 7000 12 0 0 0 0 0 0\n"
                " veth1: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0\nbr-abc: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0\ndocker0: 9 1 0 0 0 0 0 0 8 1 0 0 0 0 0 0\n")
-        self.assertEqual(render.parse_netdev(dev), {"eth0": (5000, 7000), "docker0": (9, 8)})   # no lo, veth, container bridges
-        sess = render.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 user - no -\n",
+        self.assertEqual(hostdata.parse_netdev(dev), {"eth0": (5000, 7000), "docker0": (9, 8)})   # no lo, veth, container bridges
+        sess = hostdata.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 user - no -\n",
                                      "0 0 192.168.0.10:22 192.168.0.5:50000\n0 0 192.168.0.10:22 203.0.113.9:40000\n0 0 [fd00::1]:22 [fd00::2]:1\n")
         self.assertEqual(sess["local"], [{"user": "alice", "tty": "pts/0"}, {"user": "alice", "tty": ""}])
         self.assertEqual(sess["ssh"], ["192.168.0.5", "203.0.113.9", "fd00::2"])
@@ -771,7 +773,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertTrue(exposure.is_private_addr("::ffff:192.168.0.5") and exposure.is_private_addr("fd7a:115c:a1e0::1"))
         self.assertFalse(exposure.is_private_addr("2a0d:3341::1"))
         mounts = "/dev/nvme0n1p2 / ext4 rw 0 0\n/dev/nvme0n1p2 /var/lib/foo ext4 rw 0 0\n/dev/loop3 /snap/x squashfs ro 0 0\ntmpfs /run tmpfs rw 0 0\n/dev/nvme0n1p1 /boot/efi vfat rw 0 0\noverlay /var/lib/docker/overlay2/x overlay rw 0 0\n"
-        self.assertEqual(render.parse_mounts(mounts), [("/", "ext4"), ("/boot/efi", "vfat")])   # once per device, real ones only
+        self.assertEqual(hostdata.parse_mounts(mounts), [("/", "ext4"), ("/boot/efi", "vfat")])   # once per device, real ones only
         self.assertEqual(ui.fmt_rate(0), "0 B/s")
         self.assertEqual(ui.fmt_rate(12_300), "12.3 kB/s")
         self.assertEqual(ui.fmt_rate(4_500_000), "4.5 MB/s")
@@ -837,7 +839,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertEqual(one, ["a0", "a1", "", "b0", "b1"])                         # one column: stacked with an empty line
 
     def test_three_columns_at_240_and_new_sections_only_when_room(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm.update(thermal={"cpu": (52.0, 105.0), "throttle_s": 1.0, "recent": 0},
@@ -877,13 +879,13 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         net, state = os.path.join(d, "net.json"), os.path.join(d, "c.json")
         json.dump(dict(NET, ts=time.time(), errors={"ts_peers": "x"}), open(net, "w"))
         json.dump(dict(CONT, ts=time.time()), open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(render.accept_baseline(path=os.path.join(d, "b.json")), 0)   # the baseline is created even with ts_peers broken
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
 
     def test_review10_untrusted_docker_text_is_sanitised(self):
         boot = dict(BOOT, docker_df={"rows": [{"type": "Im\x1b[2Jages", "count": "1\x1b[2J", "active": "2\x1b[2J", "size": "3\x1b[2J",
@@ -894,7 +896,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
 
     @unittest.skipUnless(nuc_config.LINUX, "loginctl + ss: the Linux session source (macOS/Windows: tests/test_platforms.py)")
     def test_review10_sessions(self):
-        sess = render.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 manager - no -\n", "")
+        sess = hostdata.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 manager - no -\n", "")
         self.assertEqual(sess["local"], [{"user": "alice", "tty": "pts/0"}])           # 'manager' is not a session
         self.assertIn("1 user session ", ansi.ANSI.sub("", "\n".join(cardlines.ov_sessioni({"sessions": sess}, 78, 0))))
 
@@ -905,7 +907,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         render.subprocess.run = lambda *a, **k: Boom()
         try:
             with self.assertRaises(RuntimeError):                                          # failed command: never "none"
-                render.read_sessions()
+                hostdata.read_sessions()
         finally:
             render.subprocess.run = orig
         self.assertIn("unavailable", ansi.ANSI.sub("", "\n".join(cardlines.ov_sessioni({"sessions": None}, 78, 0))))
@@ -920,21 +922,21 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
             release.wait(5)
             return {"ok": 1}
         t0 = time.monotonic()
-        self.assertIsNone(render.cached("test-slow", 60, slow))                         # does not wait for the slow read
+        self.assertIsNone(hostdata.cached("test-slow", 60, slow))                         # does not wait for the slow read
         self.assertLess(time.monotonic() - t0, 0.5)
         self.assertTrue(started.wait(2))
         release.set()
         for _ in range(50):
-            if render.cached("test-slow", 60, slow) is not None:
+            if hostdata.cached("test-slow", 60, slow) is not None:
                 break
             time.sleep(0.05)
-        self.assertEqual(render.cached("test-slow", 60, slow), {"ok": 1})
+        self.assertEqual(hostdata.cached("test-slow", 60, slow), {"ok": 1})
 
         def bad():
             raise OSError("stuck mount")
-        render.cached("test-bad", 60, bad)
+        hostdata.cached("test-bad", 60, bad)
         time.sleep(0.2)
-        self.assertIsNone(render.cached("test-bad", 60, bad))                            # error: None, the thread does not die
+        self.assertIsNone(hostdata.cached("test-bad", 60, bad))                            # error: None, the thread does not die
 
     def test_review10_docker_df_and_freshness_and_cleanup(self):
         self.assertEqual(collector.parse_docker_df("5\n[1]\nnull\n"), [])              # valid JSON but not an object
@@ -947,11 +949,11 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertIn("… +3 nodes", txt)                                                  # nodes past the eighth are counted
         stale_boot = dict(BOOT, ts=time.time() - 5000, docker_df={"rows": [], "volumes_unused": 0})
         self.assertIn("stale data (", ansi.ANSI.sub("", "\n".join(cardlines.ov_docker(stale_boot, 90, 0))))
-        smp = render.Sampler()
-        smp.net_hist["gone0"] = (render.collections.deque([1]), render.collections.deque([1]))
+        smp = hostdata.Sampler()
+        smp.net_hist["gone0"] = (collections.deque([1]), collections.deque([1]))
         smp.sample()
         self.assertNotIn("gone0", smp.net_hist)                                          # interface gone: history dropped
-        self.assertEqual(render.parse_netdev("h1\nh2\n  eth0: x y z\n"), {})            # line with too few fields: ignored
+        self.assertEqual(hostdata.parse_netdev("h1\nh2\n  eth0: x y z\n"), {})            # line with too few fields: ignored
 
     @unittest.skipUnless(nuc_config.LINUX, "the Linux tool set; macOS/Windows read sockets natively (tests/test_platforms.py)")
     def test_portability_missing_tools_are_absent_not_errors(self):

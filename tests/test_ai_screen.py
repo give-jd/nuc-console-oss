@@ -26,6 +26,7 @@ import advisor  # noqa: E402
 import aiweb  # noqa: E402
 import demo  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import cardlines  # noqa: E402
 import screens  # noqa: E402
 import ansi  # noqa: E402
@@ -42,7 +43,7 @@ CJK = "\u30e1\u30e2\u5e33.exe"                             # wide characters wou
 FORMAT = "a\u202eb\u200bc\u2028d"                          # right-to-left override, zero width space, line separator
 PILLS = {"gpu": "✔ FITS GPU", "partial": "◐ GPU+CPU", "ram": "✔ FITS RAM", "slow": "! SLOW", "no": "✖ TOO BIG"}
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket", "termios", "tty",
-                  "Sampler", "read_keys", "snapshot", "page_overview", "ai_build", "ai_status", "ai_screen", "ai_probe_run", "health_extra_lines", "KPI_MIN_ROWS")
+                  "read_keys", "snapshot", "page_overview", "ai_build", "ai_status", "ai_screen", "ai_probe_run", "health_extra_lines", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -100,6 +101,7 @@ class AiCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "time")}
         self.saved_time = demo.time
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], dict(cfg["ai"]), cfg["expose"])
@@ -112,7 +114,7 @@ class AiCase(unittest.TestCase):
         self.on_sleep = self.pass_time
         clock = Proxy(time, time=lambda: self.now, sleep=lambda sec: self.on_sleep(sec),
                       strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(self.now) if t is None else t))
-        render.time = demo.time = clock
+        render.time = hostdata.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
@@ -125,6 +127,8 @@ class AiCase(unittest.TestCase):
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(render, k, v)
+        for k, v in self.saved_hd.items():
+            setattr(hostdata, k, v)
         demo.time = self.saved_time
         features, render.CFG["webapps"], ai, render.CFG["expose"] = self.saved_cfg
         render.CFG["features"].clear()
@@ -1020,7 +1024,7 @@ class MainLoop(AiCase):
         render.tty = types.SimpleNamespace(setcbreak=lambda fd: None)
         render.signal = Proxy(signal, signal=lambda *a: None)
         render.shutil = Proxy(shutil, get_terminal_size=lambda fallback=None: os.terminal_size((cols, rows)))
-        render.WINDOWS, render.MODE, render.Sampler = False, "overview", FakeSampler
+        render.WINDOWS, render.MODE, hostdata.Sampler = False, "overview", FakeSampler
         render.read_keys, render.page_overview = next_read, overview_stub
         self.on_sleep = lambda sec: next_read()                                          # no keyboard: the loop sleeps between frames
         with self.assertRaises(Stop):

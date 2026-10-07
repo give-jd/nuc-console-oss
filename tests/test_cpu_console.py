@@ -25,6 +25,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import display  # noqa: E402
 import ui  # noqa: E402
 import screens  # noqa: E402
@@ -38,7 +39,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "ACCEPTED_PATH", "SENSORS", "time", "os", "sys", "signal", "shutil",
-                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "KPI_MIN_ROWS")
+                  "socket", "termios", "tty", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "cpu_screen", "cpu_slide", "slides", "KPI_MIN_ROWS")
 CELL = re.compile(r"(?<![\d.])(\d{1,3})([PE]?) [█▒░]+ +(\d+)%( \d\.\d\dG)?( +\d+°C)?")
 EVIL = "x" + ESC + "[2J" + "y" + ESC + "]0;owned" + BEL + "z" + CSI8 + "31m\r\n<b>&amp;"
 
@@ -74,6 +75,7 @@ class CpuCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "load_json", "time")}
         self.saved_write = display.write_text_atomic
         self.saved_demo = {k: getattr(demo, k) for k in ("time", "cpu_sample", "proc_sample", "sensors")}
         cfg = render.CFG
@@ -84,7 +86,7 @@ class CpuCase(unittest.TestCase):
         self.on_sleep = self.pass_time
         clock = Proxy(time, time=lambda: self.now, sleep=lambda sec: self.on_sleep(sec),
                       strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(self.now) if t is None else t))
-        render.time = demo.time = clock
+        render.time = hostdata.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.SENSORS = os.path.join(self.tmp.name, "sensors.json")            # missing unless a test writes it
@@ -96,6 +98,8 @@ class CpuCase(unittest.TestCase):
         display.write_text_atomic = self.saved_write
         for k, v in self.saved.items():
             setattr(render, k, v)
+        for k, v in self.saved_hd.items():
+            setattr(hostdata, k, v)
         for k, v in self.saved_demo.items():
             setattr(demo, k, v)
         features, render.CFG["webapps"], render.CFG["map_in_rotation"], render.CFG["cpu_in_rotation"] = self.saved_cfg
@@ -259,7 +263,7 @@ class Data(CpuCase):
             json.dump(self.sensors("windows"), f)
         render.DEMO, render.DEMO_OS = False, None
         render.WINDOWS = render.MACOS = False
-        got, extra = render.cpu_merge({"temps": {"package": None, "cores": {}}}, render.load_json(render.SENSORS), NOW)
+        got, extra = render.cpu_merge({"temps": {"package": None, "cores": {}}}, hostdata.load_json(render.SENSORS), NOW)
         self.assertIsNone(got["temps"]["package"])
         self.assertEqual(extra["notes"], [])
 
@@ -591,7 +595,7 @@ class Screens(CpuCase):
             render.procs = types.SimpleNamespace(ProcSampler=lambda: types.SimpleNamespace(sample=lambda: {
                 "procs": [], "total": {"count": 0, "running": None, "threads": None, "unreadable": 0}, "notes": ["not implemented yet"]}))
             render.snapshot = lambda w: dict(cont=None, net=None, boot=None, baseline=None)
-            render.Sampler = FakeSampler
+            hostdata.Sampler = FakeSampler
             for cols, rows in SIZES:
                 with self.subTest(os=cpu_os, size=(cols, rows)):
                     s, lines = self.once(["--details", "--select", "x"], cols, rows)
@@ -614,7 +618,7 @@ class Screens(CpuCase):
         self.producers("windows")
         render.DEMO = False
         self.feed()
-        render.Sampler = FakeSampler
+        hostdata.Sampler = FakeSampler
         s, lines = self.once([], 200, 50)
         self.assertIn("temperatures: ? (no sensors.json: the collector is not running, or [features] cpu = no)", "\n".join(lines))
         with open(render.SENSORS, "w") as f:
@@ -1011,7 +1015,7 @@ class Rotation(CpuCase):
         render.CFG["cpu_in_rotation"] = True
         log = self.producers()
         self.feed((self.cont, self.net, self.boot))
-        render.Sampler, render.MODE = FakeSampler, "overview"
+        hostdata.Sampler, render.MODE = FakeSampler, "overview"
         pages, steps = [], [40, 10, 5, 8, 40]                                                   # frames at 0 s, 40 s, 50 s, 55 s, 63 s, 103 s of the rotation
         display.write_text_atomic = lambda path, text: pages.append((text, dict(log)))
 
@@ -1098,7 +1102,7 @@ class MainLoop(CpuCase):
         render.tty = types.SimpleNamespace(setcbreak=lambda fd: None)
         render.signal = Proxy(signal, signal=lambda *a: None)
         render.shutil = Proxy(shutil, get_terminal_size=lambda fallback=None: os.terminal_size((cols, rows)))
-        render.WINDOWS, render.MODE, render.Sampler = False, "overview", FakeSampler
+        render.WINDOWS, render.MODE, hostdata.Sampler = False, "overview", FakeSampler
         render.read_keys, render.page_overview = next_read, overview_stub
         self.on_sleep = lambda sec: next_read()                                                  # no keyboard: the loop sleeps between frames
         with self.assertRaises(Stop):

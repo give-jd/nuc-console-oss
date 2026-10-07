@@ -16,6 +16,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the ho
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpers (cardlines.py)
 import hostinfo  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import cardlines  # noqa: E402
 import cards  # noqa: E402
 import ansi  # noqa: E402
@@ -47,16 +48,16 @@ class FakeProc(unittest.TestCase):
 
     def setUp(self):
         self.files, self.reads, self.statvfs = dict(FILES), [], Statvfs
-        self.saved = (render.LINUX, render.cached, render.read_thermal)
-        render.LINUX = True                           # the /proc readers, whatever the OS the tests run on
-        render.cached = lambda key, ttl, fn: None     # no background thread (loginctl, statvfs of every mount): not what is tested
-        render.read_thermal = lambda: {"throttle": None, "throttle_s": None, "clk": None}
+        self.saved = (hostdata.LINUX, hostdata.cached, hostdata.read_thermal)
+        hostdata.LINUX = True                           # the /proc readers, whatever the OS the tests run on
+        hostdata.cached = lambda key, ttl, fn: None     # no background thread (loginctl, statvfs of every mount): not what is tested
+        hostdata.read_thermal = lambda: {"throttle": None, "throttle_s": None, "clk": None}
         for p in (mock.patch("builtins.open", self.fake_open), mock.patch("os.statvfs", self.fake_statvfs, create=True)):
             p.start()
             self.addCleanup(p.stop)
 
     def tearDown(self):
-        render.LINUX, render.cached, render.read_thermal = self.saved
+        hostdata.LINUX, hostdata.cached, hostdata.read_thermal = self.saved
 
     def fake_open(self, path, *a, **kw):
         if path in self.files:
@@ -73,7 +74,7 @@ class FakeProc(unittest.TestCase):
         return self.statvfs
 
     def sample(self):
-        return render.Sampler().sample()
+        return hostdata.Sampler().sample()
 
 
 class SamplerHostFigures(FakeProc):
@@ -87,7 +88,7 @@ class SamplerHostFigures(FakeProc):
         self.assertEqual(sorted(sm["cpu"]), ["cpu0", "cpu1"])  # the other figures are still there
 
     def test_each_figure_is_read_once_per_sample_and_never_while_drawing(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         del self.reads[:]
         sm = smp.sample()
         for path in ("/proc/meminfo", "/proc/loadavg", "/proc/uptime", "statvfs /"):
@@ -100,7 +101,7 @@ class SamplerHostFigures(FakeProc):
 
         def boom(*a):
             raise AssertionError("a block called a reader of the host")
-        with mock.patch.multiple(render, meminfo=boom, loadavg=boom, uptime_s=boom, root_disk=boom, read_thermal=boom):
+        with mock.patch.multiple(hostdata, meminfo=boom, loadavg=boom, uptime_s=boom, root_disk=boom, read_thermal=boom):
             self.assertIn("RAM", text(cardlines.ov_sistema(sm, 119, 0)))
             self.assertIn("RAM", text(render.page_sistema(sm, 119, cont=None)))
 
@@ -190,37 +191,37 @@ class OtherOperatingSystems(unittest.TestCase):
     """Windows and macOS: the same figures through hostinfo (fake here), whatever the OS the tests run on."""
 
     def setUp(self):
-        self.saved = (render.LINUX, render.cached, render.read_thermal)
-        render.LINUX = False
-        render.cached = lambda key, ttl, fn: None
-        render.read_thermal = lambda: {"throttle": None, "throttle_s": None, "clk": None}
-        for p in (mock.patch.object(render.Sampler, "_cpu", staticmethod(lambda: {})),
-                  mock.patch.object(render.Sampler, "_netdev", staticmethod(lambda: {})),
-                  mock.patch.object(render, "hostinfo", hostinfo, create=True)):  # render imports it only where it is not Linux
+        self.saved = (hostdata.LINUX, hostdata.cached, hostdata.read_thermal)
+        hostdata.LINUX = False
+        hostdata.cached = lambda key, ttl, fn: None
+        hostdata.read_thermal = lambda: {"throttle": None, "throttle_s": None, "clk": None}
+        for p in (mock.patch.object(hostdata.Sampler, "_cpu", staticmethod(lambda: {})),
+                  mock.patch.object(hostdata.Sampler, "_netdev", staticmethod(lambda: {})),
+                  mock.patch.object(hostdata, "hostinfo", hostinfo, create=True)):  # hostdata imports it only where it is not Linux
             p.start()
             self.addCleanup(p.stop)
 
     def tearDown(self):
-        render.LINUX, render.cached, render.read_thermal = self.saved
+        hostdata.LINUX, hostdata.cached, hostdata.read_thermal = self.saved
 
     def test_the_figures_come_from_hostinfo(self):
         mem = {"MemTotal": 32 * GIB, "MemAvailable": 20 * GIB, "Cached": 4 * GIB, "SwapTotal": 0, "SwapFree": 0}
         with mock.patch.multiple(hostinfo, meminfo=lambda: mem, loadavg=lambda: None, uptime=lambda: 4000.0,
                                  root_disk=lambda: (100 * GIB, 500 * GIB, "C:")):
-            sm = render.Sampler().sample()
+            sm = hostdata.Sampler().sample()
         self.assertEqual((sm["mem"], sm["uptime"], sm["load"], sm["disk_root"]), (mem, 4000.0, [], (100 * GIB, 500 * GIB, "C:")))
         block = text(cardlines.ov_sistema(sm, 119, 0))
         self.assertIn("up 1h 6m", block.split("\n")[0])
         self.assertNotIn("load", block)
         with mock.patch.multiple(hostinfo, meminfo=lambda: mem, loadavg=lambda: ["1.50", "1.25", "1.00"],
                                  uptime=lambda: 4000.0, root_disk=lambda: (1, 2, "/")):
-            self.assertEqual(render.Sampler().sample()["load"], ["1.50", "1.25", "1.00"])
+            self.assertEqual(hostdata.Sampler().sample()["load"], ["1.50", "1.25", "1.00"])
 
     def test_a_failing_api_is_unknown(self):
         def fail():
             raise OSError("GlobalMemoryStatusEx failed")
         with mock.patch.multiple(hostinfo, meminfo=fail, loadavg=fail, uptime=fail, root_disk=fail):
-            sm = render.Sampler().sample()
+            sm = hostdata.Sampler().sample()
         self.assertEqual((sm["mem"], sm["uptime"], sm["load"], sm["disk_root"]), (None, None, None, None))
 
 

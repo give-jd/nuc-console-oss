@@ -33,6 +33,7 @@ import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import procs  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import display  # noqa: E402
 import cardlines  # noqa: E402
 import exposure  # noqa: E402
@@ -922,14 +923,14 @@ class Kiosk(unittest.TestCase):
         for name, folder in state_paths.items():  # every state file of this OS lives in its folders (no Linux path left on Windows)
             if not os.environ.get("NUC_CONSOLE_" + {"STATE": "STATE", "NET_STATE": "NET", "BOOT_STATE": "BOOT",
                                                     "BASELINE": "BASELINE", "ACCEPTED_PATH": "ACCEPTED"}[name]):
-                self.assertEqual(os.path.dirname(getattr(render, name)), folder, name)
+                self.assertEqual(os.path.dirname(getattr(render if name == "ACCEPTED_PATH" else hostdata, name)), folder, name)
         for name in ("OUT", "OUT_NET", "OUT_BOOT"):
             self.assertEqual(os.path.dirname(getattr(collector, name)), nuc_config.RUN_DIR)
         if nuc_config.LINUX:  # unchanged on Linux
             self.assertEqual((nuc_config.DEFAULT_PATH, nuc_config.RUN_DIR, nuc_config.LIB_DIR),
                              ("/etc/nuc-console/config.ini", "/run/nuc-console", "/var/lib/nuc-console"))
             self.assertEqual(collector.OUT_NET, "/run/nuc-console/net.json")
-            self.assertEqual(render.BASELINE, "/var/lib/nuc-console/baseline.json")
+            self.assertEqual(hostdata.BASELINE, "/var/lib/nuc-console/baseline.json")
 
     def test_config_is_utf8_with_or_without_bom(self):
         for prefix in (b"", b"\xef\xbb\xbf"):  # Windows Notepad may save a BOM

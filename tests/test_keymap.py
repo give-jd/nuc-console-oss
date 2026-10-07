@@ -17,6 +17,7 @@ import ansi  # noqa: E402
 import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import screens  # noqa: E402
 import ui  # noqa: E402
 from test_map_console import FakeSampler, MapCase, Proxy, Stop, overview_stub  # noqa: E402
@@ -389,7 +390,7 @@ class Dispatch(MapCase):
         render.tty = types.SimpleNamespace(setcbreak=lambda fd: None)
         render.signal = Proxy(signal, signal=lambda *a: None)
         render.shutil = Proxy(shutil, get_terminal_size=lambda fallback=None: os.terminal_size((cols, rows)))
-        render.WINDOWS, render.MODE, render.Sampler = False, "overview", FakeSampler
+        render.WINDOWS, render.MODE, hostdata.Sampler = False, "overview", FakeSampler
         render.read_keys, render.page_overview = next_read, overview_stub
         self.on_sleep = lambda sec: next_read()
         if exits:

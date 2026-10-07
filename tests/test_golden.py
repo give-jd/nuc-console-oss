@@ -16,6 +16,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python3 -m unittest tests.test_golden` from the root finds golden.py too
 import golden  # noqa: E402
+import hostdata  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 
@@ -99,7 +100,7 @@ class World(unittest.TestCase):
                                                         "time", "telegram_status")],
                 "others": [socket.gethostname, os.cpu_count, nuc_config.PORTABLE, golden.demo.time, golden.graph.time, golden.web.time,
                            golden.aiweb.time, golden.aiweb._ENGINE, dict(golden.aiweb._BIND), golden.aisetup.work_dir],
-                "caches": [dict(getattr(render, n)) for n in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO")]}
+                "caches": [dict(hostdata._CACHE)] + [dict(getattr(render, n)) for n in ("_HEALTH", "_ADVICE", "_AI", "_TOPO")]}
 
     def test_everything_is_put_back_in_place(self):
         cfg, features = render.CFG, render.CFG["features"]

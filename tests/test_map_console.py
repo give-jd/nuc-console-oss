@@ -25,6 +25,7 @@ import demo  # noqa: E402
 import graph  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import screens  # noqa: E402
 import ansi  # noqa: E402
 
@@ -37,7 +38,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
-                  "termios", "tty", "graph", "Sampler", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide", "KPI_MIN_ROWS")
+                  "termios", "tty", "graph", "read_keys", "snapshot", "page_overview", "map_graph", "map_slide", "KPI_MIN_ROWS")
 
 
 class Proxy(object):
@@ -103,6 +104,7 @@ class MapCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "time")}
         self.saved_time = (graph.time, demo.time)
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["map_in_rotation"])
@@ -112,7 +114,7 @@ class MapCase(unittest.TestCase):
         self.on_sleep = self.pass_time
         clock = Proxy(time, time=lambda: self.now, sleep=lambda sec: self.on_sleep(sec),
                       strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(self.now) if t is None else t))
-        render.time = graph.time = demo.time = clock
+        render.time = hostdata.time = graph.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
         render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
@@ -122,6 +124,8 @@ class MapCase(unittest.TestCase):
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(render, k, v)
+        for k, v in self.saved_hd.items():
+            setattr(hostdata, k, v)
         graph.time, demo.time = self.saved_time
         features, render.CFG["webapps"], render.CFG["map_in_rotation"] = self.saved_cfg
         render.CFG["expose"] = self.saved_expose
@@ -671,7 +675,7 @@ class MainLoop(MapCase):
         render.tty = types.SimpleNamespace(setcbreak=lambda fd: None)
         render.signal = Proxy(signal, signal=lambda *a: None)
         render.shutil = Proxy(shutil, get_terminal_size=lambda fallback=None: os.terminal_size((cols, rows)))
-        render.WINDOWS, render.MODE, render.Sampler = False, "overview", FakeSampler
+        render.WINDOWS, render.MODE, hostdata.Sampler = False, "overview", FakeSampler
         render.read_keys, render.page_overview = next_read, overview_stub
         self.on_sleep = lambda sec: next_read()                                        # no keyboard: the loop sleeps between frames
         with self.assertRaises(Stop):
@@ -867,7 +871,7 @@ class HostileAndEmpty(MapCase):
             self.assertIn("evil?[2J??1m??end", ansi.ANSI.sub("", "\n".join(body)))
 
     def test_no_collector_data_says_there_is_nothing_to_draw(self):
-        render.DEMO, render.Sampler = False, FakeSampler                                # not the demo: it declares two [webapps]
+        render.DEMO, hostdata.Sampler = False, FakeSampler                                # not the demo: it declares two [webapps]
         render.CFG["webapps"], render.CFG["map_in_rotation"] = {}, True
         render.page_overview = overview_stub
         for data, note in (((None, None, None), "network collector not running"), (({}, {}, {}), "restart the collector"),

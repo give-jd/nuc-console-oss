@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.request
 
+import hostdata
 import nuc_config
 import render
 import ui
@@ -602,17 +603,17 @@ def rate_room(stamps, now, limit=MAX_PER_HOUR, window=3600):
 # ---- the state that survives from one cycle to the next -----------------------------------------------------------------------
 
 class ThermalHistory:
-    """render.read_thermal() plus the throttling history that render.Sampler keeps (Sampler itself starts background threads that
+    """hostdata.read_thermal() plus the throttling history that hostdata.Sampler keeps (Sampler itself starts background threads that
     run loginctl, ss and statvfs: not for this process)."""
 
     def __init__(self, read=None, mono=time.monotonic):
-        self.read, self.mono, self.hist = read or render.read_thermal, mono, collections.deque(maxlen=64)
+        self.read, self.mono, self.hist = read or hostdata.read_thermal, mono, collections.deque(maxlen=64)
 
     def __call__(self):
         th, now = self.read(), self.mono()
         if th.get("throttle") is not None:
             self.hist.append((now, th["throttle"]))
-            old = next(((t, n) for t, n in self.hist if now - t <= render.THROTTLE_WINDOW_S), None)
+            old = next(((t, n) for t, n in self.hist if now - t <= hostdata.THROTTLE_WINDOW_S), None)
             rec = th["throttle"] - old[1] if old and now - old[0] >= 10 else None  # events in the last minute; None while too short
             th["recent"] = rec if rec is None or rec >= 0 else None  # a falling sum: a CPU went offline
         return th

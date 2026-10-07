@@ -35,6 +35,7 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import notify  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 REAL_SERVICE_CONTROL = notify.service_control  # Base replaces it in every test: this is the real one
@@ -642,7 +643,7 @@ class Service(Base):
         reads, mono = iter([{"throttle": 10}, {"throttle": 10}, {"throttle": 14}, {"throttle": 14}]), iter([0, 30, 60, 90])
         hist = notify.ThermalHistory(read=lambda: dict(next(reads)), mono=lambda: next(mono))
         self.assertEqual([hist().get("recent") for _ in range(4)], [None, 0, 4, 4])
-        with mock.patch.object(render.Sampler, "sample", side_effect=AssertionError("Sampler starts background threads")):
+        with mock.patch.object(hostdata.Sampler, "sample", side_effect=AssertionError("Sampler starts background threads")):
             with mock.patch.object(render, "snapshot", return_value={"net": None, "cont": None, "boot": None, "baseline": None}):
                 recs = notify.current_records(lambda: {})
         self.assertTrue(recs)  # the collectors are not running: that is a problem too
@@ -1181,7 +1182,7 @@ class Commands(Base):
     def test_preview_prints_the_message_and_sends_nothing(self):
         with mock.patch.object(notify, "HttpsTransport", side_effect=AssertionError("preview never sends")), \
                 mock.patch.object(render, "DEMO", False), mock.patch.object(render, "DEMO_OS", None), mock.patch.dict(render.CFG, clear=False), \
-                mock.patch.object(socket, "gethostname", socket.gethostname), mock.patch.object(render, "read_thermal", return_value={}):
+                mock.patch.object(socket, "gethostname", socket.gethostname), mock.patch.object(hostdata, "read_thermal", return_value={}):
             rc, out, _ = self.run_main("--preview", "--demo")
             self.assertEqual(rc, 0)
             self.assertIn("nuc-console · demo-host", out)

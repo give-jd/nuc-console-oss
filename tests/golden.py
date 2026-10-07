@@ -20,7 +20,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   socket.gethostname, os.cpu_count, nuc_config.PORTABLE, nuc_config.VERSION
   render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD, CATALOG,
           KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
-  render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
+  render caches emptied: hostdata._CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
   aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
           web.json would go); web.Server's CSRF token (a fixed one)
   tgweb: nothing: web.Server makes the demo's engine of the Telegram page (in memory, its clock the frozen one); it is put back on exit
@@ -56,6 +56,7 @@ import cpuinfo  # noqa: E402,F401
 import demo  # noqa: E402,F401
 import exposure  # noqa: E402,F401
 import graph  # noqa: E402,F401
+import hostdata  # noqa: E402,F401
 import graphjs  # noqa: E402,F401
 import graphlayout  # noqa: E402,F401
 import health  # noqa: E402,F401
@@ -237,7 +238,8 @@ class FrozenWorld(object):
             self.set(tgweb, "_BIND", dict(tgweb._BIND))
             for name in ("DEMO", "DEMO_OS", "DEMO_HEALTH"):  # --demo and web.Server set them: put back on exit
                 self.set(render, name, getattr(render, name))
-            for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
+            self.scrub(hostdata._CACHE)
+            for name in ("_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
                 if isinstance(getattr(render, name, None), dict):
                     self.scrub(getattr(render, name))
         except BaseException:
