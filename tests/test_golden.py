@@ -17,8 +17,10 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python3 -m unittest tests.test_golden` from the root finds golden.py too
 import golden  # noqa: E402
 import hostdata  # noqa: E402
+import problems  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 
 UPDATE = os.environ.get("NUC_GOLDEN_UPDATE", "") not in ("", "0")
 HINT = "\n\nIf the change is intended: NUC_GOLDEN_UPDATE=1 python3 -m unittest tests.test_golden  (then review the diff of tests/golden/ in git)"
@@ -95,9 +97,8 @@ class World(unittest.TestCase):
     def snapshot(self):
         cfg = render.CFG
         return {"cfg": copy.deepcopy(dict(cfg)), "ids": {k: id(v) for k, v in cfg.items()},
-                "attrs": [getattr(render, n) for n in ("MODE", "PAGES", "ROTATE_S", "REFRESH_S",
-                                                        "ACCEPT_CMD", "PROBLEMS_CMD", "CMD", "KIOSK_HINT", "ACCEPTED_PATH", "DEMO", "DEMO_OS", "DEMO_HEALTH",
-                                                        "time", "telegram_status")],
+                "attrs": [getattr(render, n) for n in ("MODE", "PAGES", "ROTATE_S", "REFRESH_S", "KIOSK_HINT", "DEMO", "DEMO_OS", "DEMO_HEALTH", "time")]
+                         + [getattr(problems, n) for n in ("ACCEPT_CMD", "PROBLEMS_CMD", "CMD", "ACCEPTED_PATH", "telegram_status")],
                 "others": [socket.gethostname, os.cpu_count, nuc_config.PORTABLE, golden.demo.time, golden.graph.time, golden.web.time,
                            golden.aiweb.time, golden.aiweb._ENGINE, dict(golden.aiweb._BIND), golden.aisetup.work_dir],
                 "caches": [dict(hostdata._CACHE)] + [dict(getattr(render, n)) for n in ("_HEALTH", "_ADVICE", "_AI", "_TOPO")]}
@@ -143,7 +144,7 @@ class World(unittest.TestCase):
         with golden.FrozenWorld() as world:
             self.assertEqual(os.cpu_count(), golden.CPUS)
             self.assertEqual(socket.gethostname(), golden.HOST)
-            self.assertEqual(render.ACCEPT_CMD, "sudo nuc-console-accept")
+            self.assertEqual(problems.ACCEPT_CMD, "sudo nuc-console-accept")
             frame = world.once(["--cols", "120", "--rows", "33"])
             self.assertIn("demo-host", frame)
             self.assertIn("14:13:20", frame)

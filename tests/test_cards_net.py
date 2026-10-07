@@ -22,6 +22,7 @@ import cards  # noqa: E402
 import demo  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import cardlines  # noqa: E402
 import exposure  # noqa: E402
 import ui  # noqa: E402
@@ -56,7 +57,7 @@ class Base(unittest.TestCase):
         cont, net, boot, base = (copy.deepcopy(x) for x in demo.snapshot(golden.NOW, os_name))
         if tweak:
             tweak(cont, net, base)
-        pb = render.safe_problems(net, cont, golden.NOW, boot=boot, baseline=base)
+        pb = problems.safe_problems(net, cont, golden.NOW, boot=boot, baseline=base)
         args = dict(s=demo.sampler_data(os_name, golden.NOW), cont=cont, net=net, boot=boot, problems=pb, cfg=render.CFG, now=golden.NOW,
                     baseline=base, new=exposure.new_ports(net, cont, base))
         args.update(kw)
@@ -110,17 +111,17 @@ class ConsoleTests(Base):
         self.assertEqual(self.card("attention", ctx, 3).more, ui.More(2, "more", indent=3))
 
     def test_attention_nothing_wrong_and_the_accepted_line(self):
-        ctx = self.frame(problems=render.ProblemList())
+        ctx = self.frame(problems=problems.ProblemList())
         self.assertEqual(self.lines("attention", ctx), [rule("ATTENTION"), "   ✔ no problems detected"])
-        pb = render.ProblemList([(1, "w")])
+        pb = problems.ProblemList([(1, "w")])
         pb.accepted = 2
         self.assertEqual(self.lines("attention", self.frame(problems=pb))[1:], ["   ! w", "   · 2 accepted as known (nuc-console-problems)"])
-        none = render.ProblemList()
+        none = problems.ProblemList()
         none.accepted = 1
         self.assertEqual(self.lines("attention", self.frame(problems=none))[1:], ["   ✔ no problems detected", "   · 1 accepted as known (nuc-console-problems)"])
 
     def test_attention_wraps_a_long_problem_at_its_commas(self):
-        pb = render.ProblemList([(2, "3 services reach beyond config.ini: " + ", ".join(f"service{i} :{8000 + i} LAN > local" for i in range(5)))])
+        pb = problems.ProblemList([(2, "3 services reach beyond config.ini: " + ", ".join(f"service{i} :{8000 + i} LAN > local" for i in range(5)))])
         lines = self.lines("attention", self.frame(problems=pb), width=60)
         self.assertGreater(len(lines), 3)
         self.assertTrue(lines[1].startswith("   ✖ 3 services") and lines[2].startswith("     service"))
@@ -334,17 +335,17 @@ class AttentionExtrasTests(Base):
         by = {p.id: p for p in probs}
         db = by["db-open-lan"]
         self.assertEqual(db.level, "err")
-        self.assertEqual((db.title, db.why), (render.CATALOG["db-open-lan"][0], render.CATALOG["db-open-lan"][1]))
-        self.assertEqual(db.fix, render.CATALOG["db-open-lan"][2])
+        self.assertEqual((db.title, db.why), (problems.CATALOG["db-open-lan"][0], problems.CATALOG["db-open-lan"][1]))
+        self.assertEqual(db.fix, problems.CATALOG["db-open-lan"][2])
         self.assertEqual(db.accept, 'sudo nuc-console-accept --problem db-open-lan --reason "..."')
-        self.assertEqual(by["journal-errors"].fix, render.CATALOG["journal-errors"][2])
+        self.assertEqual(by["journal-errors"].fix, problems.CATALOG["journal-errors"][2])
         for p in probs:
             self.assertTrue(p.id and p.title and p.why and p.fix and p.accept, p.id)
 
     def test_what_the_console_draws_is_unchanged_by_them(self):
         ctx = self.frame()
         with_extras = self.lines("attention", ctx, -2)
-        bare = render.ProblemList(list(ctx.problems))  # no ids, no why, no fix
+        bare = problems.ProblemList(list(ctx.problems))  # no ids, no why, no fix
         bare.accepted = ctx.problems.accepted
         self.assertEqual(with_extras, self.lines("attention", self.frame(problems=bare), -2))
 
@@ -370,7 +371,7 @@ class AttentionExtrasTests(Base):
         hints = {h.label: h.cmd for h in nodes(self.card("attention", ctx, -2), ui.Hint)}
         self.assertEqual(hints, {"list with why and fix": "nuc-console-problems",
                                  "accept a known one": 'sudo nuc-console-accept --problem <id> --reason "..."'})
-        with mock.patch.object(render, "ACCEPT_CMD", "./run.sh --accept"), mock.patch.object(render, "PROBLEMS_CMD", "./run.sh --problems"):
+        with mock.patch.object(problems, "ACCEPT_CMD", "./run.sh --accept"), mock.patch.object(problems, "PROBLEMS_CMD", "./run.sh --problems"):
             ctx = self.frame()
             card = self.card("attention", ctx, -2)
             hints = {h.label: h.cmd for h in nodes(card, ui.Hint)}
@@ -397,7 +398,7 @@ class AttentionExtrasTests(Base):
         self.assertIn('<code class="pid" title="New exposed port">port-new</code>', htmlview.html(card))
 
     def test_a_list_that_problems_did_not_build_has_no_extras_and_invents_none(self):
-        pb = render.ProblemList([(2, "x"), (1, "y")])
+        pb = problems.ProblemList([(2, "x"), (1, "y")])
         card = self.card("attention", self.frame(problems=pb), -2)
         for p in nodes(card, ui.Problem):
             self.assertEqual((p.id, p.title, p.why, p.fix, p.accept), ("", "", "", "", ""))

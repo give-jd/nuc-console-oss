@@ -25,6 +25,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import hostdata  # noqa: E402
 import display  # noqa: E402
 import ui  # noqa: E402
@@ -38,7 +39,7 @@ ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)               # built at runtime: th
 SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape sequences the renderer puts inside a line
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
-RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "ACCEPTED_PATH", "SENSORS", "time", "os", "sys", "signal", "shutil",
+RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "SENSORS", "time", "os", "sys", "signal", "shutil",
                   "socket", "termios", "tty", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "cpu_screen", "cpu_slide", "slides", "KPI_MIN_ROWS")
 CELL = re.compile(r"(?<![\d.])(\d{1,3})([PE]?) [█▒░]+ +(\d+)%( \d\.\d\dG)?( +\d+°C)?")
 EVIL = "x" + ESC + "[2J" + "y" + ESC + "]0;owned" + BEL + "z" + CSI8 + "31m\r\n<b>&amp;"
@@ -75,6 +76,7 @@ class CpuCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_pb = {k: getattr(problems, k) for k in ("ACCEPTED_PATH",)}
         self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "load_json", "time")}
         self.saved_write = display.write_text_atomic
         self.saved_demo = {k: getattr(demo, k) for k in ("time", "cpu_sample", "proc_sample", "sensors")}
@@ -88,7 +90,7 @@ class CpuCase(unittest.TestCase):
                       strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(self.now) if t is None else t))
         render.time = hostdata.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
-        render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        problems.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.SENSORS = os.path.join(self.tmp.name, "sensors.json")            # missing unless a test writes it
         render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS = True, None
@@ -100,6 +102,8 @@ class CpuCase(unittest.TestCase):
             setattr(render, k, v)
         for k, v in self.saved_hd.items():
             setattr(hostdata, k, v)
+        for k, v in self.saved_pb.items():
+            setattr(problems, k, v)
         for k, v in self.saved_demo.items():
             setattr(demo, k, v)
         features, render.CFG["webapps"], render.CFG["map_in_rotation"], render.CFG["cpu_in_rotation"] = self.saved_cfg

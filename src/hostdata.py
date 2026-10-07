@@ -15,6 +15,7 @@ import time
 import nuc_config
 
 LINUX = nuc_config.LINUX
+STALE_S = 60  # a state file older than this is not "now": the collector stopped
 if not LINUX:
     import hostinfo
 

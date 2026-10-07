@@ -26,6 +26,7 @@ import health  # noqa: E402
 import history  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import hostdata  # noqa: E402
 import ui  # noqa: E402
 import screens  # noqa: E402
@@ -40,7 +41,7 @@ ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)               # built at runtime: th
 SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape sequences the renderer puts inside a line
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
-RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "ACCEPTED_PATH", "time", "os", "sys", "signal", "shutil", "socket",
+RENDER_GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "WINDOWS", "time", "os", "sys", "signal", "shutil", "socket",
                   "termios", "tty", "read_keys", "snapshot", "page_overview", "health_build", "health_slide", "health_extra_lines", "health_screen", "health_state", "KPI_MIN_ROWS")
 
 
@@ -87,6 +88,7 @@ class HealthCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_pb = {k: getattr(problems, k) for k in ("ACCEPTED_PATH",)}
         self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "time")}
         self.saved_time = demo.time
         cfg = render.CFG
@@ -100,7 +102,7 @@ class HealthCase(unittest.TestCase):
                       strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(self.now) if t is None else t))
         render.time = hostdata.time = demo.time = clock
         render.socket = Proxy(render.socket, gethostname=lambda: "test-host")  # demo_defaults() renames it on the proxy only
-        render.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
+        problems.ACCEPTED_PATH = os.path.join(self.tmp.name, "accepted.json")     # missing: nothing accepted, whatever the host has
         render.KPI_MIN_ROWS = 10 ** 6                                           # the KPI line is tested in test_console_ui.py
         render.DEMO, render.DEMO_OS, render.DEMO_HEALTH = True, None, ""
         cfg["features"]["health"], cfg["health_in_rotation"], cfg["map_in_rotation"] = True, False, False
@@ -113,6 +115,8 @@ class HealthCase(unittest.TestCase):
             setattr(render, k, v)
         for k, v in self.saved_hd.items():
             setattr(hostdata, k, v)
+        for k, v in self.saved_pb.items():
+            setattr(problems, k, v)
         demo.time = self.saved_time
         features, render.CFG["webapps"], render.CFG["expose"], render.CFG["health_in_rotation"], render.CFG["map_in_rotation"] = self.saved_cfg
         render.CFG["features"].clear()

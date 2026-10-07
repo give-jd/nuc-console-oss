@@ -33,6 +33,7 @@ import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import procs  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import hostdata  # noqa: E402
 import display  # noqa: E402
 import cardlines  # noqa: E402
@@ -386,7 +387,7 @@ class NativeCollector(unittest.TestCase):
         d = collector.collect_net()
         self.assertIn("firewall", d["errors"])
         self.assertEqual(d["listeners"][0]["fw"], ["unknown", "firewall unreadable"])
-        pb = render.problems(d, {"ts": time.time(), "containers": [], "absent": True})
+        pb = problems.problems(d, {"ts": time.time(), "containers": [], "absent": True})
         self.assertTrue(any(sev == 2 and "firewall state unreadable" in t for sev, t in pb))
 
     def test_windows_boot_sections(self):
@@ -487,20 +488,20 @@ class NativeRenderer(unittest.TestCase):
 
     def test_problems_speak_of_the_os_firewall(self):
         cont, net, boot, base = self.snap("windows")
-        ids = lambda n: {pid for _, _, pid in render.problems_raw(n, cont, boot=boot, baseline=base)}  # noqa: E731
+        ids = lambda n: {pid for _, _, pid in problems.problems_raw(n, cont, boot=boot, baseline=base)}  # noqa: E731
         self.assertNotIn("ufw-missing", ids(net))
         self.assertNotIn("docker-bypass", ids(net))
         off = dict(net, firewall=dict(net["firewall"], off=["Public"]))
-        texts = [t for _, t, _ in render.problems_raw(off, cont, boot=boot, baseline=base)]
+        texts = [t for _, t, _ in problems.problems_raw(off, cont, boot=boot, baseline=base)]
         self.assertTrue(any("Windows Firewall off on the Public network" in t for t in texts))
         self.assertIn("firewall-policy", ids(dict(net, firewall=dict(net["firewall"], policy=True))))
         self.assertIn("firewall-unreadable", ids(dict(net, firewall=None)))
         self.assertNotIn("firewall-unreadable", ids(dict(net, firewall=None, disabled=["firewall"])))
         _, mnet, mboot, mbase = self.snap("darwin")
         moff = dict(mnet, firewall=dict(mnet["firewall"], state=0, off=["Application Firewall"]))
-        self.assertTrue(any("macOS firewall off:" in t for _, t, _ in render.problems_raw(moff, cont, boot=mboot, baseline=mbase)))
+        self.assertTrue(any("macOS firewall off:" in t for _, t, _ in problems.problems_raw(moff, cont, boot=mboot, baseline=mbase)))
         for pid in ("firewall-off", "firewall-unreadable", "firewall-policy"):
-            self.assertIn(pid, render.CATALOG)
+            self.assertIn(pid, problems.CATALOG)
 
     def test_firewall_section(self):
         _, net, _, _ = self.snap("windows")
@@ -563,7 +564,7 @@ class NativeRenderer(unittest.TestCase):
                 try:
                     render.demo_defaults()                                                          # the demo's own [expose]: one within, two beyond
                     expose = dict(render.CFG["expose"])
-                    pb = {pid: t for _, t, pid in render.problems_raw(net, cont, boot=boot, baseline=base)}
+                    pb = {pid: t for _, t, pid in problems.problems_raw(net, cont, boot=boot, baseline=base)}
                 finally:
                     render.CFG["expose"], render.CFG["webapps"], render.DEMO_OS, socket.gethostname = saved
                 self.assertEqual(expose, {"shop-web": "LAN", "shop-db": "LOCALE", "node": "TAILNET"})  # no systemd unit here: the Funnel's process
@@ -923,7 +924,7 @@ class Kiosk(unittest.TestCase):
         for name, folder in state_paths.items():  # every state file of this OS lives in its folders (no Linux path left on Windows)
             if not os.environ.get("NUC_CONSOLE_" + {"STATE": "STATE", "NET_STATE": "NET", "BOOT_STATE": "BOOT",
                                                     "BASELINE": "BASELINE", "ACCEPTED_PATH": "ACCEPTED"}[name]):
-                self.assertEqual(os.path.dirname(getattr(render if name == "ACCEPTED_PATH" else hostdata, name)), folder, name)
+                self.assertEqual(os.path.dirname(getattr(problems if name == "ACCEPTED_PATH" else hostdata, name)), folder, name)
         for name in ("OUT", "OUT_NET", "OUT_BOOT"):
             self.assertEqual(os.path.dirname(getattr(collector, name)), nuc_config.RUN_DIR)
         if nuc_config.LINUX:  # unchanged on Linux

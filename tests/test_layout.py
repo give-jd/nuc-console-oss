@@ -15,6 +15,7 @@ import graph  # noqa: E402
 import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import ui  # noqa: E402
 
 
@@ -137,10 +138,10 @@ class Primitives(unittest.TestCase):
         self.assertEqual((ansi.cell(1, loc=True), ansi.cell(0, loc=True)), ("\x1b[37m●\x1b[0m", "\x1b[90m·\x1b[0m"))
 
     def test_status_pill_codes_come_from_the_tokens(self):
-        self.assertEqual(render.status_pill([]), ("✔ ALL OK", "1;7"))
-        self.assertEqual(render.status_pill([(2, "x")]), ("✖ 1 PROBLEMS", "1;41;37"))
-        self.assertEqual(render.status_pill([(1, "x")]), ("! 1 WARNINGS", "1;43;30"))
-        self.assertEqual(render.status_pill([(3, "x")]), ("✖ EXPOSED PORTS CHANGED", "1;41;37"))
+        self.assertEqual(problems.status_pill([]), ("✔ ALL OK", "1;7"))
+        self.assertEqual(problems.status_pill([(2, "x")]), ("✖ 1 PROBLEMS", "1;41;37"))
+        self.assertEqual(problems.status_pill([(1, "x")]), ("! 1 WARNINGS", "1;43;30"))
+        self.assertEqual(problems.status_pill([(3, "x")]), ("✖ EXPOSED PORTS CHANGED", "1;41;37"))
 
 
 class TextHelpers(unittest.TestCase):

@@ -36,6 +36,7 @@ import urllib.request
 import hostdata
 import nuc_config
 import render
+import problems
 import ui
 
 API_HOST = "api.telegram.org"  # the only host this program talks to
@@ -72,7 +73,7 @@ REQ_SETTLE_S = 10  # a file that is not JSON yet may still be being written: it 
 REQ_BATCH = 8  # requests done in one look
 INBOX_S = 2  # while it takes requests, the service looks at the inbox this often
 BOT_RE = re.compile(r"[A-Za-z0-9_]{3,64}")  # a bot's @username, without the @
-TEXT_KEYED = render.NOT_ACCEPTABLE | render.COUNT_MATTERS  # problems for which one more or another item is a new problem
+TEXT_KEYED = problems.NOT_ACCEPTABLE | problems.COUNT_MATTERS  # problems for which one more or another item is a new problem
 OWN = "telegram-"  # the ids of the notifier's own problems (the dashboard shows them): never announced, it would only talk to itself
 POSIX = not nuc_config.WINDOWS
 SERVICE = {  # fixed command lines (no shell); the names the installers create
@@ -548,7 +549,7 @@ def diff(stable, sent):
 
 def title_of(key):
     pid = key.split("|", 1)[0]
-    return render.CATALOG[pid][0] if pid in render.CATALOG else clean(pid, 40)
+    return problems.CATALOG[pid][0] if pid in problems.CATALOG else clean(pid, 40)
 
 
 def detail_of(key, rec):
@@ -626,7 +627,7 @@ def current_records(thermal):
         th = thermal() if render.on("thermal") else {}
     except Exception:  # noqa: BLE001 - an unreadable sensor must not hide the other problems
         th = {}
-    return render.problem_records(st["net"], st["cont"], boot=st["boot"], thermal=th, baseline=st["baseline"])
+    return problems.problem_records(st["net"], st["cont"], boot=st["boot"], thermal=th, baseline=st["baseline"])
 
 
 class Notifier:

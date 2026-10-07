@@ -65,6 +65,7 @@ import nuc_config  # noqa: E402
 import prefs  # noqa: E402,F401
 import procs  # noqa: E402,F401
 import render  # noqa: E402
+import problems  # noqa: E402
 import ui  # noqa: E402,F401
 import web  # noqa: E402
 
@@ -221,18 +222,18 @@ class FrozenWorld(object):
             self.set(render, "PAGES", ("System", "Network & firewall", "Boot"))
             self.set(render, "ROTATE_S", 15)
             self.set(render, "REFRESH_S", 2)
-            self.set(render, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
-            self.set(render, "PROBLEMS_CMD", "nuc-console-problems")
-            self.set(render, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
+            self.set(problems, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
+            self.set(problems, "PROBLEMS_CMD", "nuc-console-problems")
+            self.set(problems, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
                                      "apply": "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"})
-            self.set(render, "CATALOG", dict(render.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
+            self.set(problems, "CATALOG", dict(problems.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
             self.set(render, "KIOSK_HINT", "Alt+F4 closes · F11 leaves full screen")
             path = os.path.join(self._tmp.name, "accepted.json")  # not there: nothing accepted, whatever the host has
             if self.accepted:
                 with open(path, "w") as f:
-                    json.dump({pid: {"reason": "known", "fp": render.fingerprint(sev, text, pid)} for pid, sev, text in self.accepted}, f)
-            self.set(render, "ACCEPTED_PATH", path)
-            self.set(render, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
+                    json.dump({pid: {"reason": "known", "fp": problems.fingerprint(sev, text, pid)} for pid, sev, text in self.accepted}, f)
+            self.set(problems, "ACCEPTED_PATH", path)
+            self.set(problems, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
             self._freeze_ai()
             self.set(tgweb, "_ENGINE", None)  # web.Server makes the demo's
             self.set(tgweb, "_BIND", dict(tgweb._BIND))

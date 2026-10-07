@@ -35,6 +35,7 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import notify  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import hostdata  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -54,11 +55,11 @@ def slurp(*path):
 
 
 def rec(pid, sev=1, text=None, accepted=False):
-    """A problem record as render.problem_records() makes it."""
-    title = render.CATALOG.get(pid, (pid,))[0]
+    """A problem record as problems.problem_records() makes it."""
+    title = problems.CATALOG.get(pid, (pid,))[0]
     text = text or title
     return {"id": pid, "severity": SEV[sev], "text": text, "accepted": accepted, "reason": "", "title": title, "why": "",
-            "fix": "", "fingerprint": render.fingerprint(sev, text, pid), "acceptable": pid not in render.NOT_ACCEPTABLE}
+            "fix": "", "fingerprint": problems.fingerprint(sev, text, pid), "acceptable": pid not in problems.NOT_ACCEPTABLE}
 
 
 def port(n):
@@ -185,7 +186,7 @@ class Keys(unittest.TestCase):
     def test_the_problems_of_the_real_list_have_the_same_keys_cycle_after_cycle(self):
         def keys():
             cont, net, boot, base = demo.snapshot()
-            return notify.collect(render.problem_records(net, cont, boot=boot, baseline=base))[0]
+            return notify.collect(problems.problem_records(net, cont, boot=boot, baseline=base))[0]
         first = keys()
         self.assertTrue(first)
         self.assertEqual(first, keys())
@@ -346,7 +347,7 @@ class Cycles(Base):
         # a journal problem appears (news, once) while temperatures and error counts move all the time
         self.run_cycles(nt, clock, *[[temp(70 + i), rec("journal-errors", 1, f"{100 + i} errors in this boot's journal")] for i in range(12)])
         self.assertEqual(len(fake.texts), 2)
-        self.assertEqual(fake.texts[1].splitlines()[1:], ["NEW  " + render.CATALOG["journal-errors"][0]])   # the title of this OS
+        self.assertEqual(fake.texts[1].splitlines()[1:], ["NEW  " + problems.CATALOG["journal-errors"][0]])   # the title of this OS
 
     def test_the_notifiers_own_problems_are_never_announced(self):
         nt, fake, clock = self.notifier()

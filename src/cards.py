@@ -9,7 +9,7 @@ Nothing here draws, reads a file or knows the size of a screen (a card's builder
 native card below (@native: data to components, drawn by ansi.card_lines and htmlview.html); render.py registers them in the order of the
 screen. A card made of ui.Raw lines (raw_card) is still drawn by both renderers.
 
-How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of render.problems_raw, and the cards they belong to):
+How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of problems.problems_raw, and the cards they belong to):
 
   collector-containers  stale-containers  unhealthy-container  container-exited      containers
   collector-boot  failed-units  journal-errors                                       boot
@@ -75,7 +75,7 @@ class Caps(object):
 
 class Ctx(object):
     """The data of one frame, as the builders read it: s (the Sampler's reading), cont / net / boot (the collectors' state: None = not
-    running), problems (a render.ProblemList: (severity, text) with .pids, the id of each, and .accepted), cfg (nuc_config.current()),
+    running), problems (a problems.ProblemList: (severity, text) with .pids, the id of each, and .accepted), cfg (nuc_config.current()),
     prefs (prefs.effective()), now, baseline, new (the new exposed ports), health (render.health_data(): {"report"}) and ai
     (render.ai_status()): the last two only where a KPI wants them. memo: what was built or worked out in this frame."""
     __slots__ = ("s", "cont", "net", "boot", "problems", "cfg", "prefs", "now", "baseline", "new", "health", "ai", "memo")
@@ -759,7 +759,7 @@ def boot_card(ctx, k, caps):
 # not draw: Problem (id, why, fix, accept), Details.brief (the accepted ones), Span.full (a name the console had to cut), Hint.
 
 NAMEW = 36                                   # the widest service name of the exposure matrix
-ADVICE_PROBLEMS_CMD = "nuc-console-problems"  # a problem list that did not come from render.problems() has no commands of its own
+ADVICE_PROBLEMS_CMD = "nuc-console-problems"  # a problem list that did not come from problems.problems() has no commands of its own
 LEGEND = "   ● open   ◐ filtered by source   ? unknown (treated as open)   · no"
 REACH_LABEL = {"INTERNET": "Internet", "LAN": "LAN+tailnet", "TAILNET": "tailnet", "LOCALE": "local only"}
 REACH_TONE = {"INTERNET": "err", "LAN": "warn", "TAILNET": None, "LOCALE": "muted"}
@@ -1306,7 +1306,7 @@ def _kpi_load(ctx):
 
 
 def _sick(ct):
-    return "unhealthy" in ct["status"] or "Restarting" in ct["status"]  # as render.problems_raw counts them
+    return "unhealthy" in ct["status"] or "Restarting" in ct["status"]  # as problems.problems_raw counts them
 
 
 @kpi("containers")
