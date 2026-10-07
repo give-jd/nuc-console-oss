@@ -187,20 +187,14 @@ class Workflow(unittest.TestCase):
 
 
 class TheRules(unittest.TestCase):
-    def test_contributing_and_claude_md_say_the_same_and_the_archives_carry_neither(self):
+    def test_contributing_holds_the_rules_and_the_archives_carry_it_not(self):
         with open(os.path.join(ROOT, "CONTRIBUTING.md"), encoding="utf-8") as f:
             contributing = f.read()
-        with open(os.path.join(ROOT, "CLAUDE.md"), encoding="utf-8") as f:
-            agents = f.read()
         self.assertIn("## Branches, commits and pull requests", contributing)
         self.assertIn("tools/check_hygiene.py", contributing)
-        self.assertIn("CONTRIBUTING.md", agents)
-        self.assertIn(DIPADA, agents)
         self.assertEqual(ch.text_findings(contributing, "CONTRIBUTING.md"), [])
-        self.assertEqual(ch.text_findings(agents, "CLAUDE.md"), [])
         sys.path.insert(0, os.path.join(ROOT, "tools"))
         import build_release
-        self.assertIn("CLAUDE.md", build_release.DEV_FILES)
         self.assertIn("CONTRIBUTING.md", build_release.DEV_FILES)
 
 
