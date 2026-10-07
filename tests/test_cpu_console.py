@@ -25,6 +25,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import display  # noqa: E402
 import ui  # noqa: E402
 import screens  # noqa: E402
 import ansi  # noqa: E402
@@ -37,7 +38,7 @@ SGR = re.compile(r"\x1b\[[0-9;]*m")                        # the only escape seq
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 LINE = "\x1b[K\r\n"                                        # frame(): every line but the last ends with erase-to-end + CRLF
 RENDER_GLOBALS = ("DEMO", "DEMO_OS", "MODE", "WINDOWS", "MACOS", "ACCEPTED_PATH", "SENSORS", "time", "os", "sys", "signal", "shutil",
-                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "write_text_atomic", "KPI_MIN_ROWS")
+                  "socket", "termios", "tty", "Sampler", "read_keys", "snapshot", "page_overview", "cpuinfo", "procs", "load_json", "cpu_screen", "cpu_slide", "slides", "KPI_MIN_ROWS")
 CELL = re.compile(r"(?<![\d.])(\d{1,3})([PE]?) [█▒░]+ +(\d+)%( \d\.\d\dG)?( +\d+°C)?")
 EVIL = "x" + ESC + "[2J" + "y" + ESC + "]0;owned" + BEL + "z" + CSI8 + "31m\r\n<b>&amp;"
 
@@ -73,6 +74,7 @@ class CpuCase(unittest.TestCase):
 
     def setUp(self):
         self.saved = {k: getattr(render, k) for k in RENDER_GLOBALS}
+        self.saved_write = display.write_text_atomic
         self.saved_demo = {k: getattr(demo, k) for k in ("time", "cpu_sample", "proc_sample", "sensors")}
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), cfg["webapps"], cfg["map_in_rotation"], cfg["cpu_in_rotation"])
@@ -91,6 +93,7 @@ class CpuCase(unittest.TestCase):
         cfg["features"]["cpu"], cfg["cpu_in_rotation"] = True, False
 
     def tearDown(self):
+        display.write_text_atomic = self.saved_write
         for k, v in self.saved.items():
             setattr(render, k, v)
         for k, v in self.saved_demo.items():
@@ -1010,7 +1013,7 @@ class Rotation(CpuCase):
         self.feed((self.cont, self.net, self.boot))
         render.Sampler, render.MODE = FakeSampler, "overview"
         pages, steps = [], [40, 10, 5, 8, 40]                                                   # frames at 0 s, 40 s, 50 s, 55 s, 63 s, 103 s of the rotation
-        render.write_text_atomic = lambda path, text: pages.append((text, dict(log)))
+        display.write_text_atomic = lambda path, text: pages.append((text, dict(log)))
 
         def sleep(sec):
             if not steps:

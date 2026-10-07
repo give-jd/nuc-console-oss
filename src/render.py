@@ -23,6 +23,7 @@ import cards  # same directory: the card registry and the KPI model
 import ansi  # same directory: the console's drawing of the components
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
+import display  # same directory: the browser behind --kiosk and --open
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
 import procs
@@ -50,6 +51,9 @@ NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "
 BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
 BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
 CFG = nuc_config.current()  # the process's one configuration dict (tests and --demo change it in place)
+# names that moved out of this file and that src/web.py still reads as `render.X` (web.py is split on its own branch): delete a line when
+# web.py imports the name from the module it lives in. Nothing else re-exports.
+KIOSK_HINT = display.KIOSK_HINT
 # the commands the advice on screen refers to, in the words of this OS
 if WINDOWS:
     ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
@@ -1787,7 +1791,6 @@ def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
     return [clip(x, w) for x in lines[:h]], sc.top, sc.rows, sc.vis, sc.pids
 
 
-
 def cpu_footer(cv, n, w):
     """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
     sorts = "  ".join(f"{k.upper()} {CPU_SORT_SHORT[v]}" for k, v in CPU_SORT_KEYS.items())
@@ -2313,8 +2316,6 @@ def ai_state(smp):
     return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
-
-
 def ai_do(av, act, rows):
     """What a key of the AI screen asked (ai_key): done through the engine, which works in the background (a download, the server, the answers
     come back as its snapshot: ai_work_lines draws them), or a question first (av.confirm, answered with y). A line only this screen says
@@ -2398,154 +2399,6 @@ def ai_once(argv, w, h):
 
 # ---- kiosk: macOS/Windows have no text console to take over, the monitor shows the screen in a full-screen browser -----
 
-def user_dir():
-    """Per-user folder for the kiosk page and the browser profile (the kiosk runs as the logged-in user)."""
-    if WINDOWS:
-        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
-    elif MACOS:
-        base = os.path.expanduser("~/Library/Application Support")
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    return os.path.join(base, "nuc-console")
-
-
-def kiosk_grid():
-    """(columns, rows) of the kiosk screen: [dashboard] columns/rows if set, else from the monitor's aspect ratio.
-
-    The page scales its font so the grid fills the screen; 64 rows of text, as many columns as the shape allows
-    (16:9 -> 237 columns, the 3-column layout; 16:10 -> 213 columns, 2 columns)."""
-    rows = CFG["rows"] or 64
-    if CFG["columns"]:
-        return CFG["columns"], rows
-    size = hostinfo.screen_size() if not LINUX else None
-    aspect = size[0] / size[1] if size else 16 / 9
-    return max(100, min(400, round(rows * aspect * 1.25 / 0.6))), rows
-
-
-BROWSERS = {
-    "windows": [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
-                r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
-                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
-                r"%ProgramFiles%\Mozilla Firefox\firefox.exe", r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe",
-                r"%LOCALAPPDATA%\Mozilla Firefox\firefox.exe"],  # Firefox last: it cannot start full screen (see browser_command)
-    "darwin": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-               "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
-    "linux": ["chromium", "chromium-browser", "google-chrome", "microsoft-edge", "brave-browser", "firefox"],
-}
-
-
-def find_browser(choice=None):
-    """Path of the browser that will show the kiosk: [display] browser in config.ini, else the first one installed."""
-    choice = choice or CFG["display"]["browser"]
-    if choice == "none":
-        return None
-    if choice != "auto":
-        return choice
-    for cand in BROWSERS[nuc_config.OS_NAME]:
-        path = re.sub(r"%([^%]+)%", lambda m: os.environ.get(m.group(1), m.group(0)), cand)
-        found = shutil.which(path) if LINUX else (path if os.path.isfile(path) else None)
-        if found:
-            return found
-    return ""  # none found: macOS falls back on Safari through `open`
-
-
-# shown in the kiosk's footer: the page has nothing to click, the keyboard is the way out
-KIOSK_HINT = "Cmd+Q closes · Ctrl+Cmd+F leaves full screen" if MACOS else "Alt+F4 closes · F11 leaves full screen"
-
-
-def browser_command(exe, url, profile):
-    """A full-screen app window (no tabs, no address bar), no first-run pages, a profile of its own (never the user's tabs
-    and logins). Not the browsers' locked "kiosk" mode: that one swallows Alt+F4 & co. and the screen could not be closed."""
-    if exe == "" and MACOS:
-        return ["/usr/bin/open", "-a", "Safari", url]  # Safari has no full-screen flag: Ctrl+Cmd+F once
-    if not exe:
-        return None
-    if "firefox" in os.path.basename(exe).lower():
-        return [exe, "--new-window", url]  # Firefox: only its locked kiosk mode starts full screen; F11 instead
-    return [exe, "--app=" + url, "--start-fullscreen", "--no-first-run", "--no-default-browser-check",
-            "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
-
-
-def kiosk_command(exe, target, base):
-    """browser_command() for the kiosk, and the log line of a browser that cannot start full screen (Firefox)."""
-    cmd = browser_command(exe, target, os.path.join(base, "browser"))
-    if cmd and "firefox" in os.path.basename(exe).lower():
-        print("Firefox does not start full screen: press F11 in its window", file=sys.stderr, flush=True)
-    return cmd
-
-
-def default_browser(exe, target):
-    """Windows, none of BROWSERS found (find_browser() said ""; not `[display] browser = none`): the default browser, in a normal window
-    (no flag can make it full screen: F11). True once opened."""
-    if exe != "" or not WINDOWS:
-        return False
-    try:
-        os.startfile(target)  # as this user, like open_in_browser
-    except OSError as e:
-        print("no supported browser found for full screen, and the default browser did not open:", repr(e)[:200], file=sys.stderr, flush=True)
-        return False
-    print("no supported browser found for full screen: opened the default browser (F11 for full screen)", file=sys.stderr, flush=True)
-    return True
-
-
-def launch(cmd):
-    """Starts the browser, detached from our console (its output is not ours to show)."""
-    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def write_text_atomic(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:  # no CRLF translation on Windows
-        f.write(text)
-    for attempt in range(20):
-        try:
-            os.replace(tmp, path)
-            return True
-        except PermissionError:  # Windows: the browser is reading the previous frame right now
-            time.sleep(0.05)
-    return False
-
-
-def web_up(port, wait):
-    """True once the local web view answers; at login it may still be starting (it starts at boot)."""
-    end = time.time() + wait
-    while True:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
-                conn.sendall(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-                if b" 200 " in conn.recv(64):
-                    return True
-        except OSError:
-            pass
-        if time.time() >= end:
-            return False
-        time.sleep(2)
-
-
-def dashboard_url(fullscreen=False, cols=0, rows=0):
-    """The page the display opens. [ui] web = classic: the classic page (fit to the window; full screen: sized to the grid, the pages taking
-    turns, the kiosk footer). [ui] web = app: the shell (app=1); full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by
-    itself, says how to close the window). Both take the token the caller appends."""
-    app = (CFG.get("ui") or {}).get("web") == "app"
-    if app:
-        query = {"app": 1, "ui": "1.dw", "kiosk": 1} if fullscreen else {"app": 1}
-    else:
-        query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
-    from urllib.parse import urlencode
-    return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
-
-
-def read_web_token(path):
-    """(the token in [web] token_file, "") if this user can read it, else ("", why). The text never holds the token."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            token = f.read(512).strip()
-    except (OSError, ValueError) as e:  # not there, not allowed (the service user's 0600 file), not text
-        return "", f"{path} cannot be read by this user ({e.strerror if isinstance(e, OSError) and e.strerror else type(e).__name__})"
-    if not re.fullmatch(r"[A-Za-z0-9._~-]{16,}", token):  # what the web view accepts (src/web.py TOKEN_OK): safe in a URL, too
-        return "", f"{path} does not hold a token the web view accepts"
-    return token, ""
-
 
 def open_in_browser(argv):
     """`render.py --open`: the dashboard in a normal window of the default browser ([display] mode = browser, at every login).
@@ -2553,17 +2406,17 @@ def open_in_browser(argv):
     The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more. With a
     token in [web], the URL carries it when this user can read the token file (the web view moves it into a cookie and keeps the view);
     otherwise the dashboard is the page written to a file, as `--kiosk` does."""
-    base = user_dir()
+    base = display.user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    url, token = dashboard_url(), ""
+    url, token = display.dashboard_url(), ""
     if CFG["web"]["token_file"]:
-        token, why = read_web_token(CFG["web"]["token_file"])
+        token, why = display.read_web_token(CFG["web"]["token_file"])
         if not token:
             print(f"[web] token_file is set but {why}: the dashboard is shown from a page written to a file instead", file=sys.stderr, flush=True)
-            return kiosk_file(argv, base, *kiosk_grid())
-    if not web_up(CFG["web"]["port"], 60):
+            return kiosk_file(argv, base, *display.kiosk_grid())
+    if not display.web_up(CFG["web"]["port"], 60):
         print(f"the web view does not answer on 127.0.0.1:{CFG['web']['port']}: dashboard not opened", file=sys.stderr, flush=True)
         return 1
     print(f"open -> {url}" + (" (with the token of [web] token_file)" if token else ""), file=sys.stderr, flush=True)  # never the token itself
@@ -2585,21 +2438,21 @@ def kiosk(argv):
     It opens the local web view (127.0.0.1, started by the installer) in a full-screen browser window: overview and Details
     pages take turns, A- / A+ change the text size. Without the web view (a Linux desktop, or a token in [web]) it falls
     back on a page written to a file every 2 s (`--file` forces it; `--html FILE`, `--no-browser`)."""
-    base = user_dir()
+    base = display.user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    cols, rows = kiosk_grid()
+    cols, rows = display.kiosk_grid()
     web = CFG["web"]
-    if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
-        url = dashboard_url(fullscreen=True, cols=cols, rows=rows)
-        exe = find_browser()
-        cmd = kiosk_command(exe, url, base)
+    if "--file" not in argv and not web["token_file"] and display.web_up(web["port"], 60):
+        url = display.dashboard_url(fullscreen=True, cols=cols, rows=rows)
+        exe = display.find_browser()
+        cmd = display.kiosk_command(exe, url, base)
         print(f"kiosk -> {url}", file=sys.stderr, flush=True)
         if "--no-browser" not in argv and cmd:
-            launch(cmd)
+            display.launch(cmd)
             return 0
-        if "--no-browser" not in argv and default_browser(exe, url):
+        if "--no-browser" not in argv and display.default_browser(exe, url):
             return 0
         print("no browser started: open " + url, file=sys.stderr, flush=True)
         return 0 if "--no-browser" in argv else 1
@@ -2627,19 +2480,19 @@ def kiosk_file(argv, base, cols, rows):
                 cpu_feed = None
             screen = frame(sl[idx], idx, len(sl), w, h,
                            safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
-                           keys=False, hint=KIOSK_HINT, page=True)
-            write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
+                           keys=False, hint=display.KIOSK_HINT, page=True)
+            display.write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
         except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
         if browser is None and "--no-browser" not in argv:
             import pathlib
-            exe = find_browser()
-            cmd = kiosk_command(exe, pathlib.Path(path).resolve().as_uri(), base)
+            exe = display.find_browser()
+            cmd = display.kiosk_command(exe, pathlib.Path(path).resolve().as_uri(), base)
             if cmd:
-                browser, started = launch(cmd), time.time()
+                browser, started = display.launch(cmd), time.time()
             else:
                 browser = False
-                if not default_browser(exe, path):
+                if not display.default_browser(exe, path):
                     print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
         # the viewer closed the window (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
         if browser and cmd[0] != "/usr/bin/open" and browser.poll() is not None and time.time() - started > 10:
