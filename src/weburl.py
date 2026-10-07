@@ -155,3 +155,6 @@ def page_url(params, **change):
     """The current view with some parameters changed (only the ones that differ from the defaults are written)."""
     p = dict(params, **change)
     return "/?" + urlencode([(k, "1" if v is True else v) for k, v in p.items() if v not in (0, False, None, "")])
+
+
+LEVEL_CLASS = {"err": "r", "warn": "y", "ok": "g"}  # a finding or a row by its level, in the pages that colour one (health, map): the shared palette class

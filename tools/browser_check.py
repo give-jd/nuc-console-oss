@@ -308,6 +308,7 @@ def parity_page(view):
     import prefs
     import render
     import web
+    import webpages
     import weburl
     shown = golden.CHAT[0]["id"]  # the AI screen with its chat (the log the app draws too) and the whole prompt of its first answer
     with golden.FrozenWorld(chat=golden.CHAT if view == "ai" else ()) as world:
@@ -344,7 +345,7 @@ def parity_page(view):
             if view == "cpu":
                 nodes = srv.api_cpu(here, "cpu", "")["nodes"]
             elif view == "health":
-                nodes = web.health_nodes(srv.smp, 7, "", dict({"view": "health", "period": 0, "sel": "", "pause": False}, **here))
+                nodes = webpages.health_nodes(srv.smp, 7, "", dict({"view": "health", "period": 0, "sel": "", "pause": False}, **here))
             elif view == "map":
                 p = weburl.view_params({"view": ["map"]})
                 nodes = srv.api_map(here, weburl.map_mode({k: p[k] for k in weburl.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]

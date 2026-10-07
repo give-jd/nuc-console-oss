@@ -22,6 +22,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import webpages  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
@@ -75,7 +76,7 @@ class HealthPage(unittest.TestCase):
     def setUpClass(cls):
         cls.host, cls.webapps, cls.expose = socket.gethostname, render.CFG["webapps"], render.CFG["expose"]  # demo_defaults() changes them for good: put them back
         cls.srv = serve()
-        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.DEMO_HEALTH, render.health_build, web.health_extra_html)
+        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.DEMO_HEALTH, render.health_build, webpages.health_extra_html)
 
     @classmethod
     def tearDownClass(cls):
@@ -94,7 +95,7 @@ class HealthPage(unittest.TestCase):
         render.health_build = lambda days, now: (self.calls.append(days), real(days, now))[1]
 
     def tearDown(self):
-        features, render.DEMO_OS, render.DEMO_HEALTH, render.health_build, web.health_extra_html = self.saved
+        features, render.DEMO_OS, render.DEMO_HEALTH, render.health_build, webpages.health_extra_html = self.saved
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render._HEALTH.clear()
@@ -464,14 +465,14 @@ class HealthPage(unittest.TestCase):
     # ---- the advisor hook -------------------------------------------------------------------------------------------------------------
 
     def test_the_hook_is_empty_by_default_and_its_block_goes_under_the_findings(self):
-        self.assertEqual(web.health_extra_html(demo.health_report(None, 7)), "")
+        self.assertEqual(webpages.health_extra_html(demo.health_report(None, 7)), "")
         self.assertNotIn("ADVICE", self.page("/?view=health"))
         seen = []
 
         def advice(rep):
             seen.append(rep["period"]["days"])
             return '<div class="nt" id="advice">AI, check before acting: <b>restart</b></div>'
-        web.health_extra_html = advice
+        webpages.health_extra_html = advice
         self.srv.cache.clear()
         body = self.page("/?view=health")
         self.assertIn('id="advice"', body)

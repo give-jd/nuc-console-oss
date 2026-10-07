@@ -25,6 +25,7 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import webpages  # noqa: E402
 import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -91,7 +92,7 @@ class AiPage(unittest.TestCase):
     def setUpClass(cls):
         cls.host, cls.webapps, cls.expose = socket.gethostname, render.CFG["webapps"], render.CFG["expose"]  # demo_defaults() changes them for good: put them back
         cls.srv = serve()
-        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]), web.health_extra_html)
+        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]), webpages.health_extra_html)
 
     @classmethod
     def tearDownClass(cls):
@@ -111,7 +112,7 @@ class AiPage(unittest.TestCase):
         render.ai_build = lambda now: (self.builds.append(render.DEMO_OS), real(now))[1]
 
     def tearDown(self):
-        features, render.DEMO_OS, render.ai_build, render.ai_status, ai, web.health_extra_html = self.saved
+        features, render.DEMO_OS, render.ai_build, render.ai_status, ai, webpages.health_extra_html = self.saved
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render.CFG["ai"].clear()
@@ -495,7 +496,7 @@ class AiPage(unittest.TestCase):
         return calls
 
     def test_the_health_page_has_no_advice_while_the_advisor_is_off(self):
-        self.assertEqual(web.health_extra_html(demo.health_report(None, 7)), "")
+        self.assertEqual(webpages.health_extra_html(demo.health_report(None, 7)), "")
         self.assertNotIn("ADVICE", self.page("/?view=health"))
 
     def test_the_cached_advice_goes_under_the_findings_and_over_the_sections_and_is_escaped(self):
