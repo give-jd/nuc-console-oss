@@ -3,6 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Security
+
+- **Every action of every workflow is pinned by commit** (`tests.yml` and `ai-pins.yml` were on `@v4`/`@v5` tags), and a test now checks all five.
+
 ## [2.3.0] - 2026-10-06
 
 The AI page works in the desktop app and the live app: *Turn AI on* asks its question and goes on, a click no longer selects a model or

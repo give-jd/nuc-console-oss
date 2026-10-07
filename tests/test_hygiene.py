@@ -174,6 +174,17 @@ class Workflow(unittest.TestCase):
     def test_the_action_is_pinned_by_commit_like_the_release(self):
         self.assertTrue(re.search(r"uses: actions/checkout@[0-9a-f]{40} # v\d", self.src))
 
+    def test_every_workflow_pins_every_action_by_commit(self):
+        d = os.path.join(ROOT, ".github", "workflows")
+        names = [n for n in sorted(os.listdir(d)) if n.endswith(".yml")]
+        self.assertGreaterEqual(len(names), 5)
+        for n in names:
+            for ref, rest in re.findall(r"^\s*(?:- )?uses:\s*(\S+)(.*)$", open(os.path.join(d, n), encoding="utf-8").read(), re.M):
+                if ref.startswith("./"):
+                    continue  # a workflow of this repository, at this commit
+                self.assertRegex(ref, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$", n + ": " + ref)
+                self.assertRegex(rest, r"#\s*v\d+\.\d+\.\d+", n + ": " + ref)
+
 
 class TheRules(unittest.TestCase):
     def test_contributing_and_claude_md_say_the_same_and_the_archives_carry_neither(self):
