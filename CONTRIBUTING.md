@@ -20,6 +20,7 @@ python3 tools/browser_check.py --out shots      # the web shell in a real headle
 python3 tools/desktop_core.py --checkout && (cd desktop/src-tauri && cargo test && cargo tauri dev)   # the desktop app, if you touch desktop/ (docs/DESKTOP.md)
 ```
 
+- Every test module starts with `import hermetic` (`tests/hermetic.py`): it keeps the host's state out of the suite (the files and commands of an installed console raise `HostStateRead`; a test that needs one points the path at a temporary folder). A test that really wants the machine says so, as `test_cpuinfo.RealHost` does.
 - Every change needs a test. Parsers get fixtures (see `tests/test_nuc_console.py`); **use documentation addresses** (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `100.64.0.0/10`, `*.example.ts.net`) and fake values built at runtime for anything secret-looking.
 - Never add a dependency. If you need one, the answer is almost certainly a stdlib function or fewer features.
 - Keep Python 3.8 compatibility (no `match`, no `X | Y` types, no `str.removeprefix`).
