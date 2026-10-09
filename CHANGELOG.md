@@ -15,6 +15,10 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   local account can post its CSRF token to the AI, Telegram and (portable, desktop) settings forms. What defends and what to set today are there, and the desktop
   app's adoption of an earlier core by its pid file is listed as a [known limitation](docs/DESKTOP.md).
 
+### Added
+
+- **Console font and screen blanking** (Linux), both off by default: `[console] font` (e.g. `Lat15-TerminusBold32x16`) and `blank_minutes` (the monitor sleeps after that many minutes without a key). `nuc-console.service` applies them as root before it starts (`src/ttyprep.py`, `setfont` and `setterm` on the dashboard's terminal); a missing tool or font is skipped, never an error. No bootloader or `console-setup` change, no reboot. [docs/CONFIGURATION.md](docs/CONFIGURATION.md#console--font-and-screen-blanking-of-the-linux-console-both-off-by-default)
+
 ### Fixed
 
 - The console rotated to a second (Details) screen on a busy host although everything fit on the first. When a section was still cut ("+N
