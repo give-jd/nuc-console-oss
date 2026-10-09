@@ -10,6 +10,7 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # golden.py
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import collector  # noqa: E402
 import golden  # noqa: E402  (FrozenWorld: the default configuration, whatever another test left in render.CFG)

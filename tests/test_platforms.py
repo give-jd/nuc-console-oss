@@ -13,6 +13,8 @@ import shutil
 import struct
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
 import threading
 import time
@@ -927,7 +929,11 @@ class Kiosk(unittest.TestCase):
             self.assertEqual((nuc_config.DEFAULT_PATH, nuc_config.RUN_DIR, nuc_config.LIB_DIR),
                              ("/etc/nuc-console/config.ini", "/run/nuc-console", "/var/lib/nuc-console"))
             self.assertEqual(collector.OUT_NET, "/run/nuc-console/net.json")
-            self.assertEqual(render.BASELINE, "/var/lib/nuc-console/baseline.json")
+            # the suite points NUC_CONSOLE_BASELINE at an empty folder (hermetic.py): the default is read in a process without it
+            env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_BASELINE"}
+            out = subprocess.run([sys.executable, "-c", "import render; print(render.BASELINE)"], env=dict(env, PYTHONPATH=os.path.join(ROOT, "src")),
+                                 stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout.strip()
+            self.assertEqual(out, "/var/lib/nuc-console/baseline.json")
 
     def test_config_is_utf8_with_or_without_bom(self):
         for prefix in (b"", b"\xef\xbb\xbf"):  # Windows Notepad may save a BOM
@@ -1142,7 +1148,8 @@ class Installers(unittest.TestCase):
 def history_job_on_this_machine(case):
     """The real history sources of this OS, once: results may be empty (a quiet machine, a tool that is not there), a crash or
     a failure that is not reported is never allowed. The first step reads every source once (events() runs at the first step)."""
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory() as d, mock.patch.object(nuc_config, "RUN_DIR", os.path.join(d, "run")), \
+            mock.patch.object(collector, "OUT_BOOT", os.path.join(d, "run", "boot.json")):  # the state of the console on this machine is not the test's
         store = history.Store(os.path.join(d, "history.db"))
         try:
             job = collector.HistoryJob(store)
@@ -1203,6 +1210,11 @@ def sample_real_procs(test):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows")
 class OnWindows(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(hermetic, "REAL_TOOLS", True)  # these try the real system tools of the machine, on purpose
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_host_metrics(self):
         cpu = hostinfo.cpu_times()
         self.assertTrue(cpu and all(busy <= total for busy, total in cpu.values()))
@@ -1316,6 +1328,11 @@ class OnWindows(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS")
 class OnMacOS(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(hermetic, "REAL_TOOLS", True)  # these try the real system tools of the machine, on purpose
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_host_metrics(self):
         cpu = hostinfo.cpu_times()
         self.assertTrue(cpu and all(busy <= total for busy, total in cpu.values()))
