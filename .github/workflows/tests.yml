@@ -31,8 +31,8 @@ jobs:
           - { os: windows-latest, python: "3.8" }
           - { os: windows-latest, python: "3.14" } # the embeddable one install-windows.ps1 installs
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
@@ -42,7 +42,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: shellcheck -S warning install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-update bin/nuc-console-ai bin/nuc-console-ask bin/nuc-console-telegram
 
   # The web shell in a real browser (the Chrome the runner ships): every view in every theme and density, with and without scripts, the wall page.
@@ -52,8 +52,8 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - run: google-chrome --version
@@ -71,7 +71,7 @@ jobs:
   install-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: sudo NUC_CONSOLE_VT=3 ./install.sh
       - run: python3 -c "import json; d = json.load(open('/run/nuc-console/net.json')); assert d['os'] == 'linux' and d['listeners'], d"
       - run: nuc-console-problems
@@ -98,7 +98,7 @@ jobs:
   install-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
       - run: sudo cat /var/log/nuc-console/collector.log || true
       - run: /opt/nuc-console/bin/nuc-console-problems
@@ -133,7 +133,7 @@ jobs:
   install-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - shell: powershell
         run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Display browser
       - shell: powershell
