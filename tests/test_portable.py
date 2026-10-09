@@ -1425,6 +1425,11 @@ class RunSh(unittest.TestCase):
         return r.status, body
 
     def run_and_stop(self, sig):
+        os.makedirs(os.path.join(self.dir, "data"), exist_ok=True)
+        stale = os.path.join(self.dir, "data", "open.html")  # a page left by an earlier run with loose permissions is replaced, not reused
+        with open(stale, "w") as f:
+            f.write("stale\n")
+        os.chmod(stale, 0o644)
         p = subprocess.Popen([os.path.join(self.dir, "run.sh"), "--web", "--no-open"], cwd=self.dir, env=self.env, stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))  # a runner started in the background ignores it

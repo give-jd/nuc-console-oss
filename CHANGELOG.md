@@ -7,6 +7,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Security
 
+- **The page that carries the token (`open.html` of `run.sh`, `open-app.html` of the desktop app) is made anew every time**, not truncated: a file left there earlier
+  with loose permissions would have kept them. On Windows the app narrows its page to the user with `icacls`, as `run.ps1` does, and removes it if that fails.
 - **The `nuc_token` and `nuc_ui` cookies carry `Secure` when the browser came over HTTPS** (`X-Forwarded-Proto: https`, as `tailscale serve` sends), never over plain
   http, where a browser would drop them.
 - **An installed `nuc-console-update` no longer goes on without a verified provenance.** The archive and `SHA256SUMS` come from the same release, so
