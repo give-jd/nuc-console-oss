@@ -13,6 +13,8 @@ import shutil
 import struct
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
 import threading
 import time
@@ -927,7 +929,11 @@ class Kiosk(unittest.TestCase):
             self.assertEqual((nuc_config.DEFAULT_PATH, nuc_config.RUN_DIR, nuc_config.LIB_DIR),
                              ("/etc/nuc-console/config.ini", "/run/nuc-console", "/var/lib/nuc-console"))
             self.assertEqual(collector.OUT_NET, "/run/nuc-console/net.json")
-            self.assertEqual(render.BASELINE, "/var/lib/nuc-console/baseline.json")
+            # the suite points NUC_CONSOLE_BASELINE at an empty folder (hermetic.py): the default is read in a process without it
+            env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_BASELINE"}
+            out = subprocess.run([sys.executable, "-c", "import render; print(render.BASELINE)"], env=dict(env, PYTHONPATH=os.path.join(ROOT, "src")),
+                                 stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout.strip()
+            self.assertEqual(out, "/var/lib/nuc-console/baseline.json")
 
     def test_config_is_utf8_with_or_without_bom(self):
         for prefix in (b"", b"\xef\xbb\xbf"):  # Windows Notepad may save a BOM

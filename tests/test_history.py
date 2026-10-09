@@ -13,6 +13,8 @@ import shutil
 import sqlite3
 import stat
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
 import threading
 import time
@@ -37,6 +39,11 @@ class TmpDir(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="nuc-history-")
         self.path = os.path.join(self.dir, "history.db")
         self.addCleanup(shutil.rmtree, self.dir, True)
+        # the collector reads boot.json and sensors.json of the machine it runs on: an empty folder of this test's own
+        for p in (mock.patch.object(nuc_config, "RUN_DIR", os.path.join(self.dir, "run")),
+                  mock.patch.object(collector, "OUT_BOOT", os.path.join(self.dir, "run", "boot.json"))):
+            p.start()
+            self.addCleanup(p.stop)
 
     def store(self, now=None):
         s = history.Store(self.path, now=lambda: now if now is not None else T0 + 100)
@@ -1376,6 +1383,12 @@ class FeatureSwitch(TmpDir):
 @unittest.skipUnless(sys.platform.startswith("linux"), "Linux")
 class OnLinux(JobCase):
     """The real sources of this machine: results may be empty (no journal, no Docker), a crash is never allowed."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(hermetic, "HOST_COMMANDS", frozenset())  # these two ask the real journalctl and docker, on purpose
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_real_journal_and_docker_readers(self):
         job, clock, store = self.job()
