@@ -7,6 +7,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Security
 
+- **The `nuc_token` and `nuc_ui` cookies carry `Secure` when the browser came over HTTPS** (`X-Forwarded-Proto: https`, as `tailscale serve` sends), never over plain
+  http, where a browser would drop them.
 - **An installed `nuc-console-update` no longer goes on without a verified provenance.** The archive and `SHA256SUMS` come from the same release, so
   the hash proves nothing about who built it; without `gh` (or logged out) the update used to go on and run the new installer as root. It now stops with
   how to proceed: install `gh` and `gh auth login`, or verify the archive by hand and run again with `--allow-unattested` (`-AllowUnattested` on Windows),
@@ -21,9 +23,18 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **The collector unit is hardened further**: `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `ProtectKernelModules`, `ProtectClock`,
   `ProtectHostname`, `SystemCallArchitectures=native`. Not added, because they would break what only root can do: a capability list, `ProtectKernelTunables`,
   `ProtectControlGroups`, `RestrictNamespaces` (`nsenter` into the containers), `ProtectSystem=strict`, `MemoryDenyWriteExecute`.
-- **What the local web view does not defend is now written down** ([SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md)): on portable, macOS and Windows it has no token, so another
-  local account can post its CSRF token to the AI, Telegram and (portable, desktop) settings forms. What defends and what to set today are there, and the desktop
-  app's adoption of an earlier core by its pid file is listed as a [known limitation](docs/DESKTOP.md).
+- **A portable run and the desktop app now ask for a token on 127.0.0.1.** The loopback view had none, so any other account of the machine could read the
+  CSRF token from the page and post it to the AI and Telegram forms and, in these two modes, to the settings forms that write the user's `config.ini`. Each data
+  folder now has its own: `data/web.token` (`secrets.token_urlsafe`, 0600; Windows: an ACL for the user), made at the first start, kept between starts, new if
+  you delete it, never in `config.ini`, a log or a page. `run.sh`, `run.cmd` and the app read it and open the dashboard through a 0600 page (`data/open.html`,
+  `open-app.html`) instead of putting it on a command line. `[web] token_file` now also applies to an installation's `--local` view when `[web] enabled = no`.
+  **An installation on macOS or Windows without `token_file` still has none**: the browser is opened by the logged-in user, so a token it can read every other
+  local user could read; this and what to set instead are in [SECURITY.md](SECURITY.md) and [docs/WEB.md](docs/WEB.md#the-loopback-view-and-the-other-accounts-of-the-machine).
+- **The desktop app signals only the core.** Adopting a core an earlier run left, and stopping it, used the pid in `portable.pid` without checking it: a reused pid
+  was sent SIGTERM, and a pid of 0 would have reached the app's own process group. A pid below 2 is never signalled, and the process must be running this app's
+  own `run.sh` / `run.ps1` (checked by `/proc`, `ps` or `Get-CimInstance`) before it is adopted and again before it is stopped ([docs/DESKTOP.md](docs/DESKTOP.md#adopting-an-earlier-core)).
+- **The desktop workflow no longer pipes `sh.rustup.rs` into a shell.** Where a runner has no Rust (the hosted ones do), it downloads `rustup-init` of one pinned
+  rustup release (1.29.1) and checks it against the SHA-256 written in the workflow, on Linux, macOS and Windows (the hashes equal the ones `static.rust-lang.org` publishes).
 
 ### Added
 

@@ -20,6 +20,8 @@ use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+mod guard;
+
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
@@ -59,8 +61,10 @@ fn parse_args<S: AsRef<str>>(argv: &[S]) -> Opts {
 /// What the app knows about the core.
 #[derive(Default)]
 struct Core {
-    child: Option<Child>, // the core this app started
-    adopted: Option<u32>, // or the one a run of this app that ended badly left running: stopped on quit all the same
+    child: Option<Child>,       // the core this app started
+    adopted: Option<u32>, // or the one a run of this app that ended badly left running: stopped on quit all the same (if it still is the core)
+    script: Option<PathBuf>, // core/run.sh (core\run.ps1): what the process of the core runs, to know it is the core
+    open_page: Option<PathBuf>, // data/open-app.html: what "Open in the browser" opens (the token is not put on a command line)
     base: Option<String>, // http://127.0.0.1:PORT, once the core said it
     status: String,       // what the start page says
     failed: bool,
@@ -305,9 +309,9 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn open_in_browser(app: &AppHandle) {
-    let base = shared(app).lock().unwrap().base.clone();
-    if let Some(base) = base {
-        let _ = app.opener().open_url(format!("{base}/app"), None::<&str>);
+    let page = shared(app).lock().unwrap().open_page.clone();
+    if let Some(page) = page {
+        let _ = app.opener().open_path(page.to_string_lossy().into_owned(), None::<&str>);
     }
 }
 
@@ -370,9 +374,13 @@ fn spawn(core: &Path, data: &Path) -> std::io::Result<Child> {
     cmd.spawn()
 }
 
-/// One that an earlier run left running (the app ended without stopping it): its pid and its address, when it still answers.
-fn running_core(data: &Path) -> Option<(u32, String)> {
+/// One that an earlier run left running (the app ended without stopping it): its pid and its address, when it still answers and the
+/// pid is really the core's (a pid is reused: portable.pid may name a process that has nothing to do with it, and it is signalled later).
+fn running_core(data: &Path, script: &Path) -> Option<(u32, String)> {
     let pid: u32 = std::fs::read_to_string(data.join("portable.pid")).ok()?.trim().parse().ok()?;
+    if !guard::is_core(pid, script) {
+        return None;
+    }
     let log = std::fs::read_to_string(data.join("logs").join("web.log")).ok()?;
     let base = log.lines().filter_map(|l| address(l, WEB_LOG_ADDRESS)).last()?;
     let addr: SocketAddr = base.trim_start_matches("http://").parse().ok()?;
@@ -389,6 +397,7 @@ fn run_core(app: AppHandle, core: PathBuf, data: PathBuf, smoke: bool) {
             format!("The app has no core: {} is missing (a build from a checkout needs tools/desktop_core.py first).", script.display());
         return give_up(&app, &msg, smoke);
     }
+    state.lock().unwrap().script = Some(script.clone());
     let mut child = match spawn(&core, &data) {
         Ok(c) => c,
         Err(e) => return give_up(&app, &format!("The core could not be started: {e}"), smoke),
@@ -426,7 +435,7 @@ fn run_core(app: AppHandle, core: PathBuf, data: PathBuf, smoke: bool) {
     if base.is_none() && ended {
         let busy = state.lock().unwrap().lines.iter().any(|l| l.contains("already running"));
         if busy {
-            if let Some((pid, found)) = running_core(&data) {
+            if let Some((pid, found)) = running_core(&data, &script) {
                 let mut c = state.lock().unwrap();
                 c.child = None;
                 c.adopted = Some(pid);
@@ -445,12 +454,26 @@ fn run_core(app: AppHandle, core: PathBuf, data: PathBuf, smoke: bool) {
             return give_up(&app, &msg, smoke);
         }
     };
-    state.lock().unwrap().base = Some(base.clone());
+    // the view asks for the token the core made in the data folder (web.token, 0600): the window and the browser get it, no other account can
+    let token = match guard::read_token(&data) {
+        Some(t) => t,
+        None => {
+            let msg = format!("The dashboard is up but its access token ({}) cannot be read.", data.join("web.token").display());
+            stop(&app);
+            return give_up(&app, &msg, smoke);
+        }
+    };
+    {
+        let mut c = state.lock().unwrap();
+        c.base = Some(base.clone());
+        c.open_page = guard::write_open_page(&data, &format!("{base}/app?token={token}"));
+    }
     if smoke {
-        return smoke_test(&app, &base);
+        return smoke_test(&app, &base, &token);
     }
     if let Some(w) = app.get_webview_window(WINDOW) {
-        if let Ok(url) = Url::parse(&format!("{base}/app")) {
+        if let Ok(url) = Url::parse(&format!("{base}/app?token={token}")) {
+            // the view moves it into a cookie and redirects to /app
             state.lock().unwrap().on_start_page = false;
             let _ = w.navigate(url);
         }
@@ -562,12 +585,18 @@ fn stop(app: &AppHandle) {
         }
     }
     if let Some(pid) = adopted {
-        terminate(pid);
+        let script = state.lock().unwrap().script.clone();
+        if script.map_or(false, |s| guard::is_core(pid, &s)) {
+            terminate(pid); // only if it still is the core: the pid may have been given to another process since it was adopted
+        }
     }
 }
 
 #[cfg(unix)]
 fn terminate(pid: u32) {
+    if !guard::pid_ok(pid) {
+        return; // kill(0) would signal our own process group, kill(1) init
+    }
     if let Ok(pid) = i32::try_from(pid) {
         unsafe {
             libc::kill(pid, libc::SIGTERM);
@@ -577,6 +606,9 @@ fn terminate(pid: u32) {
 
 #[cfg(unix)]
 fn kill(pid: u32) {
+    if !guard::pid_ok(pid) {
+        return;
+    }
     if let Ok(pid) = i32::try_from(pid) {
         unsafe {
             libc::kill(-pid, libc::SIGKILL); // its group: run.sh and all it started (spawn gave it a group of its own)
@@ -586,6 +618,9 @@ fn kill(pid: u32) {
 
 #[cfg(windows)]
 fn terminate(pid: u32) {
+    if !guard::pid_ok(pid) {
+        return;
+    }
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
@@ -604,12 +639,12 @@ fn kill(pid: u32) {
 
 // ---- --smoke-test --------------------------------------------------------------------------------------------------------
 
-fn get(base: &str, path: &str) -> std::io::Result<(u16, String)> {
+fn get(base: &str, path: &str, token: &str) -> std::io::Result<(u16, String)> {
     let host = base.trim_start_matches("http://");
     let addr: SocketAddr = host.parse().map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "not an address"))?;
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(10))?;
     s.set_read_timeout(Some(Duration::from_secs(30)))?;
-    write!(s, "GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n")?;
+    write!(s, "GET {path} HTTP/1.0\r\nHost: {host}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n")?;
     let mut body = Vec::new();
     s.read_to_end(&mut body)?;
     let text = String::from_utf8_lossy(&body).into_owned();
@@ -617,11 +652,11 @@ fn get(base: &str, path: &str) -> std::io::Result<(u16, String)> {
     Ok((status, text))
 }
 
-fn smoke_test(app: &AppHandle, base: &str) {
+fn smoke_test(app: &AppHandle, base: &str, token: &str) {
     let checks: [(&str, &str); 2] = [("/app", "<main id=\"app\""), ("/api/v1/summary", "\"api\":1")];
     let mut failed = Vec::new();
     for (path, want) in checks {
-        match get(base, path) {
+        match get(base, path, token) {
             Ok((200, text)) if text.contains(want) => println!("smoke test: {base}{path}: 200, {want}"),
             Ok((status, _)) => failed.push(format!("{path}: status {status}, or no {want}")),
             Err(e) => failed.push(format!("{path}: {e}")),

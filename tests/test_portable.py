@@ -1416,9 +1416,9 @@ class RunSh(unittest.TestCase):
             time.sleep(0.2)
         self.fail("the web view did not come up")
 
-    def get(self, port, path):
+    def get(self, port, path, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
-        c.request("GET", path)
+        c.request("GET", path, headers=headers or {})
         r = c.getresponse()
         body = r.read().decode("utf-8", "replace")
         c.close()
@@ -1431,9 +1431,22 @@ class RunSh(unittest.TestCase):
         try:
             port = self.web_url(p, os.path.join(self.dir, "data", "logs", "web.log"))
             self.assertEqual(self.get(port, "/healthz")[0], 200)
-            status, body = self.get(port, "/?fit=1")  # no token: loopback only
+            status, body = self.get(port, "/?fit=1")  # loopback only, and the folder's own token: another account has none
+            self.assertEqual(status, 401)
+            self.assertNotIn("csrf", body.lower())
+            tokfile = os.path.join(self.dir, "data", "web.token")
+            self.assertEqual(oct(os.stat(tokfile).st_mode & 0o777), "0o600")
+            tok = read(tokfile).strip()
+            status, body = self.get(port, "/?fit=1", {"Cookie": "nuc_token=" + tok})
             self.assertEqual(status, 200)
             self.assertIn("nuc-console", body)
+            opener = os.path.join(self.dir, "data", "open.html")  # what the browser is given, instead of the token on a command line
+            deadline = time.time() + 30  # run.sh writes it a moment after the view logs its address
+            while time.time() < deadline and not os.path.exists(opener):
+                time.sleep(0.1)
+            self.assertEqual(oct(os.stat(opener).st_mode & 0o777), "0o600")
+            self.assertIn("&token=" + tok, read(opener))
+            self.assertIn("http://127.0.0.1:%d/?fit=1&token=" % port, read(opener))
             pidfile = os.path.join(self.dir, "data", "portable.pid")
             self.assertEqual(int(read(pidfile)), p.pid)
             status = os.path.join(self.dir, "data", "notify", "status.json")  # the Telegram notifier, beside the web view: it takes the page's requests

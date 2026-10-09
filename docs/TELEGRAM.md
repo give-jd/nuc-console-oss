@@ -71,7 +71,7 @@ choice into `config.ini` and delete `web.json`.
 @…*), and *Switch off* tells the paired chat before it goes quiet: someone who can open the web view cannot quietly take the alerts away.
 
 **Who can do it:** whoever can open the web view, as for the AI page's buttons: on Linux the web view is off unless you enable it, then
-loopback (with `tailscale serve`: your tailnet) or a token; on macOS and Windows it listens on 127.0.0.1 (every local user and program).
+loopback (with `tailscale serve`: your tailnet) or a token; in a macOS/Windows installation it listens on 127.0.0.1 (every local user and program; a portable run and the desktop app ask for their `data/web.token`).
 The forms carry the page's CSRF token and the same checks as the AI page ([WEB.md](WEB.md#the-telegram-pages-buttons)). If that is more
 than you want, `[telegram] web_actions = no`: the page only shows, a post is refused with `403`, and the notifier reads no request.
 

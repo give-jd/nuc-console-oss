@@ -20,7 +20,7 @@
        $env:NUC_CONSOLE_DATA, an absolute path), which is created on the first run (config.ini is copied there once: your edits
        stay);
     3. starts the collector (as you: without administrator rights the sections that need them show less; right-click run.cmd,
-       Run as administrator, shows everything) and the web view on 127.0.0.1 only (no token: nothing else can connect), and
+       Run as administrator, shows everything) and the web view on 127.0.0.1 only (it asks for a token of this folder, data\web.token, that only you can read), and
        opens your default browser;
     4. closing this window or Ctrl+C stops both (a job object kills them even if this window is closed hard).
   Update: bin\nuc-console-update.cmd (keeps .\data).
@@ -29,7 +29,7 @@
   The port of the web view (default: a free one).
 
 .PARAMETER NoOpen
-  Do not open the browser; the address is printed.
+  Do not open the browser; the address is printed, and data\open.html opens it with the access token.
 
 .PARAMETER Problems
   List what needs attention now, why it matters and how to fix it (run it while another window runs run.cmd), then exit.
@@ -323,8 +323,18 @@ try {
     }
     $url = "$url/?fit=1"
     Say "dashboard on $url (close this window or press Ctrl+C to stop)"
+    # The view asks for this folder's token (data\web.token, made by web.py, readable by you only). The browser is not given it on its command
+    # line (other users can list that): it opens data\open.html, a page that sends it on to the view, which moves it into a cookie.
+    $tokenFile = Join-Path $Data 'web.token'
+    $token = if (Test-Path -LiteralPath $tokenFile) { (Get-Content -LiteralPath $tokenFile -Raw).Trim() } else { '' }
+    if ($token -notmatch '^[A-Za-z0-9._~-]{16,}$') { throw "no usable access token in $tokenFile (delete the file and start again)" }
+    $openFile = Join-Path $Data 'open.html'
+    Set-Content -LiteralPath $openFile -Encoding ASCII -Value ('<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=' + $url + '&token=' + $token + '"><title>nuc-console</title>')
+    & icacls.exe $openFile /inheritance:r /grant:r ($env:USERDOMAIN + '\' + $env:USERNAME + ':F') | Out-Null
+    if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath $openFile -Force -ErrorAction SilentlyContinue; throw "could not restrict $openFile to your account" }
+    Say "the page asks for a token: open $openFile in your browser (it carries it; the file is yours alone)"
     if (-not $NoOpen) {
-        try { Start-Process $url } catch { Say "could not open the browser: open $url yourself" }
+        try { Start-Process $openFile } catch { Say "could not open the browser: open $openFile yourself" }
     }
 
     # the baseline of the port alarms: once the collector has written its first complete snapshot (without administrator

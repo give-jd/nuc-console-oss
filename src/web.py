@@ -53,7 +53,7 @@ import ui
 import webapi
 import webcss
 import webjs
-from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, check_bind, is_loopback, page_csp, read_token
+from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import (canvas, graph_body, graph_doc, graph_here, graph_select, graph_url, map_body, map_here, map_native, map_nodes, map_state,
                     mode_switch, prune, state_params, tree_url, zoom_steps)
 from webpages import (AiUi, ai_asked, ai_body, ai_native, ai_nodes, ai_prompt_node, health_body, health_native, health_nodes, sel_index,
@@ -1356,13 +1356,17 @@ def main(argv):
         return 0 if cfg["enabled"] else 1
     if nuc_config.PORTABLE or ("--local" in argv and not cfg["enabled"]):
         # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says.
-        # A portable run (run.sh / run.ps1, NUC_CONSOLE_HOME) is always like that: nothing listens beyond 127.0.0.1, no token
-        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="")
+        # A portable run (run.sh / run.ps1, NUC_CONSOLE_HOME) is always like that: nothing listens beyond 127.0.0.1, and [web] token_file is
+        # ignored. An installation (macOS/Windows) keeps the token_file the user set.
+        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="" if nuc_config.PORTABLE else cfg["token_file"])
     if not cfg["enabled"] and not demo:
         print("nuc-console web view is disabled ([web] enabled = no in config.ini)")
         return 0
     try:
-        token = read_token(cfg["token_file"])
+        if nuc_config.PORTABLE and not demo:  # a portable run / the desktop app: this folder's own token (docs/WEB.md), so that another account of the machine cannot use the view
+            token = local_token(os.path.join(os.path.abspath(nuc_config.PORTABLE), LOCAL_TOKEN))
+        else:
+            token = read_token(cfg["token_file"])
         check_bind(cfg["bind"], token)
         port = int(argv[argv.index("--port") + 1]) if "--port" in argv else cfg["port"]
         if demo:  # --demo-os windows|darwin: the demo as that OS's collector writes it; --demo-health little|none: the HEALTH page of a young history

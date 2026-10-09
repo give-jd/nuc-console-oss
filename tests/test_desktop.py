@@ -380,6 +380,19 @@ class Rust(unittest.TestCase):
         self.assertIn("already running", read(os.path.join(ROOT, "run.sh")))  # an earlier core is found by that message
         self.assertIn("already running", read(os.path.join(ROOT, "run.ps1")))
 
+    def test_the_app_uses_the_cores_token_and_signals_only_the_core(self):
+        src, guard = self.src, read(os.path.join(ROOT, "desktop", "src-tauri", "src", "guard.rs"))
+        self.assertIn("mod guard;", src)
+        self.assertIn('data.join("web.token")', src + guard)   # what src/webhttp.py local_token() writes
+        self.assertEqual(re.search(r'LOCAL_TOKEN = "([^"]+)"', read(os.path.join(ROOT, "src", "webhttp.py"))).group(1), "web.token")
+        self.assertIn("/app?token={token}", src)                 # the window; the browser gets open-app.html, never the token on a command line
+        self.assertNotIn("open_url(format!", src)
+        self.assertIn("Authorization: Bearer {token}", src)      # the smoke test
+        self.assertIn("guard::is_core(pid, script)", src)       # adopting an earlier core
+        self.assertIn("guard::is_core(pid, &s)", src)           # and stopping it
+        self.assertEqual(src.count("if !guard::pid_ok(pid)"), 3)  # terminate (unix, windows) and kill: never pid 0 or 1
+        self.assertIn("pid > 1 && i32::try_from(pid).is_ok()", guard)
+
     def test_the_window_shows_only_the_app_and_the_core(self):
         src = self.src
         self.assertIn(".on_navigation(move |url| allowed(&nav, url))", src)
@@ -504,6 +517,18 @@ class Workflow(unittest.TestCase):
         self.assertEqual(runners["linux-arm64"], "ubuntu-22.04-arm")
         self.assertEqual(runners["windows-arm64"], "windows-11-arm")
         self.assertIn("fail-fast: false", self.text)
+
+    def test_rust_is_installed_from_a_pinned_rustup_init_never_from_a_script_piped_into_a_shell(self):
+        t = self.text
+        self.assertNotIn("sh.rustup.rs", t)
+        self.assertNotRegex(t, r"curl[^\n]*\|\s*(sh|bash)")
+        hashes = re.findall(r"sha256=([0-9a-f]+)|'([0-9a-f]{64})'", t)
+        self.assertEqual(len([h for pair in hashes for h in pair if h]), 6)   # 4 Unix triples, 2 Windows
+        for h in [h for pair in hashes for h in pair if h]:
+            self.assertEqual(len(h), 64, h)
+        self.assertEqual(t.count("https://static.rust-lang.org/rustup/archive/1.29.1/"), 2)               # the Unix download and the Windows one: one release
+        self.assertIn("sha256sum --check", t)
+        self.assertIn("Get-FileHash", t)
 
     def test_the_packages_it_makes_are_the_ones_the_release_publishes(self):
         names = []
