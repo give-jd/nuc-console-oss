@@ -1439,6 +1439,9 @@ class RunSh(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("nuc-console", body)
             opener = os.path.join(self.dir, "data", "open.html")  # what the browser is given, instead of the token on a command line
+            deadline = time.time() + 30  # run.sh writes it a moment after the view logs its address
+            while time.time() < deadline and not os.path.exists(opener):
+                time.sleep(0.1)
             self.assertEqual(oct(os.stat(opener).st_mode & 0o777), "0o600")
             self.assertIn("&token=" + tok, read(opener))
             self.assertIn("http://127.0.0.1:%d/?fit=1&token=" % port, read(opener))
