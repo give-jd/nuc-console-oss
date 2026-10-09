@@ -46,7 +46,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 # heats up wrong. Nothing about exposure, ports, the firewall, authentication or the data those judgements read (the network and container
 # collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
 # mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
-MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "failed-units", "collector-boot")
+MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot")
 
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
