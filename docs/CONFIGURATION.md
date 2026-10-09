@@ -51,7 +51,7 @@ their start. In a portable run and the desktop app the settings page turns them 
 | `mode` | `overview` | `overview`: one screen, no keyboard needed. `rotate`: 3 pages (System, Network & firewall, Boot), keys `←` `→` move through them (`1` is the first; `2`-`5` are the Map, CPU, Health and AI screens) |
 | `sections` | by priority | Fixed on-screen order, top-left to bottom-right. Names: `attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks`. Names you leave out keep their default place at the end |
 | `columns`, `rows` | `0` | Layout size in characters; `0` = the real console size. Never larger than the real console. Use it when elements run off the screen (e.g. `columns = 235`, `rows = 65`) |
-| `spacing` | `1` | A blank line under each section title. If something would be cut, the layout is first retried without it: complete content beats spacing |
+| `spacing` | `1` | A blank line under each section title. If something would be cut, the layout is first retried without it, then also without the blank lines between sections: complete content beats spacing |
 | `details` | `yes` | The overview cuts a list only when it really does not fit; those sections then get **Details** pages showing everything, rotating on the monitor (it has no keyboard). `no`: never rotate |
 | `overview_seconds` | `45` | How long the overview stays before the Details pages (10-600) |
 | `cpu_in_rotation` | `no` | `yes`: the CPU screen joins the pages the monitor rotates through (a monitor with no keyboard) |
@@ -127,6 +127,17 @@ other presets bring their own order, and `[dashboard] sections` does not change 
 settings page of the new web interface, which also shows where every value comes from), this section, the preset, the built-in default. The console has no
 URL and no cookie: it reads this section, then the preset, then the default. The server never writes
 the browser's choices anywhere. The settings page has an **Export** button that gives you a `[ui]` block like the one above, to paste here.
+
+## `[console]` — font and screen blanking of the Linux console (both off by default)
+
+Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root each time `nuc-console.service` starts (`ExecStartPre=-+`), on the terminal the dashboard draws on (`NUC_CONSOLE_VT`). Apply a change with `sudo systemctl restart nuc-console`. A missing `setfont` or `setterm`, an unknown font or an error never stops the dashboard: the step is skipped and the reason is in `journalctl -u nuc-console`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `font` | empty | A font for `setfont`, e.g. `Lat15-TerminusBold32x16` (Terminus 16x32: readable on a full-HD monitor; Debian/Ubuntu: `sudo apt install console-terminus`). Empty: the font stays as it is. Letters, digits and `_ . + -` only |
+| `blank_minutes` | `0` | Minutes without a key before the screen goes black and the monitor sleeps (`setterm --blank` and `--powerdown`), 0–60; `0` = never. The header already moves every 10 minutes against burn-in; this is what lets the monitor rest |
+
+Why not the kernel parameter `consoleblank=` (and `dpkg-reconfigure console-setup`)? Both need a bootloader or system-wide change and a reboot, apply to every console and not only the dashboard's, and one wrong edit of the kernel command line can stop the machine booting: the installer never does it. The cost of this way: it is set when the service starts (a reboot or restart re-applies it) and only on the dashboard's terminal. If you want the kernel way anyway, add `consoleblank=600` to `GRUB_CMDLINE_LINUX_DEFAULT` yourself. **Check once** that the monitor really sleeps with the dashboard redrawing every couple of seconds: output to the console can wake a blanked screen on some kernels; if it does, use the monitor's own sleep timer.
 
 ## `[display]` — the dashboard on macOS and Windows
 

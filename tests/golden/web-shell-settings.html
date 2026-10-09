@@ -536,6 +536,26 @@ hidden =
 </p>
 </div>
 </details>
+<details class="cfgs" id="cfg-console">
+<summary>
+<code>[console]</code> Linux text console (an installation&#x27;s service)</summary>
+<p class="hintl">The font and the screen blanking of the monitor the dashboard draws on, applied when nuc-console.service starts; both off by default.</p>
+<div class="ck cko" id="k-console-font">
+<span class="cn">
+<code>font</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A font for setfont, e.g. Lat15-TerminusBold32x16 (big text on a full-HD monitor). Empty: the font stays as it is.</p>
+</div>
+<div class="ck cko" id="k-console-blank_minutes">
+<span class="cn">
+<code>blank_minutes</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">Minutes without a key before the screen goes black and the monitor sleeps; 0 = never. <span class="sm">0-60 · default 0</span>
+</p>
+</div>
+</details>
 <details class="cfgs" id="cfg-web">
 <summary>
 <code>[web]</code> Web view (an installation&#x27;s service)</summary>
