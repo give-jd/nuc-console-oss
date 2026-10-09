@@ -9,7 +9,7 @@ Fields (a field that is not set falls through to the next source):
   start_view overview | map | cpu | health | ai          v<o|m|c|h|a>
   preset     default | security | server | desktop        p<n|s|v|d>   (a preset is a layout + KPIs + hidden cards)
   order      severity | fixed                            o<s|f>
-  kpis       up to 8 KPI ids, in order                   k<kpi2>(_<kpi2>)*
+  kpis       up to 8 KPI ids, in order (config.ini: none)  k<kpi2>(_<kpi2>)*
   layout     the visible cards in order, width 1-4       l<card2>[1-4][x](_...)*   (x = hidden)
   hidden     the cards not shown                         (the x items of l; a hidden card keeps its width: `db3x`)
 
@@ -44,6 +44,7 @@ KPI_IDS = ("problems", "internet", "lan", "beyond", "db_lan", "firewall", "cpu",
            "unhealthy", "failed_units", "ssh", "tailnet", "rx", "tx", "uptime", "health", "ai")
 CARDS = tuple(nuc_config.SECTIONS)  # the card ids: the overview sections
 MAX_KPIS = 8
+NOTHING = "none"  # [ui] kpis = none: no KPI row at all (the empty list; a blank value sets nothing)
 MAX_WIDTH = 4  # a card is 1-4 columns wide on the web
 COOKIE_MAX = 256
 COOKIE_NAME = "nuc_ui"
@@ -137,8 +138,8 @@ def _item(it):
 
 
 def _clean(d):
-    """The valid part of a partial prefs dict, canonical; never raises. An empty layout or kpis is dropped (it says nothing);
-    an empty hidden stays (it says 'nothing is hidden'). A card both in layout and hidden is hidden."""
+    """The valid part of a partial prefs dict, canonical; never raises. An empty layout is dropped (it says nothing); an empty kpis
+    stays (no row: `kpis = none`); an empty hidden stays (it says 'nothing is hidden'). A card both in layout and hidden is hidden."""
     out = {}
     if not isinstance(d, dict):
         return out
@@ -147,7 +148,9 @@ def _clean(d):
         if isinstance(v, str) and v in codes:
             out[field] = v
     ks = d.get("kpis")
-    if isinstance(ks, (list, tuple)):
+    if isinstance(ks, (list, tuple)) and not ks:
+        out["kpis"] = []  # `kpis = none` in config.ini: an empty row, not "unset" (a cookie cannot say it: dump_cookie leaves it out)
+    elif isinstance(ks, (list, tuple)):
         ids = []
         for k in ks:
             if isinstance(k, str) and k in KPI_CODES and k not in ids:
@@ -235,7 +238,7 @@ def dump_cookie(prefs):
     """Partial prefs -> the canonical string ('1' for none): the same preferences always give the same string."""
     p = _clean(prefs)
     segs = [letter + codes[p[field]] for field, letter, codes in _SCALARS if field in p]
-    if "kpis" in p:
+    if p.get("kpis"):  # an empty row has no cookie form: only config.ini says `none`
         segs.append("k" + "_".join(KPI_CODES[k] for k in p["kpis"]))
     items = [CARD_CODES[c] + str(w) for c, w in p.get("layout", ())] + [CARD_CODES[c] + (str(p["hidden_w"][c]) if c in p.get("hidden_w", ()) else "") + "x"
                                                      for c in p.get("hidden", ())]
@@ -431,6 +434,8 @@ def parse_ui(section, sections_default=None):
             warns.append(f"[ui] {key} must be one of {', '.join(allowed)}: '{_show(v)}' ignored")
     if "kpis" in sec:
         asked, ids = _tokens(sec["kpis"]), []
+        if asked == [NOTHING]:
+            ui["kpis"], asked = [], []
         for t in asked:
             if t not in KPI_CODES:
                 warns.append(f"[ui] kpis: unknown name '{_show(t)}' ignored (known: {', '.join(KPI_IDS)})")
@@ -509,7 +514,7 @@ def export_ini(prefs):
         if field in p:
             lines.append(f"{field} = {p[field]}")
     if "kpis" in p:
-        lines.append("kpis = " + ", ".join(p["kpis"]))
+        lines.append("kpis = " + (", ".join(p["kpis"]) or NOTHING))
     if "layout" in p:
         lines.append("layout = " + ", ".join(c if w == 1 else f"{c}:{w}" for c, w in p["layout"]))
     if "hidden" in p:
