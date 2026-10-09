@@ -31,6 +31,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Fixed
 
+- **With `[features] containers = no` the `containers` and `unhealthy` key figures no longer read a green "0/0" / "0".** They now show "-"
+  ("switched off in config.ini"), like the firewall one; so does `health` when `[features] health = no`, which the console used to fill from
+  an old history file.
 - The console rotated to a second (Details) screen on a busy host although everything fit on the first. When a section was still cut ("+N
   more") the layout was retried without the blank line under each title, but not without the blank lines between sections; a column a
   couple of rows short pushed the firewall rules to a second screen. It now also retries without those separators before giving up, so
