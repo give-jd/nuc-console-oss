@@ -94,6 +94,7 @@ install -d "$UNITD"
 {
     echo "[Service]"
     echo "TTYPath=/dev/tty$VT"
+    echo "Environment=NUC_CONSOLE_VT=$VT"  # src/ttyprep.py: font and blanking of that tty ([console] in config.ini)
     [ -z "$TZ_VAL" ] || echo "Environment=TZ=$TZ_VAL"
 } > "$UNITD/local.conf"
 install -d /etc/nuc-console

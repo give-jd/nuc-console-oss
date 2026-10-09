@@ -68,6 +68,8 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
      "that is not set falls to the preset, then to the built-in default."),
     ("display", "Display at login (macOS and Windows installations)",
      "How an installed nuc-console shows itself when you log in. The desktop app is its own window: of this section it uses zoom only."),
+    ("console", "Linux text console (an installation's service)",
+     "The font and the screen blanking of the monitor the dashboard draws on, applied when nuc-console.service starts; both off by default."),
     ("web", "Web view (an installation's service)",
      "The optional web service of an installation, the dashboard's only network listener. The desktop app and a portable run always "
      "serve 127.0.0.1 on a port of their own, without a token: they use the grid size and allowed_hosts only."),
@@ -180,6 +182,13 @@ KEYS = (
         ("browser", TEXT, "auto", INSTALLED,
          "The browser of the full-screen window: auto = Edge, then Chrome, then Firefox (Windows); Chrome, Edge, Brave, Chromium, else "
          "Safari (macOS); or the full path of a Chromium-based browser.", {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{1,%d}" % MAX_TEXT)}),
+    ))
+    + _k("console", (
+        ("font", TEXT, "", INSTALLED,
+         "A font for setfont, e.g. Lat15-TerminusBold32x16 (big text on a full-HD monitor). Empty: the font stays as it is.",
+         {"pattern": re.compile(r"[A-Za-z0-9_.+-]{0,64}")}),
+        ("blank_minutes", INT, "0", INSTALLED,
+         "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
     ))
     + _k("web", (
         ("enabled", BOOL, "no", INSTALLED, "yes: an installation runs the web view as a service (off by default)."),
