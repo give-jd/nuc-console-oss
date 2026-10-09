@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: shellcheck -S warning install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-update bin/nuc-console-ai bin/nuc-console-ask bin/nuc-console-telegram
+      - run: shellcheck -S warning install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-accept bin/nuc-console-problems bin/nuc-console-update bin/nuc-console-ai bin/nuc-console-config bin/nuc-console-ask bin/nuc-console-telegram
 
   # The web shell in a real browser (the Chrome the runner ships): every view in every theme and density, with and without scripts, the wall page.
   # It fails on a Content-Security-Policy or Trusted Types violation, a script error or a page without its landmarks; the screenshots are kept
