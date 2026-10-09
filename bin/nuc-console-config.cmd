@@ -7,5 +7,5 @@ rem The NUC_CONSOLE_* variables are cleared: they must not be able to redirect a
 setlocal
 set NUC_CONSOLE_HOME=
 set NUC_CONSOLE_CONFIG=
-"%~dp0..\python\python.exe" -B "%~dp0..\app\confmigrate.py" %*
+"%~dp0..\python\python.exe" -E -B "%~dp0..\app\confmigrate.py" %*
 exit /b %errorlevel%

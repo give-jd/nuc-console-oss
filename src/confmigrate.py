@@ -16,6 +16,7 @@ import os
 import re
 import stat
 import sys
+import tempfile
 import time
 
 import nuc_config
@@ -190,10 +191,15 @@ def migrate(path, dry_run=False, yes=False, out=print, ask=input, load=nuc_confi
         out(diff.rstrip("\n"))
         out("dry run: nothing was changed")
         return 0
-    tmp = path + ".migrating"
+    tmp = None
+    bak = None
     try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        # mkstemp: a name nobody can predict, created O_EXCL at 0600 (a planted link under a fixed name would be written through)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".config.ini.")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(new)
+            f.flush()
+            os.fsync(f.fileno())
         after = load(tmp, warn=lambda _: None)
         bad = _differs(before, after)
         if after.get("config_error") or bad:
@@ -208,20 +214,51 @@ def migrate(path, dry_run=False, yes=False, out=print, ask=input, load=nuc_confi
             except EOFError:
                 out("cancelled: nothing was changed (no answer; --yes does not ask)")
                 return 1
-        bak = "%s.bak-%s" % (path, time.strftime("%Y%m%d-%H%M%S"))
-        fd = os.open(bak, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the old file may name a token file: nobody else reads the copy
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        for n in range(1, 100):  # two runs in the same second: -2, -3 ...
+            bak = "%s.bak-%s%s" % (path, stamp, "" if n == 1 else "-%d" % n)
+            try:
+                fd = os.open(bak, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the old file may name a token file: nobody else reads the copy
+                break
+            except FileExistsError:
+                continue
+        else:
+            out("cannot write: too many backups of the same second")
+            return 1
         with os.fdopen(fd, "wb") as f:
             f.write(old_bytes)
+            f.flush()
+            os.fsync(f.fileno())
         os.chmod(tmp, mode)
+        if hasattr(os, "chown"):  # the file keeps its owner and group (run with sudo, it would be root's otherwise)
+            try:
+                st = os.stat(path)
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except OSError:
+                pass
+        if os.path.islink(path):
+            out("refused: %s became a symbolic link" % path)
+            return 1
         os.replace(tmp, path)
+        tmp = None
+        if hasattr(os, "O_DIRECTORY"):  # the rename itself survives a power cut
+            try:
+                dfd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            except OSError:
+                pass
     except OSError as e:
         out("cannot write: %s (the same rights as editing config.ini are needed: sudo on Linux and macOS, an administrator prompt on Windows)" % e)
         return 1
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
     out("migrated: %s (old file kept as %s)" % (path, os.path.basename(bak)))
     if lost:
         out("%d comment line(s) of the old layout were not carried: they are in the copy" % lost)

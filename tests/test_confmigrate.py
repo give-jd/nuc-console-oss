@@ -12,6 +12,7 @@ import hermetic  # noqa: E402,F401  (first: the host's state stays out of the te
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -148,7 +149,7 @@ class Migrate(unittest.TestCase):
         self.assertIn("--- config.ini", out)
         self.assertIn("+++ config.ini (migrated)", out)
         self.assertIn("-containers      = yes   # Docker containers list", out)
-        self.assertEqual(os.listdir(self.dir).count("config.ini.migrating"), 0)
+        self.assertEqual([n for n in os.listdir(self.dir) if n.startswith(".config.ini.")], [])
 
     def test_without_yes_it_asks_and_no_answer_changes_nothing(self):
         self.put(OLD)
@@ -180,7 +181,7 @@ class Migrate(unittest.TestCase):
         rc, out = self.run_cmd(yes=True)
         self.assertEqual((rc, self.read(), self.backups()), (1, OLD, []))
         self.assertIn("web", out)
-        self.assertNotIn("config.ini.migrating", os.listdir(self.dir))
+        self.assertEqual([n for n in os.listdir(self.dir) if n.startswith(".config.ini.")], [])
 
     def test_effective_configuration_equal_for_many_shapes(self):
         shapes = [set_old(OLD, "features", k, "no") for k in ("containers", "ai", "fail2ban", "thermal")]
@@ -206,6 +207,27 @@ class Migrate(unittest.TestCase):
         self.assertTrue(os.path.islink(self.path))
         with open(real, encoding="utf-8") as f:
             self.assertEqual(f.read(), OLD)
+
+    def test_a_planted_link_under_a_guessable_name_is_not_written_through(self):
+        self.put(OLD)
+        victim = os.path.join(self.dir, "victim")
+        with open(victim, "w") as f:
+            f.write("keep")
+        for name in ("config.ini.migrating", "config.ini.tmp"):
+            os.symlink(victim, os.path.join(self.dir, name))
+        rc, _ = self.run_cmd(yes=True)
+        self.assertEqual(rc, 0)
+        with open(victim) as f:
+            self.assertEqual(f.read(), "keep")
+        self.assertFalse(os.path.islink(self.path))
+
+    def test_two_runs_in_the_same_second_keep_both_backups(self):
+        with mock.patch("confmigrate.time.strftime", return_value="20260101-000000"):
+            self.put(OLD)
+            self.assertEqual(self.run_cmd(yes=True)[0], 0)
+            self.put(OLD)
+            self.assertEqual(self.run_cmd(yes=True)[0], 0)
+        self.assertEqual(sorted(self.backups()), ["config.ini.bak-20260101-000000", "config.ini.bak-20260101-000000-2"])
 
     def test_missing_file_or_dist(self):
         rc, out = self.run_cmd(yes=True)
