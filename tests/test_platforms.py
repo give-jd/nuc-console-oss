@@ -35,6 +35,9 @@ import htmlview  # noqa: E402
 import nuc_config  # noqa: E402
 import procs  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
+import hostdata  # noqa: E402
+import display  # noqa: E402
 import cardlines  # noqa: E402
 import exposure  # noqa: E402
 import ansi  # noqa: E402
@@ -386,7 +389,7 @@ class NativeCollector(unittest.TestCase):
         d = collector.collect_net()
         self.assertIn("firewall", d["errors"])
         self.assertEqual(d["listeners"][0]["fw"], ["unknown", "firewall unreadable"])
-        pb = render.problems(d, {"ts": time.time(), "containers": [], "absent": True})
+        pb = problems.problems(d, {"ts": time.time(), "containers": [], "absent": True})
         self.assertTrue(any(sev == 2 and "firewall state unreadable" in t for sev, t in pb))
 
     def test_windows_boot_sections(self):
@@ -487,20 +490,20 @@ class NativeRenderer(unittest.TestCase):
 
     def test_problems_speak_of_the_os_firewall(self):
         cont, net, boot, base = self.snap("windows")
-        ids = lambda n: {pid for _, _, pid in render.problems_raw(n, cont, boot=boot, baseline=base)}  # noqa: E731
+        ids = lambda n: {pid for _, _, pid in problems.problems_raw(n, cont, boot=boot, baseline=base)}  # noqa: E731
         self.assertNotIn("ufw-missing", ids(net))
         self.assertNotIn("docker-bypass", ids(net))
         off = dict(net, firewall=dict(net["firewall"], off=["Public"]))
-        texts = [t for _, t, _ in render.problems_raw(off, cont, boot=boot, baseline=base)]
+        texts = [t for _, t, _ in problems.problems_raw(off, cont, boot=boot, baseline=base)]
         self.assertTrue(any("Windows Firewall off on the Public network" in t for t in texts))
         self.assertIn("firewall-policy", ids(dict(net, firewall=dict(net["firewall"], policy=True))))
         self.assertIn("firewall-unreadable", ids(dict(net, firewall=None)))
         self.assertNotIn("firewall-unreadable", ids(dict(net, firewall=None, disabled=["firewall"])))
         _, mnet, mboot, mbase = self.snap("darwin")
         moff = dict(mnet, firewall=dict(mnet["firewall"], state=0, off=["Application Firewall"]))
-        self.assertTrue(any("macOS firewall off:" in t for _, t, _ in render.problems_raw(moff, cont, boot=mboot, baseline=mbase)))
+        self.assertTrue(any("macOS firewall off:" in t for _, t, _ in problems.problems_raw(moff, cont, boot=mboot, baseline=mbase)))
         for pid in ("firewall-off", "firewall-unreadable", "firewall-policy"):
-            self.assertIn(pid, render.CATALOG)
+            self.assertIn(pid, problems.CATALOG)
 
     def test_firewall_section(self):
         _, net, _, _ = self.snap("windows")
@@ -563,7 +566,7 @@ class NativeRenderer(unittest.TestCase):
                 try:
                     render.demo_defaults()                                                          # the demo's own [expose]: one within, two beyond
                     expose = dict(render.CFG["expose"])
-                    pb = {pid: t for _, t, pid in render.problems_raw(net, cont, boot=boot, baseline=base)}
+                    pb = {pid: t for _, t, pid in problems.problems_raw(net, cont, boot=boot, baseline=base)}
                 finally:
                     render.CFG["expose"], render.CFG["webapps"], render.DEMO_OS, socket.gethostname = saved
                 self.assertEqual(expose, {"shop-web": "LAN", "shop-db": "LOCALE", "node": "TAILNET"})  # no systemd unit here: the Funnel's process
@@ -605,30 +608,30 @@ class Kiosk(unittest.TestCase):
         saved = dict(render.CFG)
         try:
             render.CFG["columns"], render.CFG["rows"] = 180, 50
-            self.assertEqual(render.kiosk_grid(), (180, 50))
+            self.assertEqual(display.kiosk_grid(), (180, 50))
             render.CFG["columns"], render.CFG["rows"] = 0, 0
-            cols, rows = render.kiosk_grid()
+            cols, rows = display.kiosk_grid()
             self.assertEqual(rows, 64)
             self.assertTrue(100 <= cols <= 400)
         finally:
             render.CFG.clear()
             render.CFG.update(saved)
-        edge = render.browser_command(r"C:\Edge\msedge.exe", "file:///x.html", r"C:\p")
+        edge = display.browser_command(r"C:\Edge\msedge.exe", "file:///x.html", r"C:\p")
         self.assertEqual(edge[:3], [r"C:\Edge\msedge.exe", "--app=file:///x.html", "--start-fullscreen"])
         self.assertFalse([a for a in edge if "kiosk" in a])                                         # locked kiosk: Alt+F4 would not close it
         self.assertIn("--user-data-dir=C:\\p", edge)                                                # never the user's own profile
-        self.assertEqual(render.browser_command("/usr/bin/firefox", "file:///x.html", "/p"), ["/usr/bin/firefox", "--new-window", "file:///x.html"])
+        self.assertEqual(display.browser_command("/usr/bin/firefox", "file:///x.html", "/p"), ["/usr/bin/firefox", "--new-window", "file:///x.html"])
         for n in (1, 3):  # the footer says how to get out, and never runs past the screen
-            foot = ansi.ANSI.sub("", render.frame(("Overview", 1, 1, []), 0, n, 99, 10, keys=False, hint=render.KIOSK_HINT).split("\r\n")[-1])
+            foot = ansi.ANSI.sub("", render.frame(("Overview", 1, 1, []), 0, n, 99, 10, keys=False, hint=display.KIOSK_HINT).split("\r\n")[-1])
             self.assertIn("closes", foot)
             self.assertLessEqual(len(foot), 99)
-        self.assertIsNone(render.find_browser("none"))
-        self.assertEqual(render.find_browser("/opt/my/chrome"), "/opt/my/chrome")
+        self.assertIsNone(display.find_browser("none"))
+        self.assertEqual(display.find_browser("/opt/my/chrome"), "/opt/my/chrome")
 
     def test_kiosk_writes_the_page_and_stops_when_the_browser_closes(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "display.html")
-            saved = (render.launch, render.time.sleep, render.user_dir, render.find_browser)
+            saved = (display.launch, render.time.sleep, display.user_dir, display.find_browser)
 
             class Browser:
                 def __init__(self, cmd):
@@ -638,16 +641,16 @@ class Kiosk(unittest.TestCase):
                     self.polls += 1
                     return 0 if self.polls > 1 else None
             clock = [0.0]
-            render.launch = Browser  # never subprocess.Popen itself: macOS reads its metrics with commands
+            display.launch = Browser  # never subprocess.Popen itself: macOS reads its metrics with commands
             render.time.sleep = lambda s: clock.__setitem__(0, clock[0] + 30)
-            render.user_dir = lambda: d
-            render.find_browser = lambda choice=None: "/opt/browser"
+            display.user_dir = lambda: d
+            display.find_browser = lambda choice=None: "/opt/browser"
             real_time = render.time.time
             render.time.time = lambda: real_time() + clock[0]
             try:
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--file", "--html", path, "--log", os.path.join(d, "k.log")]), 0)
             finally:
-                render.launch, render.time.sleep, render.user_dir, render.find_browser = saved
+                display.launch, render.time.sleep, display.user_dir, display.find_browser = saved
                 render.time.time = real_time
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
             with open(path, encoding="utf-8") as f:
@@ -656,16 +659,16 @@ class Kiosk(unittest.TestCase):
             self.assertIn("nuc-console", page)
 
     def test_kiosk_opens_the_local_web_view_full_screen(self):
-        started, saved = [], (render.web_up, render.find_browser, render.launch, render.user_dir)
+        started, saved = [], (display.web_up, display.find_browser, display.launch, display.user_dir)
         with tempfile.TemporaryDirectory() as d:
-            render.web_up = lambda port, wait: True
-            render.find_browser = lambda choice=None: "/opt/browser"
-            render.launch = lambda cmd: started.append(cmd)
-            render.user_dir = lambda: d
+            display.web_up = lambda port, wait: True
+            display.find_browser = lambda choice=None: "/opt/browser"
+            display.launch = lambda cmd: started.append(cmd)
+            display.user_dir = lambda: d
             try:
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
             finally:
-                render.web_up, render.find_browser, render.launch, render.user_dir = saved
+                display.web_up, display.find_browser, display.launch, display.user_dir = saved
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
         cmd = started[0]
         self.assertTrue(cmd[1].startswith("--app=http://127.0.0.1:8787/?fit=1&cols="))
@@ -674,20 +677,20 @@ class Kiosk(unittest.TestCase):
         self.assertIn("--start-fullscreen", cmd)
 
     def test_browser_mode_opens_a_normal_window_of_the_default_browser(self):
-        opened, saved = [], (render.web_up, render.user_dir, getattr(render.os, "startfile", None), render.subprocess.run)
+        opened, saved = [], (display.web_up, display.user_dir, getattr(render.os, "startfile", None), render.subprocess.run)
         with tempfile.TemporaryDirectory() as d:
-            render.user_dir = lambda: d
+            display.user_dir = lambda: d
             render.os.startfile = lambda url: opened.append(url)
             render.subprocess.run = this_thread_only(lambda cmd, **kw: opened.append(cmd[-1]))
             import webbrowser
             saved_wb, webbrowser.open = webbrowser.open, lambda url: opened.append(url) or True
             try:
-                render.web_up = lambda port, wait: False
+                display.web_up = lambda port, wait: False
                 self.assertEqual(render.open_in_browser(["render.py", "--open", "--log", os.path.join(d, "o.log")]), 1)  # no web view
-                render.web_up = lambda port, wait: True
+                display.web_up = lambda port, wait: True
                 self.assertEqual(render.open_in_browser(["render.py", "--open", "--log", os.path.join(d, "o.log")]), 0)
             finally:
-                render.web_up, render.user_dir, render.subprocess.run = saved[0], saved[1], saved[3]
+                display.web_up, display.user_dir, render.subprocess.run = saved[0], saved[1], saved[3]
                 if saved[2] is None:
                     del render.os.startfile
                 else:
@@ -715,7 +718,7 @@ class Kiosk(unittest.TestCase):
             if token_name == "web.token":
                 with open(os.path.join(d, token_name), "w", encoding="utf-8") as f:
                     f.write(content)
-            patches = [mock.patch.object(render, "user_dir", lambda: d), mock.patch.object(render, "kiosk_grid", lambda: (200, 64)),
+            patches = [mock.patch.object(display, "user_dir", lambda: d), mock.patch.object(display, "kiosk_grid", lambda: (200, 64)),
                        mock.patch.object(render, "kiosk_file", lambda *a: files.append(a) or 0),
                        mock.patch.dict(render.CFG["web"], token_file=os.path.join(d, token_name) if token_name else ""),
                        mock.patch.object(render.os, "startfile", lambda url: opened.append(url), create=True),
@@ -735,7 +738,7 @@ class Kiosk(unittest.TestCase):
         return rc, opened, files, text, d
 
     def test_open_with_a_readable_token_file_puts_the_token_in_the_url(self):
-        with mock.patch.object(render, "web_up", lambda port, wait: True):
+        with mock.patch.object(display, "web_up", lambda port, wait: True):
             rc, opened, files, log, _ = self.open_browser("web.token")
             self.assertEqual((rc, files), (0, []))
             self.assertEqual(opened, ["http://127.0.0.1:8787/?fit=1&token=" + self.TOKEN])           # the web view moves it into a cookie
@@ -744,7 +747,7 @@ class Kiosk(unittest.TestCase):
             rc, opened, files, log, _ = self.open_browser(None)                                      # no token configured: as before
             self.assertEqual((rc, opened, files), (0, ["http://127.0.0.1:8787/?fit=1"], []))
             self.assertNotIn("token", log)
-        with mock.patch.object(render, "web_up", lambda port, wait: False):
+        with mock.patch.object(display, "web_up", lambda port, wait: False):
             rc, opened, files, log, _ = self.open_browser("web.token")                               # a token does not make a dead web view alive
             self.assertEqual((rc, opened, files), (1, [], []))
             self.assertIn("does not answer", log)
@@ -755,7 +758,7 @@ class Kiosk(unittest.TestCase):
         file, and the log says why. Nothing is opened with a URL that would only answer 401; the web view need not even be up."""
         def nobody(port, wait):
             raise AssertionError("the file page does not need the web view")
-        with mock.patch.object(render, "web_up", nobody):
+        with mock.patch.object(display, "web_up", nobody):
             for name, content in (("missing.token", ""), ("web.token", "short\n"), ("web.token", "x" * 20 + "\u20ac"), ("web.token", "a b" * 9)):
                 rc, opened, files, log, d = self.open_browser(name, content)
                 self.assertEqual((rc, opened), (0, []), (name, content))
@@ -770,21 +773,21 @@ class Kiosk(unittest.TestCase):
             for text, token in ((self.TOKEN, self.TOKEN), ("  " + self.TOKEN + "\r\n", self.TOKEN), ("abc.DEF_123~-xxx", "abc.DEF_123~-xxx")):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(text)
-                self.assertEqual(render.read_web_token(path), (token, ""), text)
+                self.assertEqual(display.read_web_token(path), (token, ""), text)
             for text in ("", "short", "a" * 15, "a" * 15 + ";", "a b" * 9, self.TOKEN + "\n" + self.TOKEN, "\u20ac" * 20):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(text)
-                tok, why = render.read_web_token(path)
+                tok, why = display.read_web_token(path)
                 self.assertEqual(tok, "", text)
                 self.assertIn(path, why)
                 self.assertNotIn(text.strip() or "\0", why)                                         # the reason never repeats what the file holds
             with open(path, "wb") as f:
                 f.write(b"\xff\xfe" * 20)                                                            # not text at all
-            self.assertEqual(render.read_web_token(path)[0], "")
-            tok, why = render.read_web_token(os.path.join(d, "missing"))
+            self.assertEqual(display.read_web_token(path)[0], "")
+            tok, why = display.read_web_token(os.path.join(d, "missing"))
             self.assertEqual(tok, "")
             self.assertIn("cannot be read by this user", why)
-            self.assertEqual(render.read_web_token(d)[0], "")                                        # a folder: IsADirectoryError, or PermissionError on Windows
+            self.assertEqual(display.read_web_token(d)[0], "")                                        # a folder: IsADirectoryError, or PermissionError on Windows
 
     def kiosk_on_windows(self, installed, args=(), file=False, mode="auto"):
         """render.kiosk() as Windows runs it, `installed` being a predicate on the paths of browsers found on disk: (its result, the commands
@@ -801,10 +804,11 @@ class Kiosk(unittest.TestCase):
             raise RuntimeError("no data here")  # the loop logs it and goes on: this test is about the browser
         with tempfile.TemporaryDirectory() as d:
             patches = [mock.patch.object(render, "WINDOWS", True), mock.patch.object(render, "LINUX", False), mock.patch.object(render, "MACOS", False),
+                       mock.patch.object(display, "WINDOWS", True), mock.patch.object(display, "LINUX", False), mock.patch.object(display, "MACOS", False),
                        mock.patch.object(nuc_config, "OS_NAME", "windows"), mock.patch.dict(os.environ, env),
                        mock.patch.object(render.os.path, "isfile", installed), mock.patch.dict(render.CFG["display"], browser=mode),
-                       mock.patch.object(render, "web_up", lambda port, wait: True), mock.patch.object(render, "user_dir", lambda: d),
-                       mock.patch.object(render, "kiosk_grid", lambda: (200, 64)), mock.patch.object(render, "launch", lambda cmd: launched.append(cmd)),
+                       mock.patch.object(display, "web_up", lambda port, wait: True), mock.patch.object(display, "user_dir", lambda: d),
+                       mock.patch.object(display, "kiosk_grid", lambda: (200, 64)), mock.patch.object(display, "launch", lambda cmd: launched.append(cmd)),
                        mock.patch.object(render.os, "startfile", lambda url: opened.append(url), create=True)]
             if file:
                 patches += [mock.patch.object(render, "Sampler", lambda: None), mock.patch.object(render, "snapshot", no_frame),
@@ -850,12 +854,12 @@ class Kiosk(unittest.TestCase):
     def test_a_failed_default_browser_says_so(self):
         startfile = mock.Mock(side_effect=OSError(1155, "No application is associated"))
         with tempfile.TemporaryDirectory() as d, mock.patch.object(render.os, "startfile", startfile, create=True), \
-                mock.patch.object(render, "WINDOWS", True):
+                mock.patch.object(display, "WINDOWS", True):
             log = os.path.join(d, "k.log")
             nuc_config.log_to(log)
             try:
-                self.assertFalse(render.default_browser("", "http://127.0.0.1:8787/"))
-                self.assertFalse(render.default_browser(None, "http://127.0.0.1:8787/"))             # browser = none: not even tried
+                self.assertFalse(display.default_browser("", "http://127.0.0.1:8787/"))
+                self.assertFalse(display.default_browser(None, "http://127.0.0.1:8787/"))             # browser = none: not even tried
             finally:
                 self.stop_logging()
             with open(log, encoding="utf-8") as f:
@@ -863,23 +867,23 @@ class Kiosk(unittest.TestCase):
         self.assertEqual(startfile.call_count, 1)
         self.assertIn("the default browser did not open", text)
         self.assertNotIn("opened the default browser", text)
-        with mock.patch.object(render, "WINDOWS", False):                                            # macOS has Safari, Linux has nothing to fall back on
-            self.assertFalse(render.default_browser("", "http://127.0.0.1:8787/"))
+        with mock.patch.object(display, "WINDOWS", False):                                            # macOS has Safari, Linux has nothing to fall back on
+            self.assertFalse(display.default_browser("", "http://127.0.0.1:8787/"))
 
     def test_windows_finds_firefox_after_edge_and_chrome(self):
         env = {"ProgramFiles": r"C:\Program Files", "ProgramFiles(x86)": r"C:\Program Files (x86)", "LOCALAPPDATA": r"C:\Users\u\AppData\Local"}
         firefox = (r"C:\Program Files\Mozilla Firefox\firefox.exe", r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
                    r"C:\Users\u\AppData\Local\Mozilla Firefox\firefox.exe")                          # machine-wide, 32-bit, per-user installs
-        with mock.patch.object(render, "LINUX", False), mock.patch.object(nuc_config, "OS_NAME", "windows"), mock.patch.dict(os.environ, env):
+        with mock.patch.object(display, "LINUX", False), mock.patch.object(nuc_config, "OS_NAME", "windows"), mock.patch.dict(os.environ, env):
             for path in firefox:
                 with mock.patch.object(render.os.path, "isfile", lambda p, path=path: p == path):
-                    self.assertEqual(render.find_browser("auto"), path)
+                    self.assertEqual(display.find_browser("auto"), path)
             with mock.patch.object(render.os.path, "isfile", lambda p: p.endswith(("firefox.exe", "chrome.exe"))):
-                self.assertTrue(render.find_browser("auto").endswith("chrome.exe"))                  # a Chromium browser starts full screen: it comes first
+                self.assertTrue(display.find_browser("auto").endswith("chrome.exe"))                  # a Chromium browser starts full screen: it comes first
             with mock.patch.object(render.os.path, "isfile", lambda p: False):
-                self.assertEqual(render.find_browser("auto"), "")
+                self.assertEqual(display.find_browser("auto"), "")
         for path in firefox:
-            self.assertEqual(render.browser_command(path, "http://x/", r"C:\p"), [path, "--new-window", "http://x/"])  # not --kiosk: it swallows Alt+F4
+            self.assertEqual(display.browser_command(path, "http://x/", r"C:\p"), [path, "--new-window", "http://x/"])  # not --kiosk: it swallows Alt+F4
         rc, launched, opened, log, _ = self.kiosk_on_windows(lambda p: p == firefox[1])
         self.assertEqual((rc, opened), (0, []))
         self.assertEqual(launched, [[firefox[1], "--new-window", "http://127.0.0.1:8787/?fit=1&cols=200&rows=64&rotate=1&kiosk=1"]])
@@ -922,7 +926,7 @@ class Kiosk(unittest.TestCase):
         for name, folder in state_paths.items():  # every state file of this OS lives in its folders (no Linux path left on Windows)
             if not os.environ.get("NUC_CONSOLE_" + {"STATE": "STATE", "NET_STATE": "NET", "BOOT_STATE": "BOOT",
                                                     "BASELINE": "BASELINE", "ACCEPTED_PATH": "ACCEPTED"}[name]):
-                self.assertEqual(os.path.dirname(getattr(render, name)), folder, name)
+                self.assertEqual(os.path.dirname(getattr(problems if name == "ACCEPTED_PATH" else hostdata, name)), folder, name)
         for name in ("OUT", "OUT_NET", "OUT_BOOT"):
             self.assertEqual(os.path.dirname(getattr(collector, name)), nuc_config.RUN_DIR)
         if nuc_config.LINUX:  # unchanged on Linux
@@ -931,7 +935,7 @@ class Kiosk(unittest.TestCase):
             self.assertEqual(collector.OUT_NET, "/run/nuc-console/net.json")
             # the suite points NUC_CONSOLE_BASELINE at an empty folder (hermetic.py): the default is read in a process without it
             env = {k: v for k, v in os.environ.items() if k != "NUC_CONSOLE_BASELINE"}
-            out = subprocess.run([sys.executable, "-c", "import render; print(render.BASELINE)"], env=dict(env, PYTHONPATH=os.path.join(ROOT, "src")),
+            out = subprocess.run([sys.executable, "-c", "import hostdata; print(hostdata.BASELINE)"], env=dict(env, PYTHONPATH=os.path.join(ROOT, "src")),
                                  stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout.strip()
             self.assertEqual(out, "/var/lib/nuc-console/baseline.json")
 

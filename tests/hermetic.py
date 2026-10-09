@@ -75,18 +75,18 @@ def _hermetic_open_ro(path=None):
 
 history.open_ro = _hermetic_open_ro
 
-# render.snapshot() starts a background thread that runs loginctl and ss for the SESSIONS card: the card would show whoever is logged in
-# on the machine. The thread gets an empty answer instead (render.read_sessions itself is untouched: a test that fakes subprocess.run
+# the snapshot (hostdata.py) starts a background thread that runs loginctl and ss for the SESSIONS card: the card would show whoever is logged in
+# on the machine. The thread gets an empty answer instead (hostdata.read_sessions itself is untouched: a test that fakes subprocess.run
 # and calls it, or that gives cached() another function, gets what it asked for).
-import render  # noqa: E402
-_cached, _read_sessions = render.cached, render.read_sessions
+import hostdata  # noqa: E402
+_cached, _read_sessions = hostdata.cached, hostdata.read_sessions
 
 
 def _hermetic_cached(key, ttl, fn):
     return _cached(key, ttl, (lambda: {"local": [], "ssh": []}) if fn is _read_sessions else fn)
 
 
-render.cached = _hermetic_cached
+hostdata.cached = _hermetic_cached
 VIOLATIONS = []
 
 

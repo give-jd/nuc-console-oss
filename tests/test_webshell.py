@@ -20,6 +20,7 @@ import graphjs  # noqa: E402
 import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import web  # noqa: E402
 import webhttp  # noqa: E402
 import weburl  # noqa: E402
@@ -528,7 +529,7 @@ class Shell(unittest.TestCase):
         self.assertIn("a token is required", body)
         cfg = render.CFG
         with mock.patch.dict(cfg["ai"], {"web_actions": False}), mock.patch.dict(cfg["telegram"], {"enabled": True}), \
-                mock.patch.dict(cfg, {"config_error": "bad line 3"}), mock.patch.object(render, "telegram_status", lambda path=None: {"paired": False}):
+                mock.patch.dict(cfg, {"config_error": "bad line 3"}), mock.patch.object(problems, "telegram_status", lambda path=None: {"paired": False}):
             self.srv.cache.clear()
             _, _, body = get(self.srv, "/?view=settings")
         self.assertIn("locked by the admin", body)

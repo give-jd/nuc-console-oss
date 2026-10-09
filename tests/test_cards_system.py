@@ -21,6 +21,7 @@ import cards  # noqa: E402
 import demo  # noqa: E402
 import htmlview  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import cardlines  # noqa: E402
 import ui  # noqa: E402
 from ui import Bar, Col, Flow, Grid, Head, Indent, Line, Msg, NoteTable, Row, Span, Table, Timeline  # noqa: E402
@@ -248,7 +249,7 @@ class ContainersCardTests(unittest.TestCase):
         cont["containers"][1]["status"] = "Up 1 hour (unhealthy)"
         _, text = card_text("containers", ctx_of(cont=cont), 0)
         self.assertEqual(text[1], " 7 containers   RAM 1.6G   ● 5 ok   ✖ 1 stopped   ✖ 1 unhealthy")
-        pb = render.ProblemList([(2, "x")])
+        pb = problems.ProblemList([(2, "x")])
         pb.pids = ["unhealthy-container"]
         self.assertEqual(cards.build("containers", ctx_of(cont=cont, problems=pb), 0, cards.Caps(100)).state, "err")
 

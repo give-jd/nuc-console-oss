@@ -131,7 +131,7 @@ def to_html(text):
 
 
 def sgr_class(code):
-    """'1;41;37' -> 'w bR B': an SGR code (render.status_pill's) as the class names to_html would give its text."""
+    """'1;41;37' -> 'w bR B': an SGR code (problems.status_pill's) as the class names to_html would give its text."""
     codes = [int(x) for x in str(code).split(";") if x.isdigit()]
     names = [COLOR[x] for x in codes if x in COLOR] + [BACKGROUND[x] for x in codes if x in BACKGROUND]
     return " ".join(names + (["rv"] if 7 in codes else []) + (["B"] if 1 in codes else []))
