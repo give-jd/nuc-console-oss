@@ -7,8 +7,9 @@ import os
 import sys
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import cards  # noqa: E402
 import nuc_config  # noqa: E402
 

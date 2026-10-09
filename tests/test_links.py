@@ -8,6 +8,8 @@ Addresses are documentation ranges (192.0.2.0/24 this host, 198.51.100.0/24 and 
 import json
 import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import time
 import unittest
 

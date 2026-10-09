@@ -17,6 +17,8 @@ import shutil
 import socket
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
 import threading
 import time
@@ -527,7 +529,8 @@ class FolderTests(unittest.TestCase):
             put(aisetup.stamp_path(system), "{}")
             with mock.patch.object(aisetup.os, "access", return_value=False):
                 self.assertEqual(aisetup.work_dir(), system, "what the administrator installed is shown, writable or not")
-        with mock.patch.object(aisetup.os, "access", side_effect=AssertionError("os.access is not asked on Windows")):
+        with mock.patch.object(aisetup.os, "access", side_effect=AssertionError("os.access is not asked on Windows")), \
+                mock.patch.object(os.path, "isfile", return_value=False), mock.patch.object(os.path, "isdir", return_value=False):  # not this machine's ProgramData
             self.assertEqual(aisetup.work_dir("win32"), aisetup.default_dir("win32", euid=0),
                              "Windows has one folder for every account (ProgramData's): os.access, which does not read its ACL, is never asked")
 
@@ -1698,7 +1701,7 @@ class ModelsCommandTests(unittest.TestCase):
                 self.assertTrue(out.isascii())
                 # measured with the system-wide folder of this OS in place of this test's temporary one, whose length is the runner's
                 # (C:\Users\RUNNER~1\AppData\Local\Temp\tmp... on Windows, /var/folders/../T/tmp... on macOS, /tmp/tmp... on Linux)
-                real = aisetup.default_dir(env={}, euid=0)
+                real = aisetup.default_dir(sys.platform, env={}, euid=0)  # named platform: the literal, not the empty folder of hermetic.py
                 self.assertLess(max(len(ln.replace(self.d, real)) for ln in out.splitlines()), 110, "fits a terminal")
 
 
