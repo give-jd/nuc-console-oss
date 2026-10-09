@@ -126,6 +126,14 @@ cargo tauri build --bundles deb                # a package (appimage, rpm; app, 
 and `tests/test_desktop.py` checks them). The crates are Tauri's (`tauri`, its autostart, opener and single-instance plugins) and
 `libc` on Linux and macOS; nothing else.
 
+## Known limitation: adopting an earlier core
+
+When the app finds a core that an earlier run left (see *How it works*, point 3), it takes its pid from `portable.pid` and its address from
+`logs/web.log` in the data folder, and on quit it sends that pid SIGTERM. It does not check that the pid is still that core: if the files are
+stale (the core ended and the number went to another process of the same user) or were written by something else that runs as you, that process
+is the one terminated. It needs write access to your data folder, so it is not a way in from another account; it is a gap, and the fix (check
+that the pid is the core's own run.sh before adopting and before terminating) is not made yet.
+
 ## What comes next
 
 - **Updates from inside the app**, from the GitHub releases: Tauri's updater checks a signature of its own, whose key belongs in the
