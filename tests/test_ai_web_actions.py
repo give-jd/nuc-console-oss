@@ -20,6 +20,8 @@ import socket
 import stat
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
 import re
 import threading
@@ -41,6 +43,7 @@ import render  # noqa: E402
 import screens  # noqa: E402
 import ansi  # noqa: E402
 import web  # noqa: E402
+import webhttp  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
@@ -2105,7 +2108,7 @@ class WebSecurity(WebBase):
         self.assertRefused(self.post("use", {"model": "tiny"}, csrf=""), 403)
         self.assertRefused(self.post("use", {"model": "tiny"}, csrf=self.srv.csrf + "x"), 403)
         self.assertRefused(self.post("use", {"model": "tiny"}, csrf="é" * 5), 403)
-        with mock.patch.object(web.hmac, "compare_digest", wraps=web.hmac.compare_digest) as cmp:
+        with mock.patch.object(webhttp.hmac, "compare_digest", wraps=webhttp.hmac.compare_digest) as cmp:
             self.post("use", {"model": "tiny"}, csrf="y" * 32)
         self.assertTrue(any(c.args[1] == self.srv.csrf.encode() for c in cmp.call_args_list), "hmac.compare_digest")
 
@@ -2131,11 +2134,11 @@ class WebSecurity(WebBase):
         self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": "application/json"}), 415)
         self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": "text/plain"}), 415)
         self.assertRefused(self.post("use", {"model": "tiny"}, headers={"Content-Type": None}), 415)
-        too_big = urlencode({"csrf": self.srv.csrf, "model": "tiny", "pad": "x" * web.POST_MAX})
+        too_big = urlencode({"csrf": self.srv.csrf, "model": "tiny", "pad": "x" * webhttp.POST_MAX})
         self.assertRefused(self.post("use", body=too_big), 413)
         just = urlencode({"csrf": self.srv.csrf, "pad": "x"})
-        just += "&p=" + "y" * (web.POST_MAX - len(just) - 3)
-        self.assertEqual(len(just), web.POST_MAX)
+        just += "&p=" + "y" * (webhttp.POST_MAX - len(just) - 3)
+        self.assertEqual(len(just), webhttp.POST_MAX)
         self.assertRefused(self.post("use", body=just + "z"), 413)
         many = urlencode([("csrf", self.srv.csrf)] + [("k%d" % i, "v") for i in range(40)])
         self.assertRefused(self.post("use", body=many), 400)
@@ -2249,14 +2252,14 @@ class WebToken(WebBase):
 class WebHttpHeaders(WebBase):
     def test_the_responses_carry_the_policy_of_the_page_that_made_them(self):
         st, h, _b = self.get()
-        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (web.page_csp(forms=True), "same-origin"))
+        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (webhttp.page_csp(forms=True), "same-origin"))
         st, h, _b = self.post("off")
         self.assertEqual((st, h["Referrer-Policy"], h["Cache-Control"]), (303, "same-origin", "no-store"))
         self.assertIn("form-action 'none'", h["Content-Security-Policy"], "a redirect has no form: the strict one")
-        self.assertEqual(self.get("/?view=health")[1]["Content-Security-Policy"], web.CSP, "every other page keeps form-action 'none'")
-        self.assertEqual(self.get("/")[1]["Content-Security-Policy"], web.CSP)
+        self.assertEqual(self.get("/?view=health")[1]["Content-Security-Policy"], webhttp.CSP, "every other page keeps form-action 'none'")
+        self.assertEqual(self.get("/")[1]["Content-Security-Policy"], webhttp.CSP)
         self.assertEqual(self.get("/")[1]["Referrer-Policy"], "no-referrer")
-        self.assertIn("form-action 'none'", web.CSP)
+        self.assertIn("form-action 'none'", webhttp.CSP)
 
     def test_the_page_reloads_only_while_something_runs_or_when_locked(self):
         self.assertNotIn("http-equiv", self.page())

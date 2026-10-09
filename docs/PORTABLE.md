@@ -37,8 +37,8 @@ chooses the Python (otherwise: [Python](#python)).
 It starts, as **you**:
 
 1. the collector (`src/collector.py`), in the background: it writes its snapshots to `data/run/`;
-2. the view: the terminal screen (`src/render.py`), or the browser view (`src/web.py --local`) on `127.0.0.1`, with no token (nothing but
-   this machine can connect), and opens your default browser on it (`open` on macOS, `xdg-open` on Linux when there is a desktop, `Start-Process` on Windows);
+2. the view: the terminal screen (`src/render.py`), or the browser view (`src/web.py --local`) on `127.0.0.1`, behind a token of its own (nothing but
+   this machine can connect, and of its accounts only you: [the token](#the-access-token)), and opens your default browser on it (`open` on macOS, `xdg-open` on Linux when there is a desktop, `Start-Process` on Windows);
 3. until the baseline of the port alarms exists, a small helper that tries to create it ([Port alarms](#port-alarms));
 4. the Telegram notifier (`src/notify.py`): beside the browser view it takes the Telegram page's requests (⚙ settings › *Phone alerts*: pair your
    own bot, send a test, [TELEGRAM.md](TELEGRAM.md#in-the-desktop-app-and-a-portable-run)); in the terminal it only sends, and while the alerts are
@@ -54,6 +54,8 @@ Everything it writes:
 | `data/lib/` | `baseline.json` (the port alarms) and `accepted.json` (the problems you accepted) |
 | `data/notify/` | the Telegram notifier's: the bot token and the paired chat (0600, only your account), `status.json`, the page's requests in `inbox/` |
 | `data/logs/` | `collector.log`, `web.log` (the view in the browser), `notify.log` (the Telegram notifier), `baseline.log`; a `collector.log` over 1 MB is kept once as `.1` at the next start |
+| `data/web.token` | the access token of the browser view (0600, only your account; Windows: an ACL for your account), made at the first start and kept: [the token](#the-access-token) |
+| `data/open.html` | what the browser is given to open: a page that sends it to the view with the token (0600). Same secret as `web.token`, rewritten at every start |
 | `data/portable.pid` | the process ID of the running copy; removed when it stops |
 | `python\` (Windows ZIP) | the Python, unpacked once on the first run (see [Python](#python)); on Linux and macOS `python/` is already unpacked in the archive and is only read |
 | `cache/` | what `nuc-console-update` downloaded; only exists once you used it |
@@ -75,6 +77,18 @@ to see everything. Then **every** part runs with those rights, so keep that fold
 - Linux and macOS: as root, `run.sh` refuses a `src/`, `data/` (or one of its folders) that is a link or writable by others, and says what to fix.
 - Windows: `run.ps1` does not check this. Run it as Administrator only from a folder that only Administrators can write.
 - `data/` created by a `sudo` run belongs to root: a later run as yourself says `data is not writable by you`, and `sudo chown -R "$USER" data` fixes it.
+
+## The access token
+
+The browser view is on `127.0.0.1` only, but other accounts of the same machine can reach `127.0.0.1` too. So it asks for a token, made for this
+folder: `data/web.token` (`secrets.token_urlsafe`, 0600; Windows: an ACL for your account only), created at the first start, **kept** between
+starts (your browser and the desktop app hold it as a cookie) and never in `config.ini`, in a log or in a page. `run.sh` / `run.cmd` do not put it
+on the browser's command line (any user can list that): they open `data/open.html` (0600), a page that forwards to the view with the token, which
+moves it into an `HttpOnly; SameSite=Strict` cookie. The address they print has no token, so a browser you open by hand on it gets `401`: open
+`data/open.html` instead. For a script: `Authorization: Bearer <the contents of data/web.token>`. A new token: stop the copy, delete `data/web.token`,
+start again (the browser is sent a new cookie by `open.html`). `--demo` and an installation (`[web] token_file`) are not this mode.
+What it does not do: it does not stop **you**, **root**, or a program that runs as you (they read the file), and it does not encrypt anything
+(the traffic is loopback http). A portable folder on a shared disk where others can read `data/` gives the token away: keep it yours.
 
 ## Python
 
@@ -113,7 +127,7 @@ Edit `data/config.ini` ([CONFIGURATION.md](CONFIGURATION.md) lists every key), t
 key, section by section, with what it does, the values it takes and when a change applies (most at once; [WEB.md](WEB.md#the-settings-pages-configini)).
 Everything applies except the
 parts that decide how an installation shows itself: `[web] enabled`, `bind`, `port` and `token_file` are ignored (the view is always on
-`127.0.0.1`, on the port you give or a free one, with no token) and so are `[display] mode` and `browser` (the script opens your default browser itself;
+`127.0.0.1`, on the port you give or a free one, behind the folder's own token) and so are `[display] mode` and `browser` (the script opens your default browser itself;
 `--no-open` stops it). `[display] zoom` still sets the text size.
 
 ## Stopping
@@ -164,5 +178,5 @@ updater only in a folder extracted from an archive. To update an *installed* nuc
 ## Security notes
 
 Nothing in this mode runs with more rights than you give it, and it opens no listener beyond `127.0.0.1`. The updater only runs when you start
-it; it checks what it downloads against `SHA256SUMS` and, when `gh` is installed and logged in, against the build attestation: what that proves and
+it; it checks what it downloads against `SHA256SUMS` and, when `gh` is installed and logged in, against the build attestation (an installed update refuses to go on without it unless `--allow-unattested`; a portable folder does not): what that proves and
 what it does not is in [SECURITY.md](../SECURITY.md#verifying-a-release).

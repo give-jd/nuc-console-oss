@@ -6,6 +6,8 @@ import os
 import re
 import socket
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import unittest
 from unittest import mock
 
@@ -14,6 +16,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import appjs  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 import webapi  # noqa: E402
 import webjs  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -170,13 +173,13 @@ class Page(unittest.TestCase):
 
 class Addresses(unittest.TestCase):
     def test_app_url_keeps_the_screen_and_what_it_takes(self):
-        p = lambda **q: web.view_params({k: [v] for k, v in q.items()})  # noqa: E731
-        self.assertEqual(web.app_url(p()), "/app")
-        self.assertEqual(web.app_url(p(view="cpu", sort="mem", zoom="150", sel="12")), "/app?view=cpu&sort=mem&sel=12")
-        self.assertEqual(web.app_url(p(view="health", period="30")), "/app?view=health&period=30")
-        self.assertEqual(web.app_url(p(view="map", open="0123456789.abcdefabcd", only="1")), "/app?view=map&open=0123456789.abcdefabcd&only=1")
-        self.assertEqual(web.app_url(p(view="settings")), "/app")
-        self.assertEqual(web.app_url(p(view="map", **{"as": "graph"})), "/app?view=map")
+        p = lambda **q: weburl.view_params({k: [v] for k, v in q.items()})  # noqa: E731
+        self.assertEqual(weburl.app_url(p()), "/app")
+        self.assertEqual(weburl.app_url(p(view="cpu", sort="mem", zoom="150", sel="12")), "/app?view=cpu&sort=mem&sel=12")
+        self.assertEqual(weburl.app_url(p(view="health", period="30")), "/app?view=health&period=30")
+        self.assertEqual(weburl.app_url(p(view="map", open="0123456789.abcdefabcd", only="1")), "/app?view=map&open=0123456789.abcdefabcd&only=1")
+        self.assertEqual(weburl.app_url(p(view="settings")), "/app")
+        self.assertEqual(weburl.app_url(p(view="map", **{"as": "graph"})), "/app?view=map")
 
 
 if __name__ == "__main__":

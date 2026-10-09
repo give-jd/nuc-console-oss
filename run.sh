@@ -218,11 +218,19 @@ while [ -z "$URL" ]; do
 done
 URL="$URL/?fit=1"
 echo "nuc-console: dashboard on $URL (Ctrl+C to stop)"
+# The view asks for this folder's token ($DATA/web.token, 0600, made by web.py): other accounts of the machine cannot use it. The browser
+# is not given the token on its command line (any user can list that): it opens $DATA/open.html (0600), a page that sends it on to the
+# view, which moves it into a cookie. The address printed above has no token.
+OPENFILE=$DATA/open.html
+TOKEN=$(tr -d '\n\r' < "$DATA/web.token" 2>/dev/null || true)
+case $TOKEN in ''|*[!A-Za-z0-9._~-]*) die "no usable access token in $DATA/web.token (delete the file and start again)" ;; esac
+printf '<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=%s&token=%s"><title>nuc-console</title>\n' "$URL" "$TOKEN" > "$OPENFILE"
+echo "nuc-console: the page asks for a token: open $OPENFILE in your browser (it carries it; the file is yours alone)" >&2
 if [ "$OPEN" = 1 ]; then
     if [ "$OS" = Darwin ]; then
-        /usr/bin/open "$URL" || echo "nuc-console: could not open the browser: open $URL yourself" >&2
+        /usr/bin/open "$OPENFILE" || echo "nuc-console: could not open the browser: open $OPENFILE yourself" >&2
     elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$URL" >/dev/null 2>&1 &
+        xdg-open "$OPENFILE" >/dev/null 2>&1 &
     fi
 fi
 wait "$WEB" || rc=$?

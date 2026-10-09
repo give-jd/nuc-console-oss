@@ -1152,6 +1152,11 @@ def _unk(id, hint=""):
     return Kpi(id, KPI_LABELS[id], "?", "", "unknown", None, hint)
 
 
+def _off(id):
+    """The KPI of a feature switched off in config.ini: '-' (info), never a figure that reads fine. The firewall KPI's own answer."""
+    return _k(id, "-", "", "info", "switched off in config.ini")
+
+
 def _level(frac, warn=0.7, err=0.9):
     return "ok" if frac < warn else "warn" if frac < err else "err"
 
@@ -1314,6 +1319,8 @@ def _kpi_containers(ctx):
     cont = ctx.cont
     if not isinstance(cont, dict):
         return _unk("containers")
+    if cont.get("disabled"):  # [features] containers = no: the collector hands over an empty list, which is not "0 of 0 running"
+        return _off("containers")
     if cont.get("absent"):
         return _k("containers", "-", "", "info", "docker is not installed")
     cs = cont.get("containers")
@@ -1329,6 +1336,8 @@ def _kpi_unhealthy(ctx):
     cont = ctx.cont
     if not isinstance(cont, dict):
         return _unk("unhealthy")
+    if cont.get("disabled"):
+        return _off("unhealthy")
     if cont.get("absent"):
         return _k("unhealthy", "-", "", "info", "docker is not installed")
     if not isinstance(cont.get("containers"), list):
@@ -1408,6 +1417,8 @@ def _kpi_uptime(ctx):
 
 @kpi("health")
 def _kpi_health(ctx):
+    if not ctx.cfg["features"].get("health", True):  # the console still reads the history file; its old report says nothing about now
+        return _off("health")
     rep = ctx.health.get("report") if isinstance(ctx.health, dict) else None
     findings = rep.get("findings") if isinstance(rep, dict) else None
     if not isinstance(findings, list):

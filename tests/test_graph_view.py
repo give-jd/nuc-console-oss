@@ -10,6 +10,8 @@ import os
 import re
 import socket
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import threading
 import unittest
 from html.parser import HTMLParser
@@ -22,6 +24,9 @@ import graphlayout  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import webmap  # noqa: E402
+import webhttp  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -49,7 +54,7 @@ def get(srv, path="/"):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 def key(nid):
@@ -169,12 +174,12 @@ class GraphPage(unittest.TestCase):
     @classic_default()
     def test_tree_mode_ignores_the_graph_parameters(self):
         """The graph's filters mean nothing to the tree: not in its links, not in its cache key (the very same page)."""
-        plain = self.srv.page(**web.view_params(web.parse_qs("view=map&all=1")))
-        same = self.srv.page(**web.view_params(web.parse_qs("view=map&all=1&as=tree&stacks=1&ext=0&local=2&z=200&sel=")))
+        plain = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1")))
+        same = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1&as=tree&stacks=1&ext=0&local=2&z=200&sel=")))
         self.assertIs(same, plain)
         for word in ("stacks=", "ext=", "local=", "z=", "as="):
             self.assertNotIn(word, re.sub(r'<span class="mv">.*?</span>', "", plain))
-        self.assertEqual(getattr(plain, "csp", web.CSP), web.CSP)
+        self.assertEqual(getattr(plain, "csp", webhttp.CSP), webhttp.CSP)
 
     def test_the_selection_follows_the_toggle(self):
         G = self.graph()
@@ -360,8 +365,8 @@ class GraphPage(unittest.TestCase):
         for k, n in d.nodes.items():
             self.assertRegex(k, HEX)
             self.assertEqual(n["id"], "n-" + k)
-            self.assertIn(n["cls"][1], web.STATES)
-            self.assertIn(n["cls"][2][2:], web.KINDS)
+            self.assertIn(n["cls"][1], webmap.STATES)
+            self.assertIn(n["cls"][2][2:], webmap.KINDS)
             c = n["circle"]
             for a in ("cx", "cy", "r"):
                 self.assertRegex(c[a], NUMBER)
@@ -372,7 +377,7 @@ class GraphPage(unittest.TestCase):
             self.assertEqual(params(n["href"])["sel"], k)
             self.assertEqual(params(n["href"])["as"], "graph")
             self.assertTrue(n["title"])
-            self.assertLessEqual(len(n["text"]), web.LABEL_MAX + 2)
+            self.assertLessEqual(len(n["text"]), webmap.LABEL_MAX + 2)
         for e in d.edges:
             self.assertRegex(e["data-a"], HEX)
             self.assertIn(e["data-a"], d.nodes)                                     # every endpoint is a drawn node
@@ -380,14 +385,14 @@ class GraphPage(unittest.TestCase):
             ev = e["cls"][1]
             self.assertIn(ev, ("seen", "declared", "possible", "bind", "reach"))
             self.assertTrue(set(e["cls"][2:]) <= {"bad", "nb"}, e["cls"])
-            self.assertEqual(e.get("marker-end"), f"url(#ah-{ev})" if ev in web.ARROWS else None)
+            self.assertEqual(e.get("marker-end"), f"url(#ah-{ev})" if ev in webmap.ARROWS else None)
             pts = [float(e[a]) for a in ("x1", "y1", "x2", "y2")]
             for a in ("x1", "y1", "x2", "y2"):
                 self.assertRegex(e[a], NUMBER)
             self.assertTrue(0 <= pts[0] <= w and 0 <= pts[2] <= w and 0 <= pts[1] <= h and 0 <= pts[3] <= h)
             a, b = d.nodes[e["data-a"]]["circle"], d.nodes[e["data-b"]]["circle"]
             ax, ay, ar, bx, by, br = (float(v) for v in (a["cx"], a["cy"], a["r"], b["cx"], b["cy"], b["r"]))
-            gap = web.ARROW_GAP if ev in web.ARROWS else 0
+            gap = webmap.ARROW_GAP if ev in webmap.ARROWS else 0
             if math.hypot(bx - ax, by - ay) > ar + br + gap + 1:                    # shortened to the circles' edges
                 self.assertAlmostEqual(math.hypot(pts[0] - ax, pts[1] - ay), ar, delta=0.15)
                 self.assertAlmostEqual(math.hypot(pts[2] - bx, pts[3] - by), br + gap, delta=0.15)
@@ -417,15 +422,15 @@ class GraphPage(unittest.TestCase):
         xy = {"a": (100.0, 100.0), "b": (150.0, 100.0), "c": (100.0, 300.0)}           # a and b too close for two labels below
         rad = {"a": 8.0, "b": 8.0, "c": 8.0}
         texts = {"a": "shop-web-1", "b": "shop-db-1", "c": "alone"}
-        spots = web.place_labels(["a", "b", "c"], xy, rad, texts)
+        spots = webmap.place_labels(["a", "b", "c"], xy, rad, texts)
         self.assertEqual(spots["a"], (100.0, 120.0, ""))                               # the first one keeps the default
         self.assertEqual(spots["c"], (100.0, 320.0, ""))
         self.assertNotEqual(spots["b"], (150.0, 120.0, ""))                            # the second one moves away
-        w = len(texts["a"]) * web.LABEL_CHAR_W
+        w = len(texts["a"]) * webmap.LABEL_CHAR_W
         bx, by, side = spots["b"]
         if side == "":
             self.assertTrue(by < 100 or abs(bx - 100) >= w)
-        self.assertEqual(web.place_labels(["a", "b", "c"], xy, rad, texts), spots)      # deterministic
+        self.assertEqual(webmap.place_labels(["a", "b", "c"], xy, rad, texts), spots)      # deterministic
 
     def test_selection_marks_the_neighbours_and_dims_the_rest(self):
         G = self.graph()
@@ -473,7 +478,7 @@ class GraphPage(unittest.TestCase):
             self.srv.cache.clear()
 
     def test_the_csp_pins_the_one_script_of_the_graph_page(self):
-        self.assertEqual(web.page_csp([graphjs.SCRIPT]), web.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
+        self.assertEqual(webhttp.page_csp([graphjs.SCRIPT]), webhttp.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
         fake = "/* nuc-console ✓ */ document.documentElement.dataset.ok = '1';"
         with self.script(fake):
             st, h, page = get(self.srv, "/?view=map&as=graph&sel=" + key("ct:shop-db-1"))
@@ -484,7 +489,7 @@ class GraphPage(unittest.TestCase):
         self.assertTrue(page.endswith("</footer><script>" + fake + "</script></html>"))
         self.assertEqual(page.count("<script"), 1)
         digest = base64.b64encode(hashlib.sha256(d.scripts[0].encode("utf-8")).digest()).decode()
-        self.assertEqual(h["Content-Security-Policy"], web.CSP + f"; script-src 'sha256-{digest}'")
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP + f"; script-src 'sha256-{digest}'")
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"], h["Referrer-Policy"], h["X-Frame-Options"]),
                          ("no-store", "nosniff", "no-referrer", "DENY"))
@@ -493,14 +498,14 @@ class GraphPage(unittest.TestCase):
         self.assertIsNone(re.search(r"\son[a-z]+=", page))                          # no inline event handler
         for st, h, body in others:                                                  # no other page has a script
             self.assertEqual(st, 200)
-            self.assertEqual(h["Content-Security-Policy"], web.CSP)
+            self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
             self.assertNotIn("script-src", h["Content-Security-Policy"])
             self.assertNotIn("<script", body.lower())
         with self.script(fake):                                                     # the script never comes from the request
             for path in ("/?view=map&as=graph&sel=%3Cscript%3E", "/?view=map&as=graph&ext=0&only=1&z=50&x=</script>"):
                 st, h, body = get(self.srv, path)
                 self.assertEqual(Drawing(body).scripts, [fake], path)
-                self.assertEqual(h["Content-Security-Policy"], web.page_csp([fake]))
+                self.assertEqual(h["Content-Security-Policy"], webhttp.page_csp([fake]))
 
     def test_the_real_script_can_be_inlined(self):
         """Inline, the script ends at the first '</script' and '<!--' changes how the browser reads it: neither may be in it."""
@@ -513,7 +518,7 @@ class GraphPage(unittest.TestCase):
         with self.script(""):
             st, h, page = get(self.srv, "/?view=map&as=graph")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
         self.assertNotIn("<script", page.lower())
         self.assertNotIn("<noscript>", page)                                         # no script to reload it: the meta refresh does
         self.assertIn('<meta http-equiv="refresh" content="2">', page)
@@ -521,7 +526,7 @@ class GraphPage(unittest.TestCase):
     # ---- bounds ------------------------------------------------------------------------------------------------------
 
     def test_parameters_are_validated(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual([q(s)["as"] for s in ("as=graph", "as=GRAPH", "as=tree", "as=graph2", "as=", "")], ["graph", "", "", "", "", ""])
         self.assertEqual([q(s)["stacks"] for s in ("stacks=1", "stacks=yes", "stacks=0", "stacks=2")], [True, False, False, False])
         self.assertEqual([q(s)["ext"] for s in ("ext=0", "ext=1", "ext=off", "ext=", "ext=00")], ["0", "", "", "", ""])
@@ -529,7 +534,7 @@ class GraphPage(unittest.TestCase):
                          [1, 2, 0, 0, 0, 0, 0])
         self.assertEqual([q(s)["z"] for s in ("z=100", "z=50", "z=1", "z=999999", "z=99999999", "z=130", "z=x", "z=²", "z=-50", "")],
                          [0, 50, 50, 300, 0, 125, 0, 0, 0, 0])
-        self.assertTrue(all(z in web.GZOOMS for z in web.GZOOMS))
+        self.assertTrue(all(z in weburl.GZOOMS for z in weburl.GZOOMS))
         for s in ("sel=<script>", "sel=0123456789a", "sel=ABCDEF0123"):
             self.assertEqual(q(s)["sel"], "")
         G = self.graph()
@@ -605,9 +610,9 @@ class GraphPage(unittest.TestCase):
             only = self.draw("/?view=map&as=graph&only=1")
         finally:
             render.map_graph, graphlayout.layout = saved_graph, saved_layout
-        self.assertEqual(len(d.nodes), web.GRAPH_NODES)
-        self.assertIn(f"+{len(ids) - web.GRAPH_NODES} more not drawn: show problems only, or select a node and its local graph", page)
-        self.assertEqual(sizes[0], (web.GRAPH_NODES, 2000, 1400))                     # the drawing grows with the nodes
+        self.assertEqual(len(d.nodes), webmap.GRAPH_NODES)
+        self.assertIn(f"+{len(ids) - webmap.GRAPH_NODES} more not drawn: show problems only, or select a node and its local graph", page)
+        self.assertEqual(sizes[0], (webmap.GRAPH_NODES, 2000, 1400))                     # the drawing grows with the nodes
         self.check_contract(d)
         for nid in ids - {x for x in ids if x.startswith("ext:")}:                    # problems, zones, ports, containers first
             self.assertTrue(key(nid) in d.nodes, nid)
@@ -615,8 +620,8 @@ class GraphPage(unittest.TestCase):
         self.assertEqual(kept, addrs[:len(kept)])                                     # then the remote addresses seen last
         self.assertNotIn(oldest, d.nodes)
         self.assertIn("sel", sel.nodes[oldest]["cls"])                                # a selected node is always drawn
-        self.assertEqual(len(sel.nodes), web.GRAPH_NODES)
-        self.assertLess(len(only.nodes), web.GRAPH_NODES)                             # problems only: everything fits again
+        self.assertEqual(len(sel.nodes), webmap.GRAPH_NODES)
+        self.assertLess(len(only.nodes), webmap.GRAPH_NODES)                             # problems only: everything fits again
 
     def test_hostile_names_stay_inert(self):
         saved = render.map_graph
@@ -652,7 +657,7 @@ class GraphPage(unittest.TestCase):
         self.check_contract(d)
         n = d.nodes[key("ct:shop-db-1")]
         self.assertEqual(n["title"], graph.safe(EVIL) + " · " + graph.safe(EVIL))  # the full name in the tooltip, made safe
-        self.assertEqual(n["text"], graph.safe(EVIL)[:web.LABEL_MAX - 1] + "…")       # cut under the circle
+        self.assertEqual(n["text"], graph.safe(EVIL)[:webmap.LABEL_MAX - 1] + "…")       # cut under the circle
 
     # ---- failure -----------------------------------------------------------------------------------------------------
 
@@ -674,7 +679,7 @@ class GraphPage(unittest.TestCase):
         self.assertNotIn("Traceback", body)
         self.assertIn("secret detail", err.getvalue())
         self.assertNotIn("<script", body)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
         self.assertIn('<meta http-equiv="refresh" content="2">', body)               # no script: the plain refresh
         self.assertIn("dashboard", body)
         self.assertEqual(params(link(body, "tree"))["as"], "")
@@ -702,23 +707,23 @@ class GraphPage(unittest.TestCase):
             render.CFG["features"]["map"] = flag
         self.assertIn("map disabled in config.ini", off)
         self.assertNotIn("<svg", off)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
 
 
 class Pure(unittest.TestCase):
     def test_canvas_grows_with_the_nodes(self):
-        self.assertEqual(web.canvas(0), (1000, 700))
-        self.assertEqual(web.canvas(60), (1000, 700))
-        self.assertEqual(web.canvas(web.GRAPH_NODES), (2000, 1400))
-        sizes = [web.canvas(n)[0] for n in range(0, web.GRAPH_NODES + 50, 10)]
+        self.assertEqual(webmap.canvas(0), (1000, 700))
+        self.assertEqual(webmap.canvas(60), (1000, 700))
+        self.assertEqual(webmap.canvas(webmap.GRAPH_NODES), (2000, 1400))
+        sizes = [webmap.canvas(n)[0] for n in range(0, webmap.GRAPH_NODES + 50, 10)]
         self.assertEqual(sizes, sorted(sizes))
         self.assertLessEqual(max(sizes), 2000)
 
     def test_spot_keeps_positions_inside(self):
-        self.assertEqual(web.spot((float("nan"), 3), 1000, 700), (500, 350))
-        self.assertEqual(web.spot(None, 1000, 700), (500, 350))
-        self.assertEqual(web.spot((-5, 9999), 1000, 700), (20, 666))
-        self.assertEqual([web.f1(v) for v in (1.0, 1.04, 1.05, 12.345, 0)], ["1", "1", "1.1", "12.3", "0"])
+        self.assertEqual(webmap.spot((float("nan"), 3), 1000, 700), (500, 350))
+        self.assertEqual(webmap.spot(None, 1000, 700), (500, 350))
+        self.assertEqual(webmap.spot((-5, 9999), 1000, 700), (20, 666))
+        self.assertEqual([webmap.f1(v) for v in (1.0, 1.04, 1.05, 12.345, 0)], ["1", "1", "1.1", "12.3", "0"])
 
 
 if __name__ == "__main__":

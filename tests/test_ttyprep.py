@@ -7,6 +7,8 @@ import unittest
 from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 import nuc_config  # noqa: E402
 import ttyprep  # noqa: E402

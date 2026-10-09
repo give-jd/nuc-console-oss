@@ -86,7 +86,7 @@ AI_CSS = (".pl.g{background:#3fb950;color:#0d1117}.pl.c{background:#39c5cf;color
           ".mt tbody tr:hover{background:#161b22}.mt tr.sel,.mt tr.sel:hover{background:#1f2a3a;box-shadow:inset 3px 0 #58a6ff}.mt .no a{color:#8b949e}"
           ".mt .nn div{max-width:44ch;overflow:hidden;text-overflow:ellipsis;color:#8b949e}.cmd{background:#161b22;padding:1px 6px;border-radius:3px;user-select:all;overflow-wrap:anywhere}"
           "@media(max-width:1399px){.mp.two .nn{display:none}}@media(max-width:699px){.mt .nn,.mt .pm,.mt .sz{display:none}}"
-          # the AI switch, its progress, the chat and the buttons (forms: web.py ai_control_html / ai_chat_html)
+          # the AI switch, its progress, the chat and the buttons (forms: webpages.py ai_control_html / ai_chat_html)
           ".ctl,.chat{margin:10px 0;padding:8px 12px;border:1px solid #30363d;border-radius:6px}.ctl .row{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:2px 0}"
           ".pl.big{font-size:1.15em;padding:2px 14px}.ctl .st{font-weight:700;overflow-wrap:anywhere}.ctl .note{margin:4px 0}.note.ok{color:#3fb950}.note.bad{color:#ff7b72}"
           ".ctl .dir{color:#8b949e}.ctl progress{width:min(48ch,100%);height:14px}"

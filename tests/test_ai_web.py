@@ -10,6 +10,8 @@ import os
 import re
 import socket
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import threading
 import time
 import unittest
@@ -25,6 +27,9 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import screens  # noqa: E402
 import web  # noqa: E402
+import webpages  # noqa: E402
+import webhttp  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -68,7 +73,7 @@ def link(page, text):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 def plain(page):
@@ -89,7 +94,7 @@ class AiPage(unittest.TestCase):
     def setUpClass(cls):
         cls.host, cls.webapps, cls.expose = socket.gethostname, render.CFG["webapps"], render.CFG["expose"]  # demo_defaults() changes them for good: put them back
         cls.srv = serve()
-        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]), web.health_extra_html)
+        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]), webpages.health_extra_html)
 
     @classmethod
     def tearDownClass(cls):
@@ -109,7 +114,7 @@ class AiPage(unittest.TestCase):
         render.ai_build = lambda now: (self.builds.append(render.DEMO_OS), real(now))[1]
 
     def tearDown(self):
-        features, render.DEMO_OS, render.ai_build, render.ai_status, ai, web.health_extra_html = self.saved
+        features, render.DEMO_OS, render.ai_build, render.ai_status, ai, webpages.health_extra_html = self.saved
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render.CFG["ai"].clear()
@@ -167,8 +172,8 @@ class AiPage(unittest.TestCase):
         csp = h["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
         self.assertNotIn("script-src", csp)                                  # still no script on this page
-        self.assertEqual(csp, web.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
-        self.assertEqual(csp, web.CSP.replace("form-action 'none'", "form-action 'self'"))
+        self.assertEqual(csp, webhttp.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
+        self.assertEqual(csp, webhttp.CSP.replace("form-action 'none'", "form-action 'self'"))
         self.assertEqual(h["Referrer-Policy"], "same-origin")                # so that the browser's Origin on a post is the real one, not "null"
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
         self.assertNotIn("<script", body.lower())
@@ -220,7 +225,7 @@ class AiPage(unittest.TestCase):
         render.CFG["ai"]["web_actions"] = False
         st, h, body = get(self.srv, "/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP, "form-action 'none' again")
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP, "form-action 'none' again")
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
         self.assertNotIn("<form", body)
         self.assertNotIn("<input", body)
@@ -318,11 +323,11 @@ class AiPage(unittest.TestCase):
     # ---- parameters -------------------------------------------------------------------------------------------------------------------
 
     def test_invalid_parameters_are_dropped(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("view=ai")["view"], "ai")
         self.assertEqual(q("view=ai&sel=qwen3-4b")["sel"], "qwen3-4b")       # any text: the page checks it against the catalog
-        self.assertEqual(len(q("view=ai&sel=" + "a" * 5000)["sel"]), web.AI_SEL_MAX)
-        self.assertEqual(web.AI_SEL_MAX, screens.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
+        self.assertEqual(len(q("view=ai&sel=" + "a" * 5000)["sel"]), weburl.AI_SEL_MAX)
+        self.assertEqual(weburl.AI_SEL_MAX, screens.AI_ID_MAX + 1)               # one more than an id has: a longer text never equals one
         self.assertEqual(q("view=map&sel=qwen3-4b")["sel"], "")              # the map's sel stays ten hex digits
         self.assertEqual(q("view=cpu&sel=qwen3-4b")["sel"], "")
         self.assertEqual(q("sel=qwen3-4b")["sel"], "")
@@ -391,8 +396,8 @@ class AiPage(unittest.TestCase):
         self.assertLessEqual(len(self.srv.cache), web.CACHE_MAX)
         self.assertLessEqual(len(keys), 2)                                   # paused or not: a junk selection is the empty one
         self.assertNotIn("junk", "".join(str(k) for k in self.srv.cache))
-        first = self.srv.page(**web.view_params(web.parse_qs("view=ai")))
-        self.assertIs(self.srv.page(**web.view_params(web.parse_qs("view=ai"))), first)    # within r/2: the same render
+        first = self.srv.page(**weburl.view_params(web.parse_qs("view=ai")))
+        self.assertIs(self.srv.page(**weburl.view_params(web.parse_qs("view=ai"))), first)    # within r/2: the same render
 
     # ---- hostile data -----------------------------------------------------------------------------------------------------------------
 
@@ -493,7 +498,7 @@ class AiPage(unittest.TestCase):
         return calls
 
     def test_the_health_page_has_no_advice_while_the_advisor_is_off(self):
-        self.assertEqual(web.health_extra_html(demo.health_report(None, 7)), "")
+        self.assertEqual(webpages.health_extra_html(demo.health_report(None, 7)), "")
         self.assertNotIn("ADVICE", self.page("/?view=health"))
 
     def test_the_cached_advice_goes_under_the_findings_and_over_the_sections_and_is_escaped(self):
