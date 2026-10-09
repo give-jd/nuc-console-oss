@@ -95,6 +95,8 @@ layout = attention:2, exposure:2, webapps, firewall, system, containers:2
 hidden = sessions, docker_disk
 ```
 
+`kpis = none` shows no KPI row at all, on the console and on the web (the space is given to the cards), as `hidden = none` hides nothing; a blank `kpis =` sets nothing and the preset's row is used. A browser's own choice (cookie, `?ui=`) still comes first.
+
 Values are not case sensitive; lists are separated by commas (or semicolons, or blanks, and may continue on indented lines). An unknown name, a repeat, a width
 outside 1-4 or more than 8 KPIs is reported on stderr and that item is skipped (a width is held to 1-4; the first 8 KPIs are used). If nothing valid is left in
 `kpis` or `layout`, the preset's own is used.
@@ -194,6 +196,21 @@ n8n     = tailnet
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
+## `[alerts]` — alarms you may mute
+
+```ini
+[alerts]
+mute = journal-errors, thermal
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+
+Security alarms can never be muted: ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
+
+**Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
+
 ## `[telegram]` — alerts on your phone (off by default)
 
 ```ini
@@ -242,7 +259,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 |---|---|
 | `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
-| `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root) |
+| `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |

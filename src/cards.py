@@ -120,7 +120,7 @@ PROBLEM_CARDS = {
     "firewall-off": ("firewall",), "firewall-policy": ("firewall",), "firewall-unreadable": ("firewall",),
     "ufw-missing": ("firewall",), "ufw-off": ("firewall",), "ufw-unreadable": ("firewall",),
     "config-unreadable": ("exposure", "webapps"),
-    "telegram-unpaired": (), "telegram-failing": (),
+    "telegram-unpaired": (), "telegram-failing": (), "mute-ignored": (),
 }
 SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)
 
@@ -792,6 +792,10 @@ def attention_card(ctx, k, caps):
                  for x in getattr(pb, "known", None) or []]
         body.append(ui.Details(f"{acc} accepted", known, brief=Line([Span(f"   · {acc} accepted as known ({cmds.get('problems') or ADVICE_PROBLEMS_CMD})",
                                                                           "muted")])))
+    mut = getattr(pb, "muted", 0)
+    if mut:  # [alerts] mute: still collected, off the list and the problems KPI; the count says so, `nuc-console-problems` lists them
+        items = [Msg("info", f"{x['id']}: {x['text']}") for x in getattr(pb, "muted_known", None) or []]
+        body.append(ui.Details(f"{mut} muted", items, brief=Line([Span(f"   · {mut} muted ({cmds.get('problems') or ADVICE_PROBLEMS_CMD})", "muted")])))
     if cmds:
         body.append(ui.Hint("list with why and fix", cmds["problems"]))
         if any(p.accept for p in probs):
@@ -1184,8 +1188,9 @@ def _kpi_problems(ctx):
     if pb is None:
         return _unk("problems")
     sev = max((s for s, _ in pb), default=0)
-    acc = getattr(pb, "accepted", 0)
-    return _k("problems", str(len(pb)), "", "err" if sev >= 2 else "warn" if pb else "ok", f"{acc} accepted as known" if acc else "")
+    acc, mut = getattr(pb, "accepted", 0), getattr(pb, "muted", 0)
+    hint = ", ".join(x for x in (f"{acc} accepted as known" if acc else "", f"{mut} muted" if mut else "") if x)
+    return _k("problems", str(len(pb)), "", "err" if sev >= 2 else "warn" if pb else "ok", hint)
 
 
 @kpi("internet")

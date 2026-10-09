@@ -705,7 +705,8 @@ def kpi_tile(k, href=""):
 
 def kpis_block(tiles, banner=""):
     """The KPI row block (data-card="__kpis"); the banner (a collector that is not running...) goes above the tiles."""
-    return block("div", "__kpis", "kpiblock", banner + f'<div class="kpis" role="list" aria-label="Key figures">{"".join(tiles)}</div>')
+    row = f'<div class="kpis" role="list" aria-label="Key figures">{"".join(tiles)}</div>' if tiles else ""  # [ui] kpis = none: no row, no space
+    return block("div", "__kpis", "kpiblock", banner + row)
 
 
 def banner(sym, bold, small=""):
