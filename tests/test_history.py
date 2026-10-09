@@ -1203,7 +1203,8 @@ class JobEvents(JobCase):
         def absent():
             raise collector.Absent("tool")
         ok = ([{"ts": T0, "kind": "crash", "subject": "a", "detail": "d", "source": "t", "n": 1}], [], {"x": "1"})
-        with mock.patch.object(job, "sources", lambda: [("one", boom), ("two", absent), ("three", lambda: ok)]):
+        with mock.patch.object(job, "sources", lambda: [("one", boom), ("two", absent), ("three", lambda: ok)]), \
+                mock.patch.object(collector, "disk_rows", return_value=[]):  # the daily disk reading is the machine's (macOS: `mount`), not this test's
             job.events()
         self.assertEqual(self.rows("SELECT subject FROM events"), [("a",)])
         self.assertEqual(list(json.loads(store.meta("last_errors"))), ["one"])
