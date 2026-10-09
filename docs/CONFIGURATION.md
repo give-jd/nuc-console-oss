@@ -2,6 +2,8 @@
 
 Everything is optional: a missing file, a missing key or a broken value means the default shown here, and a broken file never stops the dashboard (the problem goes to the journal).
 
+Where things are described: **this page** is the long form (what a key does, edge cases, examples); the web view's **settings page** shows the same keys with their values and when a change applies; `config/config.ini` itself has one line per key and the values a key takes, nothing more. A test fails when a key is in one of them and not in the others.
+
 | | |
 |---|---|
 | File | Linux and macOS: `/etc/nuc-console/config.ini` · Windows: `%ProgramData%\nuc-console\config.ini` (created on first install, **never overwritten**; UTF-8) · [portable run](PORTABLE.md): `data/config.ini` in the extracted folder (copied from `config/config.ini` the first time, never overwritten) |

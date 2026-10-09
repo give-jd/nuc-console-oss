@@ -244,7 +244,7 @@ enabled = no          # set up on the web view's Telegram page, or: sudo nuc-con
 
 A disabled section is not drawn, raises no alarm, and — for the collector-side ones — **its commands are never run as root**.
 Apply with `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web`. After an upgrade, `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied the file.
-**Full reference of every key, default and command: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)** (commented example: [config/config.ini](config/config.ini)).
+**Full reference of every key, default and command: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)** (short example, one line per key: [config/config.ini](config/config.ini)).
 
 ## ATTENTION: inventory, analysis, accepting
 

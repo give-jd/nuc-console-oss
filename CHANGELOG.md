@@ -3,6 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Changed
+- The shipped `config/config.ini` is about half as long (106 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and on the settings page. An installed machine keeps its own `config.ini` untouched; `diff /etc/nuc-console/config.ini{,.dist}` shows the new reference.
+
 ## [2.4.0] - 2026-10-09
 
 The result of a security review of 2.3.0, and a console that stays on one screen when it fits. **An installed `nuc-console-update` now stops when it cannot
