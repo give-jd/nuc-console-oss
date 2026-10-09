@@ -43,6 +43,7 @@ SECURITY = {
     "port-new", "port-changed", "port-gone", "port-compare-suspended", "baseline-missing", "baseline-unreadable",           # ports
     "collector-net", "collector-containers", "stale-net", "stale-containers", "net-sections", "config-unreadable",           # their data
     "telegram-unpaired", "telegram-failing",                                                                                 # the alerting
+    "failed-units",                                                                                                          # a stopped fail2ban or sshd hides in it
     "mute-ignored",                                                                                                          # this very setting
 }
 SM = {"cpu": {"cpu0": 0.1}, "thermal": {"cpu": (101.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "recent": 0, "clk": (2.6, 4.9)}}
