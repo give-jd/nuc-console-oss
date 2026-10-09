@@ -23,9 +23,13 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **The collector unit is hardened further**: `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `ProtectKernelModules`, `ProtectClock`,
   `ProtectHostname`, `SystemCallArchitectures=native`. Not added, because they would break what only root can do: a capability list, `ProtectKernelTunables`,
   `ProtectControlGroups`, `RestrictNamespaces` (`nsenter` into the containers), `ProtectSystem=strict`, `MemoryDenyWriteExecute`.
-- **What the local web view does not defend is now written down** ([SECURITY.md](SECURITY.md), [docs/WEB.md](docs/WEB.md)): on portable, macOS and Windows it has no token, so another
-  local account can post its CSRF token to the AI, Telegram and (portable, desktop) settings forms. What defends and what to set today are there, and the desktop
-  app's adoption of an earlier core by its pid file is listed as a [known limitation](docs/DESKTOP.md).
+- **A portable run and the desktop app now ask for a token on 127.0.0.1.** The loopback view had none, so any other account of the machine could read the
+  CSRF token from the page and post it to the AI and Telegram forms and, in these two modes, to the settings forms that write the user's `config.ini`. Each data
+  folder now has its own: `data/web.token` (`secrets.token_urlsafe`, 0600; Windows: an ACL for the user), made at the first start, kept between starts, new if
+  you delete it, never in `config.ini`, a log or a page. `run.sh`, `run.cmd` and the app read it and open the dashboard through a 0600 page (`data/open.html`,
+  `open-app.html`) instead of putting it on a command line. `[web] token_file` now also applies to an installation's `--local` view when `[web] enabled = no`.
+  **An installation on macOS or Windows without `token_file` still has none**: the browser is opened by the logged-in user, so a token it can read every other
+  local user could read; this and what to set instead are in [SECURITY.md](SECURITY.md) and [docs/WEB.md](docs/WEB.md#the-loopback-view-and-the-other-accounts-of-the-machine).
 
 ### Added
 

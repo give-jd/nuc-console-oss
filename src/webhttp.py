@@ -11,7 +11,9 @@ import http.server
 import ipaddress
 import os
 import re
+import secrets
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -97,6 +99,35 @@ def read_token(path):
     if not TOKEN_OK.fullmatch(tok):
         raise ValueError(f"token in {path} must be {MIN_TOKEN}+ characters from A-Z a-z 0-9 . _ ~ -")
     return tok
+
+
+LOCAL_TOKEN = "web.token"  # in the data folder of a portable run / the desktop app: the access token of the loopback view
+
+
+def local_token(path):
+    """The access token of a portable run's loopback view (run.sh, run.ps1, the desktop app), where no [web] token_file is meant to exist:
+    one per data folder, created here the first time (secrets.token_urlsafe, 0600, owner only; Windows: an ACL for this user), read back
+    by the next runs (the browser and the desktop app hold it as a cookie) and by the launchers of the same account. Delete the file for a
+    new one. A file that is not a good token, or that others can read, is an error (read_token): it is not replaced behind your back."""
+    try:
+        return read_token(path)
+    except FileNotFoundError:
+        pass
+    token = secrets.token_urlsafe(24)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:  # another start of this folder won the race
+        return read_token(path)
+    with os.fdopen(fd, "w") as f:
+        f.write(token + "\n")
+    if nuc_config.WINDOWS:  # no mode bits: only this user (and SYSTEM) may read it
+        icacls = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "icacls.exe")
+        who = (os.environ.get("USERDOMAIN", "") + "\\" if os.environ.get("USERDOMAIN") else "") + os.environ.get("USERNAME", "")
+        done = who and subprocess.run([icacls, path, "/inheritance:r", "/grant:r", who + ":F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        if not done:  # fail closed: a token others may read protects nothing
+            os.remove(path)
+            raise ValueError(f"could not restrict {path} to your account (icacls)")
+    return token
 
 
 def check_bind(bind, token):

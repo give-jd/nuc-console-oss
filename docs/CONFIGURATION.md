@@ -18,7 +18,7 @@ You do not normally set it yourself (set by hand, it also makes the web view alw
 folder; the launchers clear it, and the other `NUC_CONSOLE_*` path overrides (state, baseline, ...).
 
 Every key applies as on an installation except the ones that decide how an installation shows itself: `[web] enabled`, `bind`, `port` and `token_file` are ignored (the
-web view is on `127.0.0.1`, on the port you give with `--port` / `-Port` or a free one, with no token) and so are `[display] mode` and `browser`
+web view is on `127.0.0.1`, on the port you give with `--port` / `-Port` or a free one, behind the data folder's own token `data/web.token`: [PORTABLE.md](PORTABLE.md#the-access-token)) and so are `[display] mode` and `browser`
 (the launcher opens your default browser itself; `--no-open` / `-NoOpen` prints the address instead). `[display] zoom` still sets the text size.
 
 ## `[features]` — switch sections on or off
