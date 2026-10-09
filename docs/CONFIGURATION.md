@@ -51,7 +51,7 @@ their start. In a portable run and the desktop app the settings page turns them 
 | `mode` | `overview` | `overview`: one screen, no keyboard needed. `rotate`: 3 pages (System, Network & firewall, Boot), keys `←` `→` move through them (`1` is the first; `2`-`5` are the Map, CPU, Health and AI screens) |
 | `sections` | by priority | Fixed on-screen order, top-left to bottom-right. Names: `attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks`. Names you leave out keep their default place at the end |
 | `columns`, `rows` | `0` | Layout size in characters; `0` = the real console size. Never larger than the real console. Use it when elements run off the screen (e.g. `columns = 235`, `rows = 65`) |
-| `spacing` | `1` | A blank line under each section title. If something would be cut, the layout is first retried without it: complete content beats spacing |
+| `spacing` | `1` | A blank line under each section title. If something would be cut, the layout is first retried without it, then also without the blank lines between sections: complete content beats spacing |
 | `details` | `yes` | The overview cuts a list only when it really does not fit; those sections then get **Details** pages showing everything, rotating on the monitor (it has no keyboard). `no`: never rotate |
 | `overview_seconds` | `45` | How long the overview stays before the Details pages (10-600) |
 | `cpu_in_rotation` | `no` | `yes`: the CPU screen joins the pages the monitor rotates through (a monitor with no keyboard) |
