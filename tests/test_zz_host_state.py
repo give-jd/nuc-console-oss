@@ -31,6 +31,11 @@ class Guard(unittest.TestCase):
 
     def test_the_commands_that_ask_the_machine_are_trapped(self):
         import subprocess
+        if not hermetic.HOST_COMMANDS:  # macOS, Windows: the tools hostinfo runs are not there
+            import hostinfo
+            with self.assertRaises(FileNotFoundError):
+                hostinfo._run("netstat", "-an")
+            return
         for cmd in (["loginctl", "list-sessions"], ["/usr/bin/ss", "-tn"], ["docker", "ps"]):
             self.tripped(subprocess.run, cmd)
 

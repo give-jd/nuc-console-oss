@@ -1148,7 +1148,8 @@ class Installers(unittest.TestCase):
 def history_job_on_this_machine(case):
     """The real history sources of this OS, once: results may be empty (a quiet machine, a tool that is not there), a crash or
     a failure that is not reported is never allowed. The first step reads every source once (events() runs at the first step)."""
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory() as d, mock.patch.object(nuc_config, "RUN_DIR", os.path.join(d, "run")), \
+            mock.patch.object(collector, "OUT_BOOT", os.path.join(d, "run", "boot.json")):  # the state of the console on this machine is not the test's
         store = history.Store(os.path.join(d, "history.db"))
         try:
             job = collector.HistoryJob(store)
@@ -1209,6 +1210,11 @@ def sample_real_procs(test):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows")
 class OnWindows(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(hermetic, "REAL_TOOLS", True)  # these try the real system tools of the machine, on purpose
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_host_metrics(self):
         cpu = hostinfo.cpu_times()
         self.assertTrue(cpu and all(busy <= total for busy, total in cpu.values()))
@@ -1322,6 +1328,11 @@ class OnWindows(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS")
 class OnMacOS(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(hermetic, "REAL_TOOLS", True)  # these try the real system tools of the machine, on purpose
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_host_metrics(self):
         cpu = hostinfo.cpu_times()
         self.assertTrue(cpu and all(busy <= total for busy, total in cpu.values()))

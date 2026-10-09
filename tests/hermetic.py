@@ -128,7 +128,7 @@ def _wrap(mod, name):
 
 # the commands the collector and the renderer run to ask the machine (listeners, sessions, containers, journal, firewall): an answer from
 # the host, not from the fixture. The test that wants one fakes subprocess itself (that is above this wrapper and never reaches it).
-HOST_COMMANDS = {"ss", "netstat", "loginctl", "who", "docker", "journalctl", "systemctl", "ufw", "iptables", "nft", "tailscale",
+HOST_COMMANDS = () if not nuc_config.LINUX else {"ss", "netstat", "loginctl", "who", "docker", "journalctl", "systemctl", "ufw", "iptables", "nft", "tailscale",
                  "fail2ban-client", "lsof", "last", "sensors", "smartctl"}
 _Popen_init = subprocess.Popen.__init__
 
@@ -144,5 +144,21 @@ def _popen_init(self, args, *a, **k):
 
 subprocess.Popen.__init__ = _popen_init
 
-for _mod, _name in ((builtins, "open"), (os, "stat"), (os, "listdir"), (os, "scandir"), (os, "open"), (sqlite3, "connect")):
+# os.path.exists() and friends: on Windows with Python 3.12+ they are C functions that never go through os.stat()
+for _mod, _name in ((builtins, "open"), (os, "stat"), (os, "listdir"), (os, "scandir"), (os, "open"), (sqlite3, "connect"),
+                    (os.path, "exists"), (os.path, "lexists"), (os.path, "isfile"), (os.path, "isdir"), (os.path, "islink")):
     _wrap(_mod, _name)
+
+# macOS and Windows: the system tools hostinfo runs (vm_stat, sysctl, netstat, mount, who...) answer for the machine. They are "not there"
+# (hostinfo then says "unavailable", as it does for a missing tool), except for the tests that exist to try the real ones (OnMacOS, OnWindows
+# in test_platforms), which switch REAL_TOOLS on for their duration.
+REAL_TOOLS = False
+if not nuc_config.LINUX:
+    import hostinfo  # noqa: E402
+    _hostinfo_run = hostinfo._run
+
+    def _hermetic_hostinfo_run(*args, **kwargs):
+        if not REAL_TOOLS:
+            raise FileNotFoundError(args[0])
+        return _hostinfo_run(*args, **kwargs)
+    hostinfo._run = _hermetic_hostinfo_run
