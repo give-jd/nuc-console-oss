@@ -1237,35 +1237,38 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
                 # the caps ("… +N more") are not about space: lift each one if the layout still fits, so a free corner of the
                 # screen is used before anything is pushed to the Details pages. Section order = priority. If something stays
                 # cut, try once more without the air under the titles: complete content beats spacing.
-                def expand(first_lines):
+                def expand(first_lines, gap):
                     ls = first_lines
                     try:
                         for name in [n for n, _ in make_cand(k) if n in set(trunc)]:
                             lifted.add(name)
                             trunc.clear()
-                            try_lines = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
+                            try_lines = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, gap)
                             if try_lines is None:
                                 lifted.discard(name)
                             else:
                                 ls = try_lines
                         trunc.clear()
-                        ls = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else []) or ls
+                        ls = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, gap) or ls
                         return ls, set(trunc)
                     finally:
                         lifted.clear()
                         trunc.clear()
-                lines, left = expand(lines)
-                if left and spacing_on():
-                    saved_spacing = CFG["spacing"]
-                    CFG["spacing"] = 0
-                    try:
-                        trunc.clear()
-                        tight = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, [""] if spaced else [])
-                        tight_lines, tight_left = expand(tight) if tight is not None else (None, left)
-                    finally:
-                        CFG["spacing"] = saved_spacing
-                    if tight_lines is not None and len(tight_left) < len(left):
-                        lines, left = tight_lines, tight_left
+                lines, left = expand(lines, [""] if spaced else [])
+                if left:  # still cut: complete content beats air. First without the air under the titles, then without the blank lines between sections
+                    for tight_spacing, tight_gap in (([(0, [""] if spaced else [])] if spacing_on() else []) + ([(0, [])] if spaced else [])):
+                        saved_spacing = CFG["spacing"]
+                        CFG["spacing"] = tight_spacing
+                        try:
+                            trunc.clear()
+                            tight = pack([fn for _, fn in make_cand(k)], ncol, cw, w, body_h, tight_gap)
+                            tight_lines, tight_left = expand(tight, tight_gap) if tight is not None else (None, left)
+                        finally:
+                            CFG["spacing"] = saved_spacing
+                        if tight_lines is not None and len(tight_left) < len(left):
+                            lines, left = tight_lines, tight_left
+                        if not left:
+                            break
                 trunc.clear()
                 trunc.update(left)
             if details is not None and CFG["details"] and trunc:
