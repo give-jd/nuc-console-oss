@@ -202,8 +202,15 @@ or vanished port shows a red banner. After an intended change: `sudo nuc-console
 
 ## 6. Console font and screen blanking (optional)
 
-The default VT font is small on a full-HD monitor. On Debian/Ubuntu: `sudo dpkg-reconfigure console-setup` (choose Terminus 16×32),
-or `setfont Lat15-TerminusBold32x16` for a one-off test. To let the monitor sleep, add `consoleblank=600` (seconds) to the kernel command line.
+The default VT font is small on a full-HD monitor, and a monitor that is always on is worn by a static picture. Both are off until you ask, in `/etc/nuc-console/config.ini`:
+
+```ini
+[console]
+font = Lat15-TerminusBold32x16   # Terminus 16x32; Debian/Ubuntu: sudo apt install console-terminus
+blank_minutes = 10               # the monitor sleeps after 10 minutes without a key (0 = never)
+```
+
+then `sudo systemctl restart nuc-console`. The service applies them each time it starts (so after a reboot too), only on its own terminal, and skips with a line in `journalctl -u nuc-console` what is not there (no `setfont`, no such font). Nothing touches the bootloader or `console-setup`; why, and `consoleblank=` as an alternative: [CONFIGURATION.md](CONFIGURATION.md#console--font-and-screen-blanking-of-the-linux-console-both-off-by-default).
 
 ## 7. Optional: a local AI model
 
