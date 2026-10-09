@@ -22,6 +22,7 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import cardlines  # noqa: E402
 import ui  # noqa: E402
 
@@ -156,20 +157,20 @@ def tearDownModule():
 
 
 def plist(*items):
-    """A render.ProblemList of (severity, text, problem id)."""
-    out = render.ProblemList((sev, text) for sev, text, _ in items)
+    """A problems.ProblemList of (severity, text, problem id)."""
+    out = problems.ProblemList((sev, text) for sev, text, _ in items)
     out.pids = [pid for _, _, pid in items]
     return out
 
 
 def demo_ctx(**kw):
-    """A Ctx on the demo machine (the problems are the demo's: render.problems of its state)."""
+    """A Ctx on the demo machine (the problems are the demo's: problems.problems of its state)."""
     now = time.time()
     cont, net, boot, base = demo.snapshot(now)
     s = demo.sampler_data(None, now)
     with mock.patch.object(render, "DEMO", True):
         render.demo_defaults()
-        pb = render.problems(net, cont, now, boot=boot, thermal=s["thermal"], baseline=base)
+        pb = problems.problems(net, cont, now, boot=boot, thermal=s["thermal"], baseline=base)
     args = dict(s=s, cont=cont, net=net, boot=boot, problems=pb, now=now, baseline=base,
                 health={"report": {"findings": [{"level": "err"}, {"level": "warn"}, {"level": "info"}]}},
                 ai={"enabled": True, "probe": {"state": "answering"}})
@@ -267,7 +268,7 @@ class RegistryTests(unittest.TestCase):
 
     # ---- the problems of a card
     def test_every_problem_has_its_cards_and_they_exist(self):
-        for pid in render.CATALOG:
+        for pid in problems.CATALOG:
             self.assertIn(pid, cards.PROBLEM_CARDS, pid)
         for pid, ids in cards.PROBLEM_CARDS.items():
             self.assertTrue(set(ids) <= set(nuc_config.SECTIONS), pid)

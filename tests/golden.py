@@ -20,7 +20,7 @@ This module changes nothing in src/. What the world has to patch because the ren
   socket.gethostname, os.cpu_count, nuc_config.PORTABLE, nuc_config.VERSION
   render: CFG (restored in place, the dicts and lists inside it too), MODE, PAGES, ROTATE_S, REFRESH_S, ACCEPT_CMD, PROBLEMS_CMD, CMD, CATALOG,
           KIOSK_HINT, ACCEPTED_PATH, telegram_status, DEMO, DEMO_OS, DEMO_HEALTH
-  render caches emptied: _CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
+  render caches emptied: hostdata._CACHE, _HEALTH, _ADVICE, _AI, _TOPO, KEEP (what the console's screens last read)
   aiweb: the engine (a fresh demo one, put back on exit) and its settings; aisetup.work_dir (a temporary AI folder, where a lock file or
           web.json would go); web.Server's CSRF token (a fixed one)
   tgweb: nothing: web.Server makes the demo's engine of the Telegram page (in memory, its clock the frozen one); it is put back on exit
@@ -56,6 +56,7 @@ import cpuinfo  # noqa: E402,F401
 import demo  # noqa: E402,F401
 import exposure  # noqa: E402,F401
 import graph  # noqa: E402,F401
+import hostdata  # noqa: E402,F401
 import graphjs  # noqa: E402,F401
 import graphlayout  # noqa: E402,F401
 import health  # noqa: E402,F401
@@ -64,6 +65,7 @@ import nuc_config  # noqa: E402
 import prefs  # noqa: E402,F401
 import procs  # noqa: E402,F401
 import render  # noqa: E402
+import problems  # noqa: E402
 import ui  # noqa: E402,F401
 import web  # noqa: E402
 import webhttp  # noqa: E402
@@ -222,24 +224,25 @@ class FrozenWorld(object):
             self.set(render, "PAGES", ("System", "Network & firewall", "Boot"))
             self.set(render, "ROTATE_S", 15)
             self.set(render, "REFRESH_S", 2)
-            self.set(render, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
-            self.set(render, "PROBLEMS_CMD", "nuc-console-problems")
-            self.set(render, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
+            self.set(problems, "ACCEPT_CMD", "sudo nuc-console-accept")  # the words of Linux, installed (not the portable run)
+            self.set(problems, "PROBLEMS_CMD", "nuc-console-problems")
+            self.set(problems, "CMD", {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
                                      "apply": "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"})
-            self.set(render, "CATALOG", dict(render.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
+            self.set(problems, "CATALOG", dict(problems.BASE_CATALOG))  # the why and fix of each problem (the shell shows them) in the same words
             self.set(render, "KIOSK_HINT", "Alt+F4 closes · F11 leaves full screen")
             path = os.path.join(self._tmp.name, "accepted.json")  # not there: nothing accepted, whatever the host has
             if self.accepted:
                 with open(path, "w") as f:
-                    json.dump({pid: {"reason": "known", "fp": render.fingerprint(sev, text, pid)} for pid, sev, text in self.accepted}, f)
-            self.set(render, "ACCEPTED_PATH", path)
-            self.set(render, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
+                    json.dump({pid: {"reason": "known", "fp": problems.fingerprint(sev, text, pid)} for pid, sev, text in self.accepted}, f)
+            self.set(problems, "ACCEPTED_PATH", path)
+            self.set(problems, "telegram_status", lambda path=None: None)  # notify.py's status.json: there is none (read from the host otherwise)
             self._freeze_ai()
             self.set(tgweb, "_ENGINE", None)  # web.Server makes the demo's
             self.set(tgweb, "_BIND", dict(tgweb._BIND))
             for name in ("DEMO", "DEMO_OS", "DEMO_HEALTH"):  # --demo and web.Server set them: put back on exit
                 self.set(render, name, getattr(render, name))
-            for name in ("_CACHE", "_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
+            self.scrub(hostdata._CACHE)
+            for name in ("_HEALTH", "_ADVICE", "_AI", "_TOPO", "KEEP"):
                 if isinstance(getattr(render, name, None), dict):
                     self.scrub(getattr(render, name))
         except BaseException:
