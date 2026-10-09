@@ -139,6 +139,19 @@ class Web(unittest.TestCase):
         self.assertEqual(get(self.locked, "/?token=nope")[0], 401)
         self.assertEqual(get(self.locked, "/healthz")[0], 200)
 
+    def test_cookies_are_secure_when_the_browser_came_over_https_and_only_then(self):
+        """Behind `tailscale serve` (X-Forwarded-Proto: https) the token and appearance cookies carry Secure; on plain http (loopback) they must not,
+        or the browser would drop them."""
+        for hdr, secure in (({}, False), ({"X-Forwarded-Proto": "http"}, False), ({"X-Forwarded-Proto": "https"}, True),
+                            ({"X-Forwarded-Proto": "HTTPS, http"}, True)):
+            _, h, _ = get(self.locked, "/?token=" + TOKEN, headers=hdr)
+            self.assertEqual("Secure" in h["Set-Cookie"].split("; "), secure, hdr)
+            self.assertIn("HttpOnly", h["Set-Cookie"])
+            _, h, _ = get(self.open, "/?set=reset&back=", headers=hdr)
+            self.assertEqual("Secure" in h["Set-Cookie"].split("; "), secure, hdr)
+            _, h, _ = get(self.open, "/?set=reset&frag=1", headers=hdr)
+            self.assertEqual("Secure" in h["Set-Cookie"].split("; "), secure, hdr)
+
     def test_token_redirect_keeps_the_view(self):
         """`/?token=X&view=map` used to land on the dashboard. The redirect carries the view back, rebuilt from what view_params() validated:
         what the view does not read, what is not a parameter at all, and the token itself are left out."""

@@ -42,6 +42,9 @@ token_file = /etc/nuc-console/web.token
 The token must be 16+ characters from `A-Z a-z 0-9 . _ ~ -` and the file must be mode 0600 owned by root or `nuc-console`: otherwise the service refuses to start.
 
 Open `http://192.168.0.10:8787/?token=<the token>` once: the token is moved into an `HttpOnly; SameSite=Strict` cookie and the URL is cleaned.
+Behind a proxy that speaks HTTPS to the browser and says so (`X-Forwarded-Proto: https`, as `tailscale serve` does) the cookies (`nuc_token`, `nuc_ui`) also carry `Secure`;
+over plain http, which includes the loopback address, they do not (a browser drops a `Secure` cookie that arrives over http). The header can only make a cookie
+stricter, so any peer may send it.
 The view you asked for stays: `/?token=<the token>&view=map` lands on the MAP, `…&view=cpu&sort=mem` on the CPU page sorted by memory. The redirect
 rebuilds the address from the parameters the page understands, with their values checked; anything else is dropped, and the token never comes back.
 Scripts can send `Authorization: Bearer <token>`. The token lives in a file, never in `config.ini` (world-readable).

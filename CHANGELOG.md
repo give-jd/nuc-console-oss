@@ -7,6 +7,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Security
 
+- **The `nuc_token` and `nuc_ui` cookies carry `Secure` when the browser came over HTTPS** (`X-Forwarded-Proto: https`, as `tailscale serve` sends), never over plain
+  http, where a browser would drop them.
 - **An installed `nuc-console-update` no longer goes on without a verified provenance.** The archive and `SHA256SUMS` come from the same release, so
   the hash proves nothing about who built it; without `gh` (or logged out) the update used to go on and run the new installer as root. It now stops with
   how to proceed: install `gh` and `gh auth login`, or verify the archive by hand and run again with `--allow-unattested` (`-AllowUnattested` on Windows),

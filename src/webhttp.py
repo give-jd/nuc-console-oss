@@ -178,6 +178,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return v
         return (query.get("token") or [""])[0]
 
+    def _secure(self):
+        """'; Secure' when the browser reached this server over HTTPS (a proxy in front says so: tailscale serve and others send
+        X-Forwarded-Proto: https), else ''. Never on plain http, and loopback is plain http: a browser drops a Secure cookie that comes over
+        http, and the dashboard would ask for the token on every click. The header can only make a cookie stricter, so it needs no trusted-peer list."""
+        return "; Secure" if self.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower() == "https" else ""
+
     def _cookie(self, name):
         for part in self.headers.get("Cookie", "").split(";"):
             k, _, v = part.strip().partition("=")
@@ -208,7 +214,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             back = {}
         keep = (f"{prefs.COOKIE_NAME}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={UI_COOKIE_AGE}" if value != prefs.COOKIE_VERSION
-                else f"{prefs.COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")  # nothing left to remember: the cookie goes
+                else f"{prefs.COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0") + self._secure()  # nothing left to remember: the cookie goes
         if (q.get("frag") or [""])[0] == "1":  # a script's request: no redirect, the page changes itself; X-Nuc-Prefs is what it keeps in the browser
             return self._send(204, extra=(("Set-Cookie", keep), ("X-Nuc-Prefs", value)))
         self._send(302, extra=(("Location", view_url(view_params(back))), ("Set-Cookie", keep)))
@@ -241,7 +247,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if "token" in q and u.path in ("/", APP_PATH):  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
                 where = view_url(view_params(q)) if u.path == "/" else app_url(view_params(q))
                 return self._send(302, extra=(("Location", where), ("Set-Cookie",
-                                  f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000")))
+                                  f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000" + self._secure())))
         if api:
             return self._api(u.path[len(API_PATH):].strip("/"), q)
         if u.path == APP_PATH:
