@@ -23,7 +23,13 @@ import collector  # noqa: E402
 import confedit  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
-from test_web import get_any as get, serve  # noqa: E402
+from test_web import get_any, serve  # noqa: E402
+
+TOKEN = "t" * 24
+
+
+def get(srv, path, method="GET", headers=None):
+    return get_any(srv, path, method, dict({"Authorization": "Bearer " + TOKEN}, **(headers or {})))
 
 SHIPPED = os.path.join(ROOT, "config", "config.ini")
 POSIX = os.name == "posix"
@@ -54,7 +60,7 @@ class Folder(unittest.TestCase):
         stack = contextlib.ExitStack()
         stack.enter_context(mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.path, "NUC_CONSOLE_SETTINGS": self.ov}))
         self.addCleanup(stack.close)
-        self.config_before = read(self.path)
+        self.ini("[web]\nsettings_actions = yes\ntoken_file = /nonexistent/token")  # the opt-in, and a token configured (the server is given one below)
 
     def ini(self, text):
         with open(self.path, "a", encoding="utf-8") as f:
@@ -196,15 +202,24 @@ class Writing(Folder):
         self.assertEqual(nuc_config.read_overlay(self.ov), {"ui.theme": "dark"}, "the old file stays")
         self.assertEqual(os.listdir(self.folder), ["settings.ini"])
 
-    def test_windows_fails_closed_when_icacls_does(self):
+    def test_windows_grants_the_process_own_sid_and_fails_closed(self):
+        sid = "S-1-5-21-111-222-333-1001"
+        who = mock.Mock(returncode=0, stdout='"HOST\\svc","%s"\n' % sid)
         with mock.patch.object(nuc_config, "WINDOWS", True), mock.patch("subprocess.run") as run:
-            run.return_value.returncode = 5
+            run.side_effect = [mock.Mock(returncode=0, stdout=""), mock.Mock(returncode=0, stdout="")]  # whoami finds no SID: nothing is written
             with self.assertRaises(OSError):
                 nuc_config.update_overlay({"ui.theme": "dark"}, path=self.ov)
-            self.assertEqual(os.listdir(self.folder), [], "nothing left behind")
-            run.return_value.returncode = 0
+            self.assertEqual(os.listdir(self.folder), [], "no SID, nothing left behind")
+            run.side_effect = [who, mock.Mock(returncode=5)]  # icacls fails
+            with self.assertRaises(OSError):
+                nuc_config.update_overlay({"ui.theme": "dark"}, path=self.ov)
+            self.assertEqual(os.listdir(self.folder), [])
+            run.side_effect = [who, mock.Mock(returncode=0)]
             nuc_config.update_overlay({"ui.theme": "dark"}, path=self.ov)
-            self.assertIn("/inheritance:r", run.call_args[0][0])
+            args = run.call_args[0][0]
+            self.assertIn("/inheritance:r", args)
+            self.assertIn("*%s:F" % sid, args)
+            self.assertFalse([a for a in args if "USERNAME" in a or a.startswith("HOST")], "granted by SID, not by a name from the environment")
         self.assertEqual(nuc_config.read_overlay(self.ov), {"ui.theme": "dark"} if POSIX else {})
 
     def test_save_overlay_checks_like_save_and_keeps_config_ini_as_it_is(self):
@@ -229,7 +244,7 @@ class Page(Folder):
     @classmethod
     def setUpClass(cls):
         cls.saved = copy.deepcopy(render.CFG)
-        cls.srv = serve()
+        cls.srv = serve(TOKEN)
 
     @classmethod
     def tearDownClass(cls):
@@ -268,7 +283,7 @@ class Page(Folder):
         if csrf:
             data["csrf"] = self.srv.csrf if csrf is True else csrf
         port = self.srv.server_address[1]
-        h = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://127.0.0.1:%d" % port}
+        h = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "http://127.0.0.1:%d" % port, "Authorization": "Bearer " + TOKEN}
         h.update(headers or {})
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         c.request("POST", path, urlencode(data), h)
@@ -358,9 +373,9 @@ class Page(Folder):
             self.assertEqual(self.post(path, fields, headers={"Origin": "http://127.0.0.1:%d" % (port + 1)})[0], 403, "another port")
             self.assertEqual(self.post(path, fields, headers={"Referer": "http://evil.example/"})[0], 403, "another referer")
             self.assertEqual(self.post(path, fields, headers={"Sec-Fetch-Site": "cross-site"})[0], 403, "a cross-site fetch")
-            self.assertEqual(self.post(path, fields, headers={"Host": "evil.example"})[0], 421, "an unknown Host name")
+            self.assertEqual(self.post(path, fields, headers={"Authorization": "Bearer " + "x" * 24})[0], 401, "a wrong access token")
+            self.assertEqual(self.post(path, fields, headers={"Authorization": ""})[0], 401, "no access token")
             self.assertEqual(self.post(path, fields, headers={"Content-Type": "application/json"})[0], 415)
-        self.assertEqual(self.post("/settings/config", form, headers={"Host": "evil.example", "Origin": "http://evil.example"})[0], 421)
         self.assertFalse(os.path.exists(self.ov))
         self.assertEqual(read(self.path), self.config_before)
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -374,10 +389,73 @@ class Page(Folder):
         st, _h, text = self.post("/settings/config", {"section": "ui", "theme": "dark"})
         self.assertEqual(st, 403, text)
         self.assertIn("settings_actions", text)
-        self.assertIn("Read-only here (locked by config.ini", self.page())
+        self.assertIn("Read-only here (off in config.ini", self.page())
         self.assertFalse(os.path.exists(self.ov))
         shutil.rmtree(self.folder)
         self.assertEqual(self.post("/settings/feature", {"name": "map", "on": "no"})[0], 403)
+
+    def test_without_a_token_the_page_stays_read_only_even_when_opted_in(self):
+        """A local user could take the CSRF token from a page served without one: loopback alone is not enough."""
+        self.assertEqual(nuc_config.settings_mode(token="")[0], "")
+        self.assertIn("token_file", nuc_config.settings_mode(token="")[1])
+        self.assertEqual(nuc_config.settings_mode(token=TOKEN)[0], "overlay")
+        open_srv = serve()
+        self.addCleanup(lambda: (open_srv.shutdown(), open_srv.server_close()))
+        port = open_srv.server_address[1]
+        for path, data in (("/settings/feature", {"name": "exposure", "on": "no"}), ("/settings/config", {"section": "ui", "theme": "dark"})):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            c.request("POST", path, urlencode(dict(data, csrf=open_srv.csrf)), {"Content-Type": "application/x-www-form-urlencoded",
+                                                                                 "Origin": "http://127.0.0.1:%d" % port})
+            r = c.getresponse()
+            self.assertEqual(r.status, 403, path)
+            self.assertIn("token_file", r.read().decode())
+            c.close()
+        self.assertFalse(os.path.exists(self.ov))
+        self.assertEqual(read(self.path), self.config_before)
+
+    def test_off_by_default_and_a_typo_is_a_lock(self):
+        shutil.copy(SHIPPED, self.path)
+        put(self.ov, "[ui]\ntheme = dark\n")
+        self.assertFalse(nuc_config.load()["web"]["settings_actions"])
+        self.assertEqual(nuc_config.load()["overlaid"], {}, "the shipped config.ini opts in nowhere")
+        render.reload_config()
+        self.assertEqual(nuc_config.settings_mode(token=TOKEN)[0], "")
+        for word in ("nope", "ja", "", "1x"):
+            self.ini("[web]\nsettings_actions = %s" % word)
+            said = []
+            cfg = nuc_config.load(self.path, warn=said.append)
+            self.assertEqual(cfg["overlaid"], {}, repr(word))
+            self.assertFalse(cfg["web"]["settings_actions"])
+        self.ini("[web]\nsettings_actions = yes")
+        self.assertEqual(nuc_config.load()["overlaid"], {"ui.theme": "dark"})
+
+    def test_hiding_a_security_section_raises_a_problem_that_cannot_be_accepted(self):
+        import problems
+        render.reload_config()
+        self.assertNotIn("feature-hidden", [p[2] for p in problems.problems_raw({}, None)])
+        self.assertEqual(self.post("/settings/feature", {"name": "thermal", "on": "no"})[0], 303)
+        self.assertNotIn("feature-hidden", [p[2] for p in problems.problems_raw({}, None)], "thermal is no security section")
+        self.assertEqual(self.post("/settings/feature", {"name": "exposure", "on": "no"})[0], 303)
+        self.assertEqual(self.post("/settings/feature", {"name": "firewall", "on": "no"})[0], 303)
+        raw = [p for p in problems.problems_raw({}, None) if p[2] == "feature-hidden"]
+        self.assertEqual([(p[0], "exposure, firewall" in p[1]) for p in raw], [(2, True)])
+        self.assertIn("feature-hidden", problems.NOT_ACCEPTABLE)
+        self.assertIn("feature-hidden", problems.CATALOG)
+        self.assertEqual(self.post("/settings/reset", {"reset": "*"})[0], 303)
+        self.assertNotIn("feature-hidden", [p[2] for p in problems.problems_raw({}, None)])
+
+    def test_the_notifier_that_cannot_read_the_file_says_so_once_and_calmly(self):
+        said = []
+        with mock.patch.object(nuc_config.os, "open", side_effect=PermissionError(13, "denied")):
+            self.assertEqual(nuc_config.read_overlay(self.ov, said.append), {})
+        self.assertEqual(len(said), 1)
+        self.assertIn("by design", said[0])
+        nuc_config._REPORTED.clear()
+        printed = []
+        with mock.patch.object(nuc_config.os, "open", side_effect=PermissionError(13, "denied")), mock.patch("builtins.print", lambda *a, **k: printed.append(a)):
+            for _ in range(5):
+                nuc_config.load(self.path)
+        self.assertEqual(len(printed), 1, "once per process")
 
     def test_the_effective_configuration_is_the_same_for_every_reader(self):
         put(self.ov, "[features]\nmap = no\ndocker_disk = yes\n[ui]\ntheme = dark\n[dashboard]\nrotate_seconds = 30\n[display]\nzoom = 120\n"

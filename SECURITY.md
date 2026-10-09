@@ -52,7 +52,8 @@ Design rules you can audit in the code:
   **What a person who can open the web view can now change:** only the allowlist (`nuc_config.OVERLAY_ALLOW`): the `[features]` switches, `[dashboard]`, `[ui]` and
   `[display] zoom`: which screens exist, their order, theme, density, pace. **Never** from the page (a post for them is refused, a line for them in the file is
   ignored and logged once): `[web]` (bind, port, token_file, allowed_hosts, enabled), `[telegram]`, `[ai]` (endpoint, allow_remote, web_actions), `[expose]`,
-  `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. `[web] settings_actions = no` turns the whole thing off, and `config.ini` is read before
+  `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. **It is opt-in**: `[web] settings_actions` is `no` by default (a typo counts as `no`), and even with `yes` the page writes only when a `[web] token_file` is configured: without a token any
+  local user can read the page, take its CSRF token and post, so a loopback-only view without a token stays read-only (and says why). `config.ini` is read before
   the overlay is laid on it, so that lock cannot be overlaid.
   **Why that is acceptable:** the same person can already read everything the pages show and use the AI page's buttons; none of those keys opens a port, changes who may
   connect, sends data away or runs something. The overlay is untrusted input to every reader, **root's collector included**: it is opened without following links, must
@@ -60,8 +61,8 @@ Design rules you can audit in the code:
   would switch on what `config.ini` switched off (docker, nsenter and the rest) is ignored, so the overlay can make root's collector run less, never more. A bad
   file costs nothing: it is ignored with one line in the journal, and the collector goes on. What it leaves behind is visible: each overlaid value shows *set from this page*
   with a **Reset to config.ini** button, and an administrator undoes everything with `rm` of the file. **What it does not defend:** whoever controls the `nuc-console`
-  account can write the file too, and so can switch screens off (a hidden alarm is not a deleted one: `config.ini` is where a section stays on); they could do more with
-  that account anyway. Windows: the file gets an ACL of SYSTEM, Administrators and the writing account (`icacls`, fail closed: the write is refused when it fails).
+  account can write the file too, and so can switch screens off (a hidden alarm is not a deleted one: switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off from the page raises the ATTENTION problem `feature-hidden`, which cannot be accepted and goes away only when the choice is reset; the notifier, another account, does not read the overlay by design, so that problem is on the dashboard, not in Telegram); they could do more with
+  that account anyway. Windows: the file gets an ACL of SYSTEM, Administrators and the writing account (`icacls` by SID, the writing process's own SID resolved with `whoami`; fail closed: the write is refused when either step fails).
 - **The Telegram page has buttons too** (`/?view=telegram`; `[telegram] web_actions`, default `yes`; `no` is the lock). What they can do, and nothing else: check a bot token
   with Telegram (`getMe`), wait for the Start of the @username typed in (a `getUpdates` long poll, only while a pairing you started runs, the same code as `--setup`),
   hand that pairing to the notifier, and ask the notifier to switch on, switch off or send a test. **By whom:** the same people as the AI page's buttons. **The token

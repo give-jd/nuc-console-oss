@@ -9,8 +9,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **The settings page of an installation can change settings**, without making `config.ini` writable and without any privileged helper: what it changes is kept in
   `settings.ini` in the AI folder (`/var/lib/nuc-console/ai`, the folder the web view's account already owns; the same on macOS and Windows) and laid over `config.ini`
   for the screens, the web view and the collector. Only presentation keys can be changed that way: the `[features]` switches (to **off** only: `config.ini` alone switches
-  on), `[dashboard]`, `[ui]`, `[display] zoom`. `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]` and every lock stay in `config.ini`, and the new lock
-  `[web] settings_actions = no` turns the page read-only again. Each value set from the page is marked, with a **Reset to config.ini** button; `rm` of the file resets all.
+  on), `[dashboard]`, `[ui]`, `[display] zoom`. `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]` and every lock stay in `config.ini`, and the new key
+  `[web] settings_actions` (default `no`: opt-in, and a value that is not yes/no counts as `no`) turns it on, **only together with `[web] token_file`**; switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off from the page raises the ATTENTION problem `feature-hidden`, which cannot be accepted. Each value set from the page is marked, with a **Reset to config.ini** button; `rm` of the file resets all.
   See [docs/WEB.md](docs/WEB.md#an-installations-settings-overlay), [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and [SECURITY.md](SECURITY.md#the-installations-settings-overlay).
 
 ### Changed

@@ -66,7 +66,7 @@ def load(path=None, warn=None, overlay=True):
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
-                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": True},
+                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True},
@@ -89,9 +89,9 @@ def load(path=None, warn=None, overlay=True):
     ov = overlay_for(path, overlay)
     if ov:  # a lock in config.ini (read before anything is laid over it) says whether the page's choices count at all
         try:
-            locked = not cp.getboolean("web", "settings_actions", fallback=True)
+            locked = not cp.getboolean("web", "settings_actions", fallback=False)  # opt-in; a typo is a lock, not an opening
         except ValueError:
-            locked = False
+            locked = True
         if not locked:
             cfg["overlaid"] = lay_overlay(cp, ov, say)
     for key in cp["features"] if cp.has_section("features") else ():
@@ -164,9 +164,9 @@ def load(path=None, warn=None, overlay=True):
         except ValueError:
             say(f"nuc-console: {path}: [web] enabled is not a boolean: kept off")
         try:
-            w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=True)  # no = the settings page changes nothing (a lock)
+            w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=False)  # yes = an installation's settings page may use the overlay
         except ValueError:
-            say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept on")
+            say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept no (locked)")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
@@ -408,6 +408,7 @@ def edit_lines(lines, section, items, drop=()):
 # it over config.ini. It is UNTRUSTED input to every reader, root's collector included: only OVERLAY_ALLOW keys count, [features] only to
 # switch OFF (what root runs can shrink that way, never grow), any other key is ignored and reported. `rm` of the file resets everything.
 OVERLAY_FILE = "settings.ini"
+SECURITY_FEATURES = ("exposure", "firewall", "fail2ban", "databases", "tailscale")  # switching one off from the page raises a problem that cannot be accepted
 OVERLAY_MAX = 16384  # bytes; a bigger file counts for nothing
 OVERLAY_ALLOW = (("features", "*"), ("dashboard", "*"), ("ui", "*"), ("display", "zoom"))  # presentation and non-security switches, nothing else
 _REPORTED = set()
@@ -472,7 +473,10 @@ def read_overlay(path=None, warn=None):
             text = f.read(OVERLAY_MAX + 1).decode("utf-8-sig")
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError):  # a link (O_NOFOLLOW), a permission, bad bytes
+    except PermissionError:  # the notifier (another account) is not meant to read it: say so once, calmly
+        say(f"nuc-console: {path}: not readable by this account (by design): the settings page's choices do not apply here")
+        return {}
+    except (OSError, ValueError):  # a link (O_NOFOLLOW), bad bytes
         say(f"nuc-console: {path}: cannot be read as a settings file: ignored")
         return {}
     cp = configparser.ConfigParser(interpolation=None, strict=False, default_section="\0default")  # a [DEFAULT] is a section like any other
@@ -542,9 +546,13 @@ def _write_overlay(values, path, check=None):
             f.write(data)
         if WINDOWS:  # no mode bits: SYSTEM and Administrators write, the web view's account too, everyone else reads; fail closed
             icacls = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "icacls.exe")
-            who = (os.environ.get("USERDOMAIN", "") + "\\" if os.environ.get("USERDOMAIN") else "") + os.environ.get("USERNAME", "")
-            grants = ["*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:R"] + ([who + ":M"] if who else [])
             import subprocess
+            me = subprocess.run([os.path.join(os.environ.get("SystemRoot") or r"C:\\Windows", "System32", "whoami.exe"), "/user", "/fo", "csv", "/nh"],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+            sid = re.search(r"S-1-\d+(?:-\d+)+", me.stdout or "") if me.returncode == 0 else None
+            if not sid:  # fail closed: without this process's own SID the file would not be writable by it, or by everyone
+                raise OSError("could not resolve this account's SID (whoami)")
+            grants = ["*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:R", "*%s:F" % sid.group(0)]
             if subprocess.run([icacls, tmp, "/inheritance:r", "/grant:r"] + grants, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
                 raise OSError("could not restrict %s (icacls)" % tmp)
         if check is not None:
@@ -594,16 +602,21 @@ def features_writable(path=None):
     return True, ""
 
 
-def settings_mode(path=None):
+def settings_mode(path=None, token=None):
     """How the settings page may change things here: ("file", "") a portable run's own config.ini; ("overlay", "") an installation, through the
-    overlay (settings.ini) when its folder is this account's to write and config.ini does not lock it ([web] settings_actions); else ("", why)."""
+    overlay (settings.ini) when config.ini opts in ([web] settings_actions = yes), a token is configured (token: the running server's, else
+    [web] token_file: without one any local user could take the page's CSRF token and use it), and the folder is this account's to write;
+    else ("", why)."""
     if features_writable(path)[0]:
         return "file", ""
     ov = overlay_path()
     if not ov:
         return "", "config.ini cannot be written by this account"
-    if not current()["web"].get("settings_actions", True):
-        return "", "locked by config.ini ([web] settings_actions = no)"
+    web = current()["web"]
+    if not web.get("settings_actions", False):
+        return "", "off in config.ini: [web] settings_actions = yes turns it on"
+    if not (web.get("token_file") if token is None else token):
+        return "", "it needs [web] token_file: without a token any local user of this machine could use the page"
     folder = os.path.dirname(ov)
     if os.path.islink(folder) or not os.path.isdir(folder) or (not WINDOWS and not os.access(folder, os.W_OK | os.X_OK)):
         return "", "the settings folder is not writable by this account"

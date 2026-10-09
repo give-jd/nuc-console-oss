@@ -191,7 +191,7 @@ n8n     = tailnet
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
-| `settings_actions` | `yes` | A lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below); `no`: it only shows, and what it chose before counts for nothing. A portable run does not use it |
+| `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
@@ -209,7 +209,7 @@ Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Suppor
 Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
 overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
 or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
-notices within 10 seconds); `[web] settings_actions = no` stops the page from using it at all.
+notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.
 
 ## `[telegram]` — alerts on your phone (off by default)
 

@@ -206,9 +206,9 @@ KEYS = (
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
-        ("settings_actions", BOOL, "yes", LOCK,
-         "yes: the settings page of an installation may change the presentation keys (what config.ini says wins for every other key); no: it "
-         "only shows, and what it chose before counts for nothing (an administrator's lock)."),
+        ("settings_actions", BOOL, "no", LOCK,
+         "yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it "
+         "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),
         ("columns", INT, "200", NOW, "Width of the classic web pages' grid in characters (a page can ask ?cols=).", {"lo": 60, "hi": 300}),
         ("rows", INT, "60", NOW, "Height of that grid in lines.", {"lo": 20, "hi": 120}),
     ))

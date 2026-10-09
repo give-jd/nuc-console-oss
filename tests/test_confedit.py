@@ -327,7 +327,7 @@ class Page(Folder):
         with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.path}):
             body = self.settings()
             self.assertNotIn("<form", body)
-            self.assertIn("Read-only here (the settings folder is not writable", body)  # no settings folder this account can write: the overlay is unavailable
+            self.assertIn("Read-only here (off in config.ini", body)  # no settings folder this account can write: the overlay is unavailable
             for key in confedit.KEYS:
                 if key.section != "features":
                     self.assertIn('id="k-%s-%s"' % (key.section, key.name), body)

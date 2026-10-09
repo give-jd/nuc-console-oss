@@ -419,8 +419,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
         if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
             return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
-        if area == "settings" and not nuc_config.settings_mode()[0]:
-            return self._send(403, ("the settings page cannot write here (%s): edit config.ini, then restart\n" % nuc_config.settings_mode()[1]).encode())
+        if area == "settings" and not nuc_config.settings_mode(token=srv.token)[0]:
+            return self._send(403, ("the settings page cannot write here (%s): edit config.ini, then restart\n" % nuc_config.settings_mode(token=srv.token)[1]).encode())
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site not in ("same-origin", "none"):

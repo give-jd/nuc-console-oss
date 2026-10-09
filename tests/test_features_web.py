@@ -214,7 +214,7 @@ class Page(Folder):
         with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.path}):
             h, body = self.settings()
             self.assertIn('<section class="sec" id="features"', body)
-            self.assertIn("Read-only here (the settings folder is not writable", body)  # the overlay's folder is not there: nothing to write in
+            self.assertIn("Read-only here (off in config.ini", body)  # the overlay's folder is not there: nothing to write in
             self.assertNotIn('action="/settings/feature"', body)
             self.assertIn("form-action 'none'", h["Content-Security-Policy"])
             self.assertEqual(body.count('data-feature="'), len(nuc_config.FEATURES))

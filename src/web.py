@@ -746,7 +746,7 @@ class Server(http.server.ThreadingHTTPServer):
         symbol; in a portable run (the desktop app) a button that turns it on or off (a form posting to /settings/feature with the CSRF token),
         in an installation the switches as they are and how to change them (config.ini is the administrator's: the page never writes it)."""
         esc, feats = html.escape, render.CFG["features"]
-        mode, why = nuc_config.settings_mode()
+        mode, why = nuc_config.settings_mode(token=self.token)
         ok, overlay = bool(mode), mode == "overlay"
         path = nuc_config.config_path()
         base = nuc_config.load(path, overlay=False)["features"] if overlay else {}  # config.ini alone: the page can only switch off what it says on
@@ -787,7 +787,7 @@ class Server(http.server.ThreadingHTTPServer):
         /settings/config with the CSRF token; the locks and the keys only an installation reads are shown, not offered. In an installation
         the same, read-only, with the file to edit and how to restart. A section opens by itself after a save, with what the save did."""
         esc, cfg = html.escape, render.CFG
-        mode, why = nuc_config.settings_mode()
+        mode, why = nuc_config.settings_mode(token=self.token)
         ok, overlay = bool(mode), mode == "overlay"
         path = nuc_config.config_path()
         note = self.config_note if self.config_note and time.time() - self.config_note["at"] < CONFIG_NOTE_S else None
@@ -1258,7 +1258,7 @@ class Server(http.server.ThreadingHTTPServer):
             nuc_config.set_feature(name, on == "yes")
         except ValueError as e:  # config.ini says no and only it can say yes
             raise BadRequest(str(e))
-        if nuc_config.settings_mode()[0] == "overlay":
+        if nuc_config.settings_mode(token=self.token)[0] == "overlay":
             render.reload_config()  # the overlay's markers
         if name == "ai" and on == "no":  # the AI screen goes: the model server this process started goes too (no page would be left to stop it)
             render.ai_engine().stop_server()
@@ -1270,7 +1270,7 @@ class Server(http.server.ThreadingHTTPServer):
     def reset_action(self, what, back):
         """POST /settings/reset (an installation): `what` = "section.key" of the overlay, or "*" for all of it, removed from settings.ini."""
         sec, _, key = what.partition(".")
-        if nuc_config.settings_mode()[0] != "overlay" or (what != "*" and not (key and nuc_config.overlay_allowed(sec, key))):
+        if nuc_config.settings_mode(token=self.token)[0] != "overlay" or (what != "*" and not (key and nuc_config.overlay_allowed(sec, key))):
             raise BadRequest("a key this page set, or *, is needed")
         nuc_config.update_overlay(drop=[what])
         render.reload_config()
@@ -1290,7 +1290,7 @@ class Server(http.server.ThreadingHTTPServer):
             raise BadRequest("a section of config.ini is needed")
         typed = {k: v[0][:3000] for k, v in form.items() if k not in ("csrf", "back", "section") and v}
         try:
-            overlay = nuc_config.settings_mode()[0] == "overlay"
+            overlay = nuc_config.settings_mode(token=self.token)[0] == "overlay"
             names = (confedit.save_overlay if overlay else confedit.save)(nuc_config.config_path(), section, form)
         except confedit.Refused as e:
             note = dict(ok=False, lines=["Not saved, nothing changed:"] + [r[:300] for r in e.reasons[:12]], form=typed)

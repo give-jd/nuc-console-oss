@@ -222,7 +222,7 @@ hidden =
 </section>
 <section class="sec" id="features" aria-labelledby="sec-feat">
 <h3 class="sech" id="sec-feat">Screens and sections</h3>
-<p class="hintl">Read-only here (the settings folder is not writable by this account): edit <b>[features]</b> in <code class="cmd">/nonexistent</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
+<p class="hintl">Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit <b>[features]</b> in <code class="cmd">/nonexistent</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
 <ul class="feats">
 <li class="on" data-feature="map">
 <span class="ft">
@@ -330,7 +330,7 @@ hidden =
 </section>
 <section class="sec" id="config" aria-labelledby="sec-cfg">
 <h3 class="sech" id="sec-cfg">config.ini</h3>
-<p class="hintl">What <code class="cmd">/nonexistent</code> sets, key by key, and what each one does. Read-only here (the settings folder is not writable by this account): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
+<p class="hintl">What <code class="cmd">/nonexistent</code> sets, key by key, and what each one does. Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
 <div class="cfgl">
 <details class="cfgs" id="cfg-dashboard">
 <summary>
@@ -602,8 +602,8 @@ hidden =
 <span class="cn">
 <code>settings_actions</code>
 </span>
-<code class="cv">yes</code>
-<p class="hintl">yes: the settings page of an installation may change the presentation keys (what config.ini says wins for every other key); no: it only shows, and what it chose before counts for nothing (an administrator&#x27;s lock). <span class="sm">yes or no · default yes · a lock: only config.ini changes it, never this page</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it only shows, and what it chose before counts for nothing (an administrator&#x27;s opt-in). <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
 </p>
 </div>
 <div class="ck cko" id="k-web-columns">
