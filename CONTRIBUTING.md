@@ -116,7 +116,7 @@ Compare runs on one machine and one Python, one after the other: the figures do 
 
 ## Branches, commits and pull requests
 
-These rules are for everyone who changes this repository, people and automated agents alike (agents also read `CLAUDE.md`, which points here).
+These rules are for everyone who changes this repository, people and automated agents alike.
 The repository is public: everything pushed to it, every pull request, comment and release note can be read by anyone and stays in its history.
 
 **Branches**
@@ -147,7 +147,7 @@ The repository is public: everything pushed to it, every pull request, comment a
 - Small, focused, with tests. The title follows the commit format; the description says what changes, why, how it was tested and which docs
   changed. No signature or footer.
 - An agent does not open pull requests: it pushes its branch, the owner opens the pull request on GitHub, and the agent then writes the title
-  and the description by editing it (see `CLAUDE.md`).
+  and the description by editing it.
 - The docs change in the same pull request as the code (README, `docs/`, `SECURITY.md`, this file, `config/config.ini`, `docs/CONFIGURATION.md`
   where it applies; screenshots regenerated, see below). A user-visible change gets a line in `CHANGELOG.md`.
 - Do not include secrets, real hostnames, real IP addresses or machine-specific paths in code, tests, docs or screenshots (use `--demo`).
