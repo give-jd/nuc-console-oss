@@ -33,6 +33,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - **The desktop app signals only the core.** Adopting a core an earlier run left, and stopping it, used the pid in `portable.pid` without checking it: a reused pid
   was sent SIGTERM, and a pid of 0 would have reached the app's own process group. A pid below 2 is never signalled, and the process must be running this app's
   own `run.sh` / `run.ps1` (checked by `/proc`, `ps` or `Get-CimInstance`) before it is adopted and again before it is stopped ([docs/DESKTOP.md](docs/DESKTOP.md#adopting-an-earlier-core)).
+- **The desktop workflow no longer pipes `sh.rustup.rs` into a shell.** Where a runner has no Rust (the hosted ones do), it downloads `rustup-init` of one pinned
+  rustup release (1.29.1) and checks it against the SHA-256 written in the workflow, on Linux, macOS and Windows (the hashes equal the ones `static.rust-lang.org` publishes).
 
 ### Added
 

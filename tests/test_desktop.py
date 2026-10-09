@@ -516,6 +516,18 @@ class Workflow(unittest.TestCase):
         self.assertEqual(runners["windows-arm64"], "windows-11-arm")
         self.assertIn("fail-fast: false", self.text)
 
+    def test_rust_is_installed_from_a_pinned_rustup_init_never_from_a_script_piped_into_a_shell(self):
+        t = self.text
+        self.assertNotIn("sh.rustup.rs", t)
+        self.assertNotRegex(t, r"curl[^\n]*\|\s*(sh|bash)")
+        hashes = re.findall(r"sha256=([0-9a-f]+)|'([0-9a-f]{64})'", t)
+        self.assertEqual(len([h for pair in hashes for h in pair if h]), 6)   # 4 Unix triples, 2 Windows
+        for h in [h for pair in hashes for h in pair if h]:
+            self.assertEqual(len(h), 64, h)
+        self.assertEqual(t.count("https://static.rust-lang.org/rustup/archive/1.29.1/"), 2)               # the Unix download and the Windows one: one release
+        self.assertIn("sha256sum --check", t)
+        self.assertIn("Get-FileHash", t)
+
     def test_the_packages_it_makes_are_the_ones_the_release_publishes(self):
         names = []
         for target, _runner, bundles in self.matrix:
