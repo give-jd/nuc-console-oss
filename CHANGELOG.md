@@ -3,7 +3,13 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.4.0] - 2026-10-09
+
+The result of a security review of 2.3.0, and a console that stays on one screen when it fits. **An installed `nuc-console-update` now stops when it cannot
+verify the release's provenance** (no `gh`, or `gh` not logged in): install `gh` and run `gh auth login`, or verify the archive by hand and run it again with
+`--allow-unattested`; a portable folder is unchanged. A portable run and the desktop app ask for a token on their loopback view. The console font and the
+screen blanking can be set from `config.ini` (off by default). A minor version: nothing is removed, `config.ini` is kept, and apart from that updater
+behaviour nothing needs doing after the update. Still Python 3.8+, standard library only.
 
 ### Security
 
@@ -15,10 +21,8 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   which warns. A failed verification still always stops; a portable folder is unchanged (it says the provenance was not checked).
 - The updater checks, once the archive is unpacked, where every symbolic link really leads (`realpath`), and refuses writing through a link, also on
   Pythons without the tar `data` filter.
-
 - **A named pipe left in the Telegram inbox no longer stalls the notifier.**
 - **An archive of the AI engine can no longer write outside its folder through a chain of links.**
-
 - **Every action of every workflow is pinned by commit** (`tests.yml` and `ai-pins.yml` were on `@v4`/`@v5` tags), and a test now checks all five.
 - **The collector unit is hardened further**: `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `ProtectKernelModules`, `ProtectClock`,
   `ProtectHostname`, `SystemCallArchitectures=native`. Not added, because they would break what only root can do: a capability list, `ProtectKernelTunables`,
