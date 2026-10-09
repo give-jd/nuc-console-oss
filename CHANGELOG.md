@@ -30,6 +30,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   `open-app.html`) instead of putting it on a command line. `[web] token_file` now also applies to an installation's `--local` view when `[web] enabled = no`.
   **An installation on macOS or Windows without `token_file` still has none**: the browser is opened by the logged-in user, so a token it can read every other
   local user could read; this and what to set instead are in [SECURITY.md](SECURITY.md) and [docs/WEB.md](docs/WEB.md#the-loopback-view-and-the-other-accounts-of-the-machine).
+- **The desktop app signals only the core.** Adopting a core an earlier run left, and stopping it, used the pid in `portable.pid` without checking it: a reused pid
+  was sent SIGTERM, and a pid of 0 would have reached the app's own process group. A pid below 2 is never signalled, and the process must be running this app's
+  own `run.sh` / `run.ps1` (checked by `/proc`, `ps` or `Get-CimInstance`) before it is adopted and again before it is stopped ([docs/DESKTOP.md](docs/DESKTOP.md#adopting-an-earlier-core)).
 
 ### Added
 

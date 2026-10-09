@@ -81,9 +81,14 @@ Windows, WebKit on macOS and Linux), with no browser of its own.
    `core\run.ps1 -NoOpen`, through the PowerShell of `System32`), with `NUC_CONSOLE_DATA` set to the data folder above. The core is
    the release archive of the same system and processor, Python included, unpacked into the package; it writes only to the data folder.
 2. `run.sh` / `run.ps1` start the collector and the web view on `127.0.0.1` and a free port, and print the address; the app reads
-   it and loads `/app` in the window.
+   it and loads `/app` in the window. The view asks for a token: the core made one in the data folder (`web.token`, 0600, see
+   [PORTABLE.md](PORTABLE.md#the-access-token)), the app reads that file and opens `/app?token=…` in its window, where the view moves it
+   into a cookie. *Open in the browser* does not put it on a command line (other users could list that): it opens `open-app.html` in the data
+   folder (0600), a page that forwards to the view with the token. To get a new token, quit the app, delete `web.token` and start it again.
 3. If the core does not come up, the start page says why, with its last lines and where its logs are. If an earlier run of the app
-   ended without stopping it (a crash, a kill), the app finds that core by its address in `logs/web.log` and uses it.
+   ended without stopping it (a crash, a kill), the app finds that core by its address in `logs/web.log` and uses it, but only if the pid in
+   `portable.pid` is a process running this app's own `run.sh` (`run.ps1`); otherwise it does not adopt it and the start page says the core is
+   already running.
 4. Quitting sends the core SIGTERM (`run.sh` then stops all it started; a core that does not end in 10 seconds is killed with its
    process group); on Windows the process tree of `run.ps1` is ended.
 
@@ -126,13 +131,15 @@ cargo tauri build --bundles deb                # a package (appimage, rpm; app, 
 and `tests/test_desktop.py` checks them). The crates are Tauri's (`tauri`, its autostart, opener and single-instance plugins) and
 `libc` on Linux and macOS; nothing else.
 
-## Known limitation: adopting an earlier core
+## Adopting an earlier core
 
 When the app finds a core that an earlier run left (see *How it works*, point 3), it takes its pid from `portable.pid` and its address from
-`logs/web.log` in the data folder, and on quit it sends that pid SIGTERM. It does not check that the pid is still that core: if the files are
-stale (the core ended and the number went to another process of the same user) or were written by something else that runs as you, that process
-is the one terminated. It needs write access to your data folder, so it is not a way in from another account; it is a gap, and the fix (check
-that the pid is the core's own run.sh before adopting and before terminating) is not made yet.
+`logs/web.log`. Before it adopts that pid, and again before it sends it SIGTERM on quit, it checks that the process is the core: it must run
+this app's own `core/run.sh` (Linux: `/proc/<pid>/cmdline`; macOS: `ps`; Windows: the command line from `Get-CimInstance`, through the
+PowerShell of `System32`). A pid of 0 or 1 is never signalled (`kill(0)` would reach the app's own process group). A pid that went to another
+process, or that cannot be looked at, is left alone. A core started from another copy of the app (another path) is not this app's to stop.
+Not covered: the check reads the command line, which whoever can run a process as you can imitate; it is there against a stale pid, not against
+you.
 
 ## What comes next
 
