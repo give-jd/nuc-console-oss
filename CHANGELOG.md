@@ -7,6 +7,13 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Security
 
+- **An installed `nuc-console-update` no longer goes on without a verified provenance.** The archive and `SHA256SUMS` come from the same release, so
+  the hash proves nothing about who built it; without `gh` (or logged out) the update used to go on and run the new installer as root. It now stops with
+  how to proceed: install `gh` and `gh auth login`, or verify the archive by hand and run again with `--allow-unattested` (`-AllowUnattested` on Windows),
+  which warns. A failed verification still always stops; a portable folder is unchanged (it says the provenance was not checked).
+- The updater checks, once the archive is unpacked, where every symbolic link really leads (`realpath`), and refuses writing through a link, also on
+  Pythons without the tar `data` filter.
+
 - **A named pipe left in the Telegram inbox no longer stalls the notifier.**
 - **An archive of the AI engine can no longer write outside its folder through a chain of links.**
 

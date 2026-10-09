@@ -2,6 +2,7 @@
 rem Updates nuc-console to the latest GitHub release. You run it: it is never automatic, never in the background.
 rem   nuc-console-update -Check       only say whether a newer release exists
 rem   nuc-console-update             ask, then update          nuc-console-update -Yes     do not ask
+rem   nuc-console-update -AllowUnattested  installed: go on although gh could not verify the release
 rem   nuc-console-update -Installed  the installed nuc-console, even when run from an extracted folder
 rem Run from the bin\ of an extracted folder that has run.cmd (the portable mode) it updates that folder (data\ stays) and
 rem needs no rights. Otherwise it updates the installed one: that needs administrator rights, asked for here like

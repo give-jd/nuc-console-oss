@@ -619,6 +619,44 @@ class Extract(unittest.TestCase):
                     update.extract(path, os.path.join(d, "out"))
             self.assertFalse(os.path.exists(os.path.join(d, "x")))
 
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_two_links_that_lead_out_together_are_refused(self):
+        # each name passes the lexical check; followed one after the other they leave the folder
+        with tempfile.TemporaryDirectory() as d:
+            path = self.tar(d, [(self.info("t/a/f", 1), b"x"),
+                                (self.info("t/a/b/c/s", 0, 0o777, tarfile.SYMTYPE, "../.."), None),   # -> t/a/b, inside
+                                (self.info("t/e/L", 0, 0o777, tarfile.SYMTYPE, "../a/b/c/s/../../.."), None),  # lexically t/a, really outside t
+                                ])
+            # Python 3.12+ rewrites such targets itself (filter="data"): test the check that older Pythons rely on
+            with mock.patch.dict(tarfile.__dict__), mock.patch.object(tarfile.TarFile, "extraction_filter", staticmethod(getattr(tarfile, "fully_trusted_filter", None)), create=True):
+                tarfile.__dict__.pop("data_filter", None)
+                with self.assertRaises(update.UpdateError):
+                    update.extract(path, os.path.join(d, "out"))
+            self.assertFalse(os.path.exists(os.path.join(d, "out")))
+
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_nothing_is_written_through_a_link(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.tar(d, [(self.info("t/a/f", 1), b"x"),
+                                (self.info("t/lnk", 0, 0o777, tarfile.SYMTYPE, "a"), None),
+                                (self.info("t/lnk/g", 1), b"y")])
+            with self.assertRaises(update.UpdateError):
+                update.extract(path, os.path.join(d, "out"))
+
+    @unittest.skipIf(WINDOWS, "symbolic links")
+    def test_legitimate_internal_links_still_extract(self):
+        # the shapes of python-build-standalone: lib64 -> lib, links to links, a link to a folder, a link up and back down
+        with tempfile.TemporaryDirectory() as d:
+            path = self.tar(d, [(self.info("t/python/lib/libx.so.1", 1), b"y"),
+                                (self.info("t/python/lib64", 0, 0o777, tarfile.SYMTYPE, "lib"), None),
+                                (self.info("t/python/lib/libx.so", 0, 0o777, tarfile.SYMTYPE, "libx.so.1"), None),
+                                (self.info("t/python/lib/liby.so", 0, 0o777, tarfile.SYMTYPE, "libx.so"), None),
+                                (self.info("t/python/bin/python3", 0, 0o777, tarfile.SYMTYPE, "../lib64/liby.so"), None),
+                                (self.info("t/python/share", 0, 0o777, tarfile.SYMTYPE, "../python/lib/"), None)])
+            top = update.extract(path, os.path.join(d, "out"))
+            self.assertEqual(read(os.path.join(top, "python", "bin", "python3")), "y")
+            self.assertTrue(os.path.islink(os.path.join(top, "python", "lib64")))
+
     def test_one_top_folder(self):
         with tempfile.TemporaryDirectory() as d:
             path = self.tar(d, [(self.info("one/a", 1), b"x"), (self.info("two/b", 1), b"y")])
@@ -696,7 +734,7 @@ class Flow(unittest.TestCase):
         old_tree(installed)
         os.mkdir(os.path.join(installed, ".git"))
         self.assertEqual(World().run(os.path.join(installed, "src"), os.path.join(self.tmp.name, "cache2"), "installed",
-                                     stage_file=os.path.join(self.tmp.name, "stage")), 0)
+                                     stage_file=os.path.join(self.tmp.name, "stage"), allow_unattested=True), 0)
 
     def test_not_confirmed_does_nothing(self):
         world = World()
@@ -903,6 +941,52 @@ class Flow(unittest.TestCase):
             self.assertIn(msg, world.messages)
             self.assertIn('VERSION = "%s"' % NEW, read(os.path.join(self.root, "src", "nuc_config.py")))
 
+    def installed(self, status, msg, **kw):
+        world = World()
+        app = os.path.join(self.tmp.name, "app")
+        write(os.path.join(app, "nuc_config.py"), 'VERSION = "1.0.0"\n')
+        stage_file = os.path.join(self.tmp.name, "stage")
+        try:
+            return world, world.run(app, os.path.join(self.tmp.name, "icache"), "installed", stage_file=stage_file,
+                                    attest=lambda p: (status, msg), **kw), stage_file
+        except update.UpdateError as e:
+            return world, e, stage_file
+
+    def test_an_installed_update_needs_a_verified_provenance(self):
+        # it runs the new installer as root: no gh / no login must stop it, and nothing is handed to the wrapper
+        for status in ("missing", "noauth"):
+            world, err, stage_file = self.installed(status, "provenance not checked: x")
+            self.assertIsInstance(err, update.UpdateError, status)
+            for word in ("not installed", "gh auth login", "gh attestation verify", "--allow-unattested"):
+                self.assertIn(word, str(err))
+            self.assertFalse(os.path.exists(stage_file), status)
+
+    def test_an_installed_update_goes_on_with_a_verified_provenance(self):
+        world, rc, stage_file = self.installed("ok", "provenance verified")
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(stage_file))
+        self.assertFalse(any("WARNING" in m for m in world.messages))
+
+    def test_the_consent_flag_lets_an_unverified_installed_update_go_on_and_warns(self):
+        for status in ("missing", "noauth"):
+            world, rc, stage_file = self.installed(status, "provenance not checked: x", allow_unattested=True)
+            self.assertEqual(rc, 0, status)
+            self.assertTrue(os.path.exists(stage_file))
+            self.assertTrue(any("WARNING" in m and "--allow-unattested" in m for m in world.messages), world.messages)
+
+    def test_a_failed_attestation_stops_even_with_the_consent_flag(self):
+        for mode in ("installed", "portable"):
+            world = World()
+            app = os.path.join(self.tmp.name, "app")
+            write(os.path.join(app, "nuc_config.py"), 'VERSION = "1.0.0"\n')
+            with self.assertRaises(update.UpdateError):
+                world.run(app, os.path.join(self.tmp.name, "c-" + mode), mode, root=self.root, stage_file=os.path.join(self.tmp.name, "s"),
+                          attest=lambda p: ("failed", "gh attestation verify failed"), allow_unattested=True)
+
+    def test_the_flag_is_a_command_line_option_only(self):
+        self.assertTrue(update.main(["--release-json", "/nonexistent", "--cache", "/x", "--allow-unattested"]) == 1)
+        self.assertNotIn("environ", read(os.path.join(ROOT, "src", "update.py")).split("def run_update")[1].split("def main")[0])
+
     def test_the_attestation_is_asked_about_the_cached_archive(self):
         world = World()
         seen = []
@@ -925,7 +1009,7 @@ class Flow(unittest.TestCase):
         write(os.path.join(app, "nuc_config.py"), 'VERSION = "1.0.0"\n')
         stage_file = os.path.join(self.tmp.name, "stage")
         cache = os.path.join(self.tmp.name, "cache")
-        self.assertEqual(world.run(app, cache, "installed", stage_file=stage_file), 0)
+        self.assertEqual(world.run(app, cache, "installed", stage_file=stage_file, allow_unattested=True), 0)
         top = read(stage_file).strip()
         self.assertEqual(os.path.dirname(os.path.dirname(top)), cache)
         self.assertTrue(os.path.basename(os.path.dirname(top)).startswith("stage-"))

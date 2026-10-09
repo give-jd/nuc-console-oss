@@ -8,6 +8,7 @@
     nuc-console-update.cmd -Check       only say whether a newer release exists
     nuc-console-update.cmd              ask, then update
     nuc-console-update.cmd -Yes         do not ask
+    nuc-console-update.cmd -AllowUnattested   installed: go on although gh could not verify the release (see below)
     nuc-console-update.cmd -Installed   the installed nuc-console, even when run from an extracted folder
 
   Run from the bin\ of an extracted folder that has run.cmd (the portable mode) it updates that folder: src\, bin\, docs\ ...
@@ -18,7 +19,8 @@
   What it does: asks api.github.com (HTTPS, Invoke-RestMethod) for the latest release; if it is newer, downloads the archive for
   this processor (windows-x64 or windows-arm64) and SHA256SUMS into the cache (%ProgramData%\nuc-console\cache, portable:
   .\cache; a file whose SHA-256 is already right is not downloaded again), checks the SHA-256, runs `gh attestation verify`
-  when gh is installed (a failure stops it; without gh it says the provenance was not checked), unpacks it and installs it.
+  (a failure stops it; an installed update, which runs as administrator, also stops when gh is missing or not logged in, unless
+  -AllowUnattested; a portable folder only says the provenance was not checked), unpacks it and installs it.
   The comparing, downloading and checking is src\update.py; this script only asks GitHub and runs the installer.
 
 .PARAMETER Check
@@ -27,13 +29,17 @@
 .PARAMETER Yes
   Do not ask for confirmation.
 
+.PARAMETER AllowUnattested
+  Installed update only: go on although the build provenance could not be verified (no gh, or not logged in). Use it after
+  checking the archive yourself with `gh attestation verify <archive> --repo give-jd/nuc-console-oss`. A failed check still stops.
+
 .PARAMETER Installed
   Update the installed nuc-console, even when this script runs from an extracted folder.
 
 .PARAMETER Elevated
   Set by nuc-console-update.cmd when it re-started itself with administrator rights: has no other effect.
 #>
-param([switch]$Check, [switch]$Yes, [switch]$Installed, [switch]$Elevated)
+param([switch]$Check, [switch]$Yes, [switch]$Installed, [switch]$AllowUnattested, [switch]$Elevated)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
@@ -107,6 +113,7 @@ try {
     if ($mode -eq 'portable') { $argv += @('--root', $Root) }
     if ($Check) { $argv += '--check' }
     if ($Yes) { $argv += '--yes' }
+    if ($AllowUnattested) { $argv += '--allow-unattested' }
     & $python @argv
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
