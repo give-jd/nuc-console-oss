@@ -101,7 +101,7 @@ class Schema(unittest.TestCase):
             self.assertTrue(key.what.isascii() or "…" in key.what, key.name)
         self.assertEqual(sorted(k for k, _t, _w in confedit.FEATURE_WORDS), sorted(nuc_config.FEATURES))
         locks = {(k.section, k.name) for k in confedit.KEYS if k.applies == confedit.LOCK}
-        self.assertEqual(locks, {("ai", "web_actions"), ("telegram", "web_actions"), ("ai", "allow_remote")})
+        self.assertEqual(locks, {("ai", "web_actions"), ("telegram", "web_actions"), ("ai", "allow_remote"), ("web", "settings_actions")})
 
 
 class Folder(unittest.TestCase):
@@ -327,7 +327,7 @@ class Page(Folder):
         with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.path}):
             body = self.settings()
             self.assertNotIn("<form", body)
-            self.assertIn("Read-only here (installed: config.ini is the administrator&#x27;s)", body)
+            self.assertIn("Read-only here (the settings folder is not writable", body)  # no settings folder this account can write: the overlay is unavailable
             for key in confedit.KEYS:
                 if key.section != "features":
                     self.assertIn('id="k-%s-%s"' % (key.section, key.name), body)

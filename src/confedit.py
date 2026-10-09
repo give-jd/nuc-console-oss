@@ -38,8 +38,11 @@ class Key(object):
         self.section, self.name, self.kind, self.default, self.applies, self.what = section, name, kind, default, applies, what
         self.choices, self.lo, self.hi, self.zero, self.pattern, self.unset = tuple(choices), lo, hi, zero, pattern, unset
 
-    def editable(self):
-        """The page may change it: not a lock, and not a key that only an installation reads (the page writes only a portable run's file)."""
+    def editable(self, overlay=False):
+        """The page may change it: not a lock, and not a key that only an installation reads (the page writes a portable run's file).
+        overlay (an installation): only the keys nuc_config.OVERLAY_ALLOW lists, and never a lock."""
+        if overlay:
+            return self.applies != LOCK and nuc_config.overlay_allowed(self.section, self.name)
         return self.applies not in (LOCK, INSTALLED)
 
     def values(self):
@@ -203,6 +206,9 @@ KEYS = (
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
+        ("settings_actions", BOOL, "yes", LOCK,
+         "yes: the settings page of an installation may change the presentation keys (what config.ini says wins for every other key); no: it "
+         "only shows, and what it chose before counts for nothing (an administrator's lock)."),
         ("columns", INT, "200", NOW, "Width of the classic web pages' grid in characters (a page can ask ?cols=).", {"lo": 60, "hi": 300}),
         ("rows", INT, "60", NOW, "Height of that grid in lines.", {"lo": 20, "hi": 120}),
     ))
@@ -452,3 +458,54 @@ def applies(section, names):
         key = KEY.get((section, name))
         out.setdefault(key.applies if key else NOW, []).append(name)
     return {code: out[code] for code in APPLIES if code in out}
+
+
+def save_overlay(path, section, form, overlay=None, load=nuc_config.load):
+    """The installation's save: what a post of one section changed goes into the overlay (nuc_config.update_overlay), never into config.ini at
+    `path`. Only keys of nuc_config.OVERLAY_ALLOW: a post that names any other key of the section, or a section with none, is refused whole.
+    A value equal to config.ini's is not kept (the overlay holds only what differs), an empty [ui] value drops its entry. The new file is read
+    back with load() like save() does. Returns the names changed."""
+    overlay = overlay or nuc_config.overlay_path()
+    if section not in BY_SECTION or section in ("features",) + MAPS or not any(k.editable(True) for k in BY_SECTION[section]):
+        raise Refused(["[%s] is the administrator's: only config.ini changes it" % section[:40]])
+    one = lambda name: (form.get(name) or [None])[0]  # noqa: E731
+    base = load(path, overlay=False)
+    if base.get("config_error"):
+        raise Refused(["config.ini cannot be read (%s): fix it by hand first" % base["config_error"][:120]])
+    cur, why, put, drop = nuc_config.read_overlay(overlay), [], {}, []
+    for key in BY_SECTION[section]:
+        raw = one(key.name)
+        if raw is None:
+            continue
+        if not key.editable(True):
+            why.append("[%s] %s: only config.ini changes it" % (section, key.name))
+            continue
+        try:
+            v = check(key, raw)
+        except Refused as e:
+            why.extend("[%s] %s" % (section, r) for r in e.reasons)
+            continue
+        name = "%s.%s" % (section, key.name)
+        if v == value(base, key) or (v == "" and key.unset):
+            if name in cur:
+                drop.append(name)
+        elif cur.get(name) != ("" if v == NOTHING else v):
+            put[name] = "" if v == NOTHING else v
+    if why:
+        raise Refused(why)
+    if not put and not drop:
+        return []
+    tag = "[%s]" % section
+    before = []
+    load(path, warn=before.append, overlay=overlay)
+    before = {w.split(": ", 2)[-1] for w in before}
+
+    def judge(tmp):
+        said = []
+        if load(path, warn=said.append, overlay=tmp or False).get("config_error"):
+            raise Refused(["config.ini would not be readable any more"])
+        new = [w for w in (w.split(": ", 2)[-1] for w in said if tag in w) if w not in before]
+        if new:
+            raise Refused(new)
+    nuc_config.update_overlay(put, drop, overlay, judge)
+    return [n.partition(".")[2] for n in list(put) + drop]

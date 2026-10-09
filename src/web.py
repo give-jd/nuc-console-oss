@@ -746,8 +746,10 @@ class Server(http.server.ThreadingHTTPServer):
         symbol; in a portable run (the desktop app) a button that turns it on or off (a form posting to /settings/feature with the CSRF token),
         in an installation the switches as they are and how to change them (config.ini is the administrator's: the page never writes it)."""
         esc, feats = html.escape, render.CFG["features"]
-        ok, why = nuc_config.features_writable()
+        mode, why = nuc_config.settings_mode()
+        ok, overlay = bool(mode), mode == "overlay"
         path = nuc_config.config_path()
+        base = nuc_config.load(path, overlay=False)["features"] if overlay else {}  # config.ini alone: the page can only switch off what it says on
         hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back)))
         rows = []
         for key, title, what in FEATURE_WORDS:
@@ -756,9 +758,19 @@ class Server(http.server.ThreadingHTTPServer):
             ctl = (f'<form class="f" method="post" action="/settings/feature">{hidden}<input type="hidden" name="name" value="{key}">'
                    f'<input type="hidden" name="on" value="{"no" if on else "yes"}"><button class="btn{"" if on else " pri"}" type="submit">'
                    f'{"Turn off" if on else "Turn on"}</button></form>' if ok else "")
+            if overlay:
+                mine = "features." + key in render.CFG.get("overlaid", {})
+                ctl = (f'<span class="sm">set from this page</span><form class="f" method="post" action="/settings/reset">{hidden}'
+                       f'<input type="hidden" name="reset" value="features.{key}"><button class="btn" type="submit">Reset to config.ini</button></form>'
+                       if mine else ctl if base.get(key, True) else '<span class="sm">off in config.ini</span>')
             rows.append(f'<li class="{"on" if on else "off"}" data-feature="{key}"><span class="ft"><b>{esc(title)}</b> <span class="sm">{esc(what)}</span></span>'
                         f'{state}{ctl}</li>')
-        if ok:
+        if overlay:
+            note = (f'<code class="cmd">{esc(path)}</code> is the administrator\'s and stays as it is: what you switch <b>off</b> here is kept in '
+                    f'<code class="cmd">{esc(nuc_config.overlay_path())}</code> and marked <i>set from this page</i>; <b>Reset to config.ini</b> undoes it '
+                    '(an administrator can also delete that file). A switch that config.ini turns off can only be turned on there. The screens follow at '
+                    'once, the collector within 10 seconds, and a section that is off is not drawn, raises no alarm and is not collected.')
+        elif ok:
             note = (f'Saved in <code class="cmd">{esc(path)}</code> as you click (the rest of the file stays as it is): the screens follow at once, '
                     'the collector within 10 seconds. A section that is off is not drawn, raises no alarm and is not collected.')
         else:
@@ -775,7 +787,8 @@ class Server(http.server.ThreadingHTTPServer):
         /settings/config with the CSRF token; the locks and the keys only an installation reads are shown, not offered. In an installation
         the same, read-only, with the file to edit and how to restart. A section opens by itself after a save, with what the save did."""
         esc, cfg = html.escape, render.CFG
-        ok, why = nuc_config.features_writable()
+        mode, why = nuc_config.settings_mode()
+        ok, overlay = bool(mode), mode == "overlay"
         path = nuc_config.config_path()
         note = self.config_note if self.config_note and time.time() - self.config_note["at"] < CONFIG_NOTE_S else None
         hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back)))
@@ -783,23 +796,34 @@ class Server(http.server.ThreadingHTTPServer):
         for sec, title, what in confedit.SECTIONS:
             mine = note if note and note["section"] == sec else None
             typed = mine["form"] if mine and not mine["ok"] else {}  # a refused post: the page shows what was typed, to fix it
+            form_ok = ok and (not overlay or any(k.editable(True) for k in confedit.BY_SECTION.get(sec, ())))  # an installation: allowlisted sections only
             if sec in confedit.MAPS:
                 text = typed.get("text", confedit.map_text(cfg, sec))
                 body = (f'<textarea class="cmap" id="f-{sec}" name="text" rows="{max(3, min(12, text.count(chr(10)) + 2))}" maxlength="1200" '
-                        f'spellcheck="false" autocomplete="off" aria-label="[{sec}]">{esc(text)}</textarea>' if ok
+                        f'spellcheck="false" autocomplete="off" aria-label="[{sec}]">{esc(text)}</textarea>' if form_ok and not overlay
                         else f'<pre class="cmap">{esc(text)}</pre>' if text else '<p class="hintl">Nothing in this section.</p>')
                 body = f'<div class="ck wide">{body}</div>'
             else:
-                body = "".join(self.config_row(key, typed.get(key.name), ok) for key in confedit.BY_SECTION[sec])
+                body = "".join(self.config_row(key, typed.get(key.name), ok, overlay) for key in confedit.BY_SECTION[sec])
             if mine:
                 body = (f'<div class="cfgn {"ok" if mine["ok"] else "bad"}" role="status">'
                         + "<br>".join(esc(x) for x in mine["lines"]) + "</div>" + body)
-            if ok:
+            if form_ok:
                 body = (f'<form class="cfgf" method="post" action="/settings/config">{hidden}<input type="hidden" name="section" value="{sec}">'
                         f'{body}<div class="cfgb"><button class="btn pri" type="submit">Save [{sec}]</button></div></form>')
             blocks.append(f'<details class="cfgs" id="cfg-{sec}"{" open" if mine else ""}><summary><code>[{sec}]</code> {esc(title)}</summary>'
                           f'<p class="hintl">{esc(what)}</p>{body}</details>')
-        if ok:
+        if overlay:
+            head = (f'What <code class="cmd">{esc(path)}</code> sets, key by key. It is the administrator\'s and this page never writes it, but the '
+                    'presentation keys ([dashboard], [ui], [display] zoom) can be changed here: the new value is kept in '
+                    f'<code class="cmd">{esc(nuc_config.overlay_path())}</code>, marked <i>set from this page</i>, and laid over config.ini. '
+                    '<b>Reset to config.ini</b> drops it; a value equal to config.ini\'s is not kept. Everything else (web, telegram, ai, expose, '
+                    f'webapps, the locks) is read-only: edit the file, then <code class="cmd">{esc(render.CMD.get("apply") or render.CMD["restart"])}</code>. '
+                    '[features] is <a class="lnk" href="#features">Screens and sections</a> above.')
+            if render.CFG.get("overlaid"):
+                head += ('<form class="f" method="post" action="/settings/reset">' + hidden + '<input type="hidden" name="reset" value="*">'
+                         '<button class="btn" type="submit">Reset everything set from this page</button></form>')
+        elif ok:
             head = (f'Every key of <code class="cmd">{esc(path)}</code>, section by section: <b>Save</b> writes the keys of that section you changed, '
                     'and nothing else of the file (its comments stay). A value is checked before it is written: one the dashboard would not '
                     'take is refused, and the file stays as it was. [features] is <a class="lnk" href="#features">Screens and sections</a> above.')
@@ -811,17 +835,17 @@ class Server(http.server.ThreadingHTTPServer):
                 f'<p class="hintl">{head}</p><div class="cfgl">{"".join(blocks)}</div></section>')
 
     @staticmethod
-    def config_row(key, typed, ok):
+    def config_row(key, typed, ok, overlay=False):
         """One key of the config.ini block: its name, its value (a control when the page may change it), and what it does, the values it takes,
         its default and when a change applies."""
         esc, cur = html.escape, confedit.value(render.CFG, key)
         v = cur if typed is None else typed
         fid = f"f-{key.section}-{key.name}"
         dflt = "default " + key.default if key.default and key.default != ", ".join(key.choices) else "default: all, in this order" if key.default else ""
-        when = confedit.APPLIES[key.applies] if ok or key.applies in (confedit.LOCK, confedit.NOTIFIER) else ""  # installed: all at the restart
+        when = confedit.APPLIES[key.applies] if (ok and (not overlay or key.editable(True))) or key.applies in (confedit.LOCK, confedit.NOTIFIER) else ""  # installed: all at the restart
         meta = [x for x in (key.values(), dflt, when) if x]
         hint = f'<p class="hintl">{esc(key.what)}' + (f' <span class="sm">{esc(" · ".join(meta))}</span>' if meta else "") + "</p>"
-        if not (ok and key.editable()):
+        if not (ok and key.editable(overlay)):
             shown = f'<code class="cv">{esc(cur)}</code>' if cur else '<span class="sm">not set</span>'
             return f'<div class="ck cko" id="k-{key.section}-{key.name}"><span class="cn"><code>{key.name}</code></span>{shown}{hint}</div>'
         if key.kind in (confedit.BOOL, confedit.CHOICE):
@@ -839,6 +863,9 @@ class Server(http.server.ThreadingHTTPServer):
         else:
             ctl = (f'<input id="{fid}" name="{key.name}" type="text" maxlength="{confedit.MAX_TEXT}" spellcheck="false" autocomplete="off" '
                    f'value="{esc(v, quote=True)}"' + (f' placeholder="{esc(key.default, quote=True)}"' if key.default else "") + ">")
+        if overlay and f"{key.section}.{key.name}" in render.CFG.get("overlaid", {}):
+            ctl += (' <span class="sm">set from this page</span> <button class="btn" type="submit" formaction="/settings/reset" formnovalidate '
+                    f'name="reset" value="{key.section}.{key.name}">Reset to config.ini</button>')
         return f'<div class="ck" id="k-{key.section}-{key.name}"><label class="cn" for="{fid}"><code>{key.name}</code></label>{ctl}{hint}</div>'
 
     def alerts_html(self, here):
@@ -1222,16 +1249,37 @@ class Server(http.server.ThreadingHTTPServer):
         one = lambda k, n=40: ((form.get(k) or [""])[0])[:n]  # noqa: E731
         if act == "config":
             return self.config_action(form, one("section", 20), view_params(parse_qs(one("back", 400))))
+        if act == "reset":  # an installation: drop what this page chose (one "section.key", or "*"), config.ini is in force again
+            return self.reset_action(one("reset", 40), view_params(parse_qs(one("back", 400))))
         name, on = one("name"), one("on", 3)
         if act != "feature" or name not in nuc_config.FEATURES or on not in ("yes", "no"):
             raise BadRequest("a feature of [features] and yes or no are needed")
-        nuc_config.set_feature(name, on == "yes")
+        try:
+            nuc_config.set_feature(name, on == "yes")
+        except ValueError as e:  # config.ini says no and only it can say yes
+            raise BadRequest(str(e))
+        if nuc_config.settings_mode()[0] == "overlay":
+            render.reload_config()  # the overlay's markers
         if name == "ai" and on == "no":  # the AI screen goes: the model server this process started goes too (no page would be left to stop it)
             render.ai_engine().stop_server()
         with self.lock:
             self.cache.clear()  # what the pages show changes with it
         back = view_params(parse_qs(one("back", 400)))
         return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#features"
+
+    def reset_action(self, what, back):
+        """POST /settings/reset (an installation): `what` = "section.key" of the overlay, or "*" for all of it, removed from settings.ini."""
+        sec, _, key = what.partition(".")
+        if nuc_config.settings_mode()[0] != "overlay" or (what != "*" and not (key and nuc_config.overlay_allowed(sec, key))):
+            raise BadRequest("a key this page set, or *, is needed")
+        nuc_config.update_overlay(drop=[what])
+        render.reload_config()
+        for k in ("columns", "rows", "refresh_seconds"):
+            self.cfg[k] = render.CFG["web"][k]
+        self.zoom = render.CFG["display"]["zoom"]
+        with self.lock:
+            self.cache.clear()
+        return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + ("#features" if sec == "features" else "#cfg-" + sec if sec in confedit.TITLES else "#config")
 
     def config_action(self, form, section, back):
         """A section of the settings page's config.ini block (a portable run: do_POST checked that the file is this account's): the keys the page
@@ -1242,7 +1290,8 @@ class Server(http.server.ThreadingHTTPServer):
             raise BadRequest("a section of config.ini is needed")
         typed = {k: v[0][:3000] for k, v in form.items() if k not in ("csrf", "back", "section") and v}
         try:
-            names = confedit.save(nuc_config.config_path(), section, form)
+            overlay = nuc_config.settings_mode()[0] == "overlay"
+            names = (confedit.save_overlay if overlay else confedit.save)(nuc_config.config_path(), section, form)
         except confedit.Refused as e:
             note = dict(ok=False, lines=["Not saved, nothing changed:"] + [r[:300] for r in e.reasons[:12]], form=typed)
         else:
@@ -1252,7 +1301,7 @@ class Server(http.server.ThreadingHTTPServer):
                 for k in ("columns", "rows", "refresh_seconds"):  # what this server copied at its start; the rest of [web] is read at the next one
                     self.cfg[k] = web[k]
                 self.zoom = render.CFG["display"]["zoom"]
-                lines = ["Saved in config.ini: " + ", ".join(names) + "."]
+                lines = ["Saved " + ("from this page (config.ini stays as it is): " if overlay else "in config.ini: ") + ", ".join(names) + "."]
                 for code, keys in confedit.applies(section, names).items():
                     lines.append("%s: %s." % (", ".join(keys), confedit.APPLIES[code]))
                 if confedit.START in confedit.applies(section, names):
