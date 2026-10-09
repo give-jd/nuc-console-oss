@@ -190,7 +190,7 @@ def put(d, name, text, mode):
 def read_private(path, limit=65536):
     """Text of a file that holds a secret. POSIX, like web.read_token: no group/other permission bits, and the owner is root, this
     user or the owner of the folder (the service user: root reads what --setup wrote for it); the folder is not writable by others."""
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if POSIX:
@@ -328,17 +328,17 @@ def take_requests(d, now, limit=REQ_BATCH):
     for name in names[:limit]:
         path, req = os.path.join(box, name), None
         try:
-            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
             with os.fdopen(fd, "rb") as f:
                 st = os.fstat(f.fileno())
                 raw = f.read(REQ_MAX + 1) if stat.S_ISREG(st.st_mode) else b""
             try:
                 req = json.loads(raw.decode("utf-8")) if len(raw) <= REQ_MAX else None
             except (ValueError, RecursionError):
-                if now - st.st_mtime < REQ_SETTLE_S:  # the page may be writing it right now
+                if stat.S_ISREG(st.st_mode) and now - st.st_mtime < REQ_SETTLE_S:  # the page may be writing it right now
                     continue
         except OSError:
-            pass  # a link (O_NOFOLLOW refuses it), or gone meanwhile
+            pass  # a link (O_NOFOLLOW refuses it), or gone meanwhile; a fifo opens (O_NONBLOCK) and is no regular file
         try:
             os.remove(path)
         except FileNotFoundError:

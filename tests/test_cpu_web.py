@@ -18,6 +18,7 @@ import demo  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -65,7 +66,7 @@ def link(page, text):
 
 
 def params(url):
-    return web.view_params(web.parse_qs(web.urlsplit(url).query))
+    return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
 class CpuPageCase(unittest.TestCase):
@@ -258,7 +259,7 @@ class Page(CpuPageCase):
 
 class Parameters(CpuPageCase):
     def test_sort_is_one_of_the_five_names_else_dropped(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         for name, want in (("mem", "mem"), ("time", "time"), ("pid", "pid"), ("user", "user"), ("cpu", ""), ("", ""), ("MEM", ""), ("memory", ""),
                            ("mem ", ""), ("<script>", ""), ("%00", ""), ("p", "")):
             self.assertEqual(q("view=cpu&sort=" + name)["sort"], want, repr(name))
@@ -269,7 +270,7 @@ class Parameters(CpuPageCase):
         self.assertEqual(q("view=cpu&sort=mem&sort=pid")["sort"], "mem")                             # the first one counts
 
     def test_sel_is_a_pid_digits_only_in_range_normalised(self):
-        q = lambda s: web.view_params(web.parse_qs(s))["sel"]  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))["sel"]  # noqa: E731
         for raw, want in (("2210", "2210"), ("0", "0"), ("007", "7"), ("4294967295", "4294967295"), ("4294967296", ""), ("12345678901", ""),
                           ("", ""), ("-1", ""), ("+5", ""), ("1.5", ""), ("1e3", ""), (" 5", ""), ("5 ", ""), ("0x10", ""), ("%C2%B2", ""),
                           ("%D9%A3", ""), ("<script>", ""), ("2210%00", ""), ("a" * 5000, ""), ("9" * 5000, "")):
@@ -281,7 +282,7 @@ class Parameters(CpuPageCase):
         self.assertEqual(q("view=cpu&sel=1&sel=2"), "1")
 
     def test_other_parameters_of_the_dashboard_still_apply(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         got = q("view=cpu&cols=133&rows=7&zoom=133&fit=1&refresh=99&kiosk=1")
         self.assertEqual((got["cols"], got["rows"], got["zoom"], got["fit"], got["refresh"], got["kiosk"]), (140, 20, 125, True, 10, True))
 
@@ -327,7 +328,7 @@ class Parameters(CpuPageCase):
 
 class CacheAndSampling(CpuPageCase):
     def pg(self, query):
-        return self.srv.page(**web.view_params(web.parse_qs(query)))
+        return self.srv.page(**weburl.view_params(web.parse_qs(query)))
 
     @classic_default()
     def test_the_cache_key_has_the_view_the_sort_and_the_selection(self):
@@ -394,13 +395,13 @@ class CacheAndSampling(CpuPageCase):
         render.DEMO = False
         for q in ("", "full=1", "cols=100", "view=map"):                                               # nobody looks at the CPU: nothing is made or read
             try:
-                srv.page(**web.view_params(web.parse_qs(q)))
+                srv.page(**weburl.view_params(web.parse_qs(q)))
             except Exception:  # noqa: BLE001 - this server has no containers/net state: not what is tested here
                 pass
         self.assertEqual((log["cpu_made"], log["proc_made"], log["proc_sampled"]), (0, 0, 0))
         views = ["view=cpu", "view=cpu&sort=mem", "view=cpu&sort=time&sel=2210", "view=cpu&sel=1", "view=cpu&cols=100&rows=40", "view=cpu&zoom=150",
                  "view=cpu&sort=pid", "view=cpu&sort=user&sel=2350"]
-        pages = [srv.page(**web.view_params(web.parse_qs(v))) for v in views]
+        pages = [srv.page(**weburl.view_params(web.parse_qs(v))) for v in views]
         self.assertTrue(all("PROCESSES" in x for x in pages))
         self.assertEqual((log["cpu_made"], log["proc_made"]), (1, 1))                                 # one pair for the whole server
         self.assertEqual((log["cpu_sampled"], log["proc_sampled"]), (1, 2))                           # the 2nd process reading: the first had no CPU%
@@ -408,17 +409,17 @@ class CacheAndSampling(CpuPageCase):
         self.assertNotIn("measuring", "".join(pages))                                                # so the first page already has a CPU%
         clock[0] += 1.9                                                                              # within the interval: every other view, no new reading
         for v in views + ["view=cpu&sort=mem&sel=2600", "view=cpu&sel=3301"]:
-            srv.page(**web.view_params(web.parse_qs(v)))
+            srv.page(**weburl.view_params(web.parse_qs(v)))
         self.assertEqual((log["cpu_sampled"], log["proc_sampled"]), (1, 2))
         clock[0] += 1.2                                                                              # the interval is over (and the cached pages are old): one reading, whoever asks first
         for v in views:
-            srv.page(**web.view_params(web.parse_qs(v)))
+            srv.page(**weburl.view_params(web.parse_qs(v)))
         self.assertEqual((log["cpu_made"], log["proc_made"], log["cpu_sampled"], log["proc_sampled"]), (1, 1, 2, 3))
         clock[0] += 8                                                                                # a slower refresh asks for fewer readings
-        slow = [srv.page(**web.view_params(web.parse_qs("view=cpu&refresh=7&sel=%d" % i))) for i in (1, 2, 3)]
+        slow = [srv.page(**weburl.view_params(web.parse_qs("view=cpu&refresh=7&sel=%d" % i))) for i in (1, 2, 3)]
         self.assertEqual(log["proc_sampled"], 4)
         clock[0] += 5
-        srv.page(**web.view_params(web.parse_qs("view=cpu&refresh=7")))
+        srv.page(**weburl.view_params(web.parse_qs("view=cpu&refresh=7")))
         self.assertEqual(log["proc_sampled"], 4)
         self.assertEqual(len(slow), 3)
 
@@ -431,7 +432,7 @@ class CacheAndSampling(CpuPageCase):
 
         def viewer(i):
             try:
-                out.append(srv.page(**web.view_params(web.parse_qs("view=cpu&sel=%d&sort=%s" % (1 + i % 5, ("mem", "time", "")[i % 3])))))
+                out.append(srv.page(**weburl.view_params(web.parse_qs("view=cpu&sel=%d&sort=%s" % (1 + i % 5, ("mem", "time", "")[i % 3])))))
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
         threads = [threading.Thread(target=viewer, args=(i,)) for i in range(24)]

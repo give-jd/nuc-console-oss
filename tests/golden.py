@@ -66,6 +66,8 @@ import procs  # noqa: E402,F401
 import render  # noqa: E402
 import ui  # noqa: E402,F401
 import web  # noqa: E402
+import webhttp  # noqa: E402
+import weburl  # noqa: E402
 
 NOW = 1_790_000_000      # 2026-09-21 14:13:20 UTC: the header reads 14:13:20, and its burn-in shift is one column
 HOST = "demo-host"
@@ -291,8 +293,8 @@ class FrozenWorld(object):
         """The page web.Server serves for ?QUERY (clamped as the request handler does), as its golden file has it."""
         srv = self.server
         srv.cache.clear()
-        page = srv.page(**web.view_params(parse_qs(query)))
-        return web_text(str(page), getattr(page, "csp", web.CSP))
+        page = srv.page(**weburl.view_params(parse_qs(query)))
+        return web_text(str(page), getattr(page, "csp", webhttp.CSP))
 
 
 # ---- the web files -------------------------------------------------------------------------------------------------------------------

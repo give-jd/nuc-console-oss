@@ -159,6 +159,14 @@ def _write(src, path, mode, cancel):
     os.chmod(path, mode)
 
 
+def _inside(root, path):
+    """The folder of `path`, once the links unpacked so far are followed, is still under `root`: the check of a link's text is lexical,
+    a chain of links (a -> ., a/l -> ..) is not."""
+    r, d = os.path.realpath(root), os.path.realpath(os.path.dirname(path))
+    if d != r and not d.startswith(r.rstrip(os.sep) + os.sep):
+        raise SetupError("the archive holds a link that leaves it: %s" % _safe(os.path.relpath(path, root)))
+
+
 def _untar(t, root, cancel):
     done = {}
     for m in t:
@@ -168,6 +176,7 @@ def _untar(t, root, cancel):
         if not parts:
             continue
         path = os.path.join(root, *parts)
+        _inside(root, path)
         if m.isdir():
             os.makedirs(path, exist_ok=True)
         elif m.isfile():
