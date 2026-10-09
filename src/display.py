@@ -162,6 +162,6 @@ def read_web_token(path):
             token = f.read(512).strip()
     except (OSError, ValueError) as e:  # not there, not allowed (the service user's 0600 file), not text
         return "", f"{path} cannot be read by this user ({e.strerror if isinstance(e, OSError) and e.strerror else type(e).__name__})"
-    if not re.fullmatch(r"[A-Za-z0-9._~-]{16,}", token):  # what the web view accepts (src/web.py TOKEN_OK): safe in a URL, too
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{16,}", token):  # what the web view accepts (src/webhttp.py TOKEN_OK): safe in a URL, too
         return "", f"{path} does not hold a token the web view accepts"
     return token, ""
