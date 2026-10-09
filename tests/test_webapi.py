@@ -18,6 +18,7 @@ import render  # noqa: E402
 import ui  # noqa: E402
 import web  # noqa: E402
 import webapi  # noqa: E402
+import webhttp  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_web import TOKEN, get_any as get, raw, serve  # noqa: E402
 
@@ -331,7 +332,7 @@ class Stream(unittest.TestCase):
 
     def test_the_request_deadline_does_not_cut_a_stream(self):
         get(self.srv, "/api/v1/telegram")  # built once: the stream starts at once, well within the deadline of its request
-        with mock.patch.object(web, "DEADLINE_S", 0.5):
+        with mock.patch.object(webhttp, "DEADLINE_S", 0.5):
             took, (_head, body) = self.open()
         self.assertGreaterEqual(took, 1.0)
         self.assertIn(": keepalive", body, "written after the deadline of a request")

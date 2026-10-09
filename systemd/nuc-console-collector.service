@@ -15,6 +15,22 @@ NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes
+# Added conservative: none of these touches what the collector does (docker, ss, ufw/iptables, fail2ban-client, tailscale,
+# systemd-analyze, journalctl, nsenter -n into the containers' network namespaces, writing /run/nuc-console).
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectKernelModules=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+# Left out on purpose, each would break the collector (it runs as root to read what only root can):
+# - CapabilityBoundingSet=: nsenter needs CAP_SYS_ADMIN/CAP_SYS_PTRACE, iptables CAP_NET_ADMIN/CAP_NET_RAW, docker/ufw/fail2ban the file ones; a
+#   short list is a guess that fails one section at a time, silently.
+# - ProtectKernelTunables= / ProtectControlGroups=: read-only /proc/sys, /sys and cgroup would hide or break the iptables, tailscale and docker reads.
+# - RestrictNamespaces=: forbids setns(), so nsenter into a container fails.
+# - ProtectSystem=strict: ufw/iptables take their own locks (see above). User=: root is needed for all of the above.
+# - MemoryDenyWriteExecute=: inherited by every child (docker, tailscale, ufw, fail2ban-client), not worth the risk to the data.
 
 [Install]
 WantedBy=multi-user.target

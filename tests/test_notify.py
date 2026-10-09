@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.request
@@ -1511,6 +1512,21 @@ class WebPage(Base):
         os.symlink(target, os.path.join(notify.inbox_dir(self.dir), "r-%013d-%08x.json" % (1000000000, 1)))
         self.assertEqual(notify.take_requests(self.dir, Clock().t), [])
         self.assertEqual((self.inbox(), os.path.exists(target)), ([], True))
+
+    @unittest.skipUnless(POSIX, "fifo: POSIX")
+    def test_a_fifo_in_the_inbox_does_not_block_the_notifier(self):
+        os.makedirs(notify.inbox_dir(self.dir))
+        fifo = os.path.join(notify.inbox_dir(self.dir), "r-%013d-%08x.json" % (1000000000, 1))
+        os.mkfifo(fifo)
+        got = []
+        th = threading.Thread(target=lambda: got.append(notify.take_requests(self.dir, Clock().t)), daemon=True)
+        th.start()
+        th.join(5)
+        if th.is_alive():  # let the stuck open go, so the thread does not outlive the test
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            th.join(5)
+            self.fail("take_requests blocked on a fifo")
+        self.assertEqual((got, self.inbox()), ([[]], []))
 
     def test_the_settings_in_force_lay_web_json_over_config_ini(self):
         self.config(enabled="no", username="@alice")

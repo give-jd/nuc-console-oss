@@ -15,6 +15,8 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import ansi  # noqa: E402
 import web  # noqa: E402
+import webmap  # noqa: E402
+import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import classic_default  # noqa: E402
 
@@ -171,9 +173,9 @@ class Web(unittest.TestCase):
 
     def test_view_url_is_the_pages_own_address(self):
         """view_url() writes a view as the links of the pages do, so that the redirect and a click on the same view agree."""
-        q = lambda s: web.view_url(web.view_params(web.parse_qs(s)))  # noqa: E731
+        q = lambda s: weburl.view_url(weburl.view_params(web.parse_qs(s)))  # noqa: E731
         self.assertEqual(q(""), "/")
-        self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), web.page_url(dict(web.map_here({k: 0 for k in web.HERE_KEYS}, web.graph.State(
+        self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), weburl.page_url(dict(webmap.map_here({k: 0 for k in weburl.HERE_KEYS}, web.graph.State(
             open=("aaaaaaaaaa", "bbbbbbbbbb")), "", False))))
         self.assertEqual(q("view=cpu&sort=cpu"), "/?view=cpu")                                       # the default is not written
         self.assertEqual(q("fit=1&kiosk=1&rotate=1&cols=220&rows=64"), "/?cols=220&rows=64&fit=1&rotate=1&kiosk=1")
@@ -218,7 +220,7 @@ class Web(unittest.TestCase):
     def test_numbers_are_ascii_digits_only(self):
         """'²' is a digit to str.isdigit() but not to int(), nor are 5000 digits (Python 3.11+): the ValueError dropped the
         connection. Anything but a few ASCII digits is ignored: a normal page, the parameter at its default."""
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         for bad in ("%C2%B2", "%D9%A3", "1%C2%B2", "%EF%BC%95", "9" * 5000, "+5", "-5", " 5"):
             p = q(f"zoom={bad}&cols={bad}&rows={bad}&refresh={bad}")
             self.assertEqual([p[k] for k in ("zoom", "cols", "rows", "refresh")], [0, 0, 0, 0], bad)
@@ -229,7 +231,7 @@ class Web(unittest.TestCase):
         self.assertIn("font-size:14.0px", get(self.open, "/?zoom=%C2%B2")[2])                         # ignored: the default size
 
     def test_text_size_and_fit(self):
-        q = lambda s: web.view_params(web.parse_qs(s))  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("zoom=133")["zoom"], 125)                                                 # snapped to a step
         self.assertEqual((q("zoom=9999")["zoom"], q("zoom=1")["zoom"], q("zoom=x")["zoom"]), (200, 50, 0))  # 0 = [display] zoom
         self.assertEqual((q("rows=7")["rows"], q("rows=999")["rows"], q("cols=133")["cols"]), (20, 120, 140))
@@ -266,7 +268,7 @@ class Web(unittest.TestCase):
         self.assertEqual((seen["addr"][0], seen["token"]), ("127.0.0.1", ""))
 
     def test_refresh_interval_between_1_and_10_seconds(self):
-        q = lambda s: web.view_params(web.parse_qs(s))["refresh"]  # noqa: E731
+        q = lambda s: weburl.view_params(web.parse_qs(s))["refresh"]  # noqa: E731
         self.assertEqual((q(""), q("refresh=0"), q("refresh=1"), q("refresh=7"), q("refresh=99"), q("refresh=x")), (0, 0, 1, 7, 10, 0))
         _, _, page = get(self.open, "/?refresh=1")
         self.assertIn('<meta http-equiv="refresh" content="1">', page)

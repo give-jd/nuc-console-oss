@@ -469,5 +469,26 @@ logged-in user can read the token file (the web view moves it into a cookie, as 
 which other users of the machine can list). When that user cannot read it (the usual case on macOS, where the file is the service user's),
 the dashboard is shown from a page written to a file instead, as the full-screen window does, and `display.log` says why.
 
+### What the loopback view without a token does not defend
+
+Loopback and no token keep the network and other sites out; they do not separate the accounts of one machine. **Defended:** DNS rebinding and other
+sites in your browser (the `Host` check answers `421` to a name that is not this machine's; `Origin` / `Sec-Fetch-Site` and the CSRF token refuse a
+post that does not come from the page itself). **Not defended:** another local account or program. It needs no token to `GET` a page, and the CSRF token
+is in the page it gets, so it can post it back to `/ai/*` (the model, the chat), `/telegram/pair` (pair the alerts with its own bot, switch them off)
+and, in a portable run and the desktop app, `/settings/feature` and `/settings/config` (write the user's own `config.ini`; with `sudo ./run.sh` that
+steers what root's collector collects). On a machine with one user this changes nothing; on a shared one it is the limit of this mode.
+
+What to do today:
+
+- `[ai] web_actions = no` and `[telegram] web_actions = no`: the two pages only show, and no page can unlock them. They are locks of `config.ini`
+  (in a portable run, the one in the extracted folder or the data folder).
+- An installation on macOS or Windows: `[web] enabled = yes` with `token_file` (and a `bind`; then run the installer again) makes the web view
+  ask for the token like on Linux. In an installation the settings page refuses posts (`403`) anyway.
+- A portable run and the desktop app ignore `[web]` (always `127.0.0.1`, no token, whatever `bind`, `token_file` or `enabled` say), and no setting turns
+  their settings page off: on a shared machine use `./run.sh --console` (Linux, macOS: no web view) or an installation with a token.
+- Not a mitigation: `allow_remote`, which is the AI endpoint's key (`[ai] allow_remote`), nothing to do with who may open the view.
+
+A token for the local mode, so that other accounts cannot open it, is planned and is not in this release.
+
 A portable run ([PORTABLE.md](PORTABLE.md): `./run.sh --web` (the default on macOS) or `run.cmd`) starts the web view the same way on any system: 127.0.0.1 only, no
 token, a free port (or `--port`), whatever `[web]` says; it stops with the run.

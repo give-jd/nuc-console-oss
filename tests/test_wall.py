@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import render  # noqa: E402
 import web  # noqa: E402
+import weburl  # noqa: E402
 import webcss  # noqa: E402
 import webjs  # noqa: E402
 from test_web import get_any as get, serve  # noqa: E402
@@ -128,7 +129,7 @@ class DisplayUrl(unittest.TestCase):
         self.assertEqual(self.url("app"), "http://127.0.0.1:8787/?app=1")
 
     def test_the_url_is_a_wall_page_for_the_server(self):
-        q = web.view_params(parse_qs("app=1&ui=1.dw&kiosk=1"))
+        q = weburl.view_params(parse_qs("app=1&ui=1.dw&kiosk=1"))
         self.assertEqual((q["app"], q["ui"], q["kiosk"]), ("1", "1.dw", True))
 
     def test_the_launcher_hands_the_browser_that_url(self):

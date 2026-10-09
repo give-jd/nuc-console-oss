@@ -21,6 +21,8 @@ import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
+import webhttp  # noqa: E402
+import weburl  # noqa: E402
 import webcss  # noqa: E402
 import webjs  # noqa: E402
 from test_web import get_any as get, serve  # noqa: E402
@@ -355,9 +357,9 @@ class Shell(unittest.TestCase):
             self.assertIn(q, css)
         for d in ("wall", "desk", "compact"):
             self.assertIn(f'html[data-density="{d}"]', css)
-        for z in web.ZOOMS:
+        for z in weburl.ZOOMS:
             self.assertIn(f"html.z{z}{{", css)
-        self.assertEqual(sorted(webcss.ZOOMS), sorted(web.ZOOMS))
+        self.assertEqual(sorted(webcss.ZOOMS), sorted(weburl.ZOOMS))
         self.assertIn("@container app", css)
         legacy = webcss.themed("".join(webcss.LEGACY_SOURCES))
         self.assertEqual(webcss.HEX.findall(legacy), [], "a colour of htmlview's palette that webcss.REMAP does not map")
@@ -541,8 +543,8 @@ class Shell(unittest.TestCase):
         _, h, body = get(self.srv, "/?app=0")
         self.assertIn("<pre>", body)
         self.assertNotIn("/s/app.", body)
-        self.assertEqual(h["Content-Security-Policy"], web.CSP)
-        self.assertNotIn("script-src", web.CSP)
+        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
+        self.assertNotIn("script-src", webhttp.CSP)
         self.assertNotIn("<script", body.lower())
 
     def test_ui_web_classic_makes_the_classic_pages_the_default_and_app_1_the_way_forward(self):
@@ -665,18 +667,18 @@ class Scripts(unittest.TestCase):
             self.assertEqual(h["Referrer-Policy"], "same-origin" if forms else "no-referrer", path)
 
     def test_the_policy_builder(self):
-        self.assertEqual(web.page_csp(), web.CSP)
-        self.assertEqual(web.CSP, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-        self.assertEqual(web.page_csp(forms=True), web.CSP.replace("form-action 'none'", "form-action 'self'"))
-        one = web.page_csp(["x = 1;"])
-        self.assertEqual(one, web.CSP + "; script-src " + hashes(["x = 1;"])[0])  # an unknown script: its hash only, no connection, no Trusted Types
-        self.assertEqual(web.page_csp(["x = 1;", "x = 1;"]), one)
+        self.assertEqual(webhttp.page_csp(), webhttp.CSP)
+        self.assertEqual(webhttp.CSP, "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+        self.assertEqual(webhttp.page_csp(forms=True), webhttp.CSP.replace("form-action 'none'", "form-action 'self'"))
+        one = webhttp.page_csp(["x = 1;"])
+        self.assertEqual(one, webhttp.CSP + "; script-src " + hashes(["x = 1;"])[0])  # an unknown script: its hash only, no connection, no Trusted Types
+        self.assertEqual(webhttp.page_csp(["x = 1;", "x = 1;"]), one)
         for js, connect in ((webjs.REFRESH_JS, True), (webjs.KEYS_JS, False), (webjs.PREFS_JS, True), (webjs.BUILDER_JS, True)):
-            csp = web.page_csp([js])
+            csp = webhttp.page_csp([js])
             self.assertEqual("connect-src 'self'" in csp, connect)
             self.assertEqual("trusted-types nuc-frag" in csp, js is webjs.REFRESH_JS)
-        self.assertNotIn("script-src", web.page_csp([""]))
-        self.assertIn("style-src 'self'", web.page_csp(shell=True))
+        self.assertNotIn("script-src", webhttp.page_csp([""]))
+        self.assertIn("style-src 'self'", webhttp.page_csp(shell=True))
 
     def test_the_classic_pages_have_no_script_src_except_the_graph(self):
         for path in ("/?app=0", "/?view=cpu&app=0", "/?view=map&app=0", "/?view=health&app=0", "/?view=ai&app=0", "/?cols=100&full=1&app=0"):
@@ -720,7 +722,7 @@ class Scripts(unittest.TestCase):
             self.assertEqual(st, 200, path)
             self.assertEqual(h["X-Nuc-Fragment"], "1")
             self.assertEqual(h["Content-Type"], "text/html; charset=utf-8")
-            self.assertEqual(h["Content-Security-Policy"], web.CSP)
+            self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
             self.assertEqual((h["Cache-Control"], h["Vary"], h["X-Content-Type-Options"]), ("no-store", "Cookie", "nosniff"))
             self.assertRegex(h["ETag"], r'^"[0-9a-f]{20}"$')
             theirs, mine = split_blocks(frag), split_blocks(page)
@@ -1158,7 +1160,7 @@ class Builder(unittest.TestCase):
             self.assertNotIn("require-trusted-types-for 'script'", parts)  # no REFRESH_JS here: nothing is parsed from a string
             self.assertNotIn("trusted-types nuc-frag", parts)
             self.assertNotIn(webjs.csp_source(webjs.REFRESH_JS), h["Content-Security-Policy"])
-            self.assertEqual(h["Content-Security-Policy"], web.page_csp(want, shell=True))
+            self.assertEqual(h["Content-Security-Policy"], webhttp.page_csp(want, shell=True))
 
     def test_no_shell_page_has_an_inline_style(self):
         """style-src is exactly 'self': no <style>, no style= attribute, on any page or fragment of the shell (the graph's size is a class of <html>)."""
@@ -1179,7 +1181,7 @@ class Builder(unittest.TestCase):
         self.assertIn(".gz125 #gsvg{width:125%}", webcss.CSS)
         self.assertRegex(get(self.srv, "/?app=1&view=map&as=graph")[2], r'<html [^>]*class="[^"]*\bgzfit\b')
         self.assertNotIn("style", webjs.FRAG_ATTRS)
-        self.assertEqual(web.GZOOMS, webcss.GZOOMS)
+        self.assertEqual(weburl.GZOOMS, webcss.GZOOMS)
 
     def test_the_builder_script_is_on_the_edit_page_only(self):
         for path in ("/?app=1", "/?app=1&view=settings", "/?card=exposure", "/?app=1&view=map", "/?app=1&view=ai", "/?app=1&view=cpu", "/?app=1&pause=1",
