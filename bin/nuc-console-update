@@ -4,6 +4,7 @@
 #   nuc-console-update --check      only say whether a newer release exists
 #   nuc-console-update              ask, then update            sudo nuc-console-update   (an installed nuc-console)
 #   nuc-console-update --yes        do not ask
+#   --allow-unattested              installed: go on although gh could not verify the release (see below)
 #   --installed                     the installed nuc-console (/opt/nuc-console), even when run from an extracted folder
 #
 # Run from the bin/ of an extracted folder that has run.sh (the portable mode) it updates that folder: src/, bin/, docs/ ...
@@ -12,29 +13,33 @@
 # baseline.
 # What it does: asks api.github.com (HTTPS) for the latest release; if it is newer, downloads this OS's archive and SHA256SUMS
 # into the cache (Linux /var/cache/nuc-console, macOS /Library/Caches/nuc-console, portable ./cache; a file whose SHA-256 is
-# already right is not downloaded again), checks the archive's SHA-256, runs `gh attestation verify` when gh is installed (a
-# failure stops it; without gh it says the provenance was not checked), unpacks it and installs it.
+# already right is not downloaded again), checks the archive's SHA-256, runs `gh attestation verify` (a failure stops it; an
+# installed update, which runs as root, also stops when gh is missing or not logged in, unless --allow-unattested; a portable
+# folder only says the provenance was not checked), unpacks it and installs it.
 set -eu
 
 die() { echo "nuc-console-update: $*" >&2; exit 1; }
 
 usage() {
     cat <<'EOF'
-usage: nuc-console-update [--check] [--yes] [--installed]
+usage: nuc-console-update [--check] [--yes] [--installed] [--allow-unattested]
   --check       only report: "already at X.Y.Z", or which release is available
   --yes         update without asking
+  --allow-unattested  installed: continue although the release's provenance was not verified (no gh, or not logged in);
+                      only after checking it yourself: gh attestation verify <archive> --repo give-jd/nuc-console-oss
   --installed   update the installed nuc-console, even from an extracted folder (needs root)
 Run in the bin/ of a folder with run.sh it updates that folder (data/ and cache/ stay); else the installed one: sudo.
 EOF
 }
 
 main() {
-    CHECK=0 YES=0 INSTALLED=0
+    CHECK=0 YES=0 INSTALLED=0 UNATT=0
     for a in "$@"; do
         case $a in
             --check) CHECK=1 ;;
             --yes|-y) YES=1 ;;
             --installed) INSTALLED=1 ;;
+            --allow-unattested) UNATT=1 ;;
             -h|--help) usage; exit 0 ;;
             *) usage >&2; exit 2 ;;
         esac
@@ -83,6 +88,7 @@ main() {
     [ "$MODE" = installed ] || set -- "$@" --root "$ROOT"
     [ "$CHECK" = 0 ] || set -- "$@" --check
     [ "$YES" = 0 ] || set -- "$@" --yes
+    [ "$UNATT" = 0 ] || set -- "$@" --allow-unattested
     rc=0
     "$PY" -I -B "$UPDATE_PY" "$@" || rc=$?
     [ "$rc" -eq 0 ] || exit "$rc"

@@ -3,6 +3,17 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Security
+
+- **An installed `nuc-console-update` no longer goes on without a verified provenance.** The archive and `SHA256SUMS` come from the same release, so
+  the hash proves nothing about who built it; without `gh` (or logged out) the update used to go on and run the new installer as root. It now stops with
+  how to proceed: install `gh` and `gh auth login`, or verify the archive by hand and run again with `--allow-unattested` (`-AllowUnattested` on Windows),
+  which warns. A failed verification still always stops; a portable folder is unchanged (it says the provenance was not checked).
+- The updater checks, once the archive is unpacked, where every symbolic link really leads (`realpath`), and refuses writing through a link, also on
+  Pythons without the tar `data` filter.
+
 ## [2.3.0] - 2026-10-06
 
 The AI page works in the desktop app and the live app: *Turn AI on* asks its question and goes on, a click no longer selects a model or

@@ -164,5 +164,5 @@ updater only in a folder extracted from an archive. To update an *installed* nuc
 ## Security notes
 
 Nothing in this mode runs with more rights than you give it, and it opens no listener beyond `127.0.0.1`. The updater only runs when you start
-it; it checks what it downloads against `SHA256SUMS` and, when `gh` is installed and logged in, against the build attestation: what that proves and
+it; it checks what it downloads against `SHA256SUMS` and, when `gh` is installed and logged in, against the build attestation (an installed update refuses to go on without it unless `--allow-unattested`; a portable folder does not): what that proves and
 what it does not is in [SECURITY.md](../SECURITY.md#verifying-a-release).
