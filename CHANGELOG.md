@@ -5,6 +5,12 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ## [Unreleased]
 
+### Added
+- `sudo nuc-console-config migrate [--dry-run] [--yes]` ([#55](https://github.com/give-jd/nuc-console-oss/issues/55)) brings an installed, old-layout `config.ini` to the shipped one without losing a setting:
+  values you changed and your `[ui]`, `[webapps]` and `[expose]` lines are kept, unknown keys stay under a `# legacy:` line, the configuration in force is checked to be the same before
+  the file is replaced, and the old file is kept as `config.ini.bak-YYYYMMDD-HHMMSS`. `nuc-console-update` prints one line when your file is in the old layout; it never migrates by itself.
+  See [Upgrading config.ini](docs/CONFIGURATION.md#upgrading-configini).
+
 ### Changed
 - The shipped `config/config.ini` is about half as long (106 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
   [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and on the settings page. An installed machine keeps its own `config.ini` untouched; `diff /etc/nuc-console/config.ini{,.dist}` shows the new reference.

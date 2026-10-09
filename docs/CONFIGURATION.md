@@ -23,6 +23,10 @@ Every key applies as on an installation except the ones that decide how an insta
 web view is on `127.0.0.1`, on the port you give with `--port` / `-Port` or a free one, behind the data folder's own token `data/web.token`: [PORTABLE.md](PORTABLE.md#the-access-token)) and so are `[display] mode` and `browser`
 (the launcher opens your default browser itself; `--no-open` / `-NoOpen` prints the address instead). `[display] zoom` still sets the text size.
 
+## Upgrading config.ini
+
+An installation keeps the `config.ini` it started with (the installers never overwrite it), so an older one is still the long, commented file. `sudo nuc-console-config migrate` brings it to the layout of `config.ini.dist` (Windows: `nuc-console-config migrate` from an administrator prompt) and loses no setting: every key you set to a value other than the default is carried over, keys equal to the default go, your `[ui]`, `[webapps]` and `[expose]` lines stay as you wrote them, and a key or section the new layout does not know stays under a `# legacy:` line. Comments on the lines you wrote stay; the long comments of the old layout do not. The new file is written aside and read back with the dashboard's own reader: if the configuration in force would differ in any section, nothing is replaced. The old file is copied first to `config.ini.bak-YYYYMMDD-HHMMSS` in the same folder (mode 0600). `--dry-run` prints the diff and changes nothing; `--yes` does not ask; a second run says "already current" (the `# config-layout:` line of the file is what it compares). It needs the rights to edit `config.ini`, refuses a `config.ini` that is a symbolic link or cannot be read, and never runs by itself: `nuc-console-update` only prints one line when your file is in the old layout.
+
 ## `[features]` — switch sections on or off
 
 All default to `yes`. A disabled section is not drawn, raises no alarm and, for the collector-side ones, **its commands are never run as root**.
@@ -243,6 +247,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root) |
+| `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
 | `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |

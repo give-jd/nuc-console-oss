@@ -133,6 +133,8 @@ try {
             Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         if ($rc -ne 0) { throw "the installer failed (exit code $rc): the previous version may be partly replaced, run this again" }
+        # one line, never run for you: an old, long config.ini is brought to the new layout by `nuc-console-config migrate`
+        & $python -B (Join-Path $app 'confmigrate.py') notice 2>$null
     }
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
