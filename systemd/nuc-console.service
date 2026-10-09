@@ -9,8 +9,10 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 User=nuc-console
-# time zone (NUC_CONSOLE_TZ) and virtual terminal (NUC_CONSOLE_VT) live in nuc-console.service.d/local.conf, written by install.sh
+# time zone (NUC_CONSOLE_TZ) and virtual terminal (NUC_CONSOLE_VT) live in nuc-console.service.d/local.conf (the VT also for ttyprep.py), written by install.sh
 # modalita' (overview/rotate) e sezioni: /etc/nuc-console/config.ini
+# [console] font and blank_minutes of config.ini: -+ = as root (setfont needs it), and a failure never stops the dashboard (src/ttyprep.py)
+ExecStartPre=-+/usr/bin/python3 /opt/nuc-console/ttyprep.py
 ExecStart=/usr/bin/python3 /opt/nuc-console/render.py
 StandardInput=tty
 StandardOutput=tty

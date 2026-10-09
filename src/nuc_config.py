@@ -67,7 +67,8 @@ def load(path=None, warn=None):
                    "refresh_seconds": 2, "allowed_hosts": []},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
-                  "daily": False, "gpu": "auto", "web_actions": True}}
+                  "daily": False, "gpu": "auto", "web_actions": True},
+           "console": {"font": "", "blank_minutes": 0}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
@@ -215,6 +216,19 @@ def load(path=None, warn=None):
             ai["timeout_s"] = max(10, min(600, cp.getint("ai", "timeout_s", fallback=ai["timeout_s"])))
         except ValueError:
             say(f"nuc-console: {path}: [ai] timeout_s must be an integer (10-600)")
+    if cp.has_section("console"):  # Linux text console, read by ttyprep.py before the dashboard starts: both off unless asked for
+        font = cp.get("console", "font", fallback="").strip()
+        if re.fullmatch(r"[A-Za-z0-9_.+-]*", font):  # a font name or file name for setfont: no path, no spaces
+            cfg["console"]["font"] = font
+        else:
+            say(f"nuc-console: {path}: [console] font must be a font name such as Lat15-TerminusBold32x16: kept off")
+        try:
+            minutes = cp.getint("console", "blank_minutes", fallback=0)
+            if not 0 <= minutes <= 60:
+                raise ValueError
+            cfg["console"]["blank_minutes"] = minutes
+        except ValueError:
+            say(f"nuc-console: {path}: [console] blank_minutes must be an integer (0-60): kept off")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours
