@@ -5,6 +5,10 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ## [Unreleased]
 
+### Added
+
+- **Console font and screen blanking** (Linux), both off by default: `[console] font` (e.g. `Lat15-TerminusBold32x16`) and `blank_minutes` (the monitor sleeps after that many minutes without a key). `nuc-console.service` applies them as root before it starts (`src/ttyprep.py`, `setfont` and `setterm` on the dashboard's terminal); a missing tool or font is skipped, never an error. No bootloader or `console-setup` change, no reboot. [docs/CONFIGURATION.md](docs/CONFIGURATION.md#console--font-and-screen-blanking-of-the-linux-console-both-off-by-default)
+
 ### Fixed
 
 - The console rotated to a second (Details) screen on a busy host although everything fit on the first. When a section was still cut ("+N
