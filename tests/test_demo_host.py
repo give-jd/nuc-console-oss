@@ -224,22 +224,24 @@ class TheOtherScreens(DemoHost):
 
     def test_a_real_sampler_given_to_the_demo_is_ignored(self):
         """The web view always owns a real Sampler: under --demo what it reads (a hot CPU, 64 cores) must not reach the page or the header."""
-        for os_name in OSES:
-            render.DEMO, render.DEMO_OS = True, os_name
-            with self.on(SMALL):
-                smp = hostdata.Sampler()
-                smp.sample()
-                self.assertGreater(hostdata.read_thermal()["recent"], 0)      # the host really is throwing problems
-                pills = [list(render.cpu_problems(smp)), list(render.map_graph(smp)[1]), list(render.health_state(smp, 7)[1]),
-                         list(render.ai_state(smp)[1])]
-                with_smp = render.render_screen(smp, 119, 33, mode="overview")
-            with self.on(BIG):
-                without = render.render_screen(None, 119, 33, mode="overview")
-                none = [list(render.cpu_problems(None)), list(render.map_graph(None)[1]), list(render.health_state(None, 7)[1]),
-                        list(render.ai_state(None)[1])]
-            self.assertEqual(pills, none, os_name)
-            self.assertEqual(with_smp, without, os_name)
-            self.assertFalse([t for pb in pills for _, t in pb if "°C" in t or "throttling" in t], os_name)
+        now = time.time()  # two renders a second apart show a different age of the same stale state: one instant for both
+        with mock.patch("time.time", return_value=now):
+            for os_name in OSES:
+                render.DEMO, render.DEMO_OS = True, os_name
+                with self.on(SMALL):
+                    smp = hostdata.Sampler()
+                    smp.sample()
+                    self.assertGreater(hostdata.read_thermal()["recent"], 0)      # the host really is throwing problems
+                    pills = [list(render.cpu_problems(smp)), list(render.map_graph(smp)[1]), list(render.health_state(smp, 7)[1]),
+                             list(render.ai_state(smp)[1])]
+                    with_smp = render.render_screen(smp, 119, 33, mode="overview")
+                with self.on(BIG):
+                    without = render.render_screen(None, 119, 33, mode="overview")
+                    none = [list(render.cpu_problems(None)), list(render.map_graph(None)[1]), list(render.health_state(None, 7)[1]),
+                            list(render.ai_state(None)[1])]
+                self.assertEqual(pills, none, os_name)
+                self.assertEqual(with_smp, without, os_name)
+                self.assertFalse([t for pb in pills for _, t in pb if "°C" in t or "throttling" in t], os_name)
 
     def test_the_demo_reads_nothing_from_the_host(self):
         def boom(*a, **kw):
