@@ -105,8 +105,15 @@ pub fn read_token(data: &Path) -> Option<String> {
 pub fn write_open_page(data: &Path, url: &str) -> Option<std::path::PathBuf> {
     use std::io::Write;
     let path = data.join("open-app.html");
+    // A file (or a link) left there earlier keeps its own permissions when it is only truncated: remove it, then create a new one that
+    // nothing else can have opened first (create_new refuses an existing path).
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return None,
+    }
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -114,6 +121,29 @@ pub fn write_open_page(data: &Path, url: &str) -> Option<std::path::PathBuf> {
     }
     let mut file = opts.open(&path).ok()?;
     write!(file, "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><meta http-equiv=\"refresh\" content=\"0;url={url}\"><title>nuc-console</title>\n").ok()?;
+    drop(file);
+    #[cfg(windows)]
+    {
+        // no mode bits: only this user (and SYSTEM) may read the page that carries the token; fail closed, as web.py does for web.token
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let icacls = Path::new(&root).join("System32").join("icacls.exe");
+        let who = format!("{}\\{}", std::env::var("USERDOMAIN").unwrap_or_default(), std::env::var("USERNAME").unwrap_or_default());
+        let done = !who.starts_with('\\')
+            && !who.ends_with('\\')
+            && Command::new(icacls)
+                .arg(&path)
+                .args(["/inheritance:r", "/grant:r"])
+                .arg(format!("{who}:F"))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+        if !done {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+    }
     Some(path)
 }
 
@@ -189,6 +219,10 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&page).unwrap().permissions().mode() & 0o777, 0o600);
+            // a page left there earlier with loose permissions is replaced, not reused
+            std::fs::set_permissions(&page, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let again = write_open_page(&dir, "http://127.0.0.1:5000/app?token=abcdefghijklmnop").unwrap();
+            assert_eq!(std::fs::metadata(&again).unwrap().permissions().mode() & 0o777, 0o600);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

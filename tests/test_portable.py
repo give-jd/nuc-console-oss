@@ -1425,6 +1425,11 @@ class RunSh(unittest.TestCase):
         return r.status, body
 
     def run_and_stop(self, sig):
+        os.makedirs(os.path.join(self.dir, "data"), exist_ok=True)
+        stale = os.path.join(self.dir, "data", "open.html")  # a page left by an earlier run with loose permissions is replaced, not reused
+        with open(stale, "w") as f:
+            f.write("stale\n")
+        os.chmod(stale, 0o644)
         p = subprocess.Popen([os.path.join(self.dir, "run.sh"), "--web", "--no-open"], cwd=self.dir, env=self.env, stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))  # a runner started in the background ignores it
@@ -1442,7 +1447,7 @@ class RunSh(unittest.TestCase):
             self.assertIn("nuc-console", body)
             opener = os.path.join(self.dir, "data", "open.html")  # what the browser is given, instead of the token on a command line
             deadline = time.time() + 30  # run.sh writes it a moment after the view logs its address
-            while time.time() < deadline and not os.path.exists(opener):
+            while time.time() < deadline and (not os.path.exists(opener) or read(opener).startswith("stale")):  # the stale one is there from the start
                 time.sleep(0.1)
             self.assertEqual(oct(os.stat(opener).st_mode & 0o777), "0o600")
             self.assertIn("&token=" + tok, read(opener))
@@ -1900,8 +1905,8 @@ class PortableAdvice(unittest.TestCase):
     """On screen, the advice must name commands that exist in a portable folder (there is no nuc-console-accept on the PATH)."""
 
     def advice(self, home):
-        code = ("import render, json; print(json.dumps([render.ACCEPT_CMD, render.CMD['restart'], render.CMD['logs'], "
-                "{k: v[2] for k, v in render.CATALOG.items()}, render.PROBLEMS_CMD]))")
+        code = ("import problems, json; print(json.dumps([problems.ACCEPT_CMD, problems.CMD['restart'], problems.CMD['logs'], "
+                "{k: v[2] for k, v in problems.CATALOG.items()}, problems.PROBLEMS_CMD]))")
         env = {k: v for k, v in os.environ.items() if not k.startswith("NUC_CONSOLE_")}
         if home:
             env["NUC_CONSOLE_HOME"] = home

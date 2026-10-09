@@ -307,6 +307,7 @@ def parity_page(view):
     import htmlview
     import prefs
     import render
+    import problems
     import web
     import webpages
     import weburl
@@ -339,7 +340,7 @@ def parity_page(view):
                     to = "#c-" + web.KPI_CARD[kid] if web.KPI_CARD.get(kid) in ids else ""
                 tiles.append(htmlview.kpi_tile(byk[kid], to))
             note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
-                                   'restart it: <code class="cmd">%s</code>' % htmlview.esc(render.CMD.get("restart", ""))) if body["stale"] else ""
+                                   'restart it: <code class="cmd">%s</code>' % htmlview.esc(problems.CMD.get("restart", ""))) if body["stale"] else ""
             kpis = note + '<div class="kpis" role="list" aria-label="Key figures">' + "".join(tiles) + "</div>"
         else:
             if view == "cpu":

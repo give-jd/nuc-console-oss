@@ -86,7 +86,7 @@ def _items(xs):
 
 
 def problems(pb):
-    """The problems of a frame (a render.ProblemList, or a plain list of (severity, text)): each with its id, state, severity and text, the cards
+    """The problems of a frame (a problems.ProblemList, or a plain list of (severity, text)): each with its id, state, severity and text, the cards
     it belongs to and, when the list has them, the catalog's title, why, fix and the command that accepts it; how many were accepted as known,
     and which."""
     pids = getattr(pb, "pids", None) or [None] * len(pb)
