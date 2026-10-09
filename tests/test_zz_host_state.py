@@ -70,12 +70,12 @@ class Guard(unittest.TestCase):
 
 
     def test_a_screen_built_by_hand_sees_no_accepted_problem_baseline_or_config_of_the_host(self):
-        import render
-        self.assertEqual(render.load_accepted(), {})          # accepted.json hid the boot errors and added "1 accepted as known"
-        self.assertIsNone(render.load_baseline())
-        self.assertEqual(render.load_json(render.NET_STATE), None)
-        self.assertTrue(render.ACCEPTED_PATH.startswith(hermetic.SCRATCH) and render.BASELINE.startswith(hermetic.SCRATCH))
-
+        import hostdata
+        import problems
+        self.assertEqual(problems.load_accepted(), {})          # accepted.json hid the boot errors and added "1 accepted as known"
+        self.assertIsNone(problems.load_baseline())
+        self.assertEqual(hostdata.load_json(hostdata.NET_STATE), None)
+        self.assertTrue(problems.ACCEPTED_PATH.startswith(hermetic.SCRATCH) and hostdata.BASELINE.startswith(hermetic.SCRATCH))
 
 class ZLast(unittest.TestCase):
     def test_zz_no_test_of_the_run_read_the_hosts_state(self):

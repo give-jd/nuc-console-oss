@@ -4,8 +4,6 @@
 On macOS and Windows there is no text console to take over: `--kiosk` writes the same screen as an HTML file and shows it
 in a full-screen browser (see kiosk()); host metrics come from hostinfo.py instead of /proc.
 """
-import collections
-import glob
 import json
 import os
 import re
@@ -23,8 +21,11 @@ import cards  # same directory: the card registry and the KPI model
 import ansi  # same directory: the console's drawing of the components
 import cpuinfo  # same directory: the CPU screen's producers
 import graph  # same directory: the MAP model
+import hostdata  # same directory: what is read from the machine and the collector's files
+import display  # same directory: the browser behind --kiosk and --open
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
+import problems  # same directory: the problem list, its advice and what was accepted
 import procs
 import ui
 import screens  # same directory: the full screens' view-models and the components of each screen
@@ -33,8 +34,7 @@ from ui import dd, dget, fmt_ago, hclean, hnum, human, idict, num, plural, safe
 from screens import (CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS, HEALTH_DAYS, HEALTH_NONE, MAP_IDLE_S, AiView, HealthView, MapView,
                      ai_key, ai_mb, ai_rows, ai_select, ai_sync, cpu_key, cpu_rows, cpu_select, cpu_sync, health_findings, health_key,
                      health_nothing, health_select, health_sync, map_key, map_layout, map_select, map_sync, map_view)
-from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
-                      exposure_rows, new_ports, os_of)
+from exposure import expose_apply, exposure_rows, new_ports
 
 try:  # POSIX terminals only: on Windows the keys come from msvcrt
     import termios
@@ -45,30 +45,20 @@ LINUX, WINDOWS, MACOS = nuc_config.LINUX, nuc_config.WINDOWS, nuc_config.MACOS
 if not LINUX:
     import hostinfo
 
-STATE = os.environ.get("NUC_CONSOLE_STATE", os.path.join(nuc_config.RUN_DIR, "containers.json"))
-NET_STATE = os.environ.get("NUC_CONSOLE_NET", os.path.join(nuc_config.RUN_DIR, "net.json"))
-BOOT_STATE = os.environ.get("NUC_CONSOLE_BOOT", os.path.join(nuc_config.RUN_DIR, "boot.json"))
-BASELINE = os.environ.get("NUC_CONSOLE_BASELINE", os.path.join(nuc_config.LIB_DIR, "baseline.json"))
 CFG = nuc_config.current()  # the process's one configuration dict (tests and --demo change it in place)
-# the commands the advice on screen refers to, in the words of this OS
-if WINDOWS:
-    ACCEPT_CMD = "nuc-console-accept"  # from an administrator prompt
-    CMD = {"restart": "Start-ScheduledTask -TaskPath \\nuc-console\\ -TaskName collector (administrator PowerShell)",
-           "logs": r"%ProgramData%\nuc-console\logs\collector.log", "apply": "run install-windows.cmd again (it keeps config.ini)"}
-elif MACOS:
-    ACCEPT_CMD = "sudo nuc-console-accept"
-    CMD = {"restart": "sudo launchctl kickstart -k system/com.nuc-console.collector", "logs": "/var/log/nuc-console/collector.log",
-           "apply": "run sudo ./install.sh again (it keeps config.ini)"}
-else:
-    ACCEPT_CMD = "sudo nuc-console-accept"
-    CMD = {"restart": "sudo systemctl restart nuc-console-collector", "logs": "journalctl -u nuc-console-collector",
-           "apply": "sudo systemctl restart nuc-console nuc-console-collector nuc-console-web"}  # apply: config.ini, everything that reads it
-PROBLEMS_CMD = "nuc-console-problems"
-if nuc_config.PORTABLE:  # run.sh / run.cmd: no nuc-console-accept on the PATH, no service to restart: the advice says what exists
-    ACCEPT_CMD = "run.cmd -Accept" if WINDOWS else "./run.sh --accept"
-    PROBLEMS_CMD = "run.cmd -Problems" if WINDOWS else "./run.sh --problems"
-    CMD = {"restart": "quit it (Ctrl+C) and start it again", "logs": os.path.join(nuc_config.BASE_DIR, "logs", "collector.log"),
-           "apply": "quit the app (or run.sh / run.cmd) and start it again"}
+# names that moved out of this file and that src/web.py still reads as `render.X` (web.py is split on its own branch): `__getattr__` answers
+# them from the module they live in, at the time of the read. Delete a line when web.py imports the name from there. Nothing else re-exports.
+WEB_COMPAT = {"KIOSK_HINT": "display", "Sampler": "hostdata", "CMD": "problems", "safe_problems": "problems", "status_pill": "problems",
+              "telegram_state": "problems"}
+
+
+def __getattr__(name):
+    mod = WEB_COMPAT.get(name)
+    if mod is None:
+        raise AttributeError(f"module 'render' has no attribute {name!r}")
+    return getattr(sys.modules[mod], name)
+
+
 MODE = os.environ.get("NUC_CONSOLE_MODE") or CFG["mode"]  # overview = a single screen, no rotation
 
 
@@ -76,7 +66,7 @@ def on(feature):
     """Section enabled in config.ini (default: yes)."""
     return CFG["features"].get(feature, True)
 
-ROTATE_S, REFRESH_S, HOLD_S, STALE_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60, 60  # REFRESH_S: 1-10 s, config.ini
+ROTATE_S, REFRESH_S, HOLD_S = CFG["rotate_seconds"], CFG["refresh_seconds"], 60  # REFRESH_S: 1-10 s, config.ini
 
 
 def reload_config():
@@ -124,274 +114,6 @@ def wrap_items(items, w, indent=6, sep="  ·  ", max_lines=None):
     return [" " * indent + sep.join(r) for r in rows[:-1]] + [" " * indent + sep.join(rows[-1]) + c(90, f"  … +{hidden}")]
 
 
-THROTTLE_WINDOW_S = 60
-
-
-def read_file(path):
-    try:
-        with open(path) as f:
-            return f.read().strip()
-    except OSError:
-        return None
-
-
-def hwmon_dir(name):
-    return next((h for h in glob.glob("/sys/class/hwmon/hwmon*") if read_file(h + "/name") == name), None)
-
-
-def read_thermal():
-    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None}.
-
-    The maximum is the sensor's own (temp1_max: CPU package, NVMe composite), not a constant of ours.
-    """
-    out = {}
-    for key, name in (("cpu", "coretemp"), ("nvme", "nvme")):
-        h = hwmon_dir(name)
-        t, mx = (read_file(f"{h}/temp1_input"), read_file(f"{h}/temp1_max")) if h else (None, None)
-        if t and mx:
-            out[key] = (int(t) / 1000, int(mx) / 1000)
-    # the counters are per logical CPU and differ a lot: the sum only serves to see that it *changes*;
-    # the readable figure is the package's total throttling time (the maximum across CPUs)
-    base = "/sys/devices/system/cpu/cpu*/thermal_throttle/package_throttle_"
-    counts = [x for x in (read_file(f) for f in glob.glob(base + "count")) if x and x.isdigit()]
-    times = [x for x in (read_file(f) for f in glob.glob(base + "total_time_ms")) if x and x.isdigit()]
-    out["throttle"] = sum(int(x) for x in counts) if counts else None
-    out["throttle_s"] = max(int(x) for x in times) / 1000 if times else None
-    cur = [read_file(f) for f in glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq")]
-    mx = read_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-    cur = [int(x) for x in cur if x and x.isdigit()]
-    out["clk"] = (sum(cur) / len(cur) / 1e6, int(mx) / 1e6) if cur and mx and mx.isdigit() else None
-    return out
-
-
-def parse_netdev(text):
-    """/proc/net/dev -> {interface: (rx_bytes, tx_bytes)} without loopback and container virtual interfaces."""
-    out = {}
-    for ln in text.splitlines()[2:]:
-        name, _, rest = ln.partition(":")
-        name, f = name.strip(), rest.split()
-        if name and len(f) >= 9 and not name.startswith(NET_SKIP):
-            out[name] = (int(f[0]), int(f[8]))
-    return out
-
-
-def parse_sessions(loginctl_text, ss_text):
-    """Local sessions (loginctl) and ssh clients connected now (peers of established connections on port 22)."""
-    local = []
-    for ln in loginctl_text.splitlines():
-        p = ln.split()
-        # SESSION UID USER SEAT LEADER CLASS TTY: class 'manager' is the user's systemd instance, not a session
-        if len(p) >= 6 and p[5] in ("user", "greeter"):
-            local.append({"user": p[2], "tty": p[6] if len(p) > 6 and p[6] != "-" else ""})
-    ssh = []
-    for ln in ss_text.splitlines():
-        f = ln.split()
-        if len(f) >= 4:
-            ssh.append(f[3].rpartition(":")[0].strip("[]"))
-    return {"local": local, "ssh": sorted(set(ssh))}
-
-
-_CACHE = {}
-_THREADS = {}
-
-
-_SLEEP = time.sleep  # the background threads' own: a test that swaps render.time for a fake clock must not have them move it
-
-
-def cached(key, ttl, fn):
-    """Last value of fn(), recomputed in a background thread every ttl seconds (None until the first one exists).
-
-    Sessions and disks use subprocess and statvfs, which can hang (timeout, stuck network mount): in the drawing loop
-    they would freeze the clock and the screen. If fn() raises, the value becomes None: the block says "unavailable"."""
-    if key not in _THREADS:
-        def loop():
-            while True:
-                try:
-                    _CACHE[key] = fn()
-                except Exception:  # noqa: BLE001 - data unavailable: the block will say so, the thread does not die
-                    _CACHE[key] = None
-                _SLEEP(ttl)
-        _THREADS[key] = threading.Thread(target=loop, daemon=True, name=f"cache-{key}")
-        _THREADS[key].start()
-    return _CACHE.get(key)
-
-
-def read_sessions():
-    if not LINUX:
-        return hostinfo.sessions()
-
-    def run(*a):
-        r = subprocess.run(list(a), capture_output=True, text=True, timeout=3)
-        if r.returncode != 0:  # failed != "none": the block must say "unavailable", not reassure
-            raise RuntimeError(f"{a[0]} rc={r.returncode}")
-        return r.stdout
-    return parse_sessions(run("loginctl", "list-sessions", "--no-legend"),
-                          run("ss", "-tnH", "state", "established", "( sport = :22 )"))
-
-
-def parse_mounts(text):
-    """/proc/mounts -> [(mountpoint, fstype)] of real filesystems only, once per device."""
-    seen, out = set(), []
-    for ln in text.splitlines():
-        f = ln.split()
-        if len(f) >= 3 and f[2] in REAL_FS and f[0] not in seen and not f[1].startswith("/var/lib/docker"):
-            seen.add(f[0])
-            out.append((f[1].replace("\\040", " "), f[2]))
-    return out
-
-
-def read_filesystems():
-    if not LINUX:
-        return hostinfo.filesystems()
-    with open("/proc/mounts") as f:
-        mounts = parse_mounts(f.read())
-    out = []
-    for mp, _ in mounts:
-        try:
-            st = os.statvfs(mp)
-        except OSError:
-            continue
-        total = st.f_blocks * st.f_frsize
-        if total:
-            out.append({"mount": mp, "used": (st.f_blocks - st.f_bfree) * st.f_frsize, "total": total})
-    return out
-
-
-class Sampler:
-    """Samples /proc/stat and the thermal sensors; CPU percentages are deltas between two consecutive calls.
-
-    sample() is the one place the dashboard reads the host from. Besides the per-core CPU, the thermal sensors, the interfaces, the
-    sessions and the filesystems it holds the figures of the SYSTEM block and of the System page, so that --demo can replace all of
-    them (demo.sampler_data) and no block calls /proc, statvfs or hostinfo while it draws:
-      "mem"        {"MemTotal", "MemAvailable", "Cached", "SwapTotal", "SwapFree"} in bytes, or None (not readable: drawn as ?)
-      "disk_root"  (used, total, label) of the system volume, or None
-      "uptime"     seconds since boot, or None
-      "load"       ['0.12', '0.30', '0.25']; [] where the OS has no load average (Windows); None when it could not be read"""
-
-    def __init__(self):
-        self.cpu = self._cpu()
-        self.hist = collections.deque(maxlen=64)  # (instant, throttling counter)
-        self.net_prev = (time.monotonic(), self._netdev())
-        self.net_hist = {}  # interface -> (rx deque, tx deque) of bytes/s
-
-    @staticmethod
-    def _netdev():
-        try:
-            if not LINUX:
-                return hostinfo.net_counters()
-            with open("/proc/net/dev") as f:
-                return parse_netdev(f.read())
-        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
-            return {}
-
-    @staticmethod
-    def _cpu():
-        if not LINUX:
-            try:
-                return hostinfo.cpu_times()
-            except (OSError, ValueError, AttributeError):  # no per-core figures: the CPU bars are left out, nothing invented
-                return {}
-        out = {}
-        with open("/proc/stat") as f:
-            for line in f:
-                if line.startswith("cpu") and line[3].isdigit():
-                    p = line.split()
-                    v = list(map(int, p[1:9]))
-                    out[p[0]] = (sum(v) - v[3] - v[4], sum(v))  # busy = everything except idle+iowait
-        return out
-
-    def sample(self):
-        cpu = self._cpu()
-        per = {k: (cpu[k][0] - self.cpu[k][0]) / max(cpu[k][1] - self.cpu[k][1], 1)
-               for k in cpu if k in self.cpu}
-        self.cpu = cpu
-        now_m, cur = time.monotonic(), self._netdev()
-        dt = max(now_m - self.net_prev[0], 0.001)
-        net = {}
-        for name, (rx, tx) in cur.items():
-            prx, ptx = self.net_prev[1].get(name, (rx, tx))
-            hrx, htx = self.net_hist.setdefault(name, (collections.deque(maxlen=NET_HIST), collections.deque(maxlen=NET_HIST)))
-            hrx.append(max(0, rx - prx) / dt)
-            htx.append(max(0, tx - ptx) / dt)
-            net[name] = {"rx": hrx[-1], "tx": htx[-1], "rx_tot": rx, "tx_tot": tx, "hist_rx": list(hrx), "hist_tx": list(htx)}
-        self.net_prev = (now_m, cur)
-        for gone in [n for n in self.net_hist if n not in cur]:
-            del self.net_hist[gone]  # interface gone: if it comes back it starts from zero, not from an old history
-        th = read_thermal()
-        now = time.monotonic()
-        if th["throttle"] is not None:
-            self.hist.append((now, th["throttle"]))
-            old = next(((t, n) for t, n in self.hist if now - t <= THROTTLE_WINDOW_S), None)
-            # events in the last minute; None while the history is too short to tell
-            rec = th["throttle"] - old[1] if old and now - old[0] >= 10 else None
-            th["recent"] = rec if rec is None or rec >= 0 else None  # falling sum = a CPU went offline: invalid figure
-        return {"cpu": per, "thermal": th if on("thermal") else {}, "net": net if on("network_traffic") else {},
-                "sessions": cached("sessions", 10, read_sessions) if on("sessions") else None,
-                "fs": cached("fs", 30, read_filesystems) if on("disks") else None,
-                "mem": read_host(meminfo), "disk_root": read_host(root_disk), "uptime": read_host(uptime_s), "load": read_load()}
-
-
-def meminfo():
-    if not LINUX:
-        return hostinfo.meminfo()
-    d = {}
-    with open("/proc/meminfo") as f:
-        for line in f:
-            k, v = line.split(":")
-            d[k] = int(v.split()[0]) * 1024
-    return d
-
-
-def loadavg():
-    """['0.12', '0.30', '0.25'], or None where the OS has no load average (Windows)."""
-    if not LINUX:
-        return hostinfo.loadavg()
-    with open("/proc/loadavg") as f:
-        return f.read().split()[:3]
-
-
-def uptime_s():
-    if not LINUX:
-        return hostinfo.uptime()
-    with open("/proc/uptime") as f:
-        return float(f.read().split()[0])
-
-
-def root_disk():
-    """(used, total, label) of the system volume."""
-    if not LINUX:
-        return hostinfo.root_disk()
-    st = os.statvfs("/")
-    return (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_blocks * st.f_frsize, "/"
-
-
-def read_host(fn):
-    """fn() for a Sampler figure: its value, or None when the host cannot give it (the screen draws `?`, whatever /proc, sysctl or the
-    Windows API raised: one unreadable figure must not take the SYSTEM block, or the frame, down)."""
-    try:
-        return fn()
-    except Exception:  # noqa: BLE001 - the answer is "unknown", never a traceback in the middle of the dashboard
-        return None
-
-
-def read_load():
-    """The Sampler's "load" (see loadavg()): [] where the OS has no load average (Windows), None when it has one but it could not be read."""
-    try:
-        load = loadavg()
-    except Exception:  # noqa: BLE001 - same rule as read_host()
-        return None
-    return [] if load is None else load if len(load) == 3 else None
-
-
-def swap_figures(m):
-    """(used, total) bytes of the swap from a Sampler's "mem": None when there is no swap (or no figures)."""
-    try:
-        total, free = m["SwapTotal"], m["SwapFree"]
-        return (total - free, total) if total else None
-    except (KeyError, TypeError):
-        return None
-
-
 def unavail_msg(d, key, prefix="unavailable"):
     """Line for a section without data: 'not installed' (info) if the tool is missing, 'unavailable: error' if it is broken."""
     m = cards.unavail(d, key, prefix)
@@ -417,7 +139,7 @@ def page_sistema(s, w, cont=None):
     m, load, up, disk = s.get("mem"), s.get("load"), s.get("uptime"), cards.disk_figures(s.get("disk_root"))  # the Sampler's: nothing is read here
     lines = [f" up {cards.fmt_up(up)}" + (f"   load {cards.fmt_load(load)}" if load != [] else ""), ""]
     bw = max(10, min(60, w - 40))
-    ram, swap = cards.ram_figures(m), swap_figures(m)
+    ram, swap = cards.ram_figures(m), hostdata.swap_figures(m)
     lines.append(f" RAM   {bar(ram[0] / ram[1], bw)} {human(ram[0])}/{human(ram[1])}  cache {human(m.get('Cached'))}" if ram
                  else f" RAM   {c(33, '?')}")
     if swap:
@@ -434,20 +156,7 @@ def page_sistema(s, w, cont=None):
     for i in range(0, len(cells), ncol):
         lines.append("".join(pad(x, cw) for x in cells[i:i + ncol]))
     lines.append("")
-    return lines + (containers_block(cont if cont is not None else load_containers(), w) if on("containers") else [])
-
-
-def load_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
-
-
-def load_containers(path=None):
-    d = load_json(path or STATE)
-    return d if isinstance(d, dict) and isinstance(d.get("containers"), list) else None
+    return lines + (containers_block(cont if cont is not None else hostdata.load_containers(), w) if on("containers") else [])
 
 
 def fmt_ports(ports):
@@ -474,14 +183,14 @@ def container_box(proj, cts, w):
 def containers_block(data, w, now=None):
     now = now or time.time()
     if data is None:
-        return [c(31, " collector not running: no state in " + STATE)]
+        return [c(31, " collector not running: no state in " + hostdata.STATE)]
     lines = []
     if data.get("absent"):
         return [msg("info", "docker not installed on this machine")]
     if data.get("error"):
         lines.append(c(31, " docker: " + safe(data["error"])))
     age = now - data.get("ts", 0)
-    if age > STALE_S:
+    if age > hostdata.STALE_S:
         lines.append(c(33, f" stale data ({int(age)} s old): collector stopped?"))
     groups = {}
     for ct in data["containers"]:
@@ -504,9 +213,6 @@ def containers_block(data, w, now=None):
 
 NAMEW = 36
 NCOL3 = 225  # from this width the single screen uses three columns
-NET_SKIP = ("lo", "veth", "br-")  # container virtual interfaces: noise
-NET_HIST = 30  # history samples for the traffic sparklines
-REAL_FS = ("ext4", "ext3", "xfs", "btrfs", "vfat", "f2fs", "zfs", "ntfs3", "exfat", "nfs", "nfs4", "cifs")
 BOOT_WINDOW_S = 900  # a container started within 15 min of boot "started with the boot"
 
 
@@ -573,7 +279,7 @@ def tight(lines):
 def page_boot(b, w, body_h, now=None):
     now = now or time.time()
     if b is None:
-        return ["", msg("err", "boot collector not running: no state in " + BOOT_STATE)]
+        return ["", msg("err", "boot collector not running: no state in " + hostdata.BOOT_STATE)]
     head = [msg("warn", f"boot data stale ({int(now - b.get('ts', 0))} s old)"), ""] if now - b.get("ts", 0) > cards.BOOT_STALE_S else []
     up = now - b.get("btime", now)
     wide = w >= WIDE
@@ -597,395 +303,39 @@ def page_boot(b, w, body_h, now=None):
     return tight(lines) if len(tight(lines)) <= body_h else lines
 
 
-def load_baseline(path=None):
-    """valid dict | None if missing | 'corrotta' (corrupt) if it exists but is unreadable (not 'missing': must be flagged)."""
-    path = path or BASELINE
-    if not os.path.exists(path):
-        return None
-    d = load_json(path)
-    return d if isinstance(d, dict) and isinstance(d.get("ports"), dict) else "corrotta"
-
-
-def accept_baseline(if_missing=False, path=None, now=None):
-    """Saves the current set of exposed ports as 'expected'. As root: sudo nuc-console-accept.
-
-    Refuses a stale or partial state: it would bless as normal what could not be measured.
-    """
-    path, now = path or BASELINE, now or time.time()
-    if if_missing and isinstance(load_baseline(path), dict):
-        print("baseline already present: left untouched")
-        return 0
-    net, cont = load_json(NET_STATE), load_containers()
-    if (not isinstance(net, dict) or now - net.get("ts", 0) > cards.NET_STALE_S or exposure_partial(net)
-            or cont is None or now - cont.get("ts", 0) > STALE_S):
-        print("network/container state missing, stale or incomplete: baseline not created", file=sys.stderr)
-        return 1
-    cur = exposure_keys(net, cont)
-    if cur is None:
-        print("port list unavailable: baseline not created", file=sys.stderr)
-        return 1
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump({"ts": now, "ports": cur}, f, indent=1)
-        f.flush()
-        os.fsync(f.fileno())  # a power cut must not leave an empty file
-    os.chmod(tmp, 0o644)
-    os.replace(tmp, path)
-    print(f"baseline written: {len(cur)} exposed ports in {path}")
-    return 0
-
-
-TELEGRAM_DOWN_S, TELEGRAM_FAILING_S = 300, 600  # notify.py rewrites status.json every 30 s: older than 5 min = not running; 10 min of failed sends = say so
-TELEGRAM_TOKEN = re.compile(r"\d{6,}:[A-Za-z0-9_-]{20,}")  # a bot token must never reach the screen, whoever put it in a message
-
-
-def telegram_status(path=None):
-    """notify.py's status.json (counters and the last error, never a secret): a dict; None if missing or broken; False if this user may
-    not read it (on Windows only administrators and the service accounts can open the notifier's folder, where the token is)."""
-    try:
-        with open(path or os.path.join(nuc_config.NOTIFY_DIR, "status.json"), encoding="utf-8") as f:
-            d = json.load(f)
-    except PermissionError:
-        return False
-    except (OSError, ValueError, RecursionError):
-        return None
-    return d if isinstance(d, dict) else None
-
-
-def telegram_state(now, path=None):
-    """The notifier as status.json shows it: ("ok" | "unreadable" | "unpaired" | "down" | "failing", how long and why, for "failing")."""
-    tg = telegram_status(path)
-    if tg is False:
-        return "unreadable", ""  # cannot look: neither a problem nor a proof that all is well
-    if tg and tg.get("paired") is False:
-        return "unpaired", ""  # its last word, even if it has stopped since (it exits at once when there is no chat)
-    ts, since = (tg or {}).get("ts"), (tg or {}).get("failing_since")
-    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or now - ts > TELEGRAM_DOWN_S:
-        return "down", ""
-    if not isinstance(since, bool) and isinstance(since, (int, float)) and now - since > TELEGRAM_FAILING_S:
-        err = TELEGRAM_TOKEN.sub("<token>", safe(tg.get("last_error") or ""))[:60].strip()
-        return "failing", fmt_ago(now - since) + (": " + err if err else "")
-    return "ok", ""
-
-
 def telegram_on():
     """The notifier is on: config.ini's [telegram] enabled, or the web view's Telegram page turned it on (nuc_config.telegram). The demo: config only."""
     return bool(CFG["telegram"]["enabled"] if DEMO else nuc_config.telegram(CFG)["enabled"])
 
 
-def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
-    """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
-    now, out = now or time.time(), []
-    if CFG.get("config_error"):  # config.ini exists but could not be read: nothing in it ([expose], [webapps]) is applied
-        out.append((2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)", "config-unreadable"))
-    if not on("containers"):
-        pass
-    elif cont is None:
-        out.append((2, "container collector not running", "collector-containers"))
-    else:
-        if now - cont.get("ts", 0) > STALE_S:
-            out.append((1, f"container state stale ({int(now - cont.get('ts', 0))} s old)", "stale-containers"))
-        down = [ct for ct in cont["containers"] if ct["state"] != "running"]
-        sick = [ct for ct in cont["containers"] if "unhealthy" in ct["status"] or "Restarting" in ct["status"]]
-        if sick:
-            out.append((2, plural(len(sick), "unhealthy container"), "unhealthy-container"))
-        if down:
-            out.append((1, plural(len(down), "container") + " exited with an error", "container-exited"))
-    if thermal and on("thermal"):
-        for label, key in (("CPU", "cpu"), ("NVMe", "nvme")):
-            if key in thermal:
-                t, mx = thermal[key]
-                if t >= ui.THERMAL_ERR * mx:
-                    out.append((2, f"{label} at {t:.0f}°C: above the {ui.THERMAL_ERR * mx:.0f}°C threshold", "thermal"))
-                elif t >= ui.THERMAL_WARN * mx:
-                    out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
-        if thermal.get("recent"):
-            out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
-    if not on("boot"):
-        pass
-    elif boot is None:
-        out.append((1, "boot collector not running", "collector-boot"))
-    elif boot:
-        lbl = cards.boot_labels(boot)
-        if boot.get("failed"):
-            out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
-        if boot.get("journal") and boot["journal"]["err"]:
-            out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
-    if net is None:
-        out.append((2, "network collector not running", "collector-net"))
-        return sorted(out, key=lambda x: -x[0])
-    if now - net.get("ts", 0) > cards.NET_STALE_S:
-        out.append((1, f"network data stale ({int(now - net.get('ts', 0))} s old)", "stale-net"))
-    if net.get("errors"):
-        out.append((1, "network sections not collected: " + ", ".join(net["errors"]), "net-sections"))
-    ufw, fw = net.get("ufw"), net.get("firewall")
-    if os_of(net) != "linux":  # the OS firewall (Windows Firewall, macOS Application Firewall) instead of ufw
-        name = (fw or {}).get("name") or "firewall"
-        if fw is None and cards.is_disabled(net, "firewall"):
-            pass
-        elif fw is None:
-            out.append((2, "firewall state unreadable: LAN exposure unknown", "firewall-unreadable"))
-        else:
-            if fw.get("off"):
-                where = f" on the {', '.join(fw['off'])} network" if fw.get("kind") == "windows" else ""
-                out.append((2, f"{name} off{where}: listening services are reachable from the LAN", "firewall-off"))
-            if fw.get("policy"):
-                out.append((1, f"{name} has rules from Group Policy: they are not read", "firewall-policy"))
-    elif ufw is None and cards.is_disabled(net, "ufw"):
-        pass  # firewall switched off in config.ini: the user's choice, not an alarm
-    elif ufw is None and cards.is_absent(net, "ufw"):
-        out.append((1, "ufw not installed: LAN filtering cannot be verified", "ufw-missing"))
-    elif ufw is None:
-        out.append((2, "ufw unreadable", "ufw-unreadable"))
-    elif not ufw["active"]:
-        out.append((2, "ufw off: no LAN filtering for non-Docker services", "ufw-off"))
-    if net.get("listeners") is not None and baseline == "corrotta":
-        out.append((2, f"port baseline unreadable: regenerate it with {ACCEPT_CMD}", "baseline-unreadable"))
-    elif net.get("listeners") is not None and baseline is None:
-        out.append((1, f"port baseline missing: create it with {ACCEPT_CMD}", "baseline-missing"))
-    elif isinstance(baseline, dict) and net.get("listeners") is not None:
-        if exposure_partial(net):  # partial data: a comparison would raise false alarms (or hide real ones)
-            out.append((1, "port comparison suspended: network sections unreadable", "port-compare-suspended"))
-        else:
-            new, gone, changed = baseline_diff(exposure_keys(net, cont) or {}, baseline)
-            for k, v in list(new.items())[:3]:
-                port, _, group = k.partition(":")
-                out.append((3, f"NEW exposed port: {port} {group.lower()} ({safe(v['name'])[:24]})", "port-new"))
-            if len(new) > 3:
-                out.append((3, f"… and {len(new) - 3} more new exposed ports", "port-new"))
-            for k, why in list(changed.items())[:3]:
-                out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
-            if gone:
-                out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
-    if net.get("listeners") is not None:
-        rows = exposure_rows(net, cont)
-        pub = [r for r in rows if r["net"] == 1]
-        expected = {p for ports in CFG["webapps"].values() for p in ports if p not in SENSITIVE}  # declared web apps: intended exposure
-        bypass = [r for r in rows if r["bad_note"] and r["note"].startswith("docker") and r["lan"] == 1
-                  and not (r["proto"] == "tcp" and r["port"] in expected)]
-        dbs = [r for r in rows if r["warn"]]
-        if dbs:
-            out.append((2, f"{len(dbs)} DB/broker open on LAN", "db-open-lan"))
-        if bypass:
-            out.append((1, plural(len(bypass), "Docker port") + " bypassing ufw (DOCKER-USER empty)", "docker-bypass"))
-        if pub:
-            out.append((1, plural(len(pub), "service") + f" public on the Internet (Funnel :{pub[0]['port']})", "funnel-public"))
-        if CFG["expose"]:  # [expose] only adds alarms: the ones above stay as they are, declared or not
-            over = expose_over_items(expose_apply(rows, net, cont))
-            if over:
-                out.append((2, plural(len(over), "service") + (" reaches" if len(over) == 1 else " reach") + " beyond config.ini: " + ", ".join(over), "over-exposed"))
-            ok = (isinstance(cont, dict) and not any(cont.get(k) for k in ("error", "absent", "disabled")) and isinstance(boot, dict)
-                  and not {"links", "dbs"} & set(net.get("errors") or ()))  # with a source of names missing every name looks wrong
-            lost = expose_unmatched(net, cont, boot) if ok else []
-            if lost:
-                out.append((1, "[expose] " + ", ".join(f"'{safe(k)}'" for k in lost) + (" matches" if len(lost) == 1 else " match") + " no service", "expose-unmatched"))
-    if telegram_on():  # notify.py (docs/TELEGRAM.md): only then its status.json is read; switched off = nothing to say
-        state, why = telegram_state(now)
-        if state == "unpaired":
-            out.append((1, "Telegram notifications on, but not paired", "telegram-unpaired"))
-        elif state == "down":
-            out.append((1, "Telegram notifier not running", "telegram-failing"))
-        elif state == "failing":
-            out.append((1, f"Telegram notifications failing for {why}", "telegram-failing"))
-    return sorted(out, key=lambda x: -x[0])
-
-
-ACCEPTED_PATH = os.environ.get("NUC_CONSOLE_ACCEPTED", os.path.join(nuc_config.LIB_DIR, "accepted.json"))
-
-# id -> (what it is, why it matters, how to handle it). Shown by `nuc-console-problems`.
-CATALOG = {
-    "collector-containers": ("Container collector not running", "no container data", "sudo systemctl status nuc-console-collector; journalctl -u nuc-console-collector"),
-    "collector-net": ("Network collector not running", "no exposure/firewall data", "sudo systemctl restart nuc-console-collector"),
-    "collector-boot": ("Boot collector not running", "no boot data", "sudo systemctl restart nuc-console-collector"),
-    "stale-containers": ("Container state is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
-    "stale-net": ("Network data is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
-    "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete", "journalctl -u nuc-console-collector; the section name is in the message"),
-    "unhealthy-container": ("Container unhealthy or restarting", "the service may be down or degraded", "docker ps; docker logs <name>; fix the healthcheck or the app. A wrong healthcheck path is the usual cause"),
-    "container-exited": ("Container exited with an error", "a service that should run is down", "docker ps -a; docker logs <name>; docker start <name> or remove it if obsolete"),
-    "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
-    "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
-    "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
-    "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
-    "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
-    "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),
-    "ufw-unreadable": ("ufw status unreadable", "firewall state unknown", "sudo ufw status verbose; journalctl -u nuc-console-collector"),
-    "docker-bypass": ("Docker ports bypass ufw", "a port published on 0.0.0.0 is reachable from the LAN whatever ufw says", "publish on 127.0.0.1 (compose: \"127.0.0.1:PORT:PORT\") or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule"),
-    "db-open-lan": ("Database/broker open on the LAN", "data services should not be reachable from the network", "publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused"),
-    "funnel-public": ("Service public on the Internet (Tailscale Funnel)", "anyone on the Internet can reach it", "tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off"),
-    "over-exposed": ("Service reaches further than config.ini says", "you declared under [expose] how far it should be reachable, and it is reachable from more places",
-                     "bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini"),
-    "expose-unmatched": ("[expose] name matches no service", "a name that matches nothing (a typo, or a service that was removed) guards nothing",
-                         "fix the name under [expose] in config.ini (container, compose service or project, process, unit, database, [webapps] name) or remove the line; ports are never checked"),
-    "config-unreadable": ("config.ini unreadable", "the file exists but could not be read, so the defaults are in use: [expose] and [webapps] are not applied and nothing is checked against them",
-                          "check config.ini for a key starting with ':' (write ports as 8080) or a section without a header; the exact error is in the service logs / stderr; restart the services after fixing it"),
-    "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
-    "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "sudo nuc-console-accept"),
-    "port-compare-suspended": ("Port comparison suspended", "network sections were unreadable", "see net-sections"),
-    "port-new": ("New exposed port", "something started listening where it did not before", "identify it (ss -ltnp); if intended: sudo nuc-console-accept; if not, stop it"),
-    "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port", "check what changed; if intended: sudo nuc-console-accept"),
-    "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: sudo nuc-console-accept"),
-}
-
-
-CATALOG.update({  # macOS/Windows: the OS firewall in place of ufw (the advice is per OS, below)
-    "firewall-off": ("Firewall off", "every listening service is reachable from the network", "turn the firewall on"),
-    "firewall-unreadable": ("Firewall state unreadable", "LAN exposure cannot be judged: ports are shown as unknown", f"{CMD['logs']}"),
-    "firewall-policy": ("Firewall rules from Group Policy", "rules set by policy are not in the local store: those ports are shown as unknown",
-                        "Get-NetFirewallRule -PolicyStore ActiveStore lists the effective rules"),
-})
-# the same problems, explained with the commands of this OS
-OS_CATALOG = {
-    "windows": {
-        "collector-containers": ("Container collector not running", "no container data",
-                                 r"Get-ScheduledTask -TaskPath \nuc-console\ ; log: " + CMD["logs"]),
-        "collector-net": ("Network collector not running", "no exposure/firewall data", CMD["restart"]),
-        "collector-boot": ("Boot collector not running", "no boot data", CMD["restart"]),
-        "stale-containers": ("Container state is old", "the collector stopped updating", CMD["restart"]),
-        "stale-net": ("Network data is old", "the collector stopped updating", CMD["restart"]),
-        "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete",
-                         CMD["logs"] + "; the section name is in the message"),
-        "failed-units": ("Automatic services stopped with an error", "a service that should run is down",
-                         "Get-Service <name>; Event Viewer > Windows Logs > System says why; Start-Service <name>"),
-        "journal-errors": ("Errors in the System event log since boot", "usually noise (DCOM permissions, drivers), sometimes a real fault",
-                           "Event Viewer > Windows Logs > System; accept it if it is known noise"),
-        "db-open-lan": ("Database/broker open on the LAN", "data services should not be reachable from the network",
-                        "publish the DB on 127.0.0.1 (compose: \"127.0.0.1:5432:5432\") or stop it if unused"),
-        "firewall-off": ("Windows Firewall off", "every listening service is reachable from that network",
-                         "Windows Security > Firewall & network protection: turn it on; or, as administrator: Set-NetFirewallProfile -All -Enabled True"),
-        "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
-        "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
-        "port-new": ("New exposed port", "something started listening where it did not before",
-                     "identify it (Get-NetTCPConnection -State Listen); if intended: nuc-console-accept (administrator); if not, stop it"),
-        "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port",
-                         "check what changed; if intended: nuc-console-accept (administrator)"),
-        "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: nuc-console-accept (administrator)"),
-    },
-    "darwin": {
-        "collector-containers": ("Container collector not running", "no container data",
-                                 "sudo launchctl print system/com.nuc-console.collector; log: " + CMD["logs"]),
-        "collector-net": ("Network collector not running", "no exposure/firewall data", CMD["restart"]),
-        "collector-boot": ("Boot collector not running", "no boot data", CMD["restart"]),
-        "stale-containers": ("Container state is old", "the collector stopped updating", CMD["restart"]),
-        "stale-net": ("Network data is old", "the collector stopped updating", CMD["restart"]),
-        "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete",
-                         CMD["logs"] + "; the section name is in the message"),
-        "failed-units": ("Launch daemons that exited with an error", "a service that should run is down",
-                         "sudo launchctl print system/<label>; its log is named in the plist (StandardErrorPath)"),
-        "firewall-off": ("macOS firewall off", "every listening service is reachable from the network",
-                         "System Settings > Network > Firewall: turn it on (or: sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on)"),
-        "port-new": ("New exposed port", "something started listening where it did not before",
-                     "identify it (sudo lsof -nP -iTCP -sTCP:LISTEN); if intended: sudo nuc-console-accept; if not, stop it"),
-    },
-}
-CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when it is on (config.ini, or the web view's Telegram page)
-    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
-                          "then tap the link it shows and press Start"),
-    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
-                         "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; journalctl -u nuc-console-notify; "
-                         "sudo systemctl restart nuc-console-notify"),
-})
-OS_CATALOG["windows"].update({
-    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "the web view's Telegram page (settings), or nuc-console-telegram.cmd --setup (administrator prompt: the bot token from "
-                          "@BotFather, your @username), then tap the link it shows and press Start"),
-    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
-                         "nuc-console-telegram.cmd --status; nuc-console-telegram.cmd --test; log: %ProgramData%\\nuc-console\\logs\\notify.log; "
-                         "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
-})
-OS_CATALOG["darwin"].update({
-    "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
-                          "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
-                          "then tap the link it shows and press Start"),
-    "telegram-failing": ("Telegram notifier not running or failing", "new problems are not reaching your phone",
-                         "sudo nuc-console-telegram --status; sudo nuc-console-telegram --test; log: /var/log/nuc-console/notify.log; "
-                         "restart: sudo launchctl kickstart -k system/com.nuc-console.notify"),
-})
-BASE_CATALOG = dict(CATALOG)  # the advice in the words of an installed Linux, before this OS's and the portable run's (tests/golden.py renders with it)
-CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
-if nuc_config.PORTABLE:
-    CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}
-    # the collector is part of the run, not a service: no systemctl, launchctl or scheduled task, and its log is a file
-    _again = CMD["restart"] + "; log: " + CMD["logs"]
-    CATALOG.update({k: (CATALOG[k][0], CATALOG[k][1], a) for k, a in {
-        "collector-containers": _again, "collector-net": _again, "collector-boot": _again,
-        "stale-containers": _again, "stale-net": _again,
-        "net-sections": CMD["logs"] + "; the section name is in the message",
-        "ufw-unreadable": "sudo ufw status verbose; log: " + CMD["logs"],
-        # the Telegram notifier starts with the run (the desktop app too): the web view's Telegram page pairs and tests it, its log is a file
-        "telegram-unpaired": "pair it on the web view's Telegram page (settings > Phone alerts), or [telegram] enabled = no",
-        "telegram-failing": "the web view's Telegram page says why and sends a test (settings > Phone alerts); log: "
-                            + os.path.join(nuc_config.BASE_DIR, "logs", "notify.log"),
-    }.items()})
-
-
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
-COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
-COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
-
-
-def fingerprint(sev, text, pid):
-    """What was accepted: severity + text. For exposure/health items the exact text (one more is a new problem); for noisy
-    counters (journal errors, temperatures) the digits are ignored, so 118 -> 120 stays accepted but a worse severity does not."""
-    return f"{sev}|" + (text if pid in COUNT_MATTERS else re.sub(r"\d+", "#", text))
-
-
-class ProblemList(list):
-    """List of (severity, text) with .accepted = how many known items were left out (shown under ATTENTION) and .pids = the problem id
-    of each item, in the same order (None when the list was not built by problems(): cards.Ctx then cannot tell which card a problem is
-    about). What only the web has room for, None in a list that problems() did not build: .info = (title, why, fix, accept command) of each
-    item, in the same order (the catalog's words for this OS and this install); .known = what was accepted, [{id, text, reason, ts}] (as
-    many as .accepted); .cmds = the commands the advice refers to: {problems, accept, forget}."""
-    accepted = 0
-    pids = None
-    info = None
-    known = None
-
-    @property
-    def cmds(self):
-        return {"problems": PROBLEMS_CMD, "accept": ACCEPT_CMD, "forget": ACCEPT_CMD + " --forget"}
-
-
-def load_accepted(path=None):
-    """{problem id: {"reason", "fp", ...}} accepted as known. A missing or broken file means nothing is accepted: it never hides by accident."""
-    try:
-        with open(path or ACCEPTED_PATH) as f:
-            d = json.load(f)
-    except (OSError, ValueError, RecursionError):
-        return {}
-    if not isinstance(d, dict):
-        return {}
-    return {k: v for k, v in d.items() if k in CATALOG and k not in NOT_ACCEPTABLE and isinstance(v, dict)
-            and isinstance(v.get("fp"), str) and isinstance(v.get("reason", ""), str)}
+problems.TELEGRAM_ON = telegram_on
 
 
 def current_problem_records():
-    smp = Sampler()
+    smp = hostdata.Sampler()
     time.sleep(0.5)
     st, sm = snapshot(200), smp.sample()
-    return problem_records(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    return problems.problem_records(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
 
 
 def accept_problem(pid, reason="", forget=False, path=None, now=None, records=None):
     """Mark what you see now as known (dimmed, counted under ATTENTION) or forget it. As root:
     sudo nuc-console-accept --problem ID --reason ... The acceptance is tied to the current severity and text: a worse or
     different situation shows up again."""
-    path = path or ACCEPTED_PATH
-    if pid not in CATALOG:
-        print("unknown problem id; known: " + ", ".join(sorted(CATALOG)), file=sys.stderr)
+    path = path or problems.ACCEPTED_PATH
+    if pid not in problems.CATALOG:
+        print("unknown problem id; known: " + ", ".join(sorted(problems.CATALOG)), file=sys.stderr)
         return 2
-    cur = load_accepted(path)
+    cur = problems.load_accepted(path)
     if forget:
         cur.pop(pid, None)
     else:
-        if pid in NOT_ACCEPTABLE:
-            print(f"port changes are accepted with the baseline: {ACCEPT_CMD} (no --problem)", file=sys.stderr)
+        if pid in problems.NOT_ACCEPTABLE:
+            print(f"port changes are accepted with the baseline: {problems.ACCEPT_CMD} (no --problem)", file=sys.stderr)
             return 2
         reason = ui.CTRL.sub(" ", reason).strip()
         if not reason:
-            print(f"--reason is required: write why this is acceptable (it is shown in `{PROBLEMS_CMD}`)", file=sys.stderr)
+            print(f"--reason is required: write why this is acceptable (it is shown in `{problems.PROBLEMS_CMD}`)", file=sys.stderr)
             return 2
         recs = current_problem_records() if records is None else records
         rec = next((r for r in recs if r["id"] == pid), None)
@@ -1003,36 +353,6 @@ def accept_problem(pid, reason="", forget=False, path=None, now=None, records=No
     os.replace(tmp, path)
     print(("forgot " if forget else "accepted ") + pid)
     return 0
-
-
-def problems(*a, **kw):
-    """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
-    acc = load_accepted()
-    out = ProblemList()
-    out.pids, out.info, out.known = [], [], []
-    for sev, text, pid in problems_raw(*a, **kw):
-        if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
-            out.accepted += 1
-            out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
-        else:
-            title, why, fix = CATALOG.get(pid, (pid, "", ""))
-            out.append((sev, text))
-            out.pids.append(pid)
-            out.info.append((title, why, fix, "" if pid in NOT_ACCEPTABLE else f'{ACCEPT_CMD} --problem {pid} --reason "..."'))
-    return out
-
-
-def problem_records(*a, **kw):
-    """Every anomaly with its analysis, for `nuc-console-problems`: [{id, severity, text, accepted, reason, title, why, fix, fingerprint}]."""
-    acc = load_accepted()
-    out = []
-    for sev, text, pid in problems_raw(*a, **kw):
-        title, why, fix = CATALOG.get(pid, (pid, "", ""))
-        fp = fingerprint(sev, text, pid)
-        out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
-                    "accepted": pid in acc and acc[pid]["fp"] == fp, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
-                    "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
-    return out
 
 
 def print_problems(argv):
@@ -1053,28 +373,10 @@ def print_problems(argv):
         if r["fix"]:
             print(f"    fix: {r['fix']}")
         if r["acceptable"]:
-            print(f"    accept if known:  {ACCEPT_CMD} --problem {r['id']} --reason \"...\"")
+            print(f"    accept if known:  {problems.ACCEPT_CMD} --problem {r['id']} --reason \"...\"")
         else:
-            print(f"    port changes are accepted with the baseline: {ACCEPT_CMD}")
+            print(f"    port changes are accepted with the baseline: {problems.ACCEPT_CMD}")
     return 0
-
-
-def safe_problems(*a, **kw):
-    """problems() that never raises: a malformed state must not send the main loop into a crash-loop."""
-    try:
-        return problems(*a, **kw)
-    except Exception as e:  # noqa: BLE001
-        return [(2, "unparseable state: " + safe(repr(e))[:60])]
-
-
-def status_pill(pb):
-    """(text, colour code) for the header: always visible, with a symbol besides the colour."""
-    if not pb:
-        return "✔ ALL OK", ui.sgr("banner_ok")
-    if any(sev == 3 for sev, _ in pb):
-        return "✖ EXPOSED PORTS CHANGED", ui.sgr("banner_err")
-    n_err = sum(1 for sev, _ in pb if sev == 2)
-    return (f"✖ {len(pb)} PROBLEMS", ui.sgr("banner_err")) if n_err else (f"! {len(pb)} WARNINGS", ui.sgr("banner_warn"))
 
 
 def _block(card_id, title, body, w):
@@ -1096,9 +398,9 @@ def firewall_block(net, w, max_rules=None):
 
 def page_rete(net, cont, w, now=None, baseline=False):
     if net is None:
-        return ["", msg("err", "network collector not running: no state in " + NET_STATE)]
+        return ["", msg("err", "network collector not running: no state in " + hostdata.NET_STATE)]
     now = now or time.time()
-    pb = safe_problems(net, cont, now, baseline=baseline)
+    pb = problems.safe_problems(net, cont, now, baseline=baseline)
     new = new_ports(net, cont, baseline)
     if not on("exposure"):  # section switched off in config.ini: draw only the other one
         return [section("ATTENTION", w), ""] + [x for sev, t in pb[:6] for x in msg_wrap("err" if sev >= 2 else "warn", t, w)] + [""] + firewall_block(net, w)
@@ -1155,7 +457,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
     `scroll`: a browser page that scrolls (body_h is ignored): every section and every item at the richest level, nothing cut,
     in columns as even as possible. A bigger text (fewer columns) then means a longer page, never less content."""
     now = time.time() if now is None else now  # one clock for the frame: the problems and every card's ages and uptimes
-    pb = safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
+    pb = problems.safe_problems(net, cont, now, boot=boot, thermal=s.get("thermal"), baseline=baseline) if pb is None else pb
     new = new_ports(net, cont, baseline)
 
     ctx = cards.Ctx(s=s, cont=cont, net=net, boot=boot, problems=pb, cfg=CFG, now=now, baseline=baseline, new=new)  # this frame's data and memo
@@ -1506,7 +808,7 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=N
     The console's frame has the tab bar on top and, from KPI_MIN_ROWS rows (or with [ui] kpis), the KPI line of ctx (a cards.Ctx; without
     one, of what the screens last read: kept_ctx); its body is body_rows(h) tall. A browser page keeps the plain header and has no KPI line."""
     name, part, parts, body = slide
-    text, code = status_pill(pb or [])
+    text, code = problems.status_pill(pb or [])
     shift = " " * (int(time.time() // 600) % 3)  # every 10 min shift the header
     flags = {"map": mapkey, "cpu": cpukey, "health": healthkey, "ai": aikey}
     shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
@@ -1561,7 +863,7 @@ def snapshot(w):
         import demo
         cont, net, boot, base = demo.snapshot(os_name=DEMO_OS)
         return dict(cont=cont, net=net, boot=boot, baseline=base)
-    return dict(cont=load_containers(), net=load_json(NET_STATE), boot=load_json(BOOT_STATE), baseline=load_baseline())
+    return dict(cont=hostdata.load_containers(), net=hostdata.load_json(hostdata.NET_STATE), boot=hostdata.load_json(hostdata.BOOT_STATE), baseline=problems.load_baseline())
 
 
 def host_sample(smp):
@@ -1591,7 +893,7 @@ def map_graph(smp=None):
     if DEMO:
         demo_defaults()
     G = graph.build(st["cont"], st["net"], st["boot"], CFG["webapps"], baseline=st["baseline"], expose=CFG["expose"])
-    return G, safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+    return G, problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
 # ---- MAP screen: graph.py's tree drawn on the console, moved through with the keyboard ------------------------------------
@@ -1629,7 +931,7 @@ def map_once(argv, w, h):
     --select TEXT: the cursor on the first row whose name contains TEXT (any case), opening the branches above it;
     --details: the details pane of the selected row (Enter); --only: problems only (p)."""
     opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
-    G, pb = map_graph(None if DEMO else Sampler())
+    G, pb = map_graph(None if DEMO else hostdata.Sampler())
     mv = MapView()
     mv.st.only, mv.details = "--only" in argv, "--details" in argv
     exp = opt("--expand")
@@ -1723,7 +1025,7 @@ def cpu_data(feed, settle=0.0):
                 r = None
             return r if isinstance(r, dict) else {}
         raw_cpu, raw_pr = read(feed.cs, "cpu"), read(feed.ps, "process")
-        sens = load_json(SENSORS) if cpu_os() != "linux" else None
+        sens = hostdata.load_json(SENSORS) if cpu_os() != "linux" else None
     cpu, extra = cpu_merge(raw_cpu, sens, now)
     pl = [p for p in (raw_pr.get("procs") if isinstance(raw_pr.get("procs"), list) else []) if isinstance(p, dict) and isinstance(p.get("pid"), int) and not isinstance(p["pid"], bool)]
     total = dd(raw_pr.get("total"))
@@ -1769,7 +1071,7 @@ def cpu_topology(ids):
         return {}
     key = tuple(ids)
     if key not in _TOPO:
-        got = {i: read_file(f"/sys/devices/system/cpu/cpu{i}/topology/core_id") for i in ids}
+        got = {i: hostdata.read_file(f"/sys/devices/system/cpu/cpu{i}/topology/core_id") for i in ids}
         _TOPO[key] = {i: int(v) for i, v in got.items() if v and v.lstrip("-").isdigit()}
     return _TOPO[key]
 
@@ -1788,7 +1090,6 @@ def cpu_view(d, w, h, sort="cpu", cur=None, details=False, top=0):
     sc = screens.cpu_view(d, cpu_ctx(), w, h, sort, cur, details, top)
     lines = [x for node in sc.nodes for x in ansi.render(node, w)[0]]
     return [clip(x, w) for x in lines[:h]], sc.top, sc.rows, sc.vis, sc.pids
-
 
 
 def cpu_footer(cv, n, w):
@@ -1831,7 +1132,7 @@ def cpu_problems(smp=None):
     keep(st, sm)
     if DEMO:
         demo_defaults()
-    return safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+    return problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
 def cpu_once(argv, w, h):
@@ -1845,7 +1146,7 @@ def cpu_once(argv, w, h):
     cv.details = "--details" in argv
     if opt("--select"):
         cpu_select(cpu_rows(d["procs"]["procs"], cv.sort), cv, opt("--select"))
-    return cpu_screen(d, cpu_problems(None if DEMO else Sampler()), cv, w, h)[0]
+    return cpu_screen(d, cpu_problems(None if DEMO else hostdata.Sampler()), cv, w, h)[0]
 
 
 def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
@@ -1863,7 +1164,7 @@ def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scr
     st, sm = snapshot(w), host_sample(smp)
     if DEMO:
         demo_defaults()
-    pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    pb = problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
     ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None  # the KPI line (a console; a browser page has its own)
     sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, scroll=scroll, cpu_lazy=True)
     if scroll:  # the page is as tall as its content (header + body + footer)
@@ -1879,7 +1180,7 @@ def render_screens(smp, w, h, mode=None, keys=True, page=False, cpu_feed=None):
     if DEMO:
         demo_defaults()
     sl = slides(sm, st["cont"], st["net"], w, body_rows(h, page), st["boot"], st["baseline"], mode=mode, cpu_feed=cpu_feed or CpuFeed(settle=0.5))
-    pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+    pb = problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
     ctx = make_ctx(st, sm, pb) if kpi_on(h, page) else None
     return [frame(x, i, len(sl), w, h, pb, keys=keys, page=page, ctx=ctx) for i, x in enumerate(sl)]
 
@@ -1925,7 +1226,7 @@ def once(argv):
             return 2
         out = ai_once(argv, w, h)
     else:
-        smp = None if DEMO else Sampler()  # the demo reads nothing from this machine (render_screen)
+        smp = None if DEMO else hostdata.Sampler()  # the demo reads nothing from this machine (render_screen)
         if smp:
             smp.sample()  # starts the background reads (sessions, disks): they have the half second below to arrive
             time.sleep(0.5)
@@ -2138,7 +1439,7 @@ def health_state(smp, days):
     keep(st, sm)
     if DEMO:
         demo_defaults()
-    return health_data(days), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+    return health_data(days), problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
 def health_once(argv, w, h):
@@ -2151,7 +1452,7 @@ def health_once(argv, w, h):
         return None
     hv = HealthView(int(opt("--period") or 7))
     hv.details = "--details" in argv
-    data, pb = health_state(None if DEMO else Sampler(), hv.days)
+    data, pb = health_state(None if DEMO else hostdata.Sampler(), hv.days)
     if opt("--select"):
         health_select(health_findings(data["report"]), hv, opt("--select"))
     return health_screen(data, pb, hv, w, h)[0]
@@ -2313,9 +1614,7 @@ def ai_state(smp):
     keep(st, sm)
     if DEMO:
         demo_defaults()
-    return ai_data(), safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
-
-
+    return ai_data(), problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
 
 
 def ai_do(av, act, rows):
@@ -2393,161 +1692,13 @@ def ai_once(argv, w, h):
     opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
     av = AiView()
     av.details = "--details" in argv
-    data, pb = ai_state(None if DEMO else Sampler())
+    data, pb = ai_state(None if DEMO else hostdata.Sampler())
     if opt("--select"):
         ai_select(ai_rows(data["cat"]), av, opt("--select"))
     return ai_screen(data, pb, av, w, h, wait=AI_PROBE_TIMEOUT + 0.5)[0]
 
 
 # ---- kiosk: macOS/Windows have no text console to take over, the monitor shows the screen in a full-screen browser -----
-
-def user_dir():
-    """Per-user folder for the kiosk page and the browser profile (the kiosk runs as the logged-in user)."""
-    if WINDOWS:
-        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
-    elif MACOS:
-        base = os.path.expanduser("~/Library/Application Support")
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    return os.path.join(base, "nuc-console")
-
-
-def kiosk_grid():
-    """(columns, rows) of the kiosk screen: [dashboard] columns/rows if set, else from the monitor's aspect ratio.
-
-    The page scales its font so the grid fills the screen; 64 rows of text, as many columns as the shape allows
-    (16:9 -> 237 columns, the 3-column layout; 16:10 -> 213 columns, 2 columns)."""
-    rows = CFG["rows"] or 64
-    if CFG["columns"]:
-        return CFG["columns"], rows
-    size = hostinfo.screen_size() if not LINUX else None
-    aspect = size[0] / size[1] if size else 16 / 9
-    return max(100, min(400, round(rows * aspect * 1.25 / 0.6))), rows
-
-
-BROWSERS = {
-    "windows": [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe",
-                r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
-                r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe", r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe",
-                r"%ProgramFiles%\Mozilla Firefox\firefox.exe", r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe",
-                r"%LOCALAPPDATA%\Mozilla Firefox\firefox.exe"],  # Firefox last: it cannot start full screen (see browser_command)
-    "darwin": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-               "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
-    "linux": ["chromium", "chromium-browser", "google-chrome", "microsoft-edge", "brave-browser", "firefox"],
-}
-
-
-def find_browser(choice=None):
-    """Path of the browser that will show the kiosk: [display] browser in config.ini, else the first one installed."""
-    choice = choice or CFG["display"]["browser"]
-    if choice == "none":
-        return None
-    if choice != "auto":
-        return choice
-    for cand in BROWSERS[nuc_config.OS_NAME]:
-        path = re.sub(r"%([^%]+)%", lambda m: os.environ.get(m.group(1), m.group(0)), cand)
-        found = shutil.which(path) if LINUX else (path if os.path.isfile(path) else None)
-        if found:
-            return found
-    return ""  # none found: macOS falls back on Safari through `open`
-
-
-# shown in the kiosk's footer: the page has nothing to click, the keyboard is the way out
-KIOSK_HINT = "Cmd+Q closes · Ctrl+Cmd+F leaves full screen" if MACOS else "Alt+F4 closes · F11 leaves full screen"
-
-
-def browser_command(exe, url, profile):
-    """A full-screen app window (no tabs, no address bar), no first-run pages, a profile of its own (never the user's tabs
-    and logins). Not the browsers' locked "kiosk" mode: that one swallows Alt+F4 & co. and the screen could not be closed."""
-    if exe == "" and MACOS:
-        return ["/usr/bin/open", "-a", "Safari", url]  # Safari has no full-screen flag: Ctrl+Cmd+F once
-    if not exe:
-        return None
-    if "firefox" in os.path.basename(exe).lower():
-        return [exe, "--new-window", url]  # Firefox: only its locked kiosk mode starts full screen; F11 instead
-    return [exe, "--app=" + url, "--start-fullscreen", "--no-first-run", "--no-default-browser-check",
-            "--disable-session-crashed-bubble", "--noerrdialogs", "--user-data-dir=" + profile]
-
-
-def kiosk_command(exe, target, base):
-    """browser_command() for the kiosk, and the log line of a browser that cannot start full screen (Firefox)."""
-    cmd = browser_command(exe, target, os.path.join(base, "browser"))
-    if cmd and "firefox" in os.path.basename(exe).lower():
-        print("Firefox does not start full screen: press F11 in its window", file=sys.stderr, flush=True)
-    return cmd
-
-
-def default_browser(exe, target):
-    """Windows, none of BROWSERS found (find_browser() said ""; not `[display] browser = none`): the default browser, in a normal window
-    (no flag can make it full screen: F11). True once opened."""
-    if exe != "" or not WINDOWS:
-        return False
-    try:
-        os.startfile(target)  # as this user, like open_in_browser
-    except OSError as e:
-        print("no supported browser found for full screen, and the default browser did not open:", repr(e)[:200], file=sys.stderr, flush=True)
-        return False
-    print("no supported browser found for full screen: opened the default browser (F11 for full screen)", file=sys.stderr, flush=True)
-    return True
-
-
-def launch(cmd):
-    """Starts the browser, detached from our console (its output is not ours to show)."""
-    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def write_text_atomic(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:  # no CRLF translation on Windows
-        f.write(text)
-    for attempt in range(20):
-        try:
-            os.replace(tmp, path)
-            return True
-        except PermissionError:  # Windows: the browser is reading the previous frame right now
-            time.sleep(0.05)
-    return False
-
-
-def web_up(port, wait):
-    """True once the local web view answers; at login it may still be starting (it starts at boot)."""
-    end = time.time() + wait
-    while True:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
-                conn.sendall(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-                if b" 200 " in conn.recv(64):
-                    return True
-        except OSError:
-            pass
-        if time.time() >= end:
-            return False
-        time.sleep(2)
-
-
-def dashboard_url(fullscreen=False, cols=0, rows=0):
-    """The page the display opens. [ui] web = classic: the classic page (fit to the window; full screen: sized to the grid, the pages taking
-    turns, the kiosk footer). [ui] web = app: the shell (app=1); full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by
-    itself, says how to close the window). Both take the token the caller appends."""
-    app = (CFG.get("ui") or {}).get("web") == "app"
-    if app:
-        query = {"app": 1, "ui": "1.dw", "kiosk": 1} if fullscreen else {"app": 1}
-    else:
-        query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
-    from urllib.parse import urlencode
-    return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
-
-
-def read_web_token(path):
-    """(the token in [web] token_file, "") if this user can read it, else ("", why). The text never holds the token."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            token = f.read(512).strip()
-    except (OSError, ValueError) as e:  # not there, not allowed (the service user's 0600 file), not text
-        return "", f"{path} cannot be read by this user ({e.strerror if isinstance(e, OSError) and e.strerror else type(e).__name__})"
-    if not re.fullmatch(r"[A-Za-z0-9._~-]{16,}", token):  # what the web view accepts (src/web.py TOKEN_OK): safe in a URL, too
-        return "", f"{path} does not hold a token the web view accepts"
-    return token, ""
 
 
 def open_in_browser(argv):
@@ -2556,17 +1707,17 @@ def open_in_browser(argv):
     The page is the local web view (127.0.0.1, started by the installer at boot): at login it may need a few seconds more. With a
     token in [web], the URL carries it when this user can read the token file (the web view moves it into a cookie and keeps the view);
     otherwise the dashboard is the page written to a file, as `--kiosk` does."""
-    base = user_dir()
+    base = display.user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    url, token = dashboard_url(), ""
+    url, token = display.dashboard_url(), ""
     if CFG["web"]["token_file"]:
-        token, why = read_web_token(CFG["web"]["token_file"])
+        token, why = display.read_web_token(CFG["web"]["token_file"])
         if not token:
             print(f"[web] token_file is set but {why}: the dashboard is shown from a page written to a file instead", file=sys.stderr, flush=True)
-            return kiosk_file(argv, base, *kiosk_grid())
-    if not web_up(CFG["web"]["port"], 60):
+            return kiosk_file(argv, base, *display.kiosk_grid())
+    if not display.web_up(CFG["web"]["port"], 60):
         print(f"the web view does not answer on 127.0.0.1:{CFG['web']['port']}: dashboard not opened", file=sys.stderr, flush=True)
         return 1
     print(f"open -> {url}" + (" (with the token of [web] token_file)" if token else ""), file=sys.stderr, flush=True)  # never the token itself
@@ -2588,21 +1739,21 @@ def kiosk(argv):
     It opens the local web view (127.0.0.1, started by the installer) in a full-screen browser window: overview and Details
     pages take turns, A- / A+ change the text size. Without the web view (a Linux desktop, or a token in [web]) it falls
     back on a page written to a file every 2 s (`--file` forces it; `--html FILE`, `--no-browser`)."""
-    base = user_dir()
+    base = display.user_dir()
     os.makedirs(base, exist_ok=True)
     if sys.stderr is None or "--log" in argv[:-1]:  # pythonw / launched at logon: no console to write to
         nuc_config.log_to(argv[argv.index("--log") + 1] if "--log" in argv[:-1] else os.path.join(base, "display.log"))
-    cols, rows = kiosk_grid()
+    cols, rows = display.kiosk_grid()
     web = CFG["web"]
-    if "--file" not in argv and not web["token_file"] and web_up(web["port"], 60):
-        url = dashboard_url(fullscreen=True, cols=cols, rows=rows)
-        exe = find_browser()
-        cmd = kiosk_command(exe, url, base)
+    if "--file" not in argv and not web["token_file"] and display.web_up(web["port"], 60):
+        url = display.dashboard_url(fullscreen=True, cols=cols, rows=rows)
+        exe = display.find_browser()
+        cmd = display.kiosk_command(exe, url, base)
         print(f"kiosk -> {url}", file=sys.stderr, flush=True)
         if "--no-browser" not in argv and cmd:
-            launch(cmd)
+            display.launch(cmd)
             return 0
-        if "--no-browser" not in argv and default_browser(exe, url):
+        if "--no-browser" not in argv and display.default_browser(exe, url):
             return 0
         print("no browser started: open " + url, file=sys.stderr, flush=True)
         return 0 if "--no-browser" in argv else 1
@@ -2617,7 +1768,7 @@ def kiosk_file(argv, base, cols, rows):
     path = argv[argv.index("--html") + 1] if "--html" in argv[:-1] else os.path.join(base, "display.html")
     w, h = cols, rows  # a browser page: every column is usable (no Linux console last-column quirk)
     print(f"kiosk {cols}x{rows} -> {path}", file=sys.stderr, flush=True)
-    smp, t0, browser, started, cmd, cpu_feed = Sampler(), time.time(), None, 0.0, None, None
+    smp, t0, browser, started, cmd, cpu_feed = hostdata.Sampler(), time.time(), None, 0.0, None, None
     while True:
         try:
             st, sm = snapshot(w), smp.sample()
@@ -2629,20 +1780,20 @@ def kiosk_file(argv, base, cols, rows):
             else:
                 cpu_feed = None
             screen = frame(sl[idx], idx, len(sl), w, h,
-                           safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
-                           keys=False, hint=KIOSK_HINT, page=True)
-            write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
+                           problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
+                           keys=False, hint=display.KIOSK_HINT, page=True)
+            display.write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
         except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
         if browser is None and "--no-browser" not in argv:
             import pathlib
-            exe = find_browser()
-            cmd = kiosk_command(exe, pathlib.Path(path).resolve().as_uri(), base)
+            exe = display.find_browser()
+            cmd = display.kiosk_command(exe, pathlib.Path(path).resolve().as_uri(), base)
             if cmd:
-                browser, started = launch(cmd), time.time()
+                browser, started = display.launch(cmd), time.time()
             else:
                 browser = False
-                if not default_browser(exe, path):
+                if not display.default_browser(exe, path):
                     print("no browser found: open " + path + " yourself, or set [display] browser in config.ini", file=sys.stderr, flush=True)
         # the viewer closed the window (Alt+F4): stop. A browser that quits at once handed the page to a running one: keep going
         if browser and cmd[0] != "/usr/bin/open" and browser.poll() is not None and time.time() - started > 10:
@@ -2781,7 +1932,7 @@ def main(argv):
         opt = lambda k: argv[argv.index(k) + 1] if k in argv and argv.index(k) + 1 < len(argv) else ""
         return accept_problem(opt(flag), opt("--reason"), forget=flag == "--forget")
     if "--accept" in argv:
-        return accept_baseline(if_missing="--if-missing" in argv)
+        return problems.accept_baseline(if_missing="--if-missing" in argv)
     if "--demo" in argv and "--once" not in argv:
         print("--demo only works together with --once", file=sys.stderr)
         return 2
@@ -2791,7 +1942,7 @@ def main(argv):
         return kiosk(argv)
     if "--open" in argv:
         return open_in_browser(argv)
-    smp = Sampler()
+    smp = hostdata.Sampler()
     fd = sys.stdin.fileno() if sys.stdin else -1
     old = termios.tcgetattr(fd) if termios and fd >= 0 and os.isatty(fd) else None
     win_keys = WINDOWS and fd >= 0 and os.isatty(fd)
@@ -2879,7 +2030,7 @@ def main(argv):
                     if now >= cpu_fresh and not paused:
                         cpu_fresh = now + (min(1.0, REFRESH_S) if cpu_d is None else REFRESH_S)
                         st, sm = snapshot(w), smp.sample()  # the header's status pill stays true while the screen is open
-                        last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                        last_pb = problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
                         keep(st, sm)
                         cpu_d = cv.feed.read()
                     screen, cpu_rows_ = cpu_screen(cpu_d, last_pb, cv, w, h)
@@ -2929,7 +2080,7 @@ def main(argv):
                         fill_cpu(sl, idx, w, body_rows(h), rot_feed)
                     else:
                         rot_feed = None
-                    last_pb = safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
+                    last_pb = problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"])
                     kctx = make_ctx(st, sm, last_pb) if kpi_on(h) else None
                     ov_cache = (sl, last_pb, kctx)
                 screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,

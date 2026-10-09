@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import render  # noqa: E402
+import display  # noqa: E402
 import web  # noqa: E402
 import weburl  # noqa: E402
 import webcss  # noqa: E402
@@ -68,7 +69,7 @@ class WallPage(unittest.TestCase):
     def test_the_footer_has_the_hint_and_nothing_to_click_that_makes_no_sense(self):
         _, body = self.page(WALL)
         foot = re.search(r'<footer class="foot">.*?</footer>', body, re.S).group(0)
-        self.assertIn(render.KIOSK_HINT, foot)
+        self.assertIn(display.KIOSK_HINT, foot)
         self.assertNotIn("<a ", foot)
         for word in ("pause", "Edit layout", "theme:", "density:", "text "):
             self.assertNotIn(word, foot)
@@ -112,13 +113,13 @@ class WallPage(unittest.TestCase):
     def test_a_classic_kiosk_page_is_not_a_wall(self):
         _, body = self.page("/?app=0&rotate=1&kiosk=1&fit=1")
         self.assertNotRegex(body, r"<main [^>]*data-rotate")
-        self.assertIn(render.KIOSK_HINT, body)
+        self.assertIn(display.KIOSK_HINT, body)
 
 
 class DisplayUrl(unittest.TestCase):
     def url(self, web_mode, **kw):
         with mock.patch.dict(render.CFG, {"ui": {"web": web_mode}}), mock.patch.dict(render.CFG["web"], {"port": 8787}):
-            return render.dashboard_url(**kw)
+            return display.dashboard_url(**kw)
 
     def test_classic_is_unchanged(self):
         self.assertEqual(self.url("classic"), "http://127.0.0.1:8787/?fit=1")
@@ -138,9 +139,9 @@ class DisplayUrl(unittest.TestCase):
             started = []
             with tempfile.TemporaryDirectory() as d, mock.patch.dict(render.CFG, {"ui": {"web": mode}}), \
                     mock.patch.dict(render.CFG["web"], {"port": 8787, "token_file": ""}), \
-                    mock.patch.object(render, "web_up", lambda port, wait: True), mock.patch.object(render, "find_browser", lambda *a: "/opt/browser"), \
-                    mock.patch.object(render, "launch", started.append), mock.patch.object(render, "user_dir", lambda: d), \
-                    mock.patch.object(render, "kiosk_grid", lambda: (200, 64)), \
+                    mock.patch.object(display, "web_up", lambda port, wait: True), mock.patch.object(display, "find_browser", lambda *a: "/opt/browser"), \
+                    mock.patch.object(display, "launch", started.append), mock.patch.object(display, "user_dir", lambda: d), \
+                    mock.patch.object(display, "kiosk_grid", lambda: (200, 64)), \
                     mock.patch.object(render.nuc_config, "log_to", lambda path: None):  # --log would send this process's stdout and stderr to the file
                 self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
             self.assertTrue(started[0][1].startswith(want), (mode, started[0][1]))

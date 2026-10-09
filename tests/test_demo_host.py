@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the host's config.ini
 import demo  # noqa: E402
 import render  # noqa: E402
+import hostdata  # noqa: E402
 import ui  # noqa: E402
 import cards  # noqa: E402
 import ansi  # noqa: E402
@@ -61,7 +62,8 @@ class DemoHost(unittest.TestCase):
     """The demo with the readers of the host behind a fake machine; the fake time stands still (the clock is the one thing the demo uses)."""
 
     def setUp(self):
-        self.saved = {k: getattr(render, k) for k in ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "time", "socket", "Sampler")}
+        self.saved = {k: getattr(render, k) for k in ("DEMO", "DEMO_OS", "DEMO_HEALTH", "MODE", "time", "socket")}
+        self.saved_hd = {k: getattr(hostdata, k) for k in ("Sampler", "time")}
         self.saved_demo_time = demo.time
         cfg = render.CFG
         self.saved_cfg = (dict(cfg["features"]), dict(cfg["webapps"]), dict(cfg["expose"]), cfg["map_in_rotation"], cfg["cpu_in_rotation"],
@@ -69,7 +71,7 @@ class DemoHost(unittest.TestCase):
         self.saved_caches = dict(render._AI), dict(render._HEALTH)
         render.MODE = "overview"  # (tests/test_nuc_console.py leaves it at "rotate")
         clock = Proxy(time, time=lambda: NOW, strftime=lambda fmt, t=None: time.strftime(fmt, time.gmtime(NOW) if t is None else t))
-        render.time = demo.time = clock
+        render.time = hostdata.time = demo.time = clock
         cfg["details"], cfg["spacing"] = True, 1
         cfg["map_in_rotation"] = cfg["cpu_in_rotation"] = cfg["health_in_rotation"] = True   # the slides of the rotation too
         for f in ("map", "cpu", "health", "ai"):
@@ -78,6 +80,8 @@ class DemoHost(unittest.TestCase):
     def tearDown(self):
         for k, v in self.saved.items():
             setattr(render, k, v)
+        for k, v in self.saved_hd.items():
+            setattr(hostdata, k, v)
         demo.time = self.saved_demo_time
         cfg = render.CFG
         features, webapps, expose, cfg["map_in_rotation"], cfg["cpu_in_rotation"], cfg["health_in_rotation"], cfg["details"], cfg["spacing"] = self.saved_cfg
@@ -109,9 +113,9 @@ class DemoHost(unittest.TestCase):
                                   ("read_sessions", lambda: {"local": [{"user": host.user, "tty": "pts/9"}], "ssh": ["203.0.113.99"]}),
                                   ("read_filesystems", lambda: [{"mount": host.mount, "used": 1, "total": host.disk}]),
                                   ("cached", lambda key, ttl, fn: fn())):
-                st.enter_context(mock.patch.object(render, target, value))
-            st.enter_context(mock.patch.object(render.Sampler, "_cpu", staticmethod(cpu)))
-            st.enter_context(mock.patch.object(render.Sampler, "_netdev", staticmethod(net)))
+                st.enter_context(mock.patch.object(hostdata, target, value))
+            st.enter_context(mock.patch.object(hostdata.Sampler, "_cpu", staticmethod(cpu)))
+            st.enter_context(mock.patch.object(hostdata.Sampler, "_netdev", staticmethod(net)))
             st.enter_context(mock.patch("os.cpu_count", lambda: host.cores))
             st.enter_context(mock.patch("os.getloadavg", lambda: (9.0, 9.0, 9.0), create=True))
             st.enter_context(mock.patch("os.statvfs", lambda path: statvfs, create=True))
@@ -225,9 +229,9 @@ class TheOtherScreens(DemoHost):
             for os_name in OSES:
                 render.DEMO, render.DEMO_OS = True, os_name
                 with self.on(SMALL):
-                    smp = render.Sampler()
+                    smp = hostdata.Sampler()
                     smp.sample()
-                    self.assertGreater(render.read_thermal()["recent"], 0)      # the host really is throwing problems
+                    self.assertGreater(hostdata.read_thermal()["recent"], 0)      # the host really is throwing problems
                     pills = [list(render.cpu_problems(smp)), list(render.map_graph(smp)[1]), list(render.health_state(smp, 7)[1]),
                              list(render.ai_state(smp)[1])]
                     with_smp = render.render_screen(smp, 119, 33, mode="overview")
@@ -242,7 +246,7 @@ class TheOtherScreens(DemoHost):
     def test_the_demo_reads_nothing_from_the_host(self):
         def boom(*a, **kw):
             raise AssertionError("the demo read the host")
-        with self.on(SMALL), mock.patch.multiple(render, meminfo=boom, loadavg=boom, uptime_s=boom, root_disk=boom, read_thermal=boom,
+        with self.on(SMALL), mock.patch.multiple(hostdata, meminfo=boom, loadavg=boom, uptime_s=boom, root_disk=boom, read_thermal=boom,
                                                  read_sessions=boom, read_filesystems=boom, Sampler=boom), \
                 mock.patch("os.cpu_count", boom), mock.patch.object(render.cpuinfo, "CpuSampler", boom), mock.patch.object(render.procs, "ProcSampler", boom):
             for argv in ([], ["--demo-os", "windows"], ["--demo-os", "darwin"], ["--view", "cpu"], ["--view", "map"], ["--view", "health"], ["--view", "ai"]):
@@ -287,7 +291,7 @@ class TheSamplerOfTheDemo(unittest.TestCase):
         self.assertEqual({k: v for k, v in a.items() if k != "net"}, {k: v for k, v in c.items() if k != "net"})
         self.assertNotEqual(a["net"], c["net"])
         n = a["net"]["eth0"]
-        self.assertEqual((len(n["hist_rx"]), len(n["hist_tx"])), (render.NET_HIST, render.NET_HIST))
+        self.assertEqual((len(n["hist_rx"]), len(n["hist_tx"])), (hostdata.NET_HIST, hostdata.NET_HIST))
         self.assertEqual((n["rx"], n["tx"]), (n["hist_rx"][-1], n["hist_tx"][-1]))
         self.assertTrue(all(v >= 0 for v in n["hist_rx"] + n["hist_tx"]))
 
@@ -422,10 +426,10 @@ class FakeSampler(object):
 
     def sample(self):
         none = lambda: None  # noqa: E731
-        with mock.patch.multiple(render, cached=lambda key, ttl, fn: None, read_thermal=lambda: {"throttle": None, "throttle_s": None, "clk": None}, meminfo=none, loadavg=none, uptime_s=none,
+        with mock.patch.multiple(hostdata, cached=lambda key, ttl, fn: None, read_thermal=lambda: {"throttle": None, "throttle_s": None, "clk": None}, meminfo=none, loadavg=none, uptime_s=none,
                                  root_disk=none), \
-                mock.patch.object(render.Sampler, "_cpu", staticmethod(lambda: {})), mock.patch.object(render.Sampler, "_netdev", staticmethod(lambda: {})):
-            return render.Sampler().sample()
+                mock.patch.object(hostdata.Sampler, "_cpu", staticmethod(lambda: {})), mock.patch.object(hostdata.Sampler, "_netdev", staticmethod(lambda: {})):
+            return hostdata.Sampler().sample()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import collections
 import json
 import os
 import sys
@@ -12,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # the test helpe
 import collector  # noqa: E402
 import nuc_config  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
+import hostdata  # noqa: E402
 import cardlines  # noqa: E402
 import ui  # noqa: E402
 import exposure  # noqa: E402
@@ -167,7 +170,7 @@ class Render(unittest.TestCase):
         self.assertIn("collector not running", render.containers_block(None, 100)[0])
 
     def test_frame_fits_screen_and_paginates(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         w, h = 100, 20
         sl = render.slides(smp.sample(), CONT, NET, w, h - 2)
@@ -193,7 +196,7 @@ class Render(unittest.TestCase):
         self.assertEqual(render.fmt_ports([{"p": 9, "s": "100.64.0.3"}, {"p": 1, "s": "lo"}]), "100.64.0.3:9 lo:1")
 
     def test_broken_state_file_does_not_crash_frame(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         broken = {"ts": time.time(), "containers": [{}]}
         sl = render.slides(smp.sample(), broken, NET, 100, 30)
         self.assertIn("error on page System", "\n".join("\n".join(x[3]) for x in sl))
@@ -203,7 +206,7 @@ class Render(unittest.TestCase):
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump([1, 2], f)
-        self.assertIsNone(render.load_containers(f.name))
+        self.assertIsNone(hostdata.load_containers(f.name))
         os.unlink(f.name)
 
     def test_fw_verdicts(self):
@@ -303,20 +306,20 @@ class Render(unittest.TestCase):
         self.assertIn("ufw logging off", text)
 
     def test_problems_summary_and_pill(self):
-        pb = render.problems(NET, CONT)
+        pb = problems.problems(NET, CONT)
         self.assertEqual(pb[0][0], 2)                                               # errors before warnings
         self.assertTrue(any("DB/broker open on LAN" in t for _, t in pb))
         self.assertTrue(any("Funnel" in t for _, t in pb))
-        self.assertIn("PROBLEMS", render.status_pill(pb)[0])
-        self.assertEqual(render.status_pill([]), ("✔ ALL OK", "1;7"))
-        self.assertTrue(any("network collector not running" in t for _, t in render.problems(None, CONT)))
-        off = render.problems(dict(NET, ufw=dict(UFW, active=False)), CONT)
+        self.assertIn("PROBLEMS", problems.status_pill(pb)[0])
+        self.assertEqual(problems.status_pill([]), ("✔ ALL OK", "1;7"))
+        self.assertTrue(any("network collector not running" in t for _, t in problems.problems(None, CONT)))
+        off = problems.problems(dict(NET, ufw=dict(UFW, active=False)), CONT)
         self.assertTrue(any("ufw off" in t for _, t in off))
 
     def test_header_shows_status_and_fits(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         sl = render.slides(smp.sample(), CONT, NET, 100, 30)
-        f = render.frame(sl[0], 0, len(sl), 100, 32, render.problems(NET, CONT)).split("\x1b[K\r\n")
+        f = render.frame(sl[0], 0, len(sl), 100, 32, problems.problems(NET, CONT)).split("\x1b[K\r\n")
         self.assertIn("PROBLEMS", f[0])
         self.assertLessEqual(ansi.vlen(f[0]), 100)
 
@@ -346,11 +349,11 @@ class Render(unittest.TestCase):
         self.assertEqual(len(render.wrap_items(items[:3], 80, indent=5, max_lines=2)), 1)
 
     def test_boot_problems(self):
-        pb = render.problems(NET, CONT, boot=dict(BOOT, failed=["x.service"]))
+        pb = problems.problems(NET, CONT, boot=dict(BOOT, failed=["x.service"]))
         self.assertTrue(any("1 failed systemd unit: x.service" in t for _, t in pb))
-        self.assertTrue(any("3 errors in this boot's journal" in t for _, t in render.problems(NET, CONT, boot=BOOT)))
-        self.assertTrue(any("boot collector not running" in t for _, t in render.problems(NET, CONT, boot=None)))
-        self.assertFalse(any("boot" in t for _, t in render.problems(NET, CONT)))    # default: no boot check
+        self.assertTrue(any("3 errors in this boot's journal" in t for _, t in problems.problems(NET, CONT, boot=BOOT)))
+        self.assertTrue(any("boot collector not running" in t for _, t in problems.problems(NET, CONT, boot=None)))
+        self.assertFalse(any("boot" in t for _, t in problems.problems(NET, CONT)))    # default: no boot check
 
     def test_thermal_lines_thresholds_from_sensor_max(self):
         th = {"cpu": (52.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "throttle": 10, "recent": 0,
@@ -367,12 +370,12 @@ class Render(unittest.TestCase):
 
     def test_thermal_problems(self):
         base = {"cpu": (50.0, 105.0), "throttle_s": 1.0, "recent": 0}
-        self.assertFalse(any("°C" in t or "throttling" in t for _, t in render.problems(NET, CONT, thermal=base)))
-        warn = render.problems(NET, CONT, thermal=dict(base, cpu=(85.0, 105.0)))
+        self.assertFalse(any("°C" in t or "throttling" in t for _, t in problems.problems(NET, CONT, thermal=base)))
+        warn = problems.problems(NET, CONT, thermal=dict(base, cpu=(85.0, 105.0)))
         self.assertTrue(any(sev == 1 and "CPU at 85°C: above the 84°C threshold" in t for sev, t in warn))
-        err = render.problems(NET, CONT, thermal=dict(base, cpu=(95.0, 105.0)))
+        err = problems.problems(NET, CONT, thermal=dict(base, cpu=(95.0, 105.0)))
         self.assertTrue(any(sev == 2 and "CPU at 95°C: above the 94°C threshold" in t for sev, t in err))
-        thr = render.problems(NET, CONT, thermal=dict(base, recent=7))
+        thr = problems.problems(NET, CONT, thermal=dict(base, recent=7))
         self.assertTrue(any("thermal throttling: 7 events" in t for _, t in thr))
 
     def test_baseline_alarms(self):
@@ -383,16 +386,16 @@ class Render(unittest.TestCase):
         eph = dict(NET, listeners=NET["listeners"] + [{"proto": "tcp", "addr": "100.64.0.1", "port": 50949, "proc": "tailscaled"}])
         self.assertNotIn("50949/t:TAILNET", exposure.exposure_keys(eph, CONT))        # ephemeral tailscaled port: excluded
         base = {"ts": 1, "ports": dict(keys)}
-        self.assertFalse(any(sev == 3 for sev, _ in render.problems(NET, CONT, baseline=base)))   # same: no alarm
+        self.assertFalse(any(sev == 3 for sev, _ in problems.problems(NET, CONT, baseline=base)))   # same: no alarm
         del base["ports"]["5432/t:LAN"]                                             # one more LAN port than expected
-        pb = render.problems(NET, CONT, baseline=base)
+        pb = problems.problems(NET, CONT, baseline=base)
         self.assertEqual(pb[0][0], 3)                                               # alarms go on top
         self.assertIn("NEW exposed port: 5432/t lan", pb[0][1])
-        self.assertIn("EXPOSED PORTS CHANGED", render.status_pill(pb)[0])
+        self.assertIn("EXPOSED PORTS CHANGED", problems.status_pill(pb)[0])
         base["ports"]["99/t:LAN"] = "old"                                           # an expected port is gone
-        self.assertTrue(any("1 port no longer exposed" in t for sev, t in render.problems(NET, CONT, baseline=base) if sev == 1))
-        self.assertTrue(any("port baseline missing" in t for _, t in render.problems(NET, CONT, baseline=None)))
-        self.assertFalse(any("baseline" in t for _, t in render.problems(NET, CONT)))   # default: no check
+        self.assertTrue(any("1 port no longer exposed" in t for sev, t in problems.problems(NET, CONT, baseline=base) if sev == 1))
+        self.assertTrue(any("port baseline missing" in t for _, t in problems.problems(NET, CONT, baseline=None)))
+        self.assertFalse(any("baseline" in t for _, t in problems.problems(NET, CONT)))   # default: no check
 
     def test_accept_baseline_roundtrip(self):
         import contextlib
@@ -403,21 +406,21 @@ class Render(unittest.TestCase):
         import json
         json.dump(dict(NET, ts=time.time()), open(net, "w"))   # fresh now: the fixtures date from the import, minutes ago on a slow runner
         json.dump(dict(CONT, ts=time.time()), open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(render.accept_baseline(path=bl), 0)
+                self.assertEqual(problems.accept_baseline(path=bl), 0)
                 mtime = os.path.getmtime(bl)
-                self.assertEqual(render.accept_baseline(if_missing=True, path=bl), 0)     # already present: left untouched
+                self.assertEqual(problems.accept_baseline(if_missing=True, path=bl), 0)     # already present: left untouched
             self.assertEqual(os.path.getmtime(bl), mtime)
-            self.assertEqual(exposure.baseline_diff(exposure.exposure_keys(NET, CONT), render.load_baseline(bl)), ({}, {}, {}))
+            self.assertEqual(exposure.baseline_diff(exposure.exposure_keys(NET, CONT), problems.load_baseline(bl)), ({}, {}, {}))
             os.unlink(net)
             with contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(render.accept_baseline(path=os.path.join(d, "b2.json")), 1)  # unknown state: does not write
+                self.assertEqual(problems.accept_baseline(path=os.path.join(d, "b2.json")), 1)  # unknown state: does not write
             self.assertFalse(os.path.exists(os.path.join(d, "b2.json")))
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
 
     def test_baseline_detects_service_and_filter_changes(self):
         """Review: a change of service or rule on the same port used to raise no alarm."""
@@ -426,7 +429,7 @@ class Render(unittest.TestCase):
         self.assertEqual(exposure.baseline_diff(keys, base)[2], {})
         evil = {k: dict(v) for k, v in keys.items()}
         evil["22/t:LAN"]["name"] = "evil"                                            # another process on port 22
-        pb = render.problems(dict(NET, listeners=[dict(x, proc="evil") if x["port"] == 22 else x for x in NET["listeners"]]),
+        pb = problems.problems(dict(NET, listeners=[dict(x, proc="evil") if x["port"] == 22 else x for x in NET["listeners"]]),
                              CONT, baseline=base)
         self.assertTrue(any(sev == 3 and "CHANGED 22/t: service sshd → evil" in t for sev, t in pb))
         base["ports"]["22/t:LAN"]["lan"] = 2                                         # expected: filtered by source
@@ -442,17 +445,17 @@ class Render(unittest.TestCase):
         keys = exposure.exposure_keys(NET, CONT)
         base = {"ts": 1, "ports": {k: dict(v) for k, v in keys.items() if k != "9011/t:LAN"}}
         partial = dict(NET, errors={"ufw": "boom"})
-        pb = render.problems(partial, CONT, baseline=base)
+        pb = problems.problems(partial, CONT, baseline=base)
         self.assertFalse(any(sev == 3 for sev, _ in pb), "partial data: no false red alarms")
         self.assertTrue(any("port comparison suspended" in t for _, t in pb))
         self.assertEqual(exposure.new_ports(partial, CONT, base), {})
-        self.assertTrue(any(sev == 2 and "port baseline unreadable" in t for sev, t in render.problems(NET, CONT, baseline="corrotta")))
+        self.assertTrue(any(sev == 2 and "port baseline unreadable" in t for sev, t in problems.problems(NET, CONT, baseline="corrotta")))
         import tempfile
         d = tempfile.mkdtemp()
-        self.assertIsNone(render.load_baseline(os.path.join(d, "nope.json")))       # missing
+        self.assertIsNone(problems.load_baseline(os.path.join(d, "nope.json")))       # missing
         bad = os.path.join(d, "bad.json")
         open(bad, "w").write("{truncated")
-        self.assertEqual(render.load_baseline(bad), "corrotta")                     # present but broken: not 'missing'
+        self.assertEqual(problems.load_baseline(bad), "corrotta")                     # present but broken: not 'missing'
         self.assertEqual(exposure.new_ports(NET, CONT, "corrotta"), {})               # and does not crash the callers
 
     def test_accept_refuses_stale_or_partial_state_and_exit_code(self):
@@ -462,18 +465,18 @@ class Render(unittest.TestCase):
         d = tempfile.mkdtemp()
         net, state = os.path.join(d, "net.json"), os.path.join(d, "c.json")
         json.dump(CONT, open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             import contextlib
             import io
             for label, data in (("stale", dict(NET, ts=time.time() - 9999)), ("with errors", dict(NET, errors={"ufw": "x"}))):
                 json.dump(data, open(net, "w"))
                 with contextlib.redirect_stderr(io.StringIO()):
-                    self.assertEqual(render.accept_baseline(path=os.path.join(d, "b.json")), 1, label)
+                    self.assertEqual(problems.accept_baseline(path=os.path.join(d, "b.json")), 1, label)
                 self.assertFalse(os.path.exists(os.path.join(d, "b.json")), label)
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
         env = dict(os.environ, NUC_CONSOLE_NET="/nonexistent", NUC_CONSOLE_STATE="/nonexistent",
                    NUC_CONSOLE_BASELINE=os.path.join(d, "x", "b.json"))
         r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..", "src", "render.py"), "--accept"],
@@ -489,15 +492,15 @@ class Render(unittest.TestCase):
         self.assertIn("41641/u:LAN", keys)                                           # fixed: tracked
 
     def test_thermal_hotplug_and_narrow_line(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         now = time.monotonic()
         smp.hist.append((now - 30, 1000))
-        orig = render.read_thermal
-        render.read_thermal = lambda: {"cpu": (50.0, 105.0), "throttle": 900, "throttle_s": 1.0, "clk": (2.6, 4.9)}
+        orig = hostdata.read_thermal
+        hostdata.read_thermal = lambda: {"cpu": (50.0, 105.0), "throttle": 900, "throttle_s": 1.0, "clk": (2.6, 4.9)}
         try:
             self.assertIsNone(smp.sample()["thermal"]["recent"])                     # CPU offline: falling counter, never negative
         finally:
-            render.read_thermal = orig
+            hostdata.read_thermal = orig
         th = {"cpu": (50.0, 105.0), "clk": (2.6, 4.9)}
         for mw in (40, 60, 90):
             self.assertTrue(all(ansi.vlen(x) <= mw or mw < 40 for x in render.thermal_lines(th, 10, mw)))
@@ -505,7 +508,7 @@ class Render(unittest.TestCase):
         self.assertNotIn("clock", "\n".join(render.thermal_lines(th, 10, 55)))      # when narrow the clock goes first
 
     def test_overview_fits_small_console_and_never_wider(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "recent": 0, "clk": (2.6, 4.9)}
@@ -520,7 +523,7 @@ class Render(unittest.TestCase):
         self.assertTrue(all(ansi.vlen(x) <= 100 for x in lines))
 
     def test_overview_fits_one_screen(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         for w, h in ((100, 30), (120, 33), (160, 40), (240, 67)):
@@ -528,7 +531,7 @@ class Render(unittest.TestCase):
             self.assertEqual(len(sl), 1, f"{w}x{h}: the single screen must be just one")
             self.assertLessEqual(len(sl[0][3]), h - 2)
             self.assertTrue(all(ansi.vlen(x) <= w - 1 for x in sl[0][3]), f"{w}x{h}: line wider than the screen")
-            f = render.frame(sl[0], 0, 1, w - 1, h, render.problems(NET, CONT, boot=BOOT)).split("\x1b[K\r\n")
+            f = render.frame(sl[0], 0, 1, w - 1, h, problems.problems(NET, CONT, boot=BOOT)).split("\x1b[K\r\n")
             self.assertEqual(len(f), h)
             self.assertIn("single screen", f[-1])
             self.assertIn(f"console {w}x{h}", f[-1])
@@ -543,8 +546,8 @@ class Render(unittest.TestCase):
         self.assertIn("NEW ", text)                                                 # marker on the new port
         broken = "\n".join(render.page_overview(sm, CONT, dict(NET, ufw="x"), BOOT, 120, 60))
         self.assertIn("SYSTEM", ansi.ANSI.sub("", broken))                        # malformed state: the screen stays alive
-        self.assertEqual(render.safe_problems(dict(NET, ufw="x"), CONT)[0][0], 2)   # and the header does not raise
-        self.assertEqual(render.safe_problems(5, CONT)[0][0], 2)
+        self.assertEqual(problems.safe_problems(dict(NET, ufw="x"), CONT)[0][0], 2)   # and the header does not raise
+        self.assertEqual(problems.safe_problems(5, CONT)[0][0], 2)
 
     def test_collector_db_items_and_privacy(self):
         def ct(name, image, nets, env=(), ports=None, project="", service="", pid=100, ip=None, expose=("5432/tcp",)):
@@ -675,7 +678,7 @@ class Render(unittest.TestCase):
         self.assertNotIn("in use now", compact)                                    # compact levels: one line per database
 
     def test_overview_uses_available_space_and_shrinks(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "throttle_s": 469.0, "recent": 0}
@@ -739,7 +742,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         big = dict(real, rules=real["rules"] + [{"to": f"{3000 + i}/tcp", "action": "ALLOW IN", "from": "192.168.0.0/24"} for i in range(20)]
                    + [{"to": f"{3000 + i}/tcp (v6)", "action": "ALLOW IN", "from": "Anywhere (v6)"} for i in range(20)]
                    + [{"to": f"{i}/tcp", "action": "ALLOW OUT", "from": "Anywhere"} for i in range(20)])
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm["thermal"] = {"cpu": (52.0, 105.0), "throttle_s": 1.0, "recent": 0}
@@ -763,8 +766,8 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         dev = ("Inter-|   Receive                                                |  Transmit\n face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
                "    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0\n  eth0: 5000 10 0 0 0 0 0 0 7000 12 0 0 0 0 0 0\n"
                " veth1: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0\nbr-abc: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0\ndocker0: 9 1 0 0 0 0 0 0 8 1 0 0 0 0 0 0\n")
-        self.assertEqual(render.parse_netdev(dev), {"eth0": (5000, 7000), "docker0": (9, 8)})   # no lo, veth, container bridges
-        sess = render.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 user - no -\n",
+        self.assertEqual(hostdata.parse_netdev(dev), {"eth0": (5000, 7000), "docker0": (9, 8)})   # no lo, veth, container bridges
+        sess = hostdata.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 user - no -\n",
                                      "0 0 192.168.0.10:22 192.168.0.5:50000\n0 0 192.168.0.10:22 203.0.113.9:40000\n0 0 [fd00::1]:22 [fd00::2]:1\n")
         self.assertEqual(sess["local"], [{"user": "alice", "tty": "pts/0"}, {"user": "alice", "tty": ""}])
         self.assertEqual(sess["ssh"], ["192.168.0.5", "203.0.113.9", "fd00::2"])
@@ -773,7 +776,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertTrue(exposure.is_private_addr("::ffff:192.168.0.5") and exposure.is_private_addr("fd7a:115c:a1e0::1"))
         self.assertFalse(exposure.is_private_addr("2a0d:3341::1"))
         mounts = "/dev/nvme0n1p2 / ext4 rw 0 0\n/dev/nvme0n1p2 /var/lib/foo ext4 rw 0 0\n/dev/loop3 /snap/x squashfs ro 0 0\ntmpfs /run tmpfs rw 0 0\n/dev/nvme0n1p1 /boot/efi vfat rw 0 0\noverlay /var/lib/docker/overlay2/x overlay rw 0 0\n"
-        self.assertEqual(render.parse_mounts(mounts), [("/", "ext4"), ("/boot/efi", "vfat")])   # once per device, real ones only
+        self.assertEqual(hostdata.parse_mounts(mounts), [("/", "ext4"), ("/boot/efi", "vfat")])   # once per device, real ones only
         self.assertEqual(ui.fmt_rate(0), "0 B/s")
         self.assertEqual(ui.fmt_rate(12_300), "12.3 kB/s")
         self.assertEqual(ui.fmt_rate(4_500_000), "4.5 MB/s")
@@ -839,7 +842,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertEqual(one, ["a0", "a1", "", "b0", "b1"])                         # one column: stacked with an empty line
 
     def test_three_columns_at_240_and_new_sections_only_when_room(self):
-        smp = render.Sampler()
+        smp = hostdata.Sampler()
         time.sleep(0.2)
         sm = smp.sample()
         sm.update(thermal={"cpu": (52.0, 105.0), "throttle_s": 1.0, "recent": 0},
@@ -865,13 +868,13 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         cosmetic = dict(NET, errors={"ts_peers": "tailscale failed", "f2b": "x", "dbs": "y"})
         self.assertFalse(exposure.exposure_partial(cosmetic))
         self.assertIn("9011/t:LAN", exposure.new_ports(cosmetic, CONT, base))              # the alarm stays on
-        pb = render.problems(cosmetic, CONT, baseline=base)
+        pb = problems.problems(cosmetic, CONT, baseline=base)
         self.assertTrue(any(sev == 3 and "NEW exposed port: 9011" in t for sev, t in pb))
         self.assertTrue(any("network sections not collected" in t for _, t in pb))        # but the error still shows
         critical = dict(NET, errors={"ufw": "boom"})
         self.assertTrue(exposure.exposure_partial(critical))
         self.assertEqual(exposure.new_ports(critical, CONT, base), {})                     # partial critical data: comparison suspended
-        self.assertTrue(any("port comparison suspended" in t for _, t in render.problems(critical, CONT, baseline=base)))
+        self.assertTrue(any("port comparison suspended" in t for _, t in problems.problems(critical, CONT, baseline=base)))
         import contextlib
         import io
         import tempfile
@@ -879,13 +882,13 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         net, state = os.path.join(d, "net.json"), os.path.join(d, "c.json")
         json.dump(dict(NET, ts=time.time(), errors={"ts_peers": "x"}), open(net, "w"))
         json.dump(dict(CONT, ts=time.time()), open(state, "w"))
-        old = (render.NET_STATE, render.STATE)
-        render.NET_STATE, render.STATE = net, state
+        old = (hostdata.NET_STATE, hostdata.STATE)
+        hostdata.NET_STATE, hostdata.STATE = net, state
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(render.accept_baseline(path=os.path.join(d, "b.json")), 0)   # the baseline is created even with ts_peers broken
+                self.assertEqual(problems.accept_baseline(path=os.path.join(d, "b.json")), 0)   # the baseline is created even with ts_peers broken
         finally:
-            render.NET_STATE, render.STATE = old
+            hostdata.NET_STATE, hostdata.STATE = old
 
     def test_review10_untrusted_docker_text_is_sanitised(self):
         boot = dict(BOOT, docker_df={"rows": [{"type": "Im\x1b[2Jages", "count": "1\x1b[2J", "active": "2\x1b[2J", "size": "3\x1b[2J",
@@ -896,7 +899,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
 
     @unittest.skipUnless(nuc_config.LINUX, "loginctl + ss: the Linux session source (macOS/Windows: tests/test_platforms.py)")
     def test_review10_sessions(self):
-        sess = render.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 manager - no -\n", "")
+        sess = hostdata.parse_sessions("c1 1000 alice - 123 user pts/0 yes 2h\n7 1000 alice - 5 manager - no -\n", "")
         self.assertEqual(sess["local"], [{"user": "alice", "tty": "pts/0"}])           # 'manager' is not a session
         self.assertIn("1 user session ", ansi.ANSI.sub("", "\n".join(cardlines.ov_sessioni({"sessions": sess}, 78, 0))))
 
@@ -907,7 +910,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         render.subprocess.run = lambda *a, **k: Boom()
         try:
             with self.assertRaises(RuntimeError):                                          # failed command: never "none"
-                render.read_sessions()
+                hostdata.read_sessions()
         finally:
             render.subprocess.run = orig
         self.assertIn("unavailable", ansi.ANSI.sub("", "\n".join(cardlines.ov_sessioni({"sessions": None}, 78, 0))))
@@ -922,21 +925,21 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
             release.wait(5)
             return {"ok": 1}
         t0 = time.monotonic()
-        self.assertIsNone(render.cached("test-slow", 60, slow))                         # does not wait for the slow read
+        self.assertIsNone(hostdata.cached("test-slow", 60, slow))                         # does not wait for the slow read
         self.assertLess(time.monotonic() - t0, 0.5)
         self.assertTrue(started.wait(2))
         release.set()
         for _ in range(50):
-            if render.cached("test-slow", 60, slow) is not None:
+            if hostdata.cached("test-slow", 60, slow) is not None:
                 break
             time.sleep(0.05)
-        self.assertEqual(render.cached("test-slow", 60, slow), {"ok": 1})
+        self.assertEqual(hostdata.cached("test-slow", 60, slow), {"ok": 1})
 
         def bad():
             raise OSError("stuck mount")
-        render.cached("test-bad", 60, bad)
+        hostdata.cached("test-bad", 60, bad)
         time.sleep(0.2)
-        self.assertIsNone(render.cached("test-bad", 60, bad))                            # error: None, the thread does not die
+        self.assertIsNone(hostdata.cached("test-bad", 60, bad))                            # error: None, the thread does not die
 
     def test_review10_docker_df_and_freshness_and_cleanup(self):
         self.assertEqual(collector.parse_docker_df("5\n[1]\nnull\n"), [])              # valid JSON but not an object
@@ -949,11 +952,11 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
         self.assertIn("… +3 nodes", txt)                                                  # nodes past the eighth are counted
         stale_boot = dict(BOOT, ts=time.time() - 5000, docker_df={"rows": [], "volumes_unused": 0})
         self.assertIn("stale data (", ansi.ANSI.sub("", "\n".join(cardlines.ov_docker(stale_boot, 90, 0))))
-        smp = render.Sampler()
-        smp.net_hist["gone0"] = (render.collections.deque([1]), render.collections.deque([1]))
+        smp = hostdata.Sampler()
+        smp.net_hist["gone0"] = (collections.deque([1]), collections.deque([1]))
         smp.sample()
         self.assertNotIn("gone0", smp.net_hist)                                          # interface gone: history dropped
-        self.assertEqual(render.parse_netdev("h1\nh2\n  eth0: x y z\n"), {})            # line with too few fields: ignored
+        self.assertEqual(hostdata.parse_netdev("h1\nh2\n  eth0: x y z\n"), {})            # line with too few fields: ignored
 
     @unittest.skipUnless(nuc_config.LINUX, "the Linux tool set; macOS/Windows read sockets natively (tests/test_platforms.py)")
     def test_portability_missing_tools_are_absent_not_errors(self):
@@ -986,12 +989,12 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
                 "kernel": "6.1", "btime": int(time.time()) - 100}
         cont = {"ts": time.time(), "containers": [], "absent": True}
         text = lambda lines: ansi.ANSI.sub("", "\n".join(lines))
-        pb = render.problems(net, cont, boot=boot)
+        pb = problems.problems(net, cont, boot=boot)
         self.assertTrue(any(sev == 1 and "ufw not installed" in t for sev, t in pb))    # warning, not error
         self.assertFalse(any(sev >= 2 for sev, _ in pb), "no error/alarm just because tools are missing")
         # but with no known firewall a listening database is still flagged (fail-open): absence does not reassure
         risky = dict(net, listeners=net["listeners"] + [{"proto": "tcp", "addr": "0.0.0.0", "port": 5432, "proc": "postgres"}])
-        self.assertTrue(any(sev == 2 and "DB/broker open on LAN" in t for sev, t in render.problems(risky, cont, boot=boot)))
+        self.assertTrue(any(sev == 2 and "DB/broker open on LAN" in t for sev, t in problems.problems(risky, cont, boot=boot)))
         self.assertNotIn("network sections not collected", text([t for _, t in pb]))
         fw = text(render.firewall_block(net, 100))
         self.assertIn("ufw not installed", fw)
@@ -1008,7 +1011,7 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
             self.assertIn("not installed", text(blk))
         # a real fault stays an error, clearly distinct from "not installed"
         broken = dict(net, ufw=None, absent=[], errors={"ufw": "boom"})
-        self.assertTrue(any(sev == 2 and "ufw unreadable" in t for sev, t in render.problems(broken, cont, boot=boot)))
+        self.assertTrue(any(sev == 2 and "ufw unreadable" in t for sev, t in problems.problems(broken, cont, boot=boot)))
         # and the whole single screen draws without exceptions
         sm = {"cpu": {"cpu0": 0.1}, "thermal": {}}
         lines = render.page_overview(sm, cont, net, boot, 200, 60)
@@ -1186,7 +1189,7 @@ class Config(unittest.TestCase):
             self.assertNotIn("KeyError", body)
             self.assertNotIn("error on page", body)
             self.assertIn("EXPOSURE", body)
-        self.assertFalse([t for _, t in render.problems(net, cont, boot=boot, baseline=base) if "KeyError" in t])
+        self.assertFalse([t for _, t in problems.problems(net, cont, boot=boot, baseline=base) if "KeyError" in t])
 
     def test_collector_skips_disabled_sections(self):
         calls = []
@@ -1217,7 +1220,7 @@ class Config(unittest.TestCase):
         net = {"ts": time.time(), "errors": {}, "absent": ["ufw"], "disabled": ["ufw"], "listeners": []}
         try:
             render.CFG["features"].update(firewall=False, boot=False, thermal=False, disks=False, containers=False)
-            pb = render.problems(net, None, boot=False)
+            pb = problems.problems(net, None, boot=False)
             self.assertFalse([t for _, t in pb if "ufw" in t or "container" in t], pb)
             body = "\n".join("\n".join(x[3]) for x in render.slides(
                 {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": None, "fs": None}, None, net, 120, 40, None, False, mode="overview"))
@@ -1346,11 +1349,11 @@ class DetailPages(unittest.TestCase):
 class WebAppsAndProblems(unittest.TestCase):
     def setUp(self):
         self.saved = dict(render.CFG["webapps"])
-        self.acc = render.ACCEPTED_PATH
+        self.acc = problems.ACCEPTED_PATH
 
     def tearDown(self):
         render.CFG["webapps"] = self.saved
-        render.ACCEPTED_PATH = self.acc
+        problems.ACCEPTED_PATH = self.acc
 
     def test_declared_up_declared_down_and_discovered(self):
         render.CFG["webapps"] = {"shop": [8080], "admin": [9443]}
@@ -1364,7 +1367,7 @@ class WebAppsAndProblems(unittest.TestCase):
         self.assertIn("1 down (expected)", txt)
 
     def test_declared_webapp_is_not_a_docker_bypass_problem(self):
-        pb = lambda: [t for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass"]
+        pb = lambda: [t for _, t, pid in problems.problems_raw(NET, CONT) if pid == "docker-bypass"]
         render.CFG["webapps"] = {}
         before = pb()
         self.assertTrue(before, "fixture must have a docker bypass")
@@ -1375,12 +1378,12 @@ class WebAppsAndProblems(unittest.TestCase):
 
     def test_every_problem_id_is_in_the_catalog(self):
         import re as _re
-        with open(render.__file__, encoding="utf-8") as f:
+        with open(problems.__file__, encoding="utf-8") as f:
             src = f.read()
         ids = set(_re.findall(r'out\.append\(\(\d, .*?, "([a-z-]+)"\)\)', src))
         self.assertTrue(ids)
-        self.assertFalse(ids - set(render.CATALOG), ids - set(render.CATALOG))
-        for pid, (title, why, fix) in render.CATALOG.items():
+        self.assertFalse(ids - set(problems.CATALOG), ids - set(problems.CATALOG))
+        for pid, (title, why, fix) in problems.CATALOG.items():
             self.assertTrue(title and fix, pid)
 
     def _boot(self, n):
@@ -1389,17 +1392,17 @@ class WebAppsAndProblems(unittest.TestCase):
     def test_accept_hides_counts_and_shows_the_count(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
-            recs = lambda n: render.problem_records(NET, CONT, boot=self._boot(n))
+            problems.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            recs = lambda n: problems.problem_records(NET, CONT, boot=self._boot(n))
             self.assertEqual(render.accept_problem("journal-errors", "", records=recs(118)), 2)        # reason required
             self.assertEqual(render.accept_problem("nope", "x", records=recs(118)), 2)                  # unknown id
             self.assertEqual(render.accept_problem("db-open-lan", "x", records=[]), 2)                  # not a current problem
-            texts = lambda n: [t for _, t in render.problems(NET, CONT, boot=self._boot(n))]
+            texts = lambda n: [t for _, t in problems.problems(NET, CONT, boot=self._boot(n))]
             self.assertTrue(any("118 errors" in t for t in texts(118)))
             self.assertEqual(render.accept_problem("journal-errors", "docker veth noise\x1b[2J", records=recs(118)), 0)
             self.assertFalse(any("errors in this boot" in t for t in texts(118)))
             self.assertFalse(any("errors in this boot" in t for t in texts(120)))                      # noisy counter: digits ignored
-            pb = render.problems(NET, CONT, boot=self._boot(118))
+            pb = problems.problems(NET, CONT, boot=self._boot(118))
             self.assertEqual(pb.accepted, 1)
             shown = "\n".join(ansi.ANSI.sub("", l) for l in render.page_overview(
                 {"cpu": {"cpu0": 0.1}, "thermal": {}, "net": {}, "sessions": None, "fs": None}, CONT, NET, self._boot(118), 118, 40, pb=pb))
@@ -1409,25 +1412,25 @@ class WebAppsAndProblems(unittest.TestCase):
             self.assertEqual(render.accept_problem("journal-errors", forget=True), 0)
             self.assertTrue(any("errors in this boot" in t for t in texts(118)))
             if os.name == "posix":  # Windows has no mode bits: the folder ACL protects the file
-                self.assertEqual(os.stat(render.ACCEPTED_PATH).st_mode & 0o777, 0o644)
+                self.assertEqual(os.stat(problems.ACCEPTED_PATH).st_mode & 0o777, 0o644)
 
     def test_acceptance_does_not_hide_a_worse_situation(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            problems.ACCEPTED_PATH = os.path.join(d, "accepted.json")
             render.CFG["webapps"] = {}
-            recs = render.problem_records(NET, CONT)
+            recs = problems.problem_records(NET, CONT)
             self.assertEqual(render.accept_problem("docker-bypass", "intended", records=recs), 0)
-            self.assertFalse([1 for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass" and t in [x for _, x in render.problems(NET, CONT)]])
+            self.assertFalse([1 for _, t, pid in problems.problems_raw(NET, CONT) if pid == "docker-bypass" and t in [x for _, x in problems.problems(NET, CONT)]])
             worse = dict(NET, listeners=NET["listeners"] + [{"proto": "tcp", "addr": "0.0.0.0", "port": 7778, "proc": "docker-proxy"}])
             cont2 = dict(CONT, containers=CONT["containers"] + [{"name": "x-1", "status": "Up", "state": "running", "project": "",
                                                               "ports": [{"p": 7778, "s": "*"}], "mem": 1}])
-            self.assertTrue(any("Docker port" in t for _, t in render.problems(worse, cont2)),
+            self.assertTrue(any("Docker port" in t for _, t in problems.problems(worse, cont2)),
                             "one more bypassing port must be a new, visible problem")
             # thermal: accepting a warning must not hide a critical temperature
-            warn = render.problem_records(NET, CONT, thermal={"cpu": (88.0, 105.0), "throttle": None})
+            warn = problems.problem_records(NET, CONT, thermal={"cpu": (88.0, 105.0), "throttle": None})
             self.assertEqual(render.accept_problem("thermal", "hot room", records=warn), 0)
-            crit = render.problems(NET, CONT, thermal={"cpu": (100.0, 105.0), "throttle": None})
+            crit = problems.problems(NET, CONT, thermal={"cpu": (100.0, 105.0), "throttle": None})
             self.assertTrue(any(sev == 2 for sev, t in crit if "CPU at" in t))
 
     def test_port_changes_cannot_be_accepted_as_problems(self):
@@ -1440,7 +1443,7 @@ class WebAppsAndProblems(unittest.TestCase):
             with tempfile.NamedTemporaryFile("w", delete=False) as f:
                 f.write(payload)
             try:
-                self.assertEqual(render.load_accepted(f.name), {}, payload[:30])
+                self.assertEqual(problems.load_accepted(f.name), {}, payload[:30])
             finally:
                 os.unlink(f.name)
 
@@ -1449,9 +1452,9 @@ class WebAppsAndProblems(unittest.TestCase):
         import io
         import json as _json
         import tempfile
-        render.ACCEPTED_PATH = os.path.join(tempfile.mkdtemp(), "accepted.json")
+        problems.ACCEPTED_PATH = os.path.join(tempfile.mkdtemp(), "accepted.json")
         orig = render.current_problem_records
-        render.current_problem_records = lambda: render.problem_records(NET, CONT, boot=self._boot(118))
+        render.current_problem_records = lambda: problems.problem_records(NET, CONT, boot=self._boot(118))
         try:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -1487,7 +1490,7 @@ class WebAppsAndProblems(unittest.TestCase):
         render.CFG["webapps"] = {"db": [5432], "shop": [8080]}
         rows = exposure.exposure_rows(NET, CONT)
         bypass = [r for r in rows if r["bad_note"] and r["note"].startswith("docker") and r["lan"] == 1]
-        pb = [t for _, t, pid in render.problems_raw(NET, CONT) if pid == "docker-bypass"]
+        pb = [t for _, t, pid in problems.problems_raw(NET, CONT) if pid == "docker-bypass"]
         self.assertTrue(pb, "the database port 5432 must still count")
         panel = "\n".join(ansi.ANSI.sub("", l) for l in render.exposure_block(NET, CONT, 100))
         self.assertIn("declared:", panel)                                                          # 8080 is labelled, not alarmed
@@ -1532,7 +1535,7 @@ class ExposeVsDeclared(unittest.TestCase):
         return dict({"proto": proto, "addr": addr, "port": port, "proc": proc}, **({"unit": unit} if unit else {}))
 
     def setUp(self):
-        self.saved = (render.CFG["expose"], dict(render.CFG["webapps"]), render.ACCEPTED_PATH)
+        self.saved = (render.CFG["expose"], dict(render.CFG["webapps"]), problems.ACCEPTED_PATH)
         render.CFG["expose"], render.CFG["webapps"] = {}, {}
         ct, ls = self._ct, self._ls
         self.cont = {"ts": time.time(), "containers": [
@@ -1549,7 +1552,7 @@ class ExposeVsDeclared(unittest.TestCase):
                            {"name": "blog-db-1", "kind": "postgres", "project": "blog"}]})
 
     def tearDown(self):
-        render.CFG["expose"], render.CFG["webapps"], render.ACCEPTED_PATH = self.saved
+        render.CFG["expose"], render.CFG["webapps"], problems.ACCEPTED_PATH = self.saved
 
     def rows(self, expose, net=None, cont=None):
         render.CFG["expose"] = expose
@@ -1557,13 +1560,13 @@ class ExposeVsDeclared(unittest.TestCase):
                                                                        cont or self.cont)}
 
     def problem(self, pid, net=None, cont=None):
-        return [t for _, t, i in render.problems_raw(net or self.net, cont or self.cont, boot={}) if i == pid]
+        return [t for _, t, i in problems.problems_raw(net or self.net, cont or self.cont, boot={}) if i == pid]
 
     def test_no_policy_touches_nothing(self):
         rows = exposure.exposure_rows(self.net, self.cont)
         self.assertEqual(exposure.expose_apply(rows, self.net, self.cont), rows)
         self.assertFalse([r for r in rows if "want" in r])
-        self.assertEqual([i for _, _, i in render.problems_raw(self.net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
+        self.assertEqual([i for _, _, i in problems.problems_raw(self.net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
 
     def test_over_and_within(self):
         rows = self.rows({"shop-db": "LOCALE", "shop-web": "LAN", "blog-db": "LOCALE"})
@@ -1579,7 +1582,7 @@ class ExposeVsDeclared(unittest.TestCase):
     def test_the_problem_is_an_error_listing_every_service_widest_first(self):
         render.CFG["expose"] = {"shop-db": "LOCALE", "n8n": "TAILNET", "shop-web": "TAILNET"}
         self.net["serve"] = [{"port": 8444, "path": "/webhook", "target": "http://127.0.0.1:5678/webhook", "funnel": True}]
-        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "over-exposed"]
+        found = [(sev, t) for sev, t, i in problems.problems_raw(self.net, self.cont) if i == "over-exposed"]
         self.assertEqual(found, [(2, "3 services reach beyond config.ini: n8n :8444 Internet > tailnet, "
                                      "shop-db :5432 LAN > local, shop-web :8080 LAN > tailnet")])
 
@@ -1644,7 +1647,7 @@ class ExposeVsDeclared(unittest.TestCase):
         self.assertEqual(exposure.expose_unmatched(self.net, self.cont), ["postgress", "n8nn"])  # a stopped container and a DB kind are known names
         self.assertEqual(self.problem("expose-unmatched"), ["[expose] 'postgress', 'n8nn' match no service"])
         render.CFG["expose"] = {"postgress": "LOCALE", "8888": "LAN"}
-        found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont, boot={}) if i == "expose-unmatched"]
+        found = [(sev, t) for sev, t, i in problems.problems_raw(self.net, self.cont, boot={}) if i == "expose-unmatched"]
         self.assertEqual(found, [(1, "[expose] 'postgress' matches no service")])
         render.CFG["expose"] = {"8888": "LAN", "53/udp": "LOCALE"}                             # nothing listens there: fine
         self.assertEqual(self.problem("expose-unmatched"), [])
@@ -1659,41 +1662,41 @@ class ExposeVsDeclared(unittest.TestCase):
     def test_nothing_is_said_without_the_listeners(self):
         render.CFG["expose"] = {"shop-db": "LOCALE"}
         net = dict(self.net, listeners=None)
-        self.assertEqual([i for _, _, i in render.problems_raw(net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
+        self.assertEqual([i for _, _, i in problems.problems_raw(net, self.cont) if i in ("over-exposed", "expose-unmatched")], [])
 
     def test_other_alarms_are_never_silenced(self):
-        before = [(t, i) for _, t, i in render.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
+        before = [(t, i) for _, t, i in problems.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
         self.assertEqual({i for _, i in before}, {"db-open-lan", "docker-bypass"})
         render.CFG["expose"] = {"shop-db": "LAN", "shop-web": "LAN", "5432": "INTERNET"}       # everything within reach
-        after = [(t, i) for _, t, i in render.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
+        after = [(t, i) for _, t, i in problems.problems_raw(self.net, self.cont) if i in ("db-open-lan", "docker-bypass")]
         self.assertEqual(after, before)
         self.assertEqual(self.problem("over-exposed"), [])
 
     def test_accepting_over_exposed_does_not_hide_a_new_service(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            render.ACCEPTED_PATH = os.path.join(d, "accepted.json")
+            problems.ACCEPTED_PATH = os.path.join(d, "accepted.json")
             render.CFG["expose"] = {"shop-db": "LOCALE", "shop-web": "LAN", "blog-db": "LOCALE"}
-            self.assertEqual(render.accept_problem("over-exposed", "known", records=render.problem_records(self.net, self.cont)), 0)
-            self.assertFalse([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t])      # accepted: dimmed
-            self.assertEqual(render.problems(self.net, self.cont).accepted, 1)
+            self.assertEqual(render.accept_problem("over-exposed", "known", records=problems.problem_records(self.net, self.cont)), 0)
+            self.assertFalse([t for _, t in problems.problems(self.net, self.cont) if "beyond config.ini" in t])      # accepted: dimmed
+            self.assertEqual(problems.problems(self.net, self.cont).accepted, 1)
             render.CFG["expose"]["shop-web"] = "LOCALE"                                        # a second service now goes beyond
-            shown = [t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t]
+            shown = [t for _, t in problems.problems(self.net, self.cont) if "beyond config.ini" in t]
             self.assertEqual(len(shown), 1, "the accepted problem must not hide a worse one")
             self.assertIn("2 services", shown[0])
             render.CFG["expose"].update({"shop-web": "LAN", "shop-db": "TAILNET"})              # same count, a different port: also new
-            self.assertEqual(len([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t]), 1)
+            self.assertEqual(len([t for _, t in problems.problems(self.net, self.cont) if "beyond config.ini" in t]), 1)
             render.CFG["expose"]["shop-db"] = "LOCALE"                                         # back to what was accepted
-            self.assertFalse([t for _, t in render.problems(self.net, self.cont) if "beyond config.ini" in t])
+            self.assertFalse([t for _, t in problems.problems(self.net, self.cont) if "beyond config.ini" in t])
 
     def test_fingerprint_keeps_the_numbers_of_the_expose_problems(self):
-        self.assertIn("over-exposed", render.COUNT_MATTERS)
+        self.assertIn("over-exposed", problems.COUNT_MATTERS)
         a, b = "2|1 service reaches beyond config.ini: x :5432 LAN > local", "2|1 service reaches beyond config.ini: x :5433 LAN > local"
-        self.assertNotEqual(render.fingerprint(2, a[2:], "over-exposed"), render.fingerprint(2, b[2:], "over-exposed"))
-        self.assertIn("expose-unmatched", render.COUNT_MATTERS)
-        self.assertNotEqual(render.fingerprint(1, "[expose] 'a1' matches no service", "expose-unmatched"),
-                            render.fingerprint(1, "[expose] 'a2' matches no service", "expose-unmatched"))  # a new typo is not the accepted one
-        self.assertEqual(render.fingerprint(1, "x 1 y", "net-sections"), render.fingerprint(1, "x 2 y", "net-sections"))  # the noisy ones still ignore digits
+        self.assertNotEqual(problems.fingerprint(2, a[2:], "over-exposed"), problems.fingerprint(2, b[2:], "over-exposed"))
+        self.assertIn("expose-unmatched", problems.COUNT_MATTERS)
+        self.assertNotEqual(problems.fingerprint(1, "[expose] 'a1' matches no service", "expose-unmatched"),
+                            problems.fingerprint(1, "[expose] 'a2' matches no service", "expose-unmatched"))  # a new typo is not the accepted one
+        self.assertEqual(problems.fingerprint(1, "x 1 y", "net-sections"), problems.fingerprint(1, "x 2 y", "net-sections"))  # the noisy ones still ignore digits
 
     def test_both_problems_are_catalogued_and_in_the_json(self):
         import contextlib
@@ -1701,11 +1704,11 @@ class ExposeVsDeclared(unittest.TestCase):
         import json as _json
         render.CFG["expose"] = {"shop-db": "LOCALE", "postgress": "LOCALE"}
         for pid in ("over-exposed", "expose-unmatched"):
-            title, why, fix = render.CATALOG[pid]
+            title, why, fix = problems.CATALOG[pid]
             self.assertTrue(title and why and fix, pid)
-            self.assertNotIn(pid, render.NOT_ACCEPTABLE)
+            self.assertNotIn(pid, problems.NOT_ACCEPTABLE)
         orig = render.current_problem_records
-        render.current_problem_records = lambda: render.problem_records(self.net, self.cont, boot={})
+        render.current_problem_records = lambda: problems.problem_records(self.net, self.cont, boot={})
         try:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -1734,7 +1737,7 @@ class ExposeVsDeclared(unittest.TestCase):
         for r in rows:
             r["name"] = "haproxy"                                                              # the process behind a port can flip between cycles
         self.assertEqual(exposure.expose_over_items(rows), items)                                # ...the text, and what was accepted, must not
-        self.assertEqual(render.fingerprint(2, items[0], "over-exposed"), "2|port 8080 LAN > local")
+        self.assertEqual(problems.fingerprint(2, items[0], "over-exposed"), "2|port 8080 LAN > local")
 
     def test_unknown_funnel_status_counts_as_internet(self):
         net = dict(self.net, serve=[], errors={"serve": "tailscale serve status failed"})     # the tailnet-only row 8444: Funnel unknown
@@ -1759,21 +1762,21 @@ class ExposeVsDeclared(unittest.TestCase):
                                        ("no boot data", self.net, self.cont, None),
                                        ("no boot argument", self.net, self.cont, False)):
             with self.subTest(label):
-                self.assertEqual([t for _, t, i in render.problems_raw(net, cont, boot=boot) if i == "expose-unmatched"], [])
+                self.assertEqual([t for _, t, i in problems.problems_raw(net, cont, boot=boot) if i == "expose-unmatched"], [])
         net = dict(self.net, errors={"serve": "boom"})                                         # another section: the names are all there
         self.assertEqual(self.problem("expose-unmatched", net), want)
-        self.assertFalse([t for _, t in render.safe_problems(self.net, self.cont) if "match no service" in t or "matches no service" in t])  # page_rete
+        self.assertFalse([t for _, t in problems.safe_problems(self.net, self.cont) if "match no service" in t or "matches no service" in t])  # page_rete
 
     def test_a_broken_config_file_is_an_error(self):
         saved = render.CFG.get("config_error")
         try:
             render.CFG["config_error"] = ""
-            self.assertEqual([i for _, _, i in render.problems_raw(self.net, self.cont) if i == "config-unreadable"], [])
+            self.assertEqual([i for _, _, i in problems.problems_raw(self.net, self.cont) if i == "config-unreadable"], [])
             render.CFG["config_error"] = "Source contains parsing errors"
-            found = [(sev, t) for sev, t, i in render.problems_raw(self.net, self.cont) if i == "config-unreadable"]
+            found = [(sev, t) for sev, t, i in problems.problems_raw(self.net, self.cont) if i == "config-unreadable"]
             self.assertEqual(found, [(2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)")])
-            self.assertTrue(all(render.CATALOG["config-unreadable"]))
-            self.assertNotIn("config-unreadable", render.NOT_ACCEPTABLE)
+            self.assertTrue(all(problems.CATALOG["config-unreadable"]))
+            self.assertNotIn("config-unreadable", problems.NOT_ACCEPTABLE)
         finally:
             if saved is None:
                 render.CFG.pop("config_error", None)
@@ -1868,16 +1871,16 @@ class TelegramProblems(unittest.TestCase):
             json.dump(d, f)
 
     def found(self):
-        return [(sev, t, pid) for sev, t, pid in render.problems_raw(NET, CONT) if pid.startswith("telegram-")]
+        return [(sev, t, pid) for sev, t, pid in problems.problems_raw(NET, CONT) if pid.startswith("telegram-")]
 
     def test_nothing_is_read_or_said_when_switched_off(self):
         render.CFG["telegram"]["enabled"] = False
-        orig = render.telegram_status
-        render.telegram_status = lambda *a: self.fail("status.json read although [telegram] is off")
+        orig = problems.telegram_status
+        problems.telegram_status = lambda *a: self.fail("status.json read although [telegram] is off")
         try:
             self.assertEqual(self.found(), [])           # no status.json at all
         finally:
-            render.telegram_status = orig
+            problems.telegram_status = orig
         self.status(paired=False, ts=time.time() - 9999, failing_since=time.time() - 9999)
         self.assertEqual(self.found(), [])
 
@@ -1924,19 +1927,19 @@ class TelegramProblems(unittest.TestCase):
     def test_a_folder_this_user_cannot_open_is_neither_ok_nor_a_problem(self):
         from unittest import mock
         with mock.patch("builtins.open", side_effect=PermissionError(13, "denied")):
-            self.assertEqual(render.telegram_state(time.time())[0], "unreadable")
-        self.assertEqual(render.telegram_state(time.time())[0], "down")                             # missing is not the same thing
+            self.assertEqual(problems.telegram_state(time.time())[0], "unreadable")
+        self.assertEqual(problems.telegram_state(time.time())[0], "down")                             # missing is not the same thing
 
     def test_catalog_has_both_ids_for_every_os_and_the_fingerprint_ignores_the_minutes(self):
         for pid in ("telegram-unpaired", "telegram-failing"):
-            self.assertIn(pid, render.CATALOG)
-            self.assertIn("nuc-console-telegram", render.CATALOG[pid][2])
+            self.assertIn(pid, problems.CATALOG)
+            self.assertIn("nuc-console-telegram", problems.CATALOG[pid][2])
             for os_name in ("windows", "darwin"):
-                self.assertIn("nuc-console-telegram", render.OS_CATALOG[os_name][pid][2])
-        self.assertIn("nuc-console-telegram.cmd --setup", render.OS_CATALOG["windows"]["telegram-unpaired"][2])
-        self.assertNotIn("telegram-failing", render.COUNT_MATTERS)
-        self.assertEqual(render.fingerprint(1, "Telegram notifications failing for 12 min: x", "telegram-failing"),
-                         render.fingerprint(1, "Telegram notifications failing for 45 min: x", "telegram-failing"))
+                self.assertIn("nuc-console-telegram", problems.OS_CATALOG[os_name][pid][2])
+        self.assertIn("nuc-console-telegram.cmd --setup", problems.OS_CATALOG["windows"]["telegram-unpaired"][2])
+        self.assertNotIn("telegram-failing", problems.COUNT_MATTERS)
+        self.assertEqual(problems.fingerprint(1, "Telegram notifications failing for 12 min: x", "telegram-failing"),
+                         problems.fingerprint(1, "Telegram notifications failing for 45 min: x", "telegram-failing"))
 
     def test_shipped_config_leaves_it_off_and_documents_it(self):
         path = os.path.join(os.path.dirname(__file__), "..", "config", "config.ini")

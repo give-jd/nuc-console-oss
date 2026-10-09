@@ -15,6 +15,7 @@ os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import cards  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
+import problems  # noqa: E402
 import ui  # noqa: E402
 import web  # noqa: E402
 import webapi  # noqa: E402
@@ -133,7 +134,7 @@ class Documents(unittest.TestCase):
         self.assertEqual(webapi.retry(3000), b"retry: 3000\n\n")
 
     def test_problems(self):
-        pb = render.ProblemList([(2, "1 DB open on LAN"), (1, "journal errors"), (3, "port changed")])
+        pb = problems.ProblemList([(2, "1 DB open on LAN"), (1, "journal errors"), (3, "port changed")])
         pb.pids = ["db-open-lan", "journal-errors", "port-changed"]
         pb.info = [("Database open", "why", "fix", "accept db"), None, ("Port changed", "w", "f", "")]
         pb.accepted, pb.known = 1, [{"id": "thermal", "text": "hot", "reason": "fan", "ts": 1}]

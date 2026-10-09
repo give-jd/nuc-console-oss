@@ -260,7 +260,7 @@ _NET = {
     "windows": {"iface": "Ethernet", "rx": 2_400_000, "tx": 520_000, "rx_tot": 88_300 * MiB, "tx_tot": 12_900 * MiB},
     "darwin": {"iface": "en0", "rx": 1_300_000, "tx": 280_000, "rx_tot": 52_700 * MiB, "tx_tot": 8_100 * MiB},
 }
-_NET_POINTS = 30  # render.NET_HIST: the samples of a traffic sparkline (a test keeps the two equal)
+_NET_POINTS = 30  # hostdata.NET_HIST: the samples of a traffic sparkline (a test keeps the two equal)
 
 
 def _traffic(now, base, salt):
