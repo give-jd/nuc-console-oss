@@ -224,6 +224,7 @@ echo "nuc-console: dashboard on $URL (Ctrl+C to stop)"
 OPENFILE=$DATA/open.html
 TOKEN=$(tr -d '\n\r' < "$DATA/web.token" 2>/dev/null || true)
 case $TOKEN in ''|*[!A-Za-z0-9._~-]*) die "no usable access token in $DATA/web.token (delete the file and start again)" ;; esac
+rm -f "$OPENFILE"  # a file left there earlier keeps its permissions when it is only overwritten
 printf '<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=%s&token=%s"><title>nuc-console</title>\n' "$URL" "$TOKEN" > "$OPENFILE"
 echo "nuc-console: the page asks for a token: open $OPENFILE in your browser (it carries it; the file is yours alone)" >&2
 if [ "$OPEN" = 1 ]; then
