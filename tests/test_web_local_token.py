@@ -9,8 +9,9 @@ import threading
 import unittest
 from unittest import mock
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
-os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import nuc_config  # noqa: E402
 import web  # noqa: E402
 import webhttp  # noqa: E402
