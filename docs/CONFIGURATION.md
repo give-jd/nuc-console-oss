@@ -10,7 +10,7 @@ Where things are described: **this page** is the long form (what a key does, edg
 | Reference copy | `config.ini.dist` next to it, refreshed on every install, update and portable start: `diff /etc/nuc-console/config.ini{,.dist}` shows the options added since you copied it |
 | Apply | Linux: `sudo systemctl restart nuc-console nuc-console-collector nuc-console-web` · macOS: run `sudo ./install.sh` again · Windows: run `install-windows.cmd` again (the installers restart everything and keep `config.ini`) · portable: quit (Ctrl+C) and start `run.sh` / `run.cmd` again. `nuc-console-update` keeps your `config.ini` |
 | Override | `NUC_CONSOLE_CONFIG=<path>` (config file), `NUC_CONSOLE_MODE` (`overview`/`rotate`), `NUC_CONSOLE_HOME=<folder>` ([portable run](#portable-run)) |
-| Settings page | the web view's ⚙ settings › **config.ini** lists every key below with its value, what it does, the values it takes and when a change applies. In a portable run and the desktop app it edits them, a section at a time, and checks each value the way the dashboard reads it (a value it would not take is refused and the file stays as it was); the locks (`[ai] web_actions`, `[ai] allow_remote`, `[telegram] web_actions`) and the keys only an installation reads stay for the file. In an installation it only shows them ([WEB.md](WEB.md#the-settings-pages-configini)) |
+| Settings page | the web view's ⚙ settings › **config.ini** lists every key below with its value, what it does, the values it takes and when a change applies. In a portable run and the desktop app it edits them, a section at a time, and checks each value the way the dashboard reads it (a value it would not take is refused and the file stays as it was); the locks (`[ai] web_actions`, `[ai] allow_remote`, `[telegram] web_actions`) and the keys only an installation reads stay for the file. In an installation it shows them all, and changes the presentation ones (`[features]` off, `[dashboard]`, `[ui]`, `[display] zoom`) in an overlay file that is laid over this one, never in this file ([below](#the-settings-overlay-an-installations-settings-page)) |
 
 ## Portable run
 
@@ -191,8 +191,25 @@ n8n     = tailnet
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
+| `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
 | `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
+
+### The settings overlay: an installation's settings page
+
+`config.ini` is root's, so the web view never writes it. What its settings page changes is kept in **`settings.ini`** (an INI file with the same sections and keys), in the AI folder:
+Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Support/nuc-console/ai/settings.ini`, Windows `%ProgramData%\nuc-console\ai\settings.ini`
+(`$NUC_CONSOLE_SETTINGS` names another file). The renderer, the web view and the collector read `config.ini` and then lay it over:
+
+| Allowed in the overlay | Rule |
+|---|---|
+| `[features]` | **off only.** `no` switches a section off; `yes` is ignored: a section that `config.ini` switches off stays off and only the administrator switches it on, so the overlay can make root's collector run less, never more |
+| `[dashboard]`, `[ui]`, `[display] zoom` | any value the dashboard takes; it wins over `config.ini` |
+
+Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
+overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
+or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
+notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.
 
 ## `[telegram]` — alerts on your phone (off by default)
 

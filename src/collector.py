@@ -1816,12 +1816,16 @@ def start_loops():
 
 
 def config_stamp(path=None):
-    """What says config.ini changed (its time and size), None when there is none."""
-    try:
-        st = os.stat(path or nuc_config.config_path())
-    except OSError:
-        return None
-    return (st.st_mtime_ns, st.st_size)
+    """What says config.ini, or the settings page's overlay laid over it (nuc_config.overlay_path), changed (time and size of each); None
+    when there is neither."""
+    out = []
+    for p, stat_ in ((path or nuc_config.config_path(), os.stat), (nuc_config.overlay_path() if path is None else "", os.lstat)):
+        try:
+            st = stat_(p) if p else None
+        except OSError:
+            st = None
+        out.append((st.st_mtime_ns, st.st_size) if st else None)
+    return tuple(out) if any(out) else None
 
 
 def reload_features(path=None):

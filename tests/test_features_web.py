@@ -214,13 +214,13 @@ class Page(Folder):
         with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": self.path}):
             h, body = self.settings()
             self.assertIn('<section class="sec" id="features"', body)
-            self.assertIn("Read-only here (installed: config.ini is the administrator&#x27;s)", body)
+            self.assertIn("Read-only here (off in config.ini", body)  # the overlay's folder is not there: nothing to write in
             self.assertNotIn('action="/settings/feature"', body)
             self.assertIn("form-action 'none'", h["Content-Security-Policy"])
             self.assertEqual(body.count('data-feature="'), len(nuc_config.FEATURES))
             st, _h, text = self.post({"name": "health", "on": "no"})
         self.assertEqual(st, 403, text)
-        self.assertIn("administrator", text)
+        self.assertIn("cannot write here", text)
         self.assertEqual(read(self.path), read(SHIPPED), "nothing was written")
 
     def test_a_portable_run_turns_a_section_off_and_on_from_the_page(self):

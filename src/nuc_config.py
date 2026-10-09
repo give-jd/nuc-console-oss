@@ -57,20 +57,23 @@ def expose_port(key):
     return int(head), proto or "tcp"
 
 
-def load(path=None, warn=None):
+def load(path=None, warn=None, overlay=True):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int, ...}. warn: what to do with each complaint about the file (a line of
-    text): printed to stderr unless given (the settings page collects them to refuse a value before it writes it)."""
+    text): printed to stderr unless given (the settings page collects them to refuse a value before it writes it).
+    overlay: what an installation's settings page chose (settings.ini, "The overlay" below) is laid over the file before it is read, when
+    the file is this process's config.ini (True; a portable run has none); a path = that overlay file; False = config.ini alone."""
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
-    say = warn or (lambda line: print(line, file=sys.stderr))
+    say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
-                   "refresh_seconds": 2, "allowed_hosts": []},
+                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True},
            "console": {"font": "", "blank_minutes": 0}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
+    cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["ui"] = {"web": "app", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
@@ -83,6 +86,14 @@ def load(path=None, warn=None):
         say(f"nuc-console: cannot read {path}: {e}")
         cfg["config_error"] = str(e)[:200]
         return cfg
+    ov = overlay_for(path, overlay)
+    if ov:  # a lock in config.ini (read before anything is laid over it) says whether the page's choices count at all
+        try:
+            locked = not cp.getboolean("web", "settings_actions", fallback=False)  # opt-in; a typo is a lock, not an opening
+        except ValueError:
+            locked = True
+        if not locked:
+            cfg["overlaid"] = lay_overlay(cp, ov, say)
     for key in cp["features"] if cp.has_section("features") else ():
         if key not in FEATURES:
             say(f"nuc-console: {path}: unknown feature '{key}' ignored")
@@ -152,6 +163,10 @@ def load(path=None, warn=None):
             w["enabled"] = cp.getboolean("web", "enabled", fallback=False)
         except ValueError:
             say(f"nuc-console: {path}: [web] enabled is not a boolean: kept off")
+        try:
+            w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=False)  # yes = an installation's settings page may use the overlay
+        except ValueError:
+            say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept no (locked)")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
@@ -387,6 +402,189 @@ def edit_lines(lines, section, items, drop=()):
     return out
 
 
+# ---- The overlay: what the settings page of an INSTALLATION changes ------------------------------------------------------------------
+# config.ini is root's and the web view runs as an unprivileged account (a deliberate boundary), so the page never writes it. Like the AI and
+# Telegram pages it writes a file of its own, settings.ini, in the AI folder (the one folder the installers give that account), and load() lays
+# it over config.ini. It is UNTRUSTED input to every reader, root's collector included: only OVERLAY_ALLOW keys count, [features] only to
+# switch OFF (what root runs can shrink that way, never grow), any other key is ignored and reported. `rm` of the file resets everything.
+OVERLAY_FILE = "settings.ini"
+SECURITY_FEATURES = ("exposure", "firewall", "fail2ban", "databases", "tailscale")  # switching one off from the page raises a problem that cannot be accepted
+OVERLAY_MAX = 16384  # bytes; a bigger file counts for nothing
+OVERLAY_ALLOW = (("features", "*"), ("dashboard", "*"), ("ui", "*"), ("display", "zoom"))  # presentation and non-security switches, nothing else
+_REPORTED = set()
+
+
+def _report(emit):
+    """A complaint about the overlay is printed once per process: the collector reads it every cycle and must not flood the journal."""
+    def say(line):
+        if line not in _REPORTED and len(_REPORTED) < 200:
+            _REPORTED.add(line)
+            emit(line)
+    return say
+
+
+def overlay_allowed(section, key):
+    return (section, "*") in OVERLAY_ALLOW or (section, key) in OVERLAY_ALLOW
+
+
+def overlay_path():
+    """The overlay file of an installation: $NUC_CONSOLE_SETTINGS, else settings.ini in the system-wide AI folder (Linux /var/lib/nuc-console/ai,
+    macOS /Library/Application Support/nuc-console/ai, Windows ProgramData's), which the installers hand to the web view's account. "" in a
+    portable run: its config.ini is the account's own file and is written directly."""
+    if PORTABLE:
+        return ""
+    if os.environ.get("NUC_CONSOLE_SETTINGS"):
+        return os.environ["NUC_CONSOLE_SETTINGS"]
+    d = os.path.join(BASE_DIR, "ai") if WINDOWS else "/Library/Application Support/nuc-console/ai" if MACOS else os.path.join(LIB_DIR, "ai")
+    return os.path.join(d, OVERLAY_FILE)
+
+
+def overlay_for(path, overlay=True):
+    """The overlay file `load(path, overlay=...)` reads, or "": only for this process's own config.ini unless a path is given."""
+    if isinstance(overlay, str):
+        return overlay
+    if overlay is not True or PORTABLE:
+        return ""
+    try:
+        same = os.path.abspath(path) == os.path.abspath(config_path())
+    except (TypeError, ValueError):
+        same = False
+    return overlay_path() if same else ""
+
+
+def read_overlay(path=None, warn=None):
+    """-> {"section.key": value} the overlay holds, whatever it holds: {} when there is none or it cannot be trusted (not a regular file, not
+    opened through a link, too big, writable by group or others, owned by neither root nor the owner of its folder). Never raises. Keys outside
+    OVERLAY_ALLOW are dropped (warn says so); [features] only keeps the ones that switch OFF."""
+    path = overlay_path() if path is None else path
+    say = warn or (lambda line: None)
+    if not path:
+        return {}
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode) or st.st_size > OVERLAY_MAX:
+                say(f"nuc-console: {path}: not a regular file of at most {OVERLAY_MAX} bytes: ignored")
+                return {}
+            if not WINDOWS and (st.st_mode & 0o022 or st.st_uid not in (0, os.stat(os.path.dirname(os.path.abspath(path))).st_uid)):
+                say(f"nuc-console: {path}: writable by others or owned by someone else: ignored")
+                return {}
+            text = f.read(OVERLAY_MAX + 1).decode("utf-8-sig")
+    except FileNotFoundError:
+        return {}
+    except PermissionError:  # the notifier (another account) is not meant to read it: say so once, calmly
+        say(f"nuc-console: {path}: not readable by this account (by design): the settings page's choices do not apply here")
+        return {}
+    except (OSError, ValueError):  # a link (O_NOFOLLOW), bad bytes
+        say(f"nuc-console: {path}: cannot be read as a settings file: ignored")
+        return {}
+    cp = configparser.ConfigParser(interpolation=None, strict=False, default_section="\0default")  # a [DEFAULT] is a section like any other
+    try:
+        cp.read_string(text)
+    except (configparser.Error, RecursionError):
+        say(f"nuc-console: {path}: not a valid ini file: ignored")
+        return {}
+    out = {}
+    for sec in cp.sections():
+        for key in cp.options(sec):
+            val = cp.get(sec, key, raw=True).strip()
+            name = f"{sec.lower()}.{key}"
+            if not overlay_allowed(sec.lower(), key) or len(val) > 300:
+                say(f"nuc-console: {path}: {name} is not for the settings page: ignored")
+            elif sec.lower() == "features" and (key not in FEATURES or val.lower() != "no"):
+                say(f"nuc-console: {path}: {name} can only switch a feature off here: ignored")
+            else:
+                out[name] = val
+    return out
+
+
+def lay_overlay(cp, path, say):
+    """The overlay's values set in `cp` (a ConfigParser that has read config.ini); -> {"section.key": value} laid over."""
+    laid = {}
+    for name, val in read_overlay(path, say).items():
+        sec, _, key = name.partition(".")
+        if not cp.has_section(sec):
+            cp.add_section(sec)
+        cp.set(sec, key, val)
+        laid[name] = val
+    return laid
+
+
+def _write_overlay(values, path, check=None):
+    """settings.ini with `values` ({"section.key": value}): written aside (created new, mode 0640, never through a link), checked, then put in
+    place with os.replace. Nothing in it: the file is removed. Raises OSError (not writable, a link in the way) or what check raises."""
+    folder = os.path.dirname(os.path.abspath(path))
+    if os.path.islink(folder) or not os.path.isdir(folder):
+        raise OSError("the settings folder %s is not a plain folder" % folder)
+    if not values:
+        if check is not None:
+            check("")
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        return
+    lines, last = ["# nuc-console: what the web view's settings page chose. config.ini wins for the keys it locks; `rm` this file to undo it all.", ""], None
+    for name in sorted(values):
+        sec, _, key = name.partition(".")
+        if sec != last:
+            lines += ([""] if last else []) + ["[%s]" % sec]
+            last = sec
+        lines.append(("%s = %s" % (key, values[name])).rstrip())
+    data = ("\n".join(lines) + "\n").encode("utf-8")
+    if len(data) > OVERLAY_MAX:
+        raise OSError("too many settings")
+    tmp = path + ".tmp"
+    try:
+        os.remove(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o640)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        if WINDOWS:  # no mode bits: SYSTEM and Administrators write, the web view's account too, everyone else reads; fail closed
+            icacls = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "icacls.exe")
+            import subprocess
+            me = subprocess.run([os.path.join(os.environ.get("SystemRoot") or r"C:\\Windows", "System32", "whoami.exe"), "/user", "/fo", "csv", "/nh"],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+            sid = re.search(r"S-1-\d+(?:-\d+)+", me.stdout or "") if me.returncode == 0 else None
+            if not sid:  # fail closed: without this process's own SID the file would not be writable by it, or by everyone
+                raise OSError("could not resolve this account's SID (whoami)")
+            grants = ["*S-1-5-18:F", "*S-1-5-32-544:F", "*S-1-5-32-545:R", "*%s:F" % sid.group(0)]
+            if subprocess.run([icacls, tmp, "/inheritance:r", "/grant:r"] + grants, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+                raise OSError("could not restrict %s (icacls)" % tmp)
+        if check is not None:
+            check(tmp)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def update_overlay(put=None, drop=(), path=None, check=None):
+    """Change the overlay: `put` ({"section.key": value}) set, `drop` (names, or "*" for all) removed. A name outside OVERLAY_ALLOW is a
+    ValueError, a [features] value that is not "no" too. check(tmp_path) as in set_keys: it sees the new file before it takes the old one's place."""
+    path = path or overlay_path()
+    if not path:
+        raise OSError("this run has no settings overlay")
+    put = put or {}
+    for name, val in put.items():
+        sec, _, key = name.partition(".")
+        if not overlay_allowed(sec, key) or (sec == "features" and (key not in FEATURES or val != "no")):
+            raise ValueError("not for the settings page: %s" % name[:60])
+    with _SET_LOCK:
+        cur = read_overlay(path)
+        for name in ([n for n in cur] if "*" in drop else drop):
+            cur.pop(name, None)
+        cur.update(put)
+        _write_overlay(cur, path, check)
+
+
 def config_path():
     """The config.ini this process reads: $NUC_CONSOLE_CONFIG, else the default (a portable run: the one in its folder)."""
     return os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
@@ -404,11 +602,42 @@ def features_writable(path=None):
     return True, ""
 
 
+def settings_mode(path=None, token=None):
+    """How the settings page may change things here: ("file", "") a portable run's own config.ini; ("overlay", "") an installation, through the
+    overlay (settings.ini) when config.ini opts in ([web] settings_actions = yes), a token is configured (token: the running server's, else
+    [web] token_file: without one any local user could take the page's CSRF token and use it), and the folder is this account's to write;
+    else ("", why)."""
+    if features_writable(path)[0]:
+        return "file", ""
+    ov = overlay_path()
+    if not ov:
+        return "", "config.ini cannot be written by this account"
+    web = current()["web"]
+    if not web.get("settings_actions", False):
+        return "", "off in config.ini: [web] settings_actions = yes turns it on"
+    if not (web.get("token_file") if token is None else token):
+        return "", "it needs [web] token_file: without a token any local user of this machine could use the page"
+    folder = os.path.dirname(ov)
+    if os.path.islink(folder) or not os.path.isdir(folder) or (not WINDOWS and not os.access(folder, os.W_OK | os.X_OK)):
+        return "", "the settings folder is not writable by this account"
+    return "overlay", ""
+
+
 def set_feature(name, on, path=None):
     """[features] name = yes | no in this process's config.ini (set_key: the rest of the file as it was), and in current() at once. The collector
-    reads it again within a cycle (collector.reload_features). ValueError for a name that is not a feature."""
+    reads it again within a cycle (collector.reload_features). ValueError for a name that is not a feature. In an installation (settings_mode
+    "overlay") off goes in the overlay and on removes that entry; on when config.ini says no is a ValueError: the page can only switch off."""
     if name not in FEATURES:
         raise ValueError("not a feature: %r" % (name,))
+    if settings_mode(path)[0] == "overlay":
+        if on and not load(path or config_path(), overlay=False)["features"][name]:
+            raise ValueError("config.ini switches %s off: only the administrator can switch it on" % name)
+        update_overlay({} if on else {"features." + name: "no"}, ["features." + name] if on else ())
+        current()["features"][name] = bool(on)
+        current()["overlaid"].pop("features." + name, None)
+        if not on:
+            current()["overlaid"]["features." + name] = "no"
+        return
     set_key(path or config_path(), "features", name, "yes" if on else "no")
     current()["features"][name] = bool(on)
 

@@ -23,6 +23,7 @@ How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of pro
   baseline-missing  baseline-unreadable                                              exposure
   firewall-off  firewall-policy  firewall-unreadable  ufw-missing  ufw-off  ufw-unreadable      firewall
   config-unreadable                                                                  exposure webapps (and attention)
+  feature-hidden                                                                     exposure firewall
   telegram-unpaired  telegram-failing                                                (attention only)
 
 The attention card belongs to every problem. The state of a card is the worst of its problems (severity 3 and 2: 'err', 1: 'warn'); a
@@ -120,6 +121,7 @@ PROBLEM_CARDS = {
     "firewall-off": ("firewall",), "firewall-policy": ("firewall",), "firewall-unreadable": ("firewall",),
     "ufw-missing": ("firewall",), "ufw-off": ("firewall",), "ufw-unreadable": ("firewall",),
     "config-unreadable": ("exposure", "webapps"),
+    "feature-hidden": ("exposure", "firewall"),
     "telegram-unpaired": (), "telegram-failing": (),
 }
 SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)

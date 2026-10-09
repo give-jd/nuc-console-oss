@@ -122,6 +122,9 @@ def telegram_state(now, path=None):
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
+    hidden = [f for f in nuc_config.SECURITY_FEATURES if "features." + f in (CFG.get("overlaid") or {}) and not CFG["features"].get(f, True)]
+    if hidden:  # a person at the settings page switched a security section off: config.ini has it on, and nothing may hide that
+        out.append((2, "%s switched off from the settings page (config.ini has it on)" % ", ".join(hidden), "feature-hidden"))
     if CFG.get("config_error"):  # config.ini exists but could not be read: nothing in it ([expose], [webapps]) is applied
         out.append((2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)", "config-unreadable"))
     if not hostdata.on("containers"):
@@ -262,6 +265,8 @@ CATALOG = {
                      "bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini"),
     "expose-unmatched": ("[expose] name matches no service", "a name that matches nothing (a typo, or a service that was removed) guards nothing",
                          "fix the name under [expose] in config.ini (container, compose service or project, process, unit, database, [webapps] name) or remove the line; ports are never checked"),
+    "feature-hidden": ("A section was switched off from the settings page", "exposure, firewall, fail2ban, databases or tailscale is collected and alarmed no more, so a change there would pass unseen; config.ini has it on and the page's choice is kept in settings.ini",
+                       "Reset to config.ini on the settings page, or delete settings.ini (the AI folder); set [web] settings_actions = no to stop the page from doing it"),
     "config-unreadable": ("config.ini unreadable", "the file exists but could not be read, so the defaults are in use: [expose] and [webapps] are not applied and nothing is checked against them",
                           "check config.ini for a key starting with ':' (write ports as 8080) or a section without a header; the exact error is in the service logs / stderr; restart the services after fixing it"),
     "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
@@ -365,7 +370,7 @@ if nuc_config.PORTABLE:
     }.items()})
 
 
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
