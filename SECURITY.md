@@ -204,10 +204,15 @@ the same machine can connect (`[web]` settings are ignored there).
 - it talks to `api.github.com` and to the assets of the release on `github.com`, over HTTPS only (a redirect too), with a size limit; it runs nothing it
   downloaded before the checks below have passed;
 - the archive must have the SHA-256 that `SHA256SUMS` of the same release lists: a mismatch deletes it and stops;
-- when `gh` is installed and logged in it runs `gh attestation verify` on the archive (`--repo give-jd/nuc-console-oss`) and a failure stops the update;
-  without `gh`, or without a login, it says that the provenance was not checked and goes on. It does not verify the attestation of `SHA256SUMS` itself;
+- it runs `gh attestation verify` on the archive (`--repo give-jd/nuc-console-oss`) and a failure always stops the update. The archive and `SHA256SUMS`
+  come from the same release, so only the attestation is independent of it. An **installed** update (the new installer runs as root; on Windows as
+  administrator) therefore **stops** when the provenance was not verified (no `gh`, `gh` not logged in, `gh` not runnable): install `gh` and run `gh auth login`,
+  or check the archive yourself and run again with `--allow-unattested` (`-AllowUnattested` on Windows), which prints a warning. It is a command-line flag,
+  never an environment variable. A **portable** folder (it runs as the user who owns it) only says that the provenance was not checked and goes on.
+  The attestation of `SHA256SUMS` itself is not verified;
 - the `VERSION` inside the archive must be the release's; a member with an absolute path or `..` is refused, and so is a device or a hard link in a `.tar.gz`
-  and a symbolic link that is absolute or leaves the archive's folder (the links of the bundled Python stay inside `python/`); tar members are unpacked as 0755 or 0644
+  and a symbolic link that is absolute or leaves the archive's folder (the links of the bundled Python stay inside `python/`); after unpacking, where every link
+  really ends up (`realpath`) must still be inside that folder, and nothing is written through a link, whatever the Python version; tar members are unpacked as 0755 or 0644
   only: no setuid;
 - it asks for the archive of this system **and processor** (`linux-x86_64`, `linux-arm64`, `macos-arm64`, `macos-x86_64`, `windows-x64`, `windows-arm64`): a processor
   without one, or a release that lacks it, is refused with a message, never a guess at another archive;

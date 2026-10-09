@@ -469,6 +469,7 @@ sudo nuc-console-update --yes     # do not ask
 |---|---|---|
 | `--check` | `-Check` | only report: `already at X.Y.Z`, or `update available: X.Y.Z -> A.B.C (archive name)`. The exit code is 0 either way: read the message |
 | `--yes`, `-y` | `-Yes` | do not ask `update nuc-console X -> Y? [y/N]` (without a terminal it refuses to ask: add `--yes`) |
+| `--allow-unattested` | `-AllowUnattested` | installed update only: go on although the build provenance could not be verified (no `gh`, or not logged in). Prints a warning. Use it only after `gh attestation verify <archive> --repo give-jd/nuc-console-oss` succeeded by hand. A failed check still stops. A portable folder does not need it |
 | `--installed` | `-Installed` | update the installed nuc-console even when you run the command from an extracted folder |
 
 On Windows run `nuc-console-update` (or `nuc-console-update.cmd`) from a new prompt, as the install put it on the PATH. It asks for
@@ -501,8 +502,10 @@ archive), and from then on `nuc-console-update` is there.
    **cache**. A processor with no archive (32-bit, RISC-V...) is refused with a message that lists what exists; so is a release that lacks the archive of yours. A file that is already in the cache with the SHA-256 that `SHA256SUMS` lists is **not downloaded again**; a missing, half or
    damaged one is.
 4. Checks the archive against `SHA256SUMS`. A mismatch deletes it and nothing is installed.
-5. If `gh` (GitHub CLI) is installed and logged in, runs `gh attestation verify <archive> --repo give-jd/nuc-console-oss`; a failure stops the
-   update. Without `gh`, or without a login, it says that the provenance was not checked and goes on.
+5. Runs `gh attestation verify <archive> --repo give-jd/nuc-console-oss` (GitHub CLI, logged in with `gh auth login`); a failure always stops the
+   update. An installed update (it runs the installer as root) also stops when `gh` is missing or not logged in, because the archive and `SHA256SUMS`
+   come from the same release: it says `provenance not checked: ...: not installed` and how to go on: install and log in `gh`, or verify by hand and
+   run again with `--allow-unattested` (warning printed). A portable folder only says that the provenance was not checked and goes on.
 6. Unpacks the archive into a temporary folder of the cache (an absolute path or `..` in it is refused, and so is a device or a hard link in a `.tar.gz`
    and a symbolic link that is absolute or leaves the folder: the links of the bundled Python, such as `python/bin/python3`, stay inside it; the
    `VERSION` inside must be the release's) and installs from there: the installer of the new release, or, for a portable folder, the replacement of its files.

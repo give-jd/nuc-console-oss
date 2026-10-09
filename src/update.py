@@ -5,14 +5,15 @@ The wrappers (bin/nuc-console-update for Linux and macOS, bin\\nuc-console-updat
 latest release (curl, Invoke-RestMethod: HTTPS only), save the answer and call this file, which decides and verifies:
 
     update.py --release-json FILE --cache DIR [--mode installed|portable] [--app DIR] [--root DIR] [--check] [--yes]
-              [--stage-file FILE]
+              [--stage-file FILE] [--allow-unattested]
 
   * the installed version is VERSION in nuc_config.py of --app (default: the folder of this file);
   * versions are compared as numbers (1.10.0 is newer than 1.9.9), nothing happens when the release is not newer;
   * the archive for this OS and processor (and SHA256SUMS) go to the cache: a file whose SHA-256 is already right is not downloaded
     again (Linux and macOS: nuc-console-X.Y.Z-linux-x86_64, -linux-arm64, -macos-arm64, -macos-x86_64 .tar.gz; Windows: -windows-x64,
     -windows-arm64 .zip; each carries the Python it runs with); the archive is checked against SHA256SUMS (a mismatch deletes it and stops); `gh attestation verify` also runs when
-    gh is installed and logged in (a failure stops; without gh, or without a login, it says that provenance was not checked);
+    gh is installed and logged in (a failure always stops; without gh, or without a login, --mode installed, which runs the installer as root, stops
+    too unless --allow-unattested; --mode portable says that provenance was not checked and goes on);
   * the archive is extracted into a fresh folder of the cache (members that could escape it are refused), and its VERSION must be
     the release's;
   * --mode portable: replaces src/, bin/, docs/ ... of --root with the new ones; data/ and cache/ stay (a git checkout is refused:
@@ -330,6 +331,20 @@ def _link_inside(name, target):
     return joined.startswith(top + "/")
 
 
+def _links_stay_inside(dest, members):
+    """_link_inside only reads the names: two links that each look harmless can lead out when one follows the other. Once
+    unpacked, what every link really resolves to (realpath) must still be inside its top folder; else the folder is deleted."""
+    real = os.path.realpath(dest)
+    for m in members:
+        if not m.issym():
+            continue
+        top = os.path.join(real, _safe_name(m.name)[0])
+        target = os.path.realpath(os.path.join(real, *_safe_name(m.name)))
+        if target != top and not target.startswith(top + os.sep):
+            shutil.rmtree(dest, ignore_errors=True)
+            raise UpdateError("the archive holds links that lead out of its folder: %r" % m.name)
+
+
 def extract(archive, dest):
     """Unpacks a .tar.gz or .zip of the release into dest -> the path of its one top folder (nuc-console-X.Y.Z).
     Absolute paths, '..', devices and hard links are refused, and so is a symbolic link that is absolute or leaves the top folder;
@@ -347,8 +362,13 @@ def extract(archive, dest):
     else:
         with tarfile.open(archive, "r:gz") as t:
             members = t.getmembers()
+            links = set()  # names of the symbolic links seen so far: nothing may be written through one
             for m in members:
+                parts = _safe_name(m.name)
+                if any("/".join(parts[:i]) in links for i in range(1, len(parts))):
+                    raise UpdateError("the archive writes through a link: %r" % m.name)
                 if m.issym():
+                    links.add("/".join(parts))
                     if not _link_inside(m.name, m.linkname):
                         raise UpdateError("the archive holds a link that leaves its folder: %r -> %r" % (m.name, m.linkname))
                 elif not (m.isfile() or m.isdir()):
@@ -363,6 +383,7 @@ def extract(archive, dest):
                 raise UpdateError("archive too big once unpacked")
             kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
             t.extractall(dest, members=members, **kwargs)
+            _links_stay_inside(dest, members)
     tops.discard("")  # an entry for the folder itself ('./')
     if len(tops) != 1:
         raise UpdateError("the archive must hold one top folder, it holds %s" % sorted(tops))
@@ -474,8 +495,10 @@ def clean_stages(cache, older_than=3600):
 
 
 def run_update(release, app, cache, mode="installed", root="", os_name=None, arch=None, check=False, yes=False,
-               stage_file="", download=https_download, attest=gh_attest, confirm=ask, say=print):
-    """-> exit code. Raises UpdateError for what stops an update (the message says why)."""
+               stage_file="", download=https_download, attest=gh_attest, confirm=ask, say=print, allow_unattested=False):
+    """-> exit code. Raises UpdateError for what stops an update (the message says why).
+    Provenance: 'failed' always stops; 'ok' goes on; anything else (no gh, no login, gh not runnable) stops in mode installed,
+    which runs the new installer as root, unless allow_unattested (the --allow-unattested flag); in mode portable it warns."""
     if release.get("draft") or release.get("prerelease"):
         raise UpdateError("the release is a draft or a pre-release: ignored")
     if mode == "portable" and os.path.lexists(os.path.join(root, ".git")):  # a clone is updated by git; this would overwrite tracked files
@@ -512,7 +535,14 @@ def run_update(release, app, cache, mode="installed", root="", os_name=None, arc
     status, message = attest(path)
     if status == "failed":
         raise UpdateError(message + ": not installed")
-    say(message)
+    if status != "ok" and mode == "installed":
+        if not allow_unattested:
+            raise UpdateError(message + ": not installed. An installed update runs the new installer as root, so its provenance must be "
+                              "verified: install gh and run `gh auth login`, or check the archive yourself with `gh attestation verify "
+                              "%s --repo %s` and run again with --allow-unattested" % (path, REPO))
+        say("WARNING: --allow-unattested: %s; going on without independent verification of the release" % message)
+    else:
+        say(message)
     stage = tempfile.mkdtemp(prefix="stage-", dir=cache)
     keep = False
     try:
@@ -547,6 +577,8 @@ def main(argv=None):
     p.add_argument("--root", default="", help="portable: the folder to update")
     p.add_argument("--check", action="store_true", help="only report")
     p.add_argument("--yes", action="store_true", help="do not ask")
+    p.add_argument("--allow-unattested", action="store_true",
+                   help="installed: go on although the build provenance was not verified (no gh, or not logged in); a failed check still stops")
     p.add_argument("--stage-file", default="", help="installed: where the folder to install from is written")
     p.add_argument("--os", dest="os_name")
     p.add_argument("--arch")
@@ -558,7 +590,8 @@ def main(argv=None):
             release = json.load(f)
         if not isinstance(release, dict):
             raise UpdateError("the release answer is not what GitHub sends")
-        return run_update(release, a.app, a.cache, a.mode, a.root, a.os_name, a.arch, a.check, a.yes, a.stage_file)
+        return run_update(release, a.app, a.cache, a.mode, a.root, a.os_name, a.arch, a.check, a.yes, a.stage_file,
+                          allow_unattested=a.allow_unattested)
     except (UpdateError, ValueError, OSError, tarfile.TarError, zipfile.BadZipFile) as e:
         print("nuc-console-update: %s" % e, file=sys.stderr)
         return 1
