@@ -16,7 +16,7 @@ import threading
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
 OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
-VERSION = "2.3.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
+VERSION = "2.4.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
 PORTABLE = os.environ.get("NUC_CONSOLE_HOME", "")  # portable run (run.sh / run.cmd): config, state and baseline in that folder
 if PORTABLE:
     BASE_DIR = os.path.abspath(PORTABLE)
