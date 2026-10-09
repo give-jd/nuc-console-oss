@@ -7,6 +7,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Security
 
+- **A named pipe left in the Telegram inbox no longer stalls the notifier.**
+- **An archive of the AI engine can no longer write outside its folder through a chain of links.**
+
 - **Every action of every workflow is pinned by commit** (`tests.yml` and `ai-pins.yml` were on `@v4`/`@v5` tags), and a test now checks all five.
 - **The collector unit is hardened further**: `LockPersonality`, `RestrictRealtime`, `RestrictSUIDSGID`, `ProtectKernelModules`, `ProtectClock`,
   `ProtectHostname`, `SystemCallArchitectures=native`. Not added, because they would break what only root can do: a capability list, `ProtectKernelTunables`,

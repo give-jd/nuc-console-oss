@@ -129,6 +129,16 @@ class UnpackTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(self.dest + ".part"), "no half-unpacked folder")
                 self.assertFalse(os.path.exists(os.path.join(self.tmp, "evil")))
 
+    @unittest.skipUnless(POSIX, "symbolic links: POSIX")
+    def test_a_chain_of_links_cannot_reach_outside_the_folder(self):
+        # each link is fine alone (a -> . stays, a/l -> .. from depth 1 stays); together l/ is the folder's parent
+        p = self.archive("chain.tgz", tgz([("a", None, 0o777, ".", "sym"), ("a/l", None, 0o777, "..", "sym"),
+                                           ("l/escaped.txt", b"x", 0o644, None, "file")]))
+        with self.assertRaises(aiollama.SetupError):
+            aiollama.unpack(p, self.dest)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "runtime", "escaped.txt")))
+        self.assertFalse(os.path.exists(self.dest + ".part"))
+
     def test_a_hard_link_to_nothing_unpacked_is_refused(self):
         p = self.archive("h.tgz", tgz([("lib/copy", None, 0o644, "lib/missing", "hard")]))
         with self.assertRaises(aiollama.SetupError):
