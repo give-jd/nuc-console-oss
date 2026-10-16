@@ -502,8 +502,8 @@ def save_overlay(path, section, form, overlay=None, load=nuc_config.load):
         if v == value(base, key) or (v == "" and key.unset):
             if name in cur:
                 drop.append(name)
-        elif cur.get(name) != ("" if v == NOTHING else v):
-            put[name] = "" if v == NOTHING else v
+        elif cur.get(name) != ("" if v == NOTHING and key.name == "hidden" else v):  # hidden = (blank) is nothing hidden; kpis = none stays "none"
+            put[name] = "" if v == NOTHING and key.name == "hidden" else v
     if why:
         raise Refused(why)
     if not put and not drop:

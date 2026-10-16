@@ -239,6 +239,11 @@ class Writing(Folder):
         self.assertFalse(os.path.exists(self.ov))
         self.assertEqual(read(self.path), self.config_before)
 
+    def test_kpis_none_is_kept_as_none_and_hidden_none_as_blank(self):
+        self.assertEqual(confedit.save_overlay(self.path, "ui", {"kpis": ["none"], "hidden": ["none"]}, self.ov), ["kpis", "hidden"])
+        self.assertEqual(nuc_config.read_overlay(self.ov), {"ui.kpis": "none", "ui.hidden": ""})
+        self.assertEqual(nuc_config.load(self.path, overlay=self.ov)["ui"]["kpis"], [], "no row: the overlay's none is read as none")
+
 
 class Page(Folder):
     @classmethod
