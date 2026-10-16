@@ -41,6 +41,12 @@ for _k, _f in (("CONFIG", "config.ini"), ("BASELINE", "baseline.json"), ("ACCEPT
                ("STATE", "containers.json"), ("SETTINGS", "settings.ini"), ("BOOT", "boot.json"), ("SENSORS", "sensors.json")):
     os.environ["NUC_CONSOLE_" + _k] = os.path.join(ABSENT, _f)
 os.environ["NUC_CONSOLE_NOTIFY_DIR"] = os.path.join(ABSENT, "notify")
+# the setup guide's marker: present (the guide was seen), so that no page of a test carries the "New here?" banner and its form; test_wizard.py points the
+# variable at a folder of its own to test the banner
+os.makedirs(os.path.join(SCRATCH, "setup"))
+os.environ["NUC_CONSOLE_SETUP"] = os.path.join(SCRATCH, "setup", "setup.json")
+with open(os.environ["NUC_CONSOLE_SETUP"], "w") as _f:
+    _f.write('{"how": "skipped", "at": 0, "version": "0"}')
 
 import nuc_config  # noqa: E402  (after the environment: it reads NUC_CONSOLE_HOME and NUC_CONSOLE_NOTIFY_DIR when imported)
 

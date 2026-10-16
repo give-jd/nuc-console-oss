@@ -28,6 +28,7 @@ Whatever is read from the host outside the demo's data (a file, a command, the e
 """
 import contextlib
 import difflib
+import html
 import io
 import json
 import math as _math
@@ -215,6 +216,11 @@ class FrozenWorld(object):
             self._undo.append((os.environ, None, dict(os.environ)))  # put back on exit; no NO_COLOR of the machine that renders (a case sets its own)
             os.environ.pop("NO_COLOR", None)
             os.environ.update(self.env)
+            marker = os.path.join(self._tmp.name, "setup.json")  # the setup guide's marker: seen, so that no page carries the banner (a case with NUC_GOLDEN_SETUP=fresh has none)
+            os.environ["NUC_CONSOLE_SETUP"] = marker
+            if self.env.get("NUC_GOLDEN_SETUP") != "fresh":
+                with open(marker, "w") as f:
+                    f.write('{"how": "skipped", "at": 0, "version": "0.0.0"}')
             self.set(nuc_config, "PORTABLE", "")  # NUC_CONSOLE_HOME: the portable run words some advice and footers differently
             self.set(nuc_config, "VERSION", "0.0.0")  # the settings page shows it: a release must not change the golden pages
             self.set(socket, "gethostname", lambda: HOST)  # render.demo_defaults() puts the same name on it
@@ -297,7 +303,12 @@ class FrozenWorld(object):
         srv = self.server
         srv.cache.clear()
         page = srv.page(**weburl.view_params(parse_qs(query)))
-        return web_text(str(page), getattr(page, "csp", webhttp.CSP))
+        text = str(page)
+        for path, shown in ((os.environ.get("NUC_CONSOLE_CONFIG"), "/etc/nuc-console/config.ini"),  # the setup guide names the files it reads: in temporary
+                            (os.environ.get("NUC_CONSOLE_SETTINGS"), "/var/lib/nuc-console/ai/settings.ini"),  # folders here, where an installation has them
+                            (os.environ.get("NUC_CONSOLE_SETUP"), "/var/lib/nuc-console/ai/setup.json")):
+            text = text.replace(html.escape(path), shown) if path else text
+        return web_text(text, getattr(page, "csp", webhttp.CSP))
 
 
 # ---- the web files -------------------------------------------------------------------------------------------------------------------
@@ -485,6 +496,10 @@ def _cases():
     # the Telegram page: off and not paired (the steps and the form, with the masked CSRF token); locked by the admin: no form
     add("web-shell-telegram", query="app=1&view=telegram")
     add("web-shell-telegram-locked", query="app=1&view=telegram", cfg={"telegram": {"web_actions": False}})
+    # the setup guide: its five steps (an installation without the overlay: step 4 gives the lines for config.ini), and the banner of a first visit
+    for n in range(1, 6):
+        add(f"web-shell-setup-{n}", query=f"app=1&view=setup&step={n}")
+    add("web-shell-overview-tour", query="app=1", env={"NUC_GOLDEN_SETUP": "fresh"})
     return out
 
 

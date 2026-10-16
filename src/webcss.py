@@ -272,6 +272,27 @@ HELP = """
 .keys dd{margin:0;color:var(--fg);min-width:0}
 """
 
+WIZARD = """
+.wz-steps{display:flex;flex-wrap:wrap;gap:.2em 1em;margin:0;padding:0;list-style:none}
+.wz-steps li{padding:.3em 0;min-width:0}
+.wz-steps [aria-current]{border-bottom:2px solid var(--accent)}
+.wz p{margin:0;overflow-wrap:anywhere;line-height:1.5}
+.wz-h{margin:.5em 0 0;font:600 .7em var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.wz-legend,.wz-list{display:grid;gap:.5em;margin:0;padding:0;list-style:none}
+.wz-legend li{display:flex;flex-wrap:wrap;gap:.1em .6em;align-items:baseline;min-width:0}
+.wz-list li{display:flex;flex-wrap:wrap;gap:.1em .9em;min-width:0;padding-bottom:.4em;border-bottom:1px solid var(--line)}
+.wz-k{flex:0 1 11em;min-width:0;overflow-wrap:anywhere;color:var(--fg-strong)}
+.wz-v{flex:1 1 16em;min-width:0;overflow-wrap:anywhere}
+.wz-n{flex:1 0 100%}
+.wz-on{color:var(--fg-strong)}
+.wz-off{color:var(--muted)}
+.wz-pre{margin:0;padding:.6em .8em;max-width:100%;overflow-x:auto;white-space:pre;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:.88em var(--mono)}
+.wz-nav,.wz-banner{display:flex;flex-wrap:wrap;gap:.5em .8em;align-items:center}
+.wz-nav .btn,.wz-banner .btn{min-height:2.6em;justify-content:center}
+.wz-nav form.f,.wz-banner form.f{margin:0}
+.wz kbd{padding:0 .35em;border:1px solid var(--line-2);border-radius:4px;font:.9em var(--mono)}
+"""
+
 SETTINGS = """
 .settings{max-width:56em;margin:0 auto;padding:var(--pad);display:grid;gap:var(--gap);min-width:0}
 .sec{display:grid;gap:1.1em;min-width:0;padding:var(--pad);background:var(--surface);border:1px solid var(--line);border-radius:8px}
@@ -813,7 +834,7 @@ def graph_zoom_css():
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, WIZARD, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

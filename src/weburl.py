@@ -58,6 +58,7 @@ def view_params(q):
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
     confirm=on|delete|delete-all|clear the question the page asks first (page() drops one that does not apply; on and delete are about sel),
     prompt= the id of the chat's exchange whose whole prompt is shown (page() drops one the chat does not have).
+    view=setup: the setup guide (/setup?step=N is its address), step=1-5.
     view=telegram: the Telegram page (pair this machine with your bot, switch the alerts, test); open=1 there: a redirect to the t.me link of the
     pairing that waits (Handler._tg_open).
     edit=1: the layout editor (the shell's overview in edit mode; with app=0 or another view it is dropped).
@@ -66,7 +67,7 @@ def view_params(q):
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     cols, rows, zoom = num("cols"), num("rows"), num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings", "telegram") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings", "telegram", "setup") else ""
     edit = not view and one("edit") == "1" and one("app") != "0"  # the layout editor: the shell's overview in edit mode (the classic page has none)
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
@@ -87,6 +88,7 @@ def view_params(q):
             "z": gzoom(num("z")),
             "sort": one("sort") if view == "cpu" and one("sort") in screens.CPU_SORTS[1:] else "",
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
+            **({"step": min(5, max(1, num("step")))} if view == "setup" else {}),  # the setup guide's step (wizard.STEPS): 1-5, anything else the nearest
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else "",
                 "prompt": one("prompt") if aiweb.CHAT_ID.fullmatch(one("prompt")) else ""} if view == "ai" else {})}
 
@@ -94,7 +96,7 @@ def view_params(q):
 APP_VIEWS = ("cpu", "health", "map", "ai")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
 HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "setup": ("step",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
 
 
 def ui_oneshot(raw):

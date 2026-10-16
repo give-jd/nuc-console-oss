@@ -367,6 +367,18 @@ carries `csrf` (this process's random token) and `back` (the view to come back t
   settings page for theirs; every other page, every error and every redirect has `form-action 'none'`. There is still no script on the AI page, and `default-src 'none'`.
 - **The page after a post** is never an old cached one (a post clears the page cache); like every page it shows this process's state, the same for every viewer.
 
+## The setup guide
+
+`/setup?step=N` (N = 1-5; anything else is the nearest step) is the first-run wizard, in the shell and in the desktop app: plain links, no script, one URL per step.
+`/?view=setup&step=N` is the same page. It is described in [WIZARD.md](WIZARD.md). Until the guide is finished or skipped, the shell and the live app carry a banner
+**New here? Take the 2-minute tour** with a **Dismiss** button; the footer and the settings page link to the guide for good.
+
+| Route | |
+|---|---|
+| `GET /setup?step=N` | step N (`wizard.clamp`). Same access as every page (Host check, or the token), `form-action 'self'` (the Finish, Skip and step 4's buttons), `Referrer-Policy: same-origin` |
+| `POST /setup/finish`, `POST /setup/skip` | write the marker `setup.json` (next to `settings.ini` in the AI folder; a portable run's own `ai` folder) and redirect (`303`) to `/`, or to `/app` with `to=app`. They change no setting. The same guard as every form: token, CSRF token, `Origin` / `Referer` / `Sec-Fetch-Site`, `application/x-www-form-urlencoded`, 4 KB |
+| `POST /settings/feature`, `/settings/config` with `to=setup` | step 4's forms are the settings page's own actions (the allowlist `nuc_config.OVERLAY_ALLOW`, the opt-in `[web] settings_actions` and `token_file`); `to=setup` only changes where the redirect goes (`/setup?step=4`). A step 4 on an installation without the overlay has no form: it shows the lines to put in `config.ini` |
+
 ## The settings page's switches
 
 In a portable run (`run.sh`, `run.cmd`) and in the desktop app, which is one, `config.ini` is your own file in your own folder and the web view runs as

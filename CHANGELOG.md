@@ -6,6 +6,11 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ## [Unreleased]
 
 ### Added
+- **A setup guide for new users** (issue #56): `/setup?step=N` in the web view and the desktop app, five short steps (what you see and how to read a state; the screens and
+  their keys; what is on and off and what each piece costs or sends away; setting it up; where things live), each its own URL, no script needed, skippable at any step and
+  repeatable from the settings page and the footer. Step 4 writes only through the settings page's own guarded actions (an installation without the overlay gets the lines for
+  `config.ini` instead of a form). Until it is finished or skipped (the marker `setup.json`) the shell shows a dismissible banner. The console shows a text version of steps 1-3
+  once on the first start and on `?` `?`; `render.py --once --view guide` prints it. See [docs/WIZARD.md](docs/WIZARD.md).
 - **The settings page of an installation can change settings**, without making `config.ini` writable and without any privileged helper: what it changes is kept in
   `settings.ini` in the AI folder (`/var/lib/nuc-console/ai`, the folder the web view's account already owns; the same on macOS and Windows) and laid over `config.ini`
   for the screens, the web view and the collector. Only presentation keys can be changed that way: the `[features]` switches (to **off** only: `config.ini` alone switches
