@@ -45,7 +45,7 @@ ASSET_CACHE = "private, max-age=31536000, immutable"  # the name carries the has
 UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear", "load")  # POST /ai/<action>
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
-SETTINGS_ACTIONS = ("feature", "config")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
+SETTINGS_ACTIONS = ("feature", "config", "reset")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS}
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 
@@ -419,8 +419,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
         if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
             return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
-        if area == "settings" and not nuc_config.features_writable()[0]:
-            return self._send(403, ("config.ini is not this page's to write (%s): edit it, then restart\n" % nuc_config.features_writable()[1]).encode())
+        if area == "settings" and not nuc_config.settings_mode(token=srv.token)[0]:
+            return self._send(403, ("the settings page cannot write here (%s): edit config.ini, then restart\n" % nuc_config.settings_mode(token=srv.token)[1]).encode())
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None and site not in ("same-origin", "none"):
@@ -447,8 +447,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except BadRequest as e:
             return self._send(400, ("%s\n" % e).encode())
         except OSError as e:  # the settings: config.ini could not be written (a full disk, a file made read-only meanwhile)
-            print("nuc-console web: config.ini not written: %r" % (e,), file=sys.stderr)
-            return self._send(500, b"config.ini could not be written (see the log)\n")
+            print("nuc-console web: settings not written: %r" % (e,), file=sys.stderr)
+            return self._send(500, b"the settings could not be written (see the log)\n")
         if (self.headers.get("Accept") or "").split(",")[0].strip().lower() == webapi.JSON_TYPE.split(";")[0]:
             return self._json(200, {"to": where})  # the live app's form, sent by its script: where the page goes next (a question to ask first...)
         self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
