@@ -66,7 +66,7 @@ class Files(unittest.TestCase):
         self.assertEqual(sorted(want - have), [], "cases without a file" + HINT)
 
     def test_the_frames_keep_their_line_ends(self):
-        """The lines of a frame end in ESC[K CR LF (so do those of the dashboard page, inside its <pre>); a checkout must not turn them
+        """The lines of a frame end in ESC[K CR LF ; a checkout must not turn them
         into LF (.gitattributes: tests/golden/** -text)."""
         for case in golden.CASES:
             with open(case.path, "rb") as f:
@@ -74,8 +74,6 @@ class Files(unittest.TestCase):
             if case.query is None:
                 self.assertIn(b"\x1b[K\r\n", raw, case.name)
                 self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n") + 1, case.name)  # every line end but the last (a bare LF) is CR LF
-            elif case.name.startswith("web-dashboard"):
-                self.assertIn(b"\r\n", raw, case.name)
 
     def test_line_endings_are_pinned(self):
         with open(os.path.join(os.path.dirname(golden.HERE), ".gitattributes"), encoding="utf-8") as f:
@@ -87,8 +85,8 @@ class Files(unittest.TestCase):
         for w, h in golden.SIZES:
             for spacing in (0, 1):
                 self.assertIn(f"overview-{w}x{h}-spacing{spacing}", names)
-        for name in ("overview-windows-200x50", "overview-darwin-200x50", "web-dashboard", "web-dashboard-full", "web-cpu", "web-map-tree",
-                     "web-map-graph", "web-health", "web-ai", "rotate-120x33-system", "rotate-226x50-boot", "details-79x24-1",
+        for name in ("overview-windows-200x50", "overview-darwin-200x50", "web-shell-overview", "web-shell-cpu", "web-shell-map",
+                     "web-shell-map-graph", "web-shell-health", "web-shell-ai", "rotate-120x33-system", "rotate-226x50-boot", "details-79x24-1",
                      "map-120x33", "cpu-sort-mem-200x50", "health-none-200x50", "ai-details-120x33", "slide-health-120x33"):
             self.assertIn(name, names)
 

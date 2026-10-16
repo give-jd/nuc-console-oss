@@ -9,23 +9,23 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="c04f169b2e">
+<header class="topbar" data-card="__top" data-rev="5f3ce19aa3">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
-<a href="/?app=1" data-key="1" aria-current="page">
+<a href="/?" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
-<a href="/?app=1&amp;view=map" data-key="2">
+<a href="/?view=map" data-key="2">
 <kbd>2</kbd>Map <span class="badge">7</span>
 </a>
-<a href="/?app=1&amp;view=cpu" data-key="3">
+<a href="/?view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
-<a href="/?app=1&amp;view=health" data-key="4">
+<a href="/?view=health" data-key="4">
 <kbd>4</kbd>Health <span class="badge">
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5">
+<a href="/?view=ai" data-key="5">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -33,7 +33,7 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+<a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
 <div class="kpiblock" data-card="__kpis" data-rev="439277b829">
@@ -96,8 +96,8 @@
 <section class="ebar" aria-label="Layout editor">
 <div class="eh">
 <h2>Edit layout</h2>
-<a class="lnk" href="/?app=1">Done</a>
-<a class="lnk" data-set href="/?set=ereset&amp;back=app%3D1%26edit%3D1">Reset layout</a>
+<a class="lnk" href="/?">Done</a>
+<a class="lnk" data-set href="/?set=ereset&amp;back=edit%3D1">Reset layout</a>
 </div>
 <p class="hintl">Each card has its own buttons: ↑ ↓ move it, − + make it narrower or wider (1 to 4 columns), ✕ hides it, and a hidden card has a <b>show</b> button. With JavaScript you can also drag a card by its ⠿ handle, drag its right edge to resize it, or focus a card and press Space, then the arrow keys, + and −, x and Esc (<a href="#help">help</a>). Every change is saved at once.</p>
 <p class="hintl">While a layout is in force (yours or config.ini's) the cards stay in this order (the order is fixed), instead of moving by severity, unless the order is set to severity. <b>Reset layout</b> brings the preset's back.</p>
@@ -105,20 +105,20 @@
 </p>
 </section>
 <main class="grid" data-edit>
-<article class="card s2 st-err" data-card="attention" data-rev="904cb972ad" id="c-attention" data-state="err" data-title="ATTENTION">
+<article class="card s2 st-err" data-card="attention" data-rev="dce2578d8d" id="c-attention" data-state="err" data-title="ATTENTION">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of ATTENTION">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euat&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: ATTENTION" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edat&amp;back=app%3D1%26edit%3D1" aria-label="Later: ATTENTION" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esat&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: ATTENTION" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euat&amp;back=edit%3D1" aria-label="Earlier: ATTENTION" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edat&amp;back=edit%3D1" aria-label="Later: ATTENTION" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esat&amp;back=edit%3D1" aria-label="Narrower: ATTENTION" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egat&amp;back=app%3D1%26edit%3D1" aria-label="Wider: ATTENTION" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehat&amp;back=app%3D1%26edit%3D1" aria-label="ATTENTION: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egat&amp;back=edit%3D1" aria-label="Wider: ATTENTION" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehat&amp;back=edit%3D1" aria-label="ATTENTION: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -209,20 +209,20 @@
 </p>
 </div>
 </article>
-<article class="card s2 st-err" data-card="exposure" data-rev="245c65aebb" id="c-exposure" data-state="err" data-title="EXPOSURE">
+<article class="card s2 st-err" data-card="exposure" data-rev="6534818173" id="c-exposure" data-state="err" data-title="EXPOSURE">
 <div class="ch">
 <h3>EXPOSURE</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of EXPOSURE">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euex&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: EXPOSURE" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edex&amp;back=app%3D1%26edit%3D1" aria-label="Later: EXPOSURE" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esex&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: EXPOSURE" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euex&amp;back=edit%3D1" aria-label="Earlier: EXPOSURE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edex&amp;back=edit%3D1" aria-label="Later: EXPOSURE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esex&amp;back=edit%3D1" aria-label="Narrower: EXPOSURE" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egex&amp;back=app%3D1%26edit%3D1" aria-label="Wider: EXPOSURE" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehex&amp;back=app%3D1%26edit%3D1" aria-label="EXPOSURE: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egex&amp;back=edit%3D1" aria-label="Wider: EXPOSURE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehex&amp;back=edit%3D1" aria-label="EXPOSURE: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -371,7 +371,7 @@
 </ul>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="webapps" data-rev="a163b3c5be" id="c-webapps" data-state="ok" data-title="WEB APPS">
+<article class="card s1 st-ok" data-card="webapps" data-rev="9d9644b79f" id="c-webapps" data-state="ok" data-title="WEB APPS">
 <div class="ch">
 <h3>WEB APPS</h3>
 <span class="note">4 active · 1 down (expected)</span>
@@ -379,13 +379,13 @@
 </div>
 <div class="ectl" role="group" aria-label="Layout of WEB APPS">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euwa&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: WEB APPS" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edwa&amp;back=app%3D1%26edit%3D1" aria-label="Later: WEB APPS" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=eswa&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: WEB APPS" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euwa&amp;back=edit%3D1" aria-label="Earlier: WEB APPS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edwa&amp;back=edit%3D1" aria-label="Later: WEB APPS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=eswa&amp;back=edit%3D1" aria-label="Narrower: WEB APPS" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egwa&amp;back=app%3D1%26edit%3D1" aria-label="Wider: WEB APPS" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehwa&amp;back=app%3D1%26edit%3D1" aria-label="WEB APPS: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egwa&amp;back=edit%3D1" aria-label="Wider: WEB APPS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehwa&amp;back=edit%3D1" aria-label="WEB APPS: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -480,20 +480,20 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="firewall" data-rev="0fb206670e" id="c-firewall" data-state="warn" data-title="FIREWALL">
+<article class="card s1 st-warn" data-card="firewall" data-rev="0cea7edb6d" id="c-firewall" data-state="warn" data-title="FIREWALL">
 <div class="ch">
 <h3>FIREWALL</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of FIREWALL">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eufw&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: FIREWALL" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edfw&amp;back=app%3D1%26edit%3D1" aria-label="Later: FIREWALL" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esfw&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: FIREWALL" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eufw&amp;back=edit%3D1" aria-label="Earlier: FIREWALL" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edfw&amp;back=edit%3D1" aria-label="Later: FIREWALL" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esfw&amp;back=edit%3D1" aria-label="Narrower: FIREWALL" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egfw&amp;back=app%3D1%26edit%3D1" aria-label="Wider: FIREWALL" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehfw&amp;back=app%3D1%26edit%3D1" aria-label="FIREWALL: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egfw&amp;back=edit%3D1" aria-label="Wider: FIREWALL" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehfw&amp;back=edit%3D1" aria-label="FIREWALL: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -558,7 +558,7 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="system" data-rev="3d67c885cd" id="c-system" data-state="ok" data-title="SYSTEM">
+<article class="card s1 st-ok" data-card="system" data-rev="93128e2589" id="c-system" data-state="ok" data-title="SYSTEM">
 <div class="ch">
 <h3>SYSTEM</h3>
 <span class="note">up 5d 0h · load 0.82 0.64 0.51</span>
@@ -566,13 +566,13 @@
 </div>
 <div class="ectl" role="group" aria-label="Layout of SYSTEM">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eusy&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: SYSTEM" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edsy&amp;back=app%3D1%26edit%3D1" aria-label="Later: SYSTEM" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=essy&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: SYSTEM" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eusy&amp;back=edit%3D1" aria-label="Earlier: SYSTEM" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edsy&amp;back=edit%3D1" aria-label="Later: SYSTEM" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=essy&amp;back=edit%3D1" aria-label="Narrower: SYSTEM" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egsy&amp;back=app%3D1%26edit%3D1" aria-label="Wider: SYSTEM" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehsy&amp;back=app%3D1%26edit%3D1" aria-label="SYSTEM: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egsy&amp;back=edit%3D1" aria-label="Wider: SYSTEM" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehsy&amp;back=edit%3D1" aria-label="SYSTEM: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -824,24 +824,24 @@
 </tbody>
 </table>
 <p class="more">
-<a href="/?app=1&amp;card=system">… the whole card</a>
+<a href="/?card=system">… the whole card</a>
 </p>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="containers" data-rev="c9b2a74c3b" id="c-containers" data-state="warn" data-title="CONTAINER">
+<article class="card s1 st-warn" data-card="containers" data-rev="746290d878" id="c-containers" data-state="warn" data-title="CONTAINER">
 <div class="ch">
 <h3>CONTAINER</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of CONTAINER">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euct&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: CONTAINER" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edct&amp;back=app%3D1%26edit%3D1" aria-label="Later: CONTAINER" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esct&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: CONTAINER" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euct&amp;back=edit%3D1" aria-label="Earlier: CONTAINER" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edct&amp;back=edit%3D1" aria-label="Later: CONTAINER" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esct&amp;back=edit%3D1" aria-label="Narrower: CONTAINER" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egct&amp;back=app%3D1%26edit%3D1" aria-label="Wider: CONTAINER" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehct&amp;back=app%3D1%26edit%3D1" aria-label="CONTAINER: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egct&amp;back=edit%3D1" aria-label="Wider: CONTAINER" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehct&amp;back=edit%3D1" aria-label="CONTAINER: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -882,7 +882,7 @@
 </section>
 </div>
 </article>
-<article class="card s1 st-err" data-card="databases" data-rev="9446e162ae" id="c-databases" data-state="err" data-title="DATABASE">
+<article class="card s1 st-err" data-card="databases" data-rev="5dc6b15f96" id="c-databases" data-state="err" data-title="DATABASE">
 <div class="ch">
 <h3>DATABASE</h3>
 <span class="note">3 running · 1 exposed</span>
@@ -890,13 +890,13 @@
 </div>
 <div class="ectl" role="group" aria-label="Layout of DATABASE">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eudb&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DATABASE" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=eddb&amp;back=app%3D1%26edit%3D1" aria-label="Later: DATABASE" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esdb&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DATABASE" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eudb&amp;back=edit%3D1" aria-label="Earlier: DATABASE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddb&amp;back=edit%3D1" aria-label="Later: DATABASE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdb&amp;back=edit%3D1" aria-label="Narrower: DATABASE" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egdb&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DATABASE" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehdb&amp;back=app%3D1%26edit%3D1" aria-label="DATABASE: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egdb&amp;back=edit%3D1" aria-label="Wider: DATABASE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdb&amp;back=edit%3D1" aria-label="DATABASE: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1006,20 +1006,20 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="boot" data-rev="dba7ef2664" id="c-boot" data-state="warn" data-title="BOOT">
+<article class="card s1 st-warn" data-card="boot" data-rev="b25172771f" id="c-boot" data-state="warn" data-title="BOOT">
 <div class="ch">
 <h3>BOOT</h3>
 <span class="chip st-warn">! warn</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of BOOT">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eubo&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: BOOT" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edbo&amp;back=app%3D1%26edit%3D1" aria-label="Later: BOOT" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esbo&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: BOOT" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eubo&amp;back=edit%3D1" aria-label="Earlier: BOOT" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edbo&amp;back=edit%3D1" aria-label="Later: BOOT" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esbo&amp;back=edit%3D1" aria-label="Narrower: BOOT" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egbo&amp;back=app%3D1%26edit%3D1" aria-label="Wider: BOOT" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehbo&amp;back=app%3D1%26edit%3D1" aria-label="BOOT: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egbo&amp;back=edit%3D1" aria-label="Wider: BOOT" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehbo&amp;back=edit%3D1" aria-label="BOOT: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1159,7 +1159,7 @@
 </div>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="network_traffic" data-rev="bb46c91805" id="c-network_traffic" data-state="ok" data-title="NETWORK TRAFFIC">
+<article class="card s1 st-ok" data-card="network_traffic" data-rev="938ce1a2c6" id="c-network_traffic" data-state="ok" data-title="NETWORK TRAFFIC">
 <div class="ch">
 <h3>NETWORK TRAFFIC</h3>
 <span class="note">↓ received · ↑ sent</span>
@@ -1167,13 +1167,13 @@
 </div>
 <div class="ectl" role="group" aria-label="Layout of NETWORK TRAFFIC">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eunt&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: NETWORK TRAFFIC" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=ednt&amp;back=app%3D1%26edit%3D1" aria-label="Later: NETWORK TRAFFIC" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esnt&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: NETWORK TRAFFIC" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eunt&amp;back=edit%3D1" aria-label="Earlier: NETWORK TRAFFIC" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=ednt&amp;back=edit%3D1" aria-label="Later: NETWORK TRAFFIC" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esnt&amp;back=edit%3D1" aria-label="Narrower: NETWORK TRAFFIC" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egnt&amp;back=app%3D1%26edit%3D1" aria-label="Wider: NETWORK TRAFFIC" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehnt&amp;back=app%3D1%26edit%3D1" aria-label="NETWORK TRAFFIC: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egnt&amp;back=edit%3D1" aria-label="Wider: NETWORK TRAFFIC" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehnt&amp;back=edit%3D1" aria-label="NETWORK TRAFFIC: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1226,20 +1226,20 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="sessions" data-rev="8c35e9daa6" id="c-sessions" data-state="ok" data-title="SESSIONS">
+<article class="card s1 st-ok" data-card="sessions" data-rev="4e49010a43" id="c-sessions" data-state="ok" data-title="SESSIONS">
 <div class="ch">
 <h3>SESSIONS</h3>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of SESSIONS">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euse&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: SESSIONS" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edse&amp;back=app%3D1%26edit%3D1" aria-label="Later: SESSIONS" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esse&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: SESSIONS" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euse&amp;back=edit%3D1" aria-label="Earlier: SESSIONS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edse&amp;back=edit%3D1" aria-label="Later: SESSIONS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esse&amp;back=edit%3D1" aria-label="Narrower: SESSIONS" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egse&amp;back=app%3D1%26edit%3D1" aria-label="Wider: SESSIONS" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehse&amp;back=app%3D1%26edit%3D1" aria-label="SESSIONS: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egse&amp;back=edit%3D1" aria-label="Wider: SESSIONS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehse&amp;back=edit%3D1" aria-label="SESSIONS: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1255,7 +1255,7 @@
 </ul>
 </div>
 </article>
-<article class="card s1 st-warn" data-card="tailscale" data-rev="83e1e160e8" id="c-tailscale" data-state="warn" data-title="TAILSCALE">
+<article class="card s1 st-warn" data-card="tailscale" data-rev="59906c1acd" id="c-tailscale" data-state="warn" data-title="TAILSCALE">
 <div class="ch">
 <h3>TAILSCALE</h3>
 <span class="note">demo-host · 1/2 nodes online</span>
@@ -1263,13 +1263,13 @@
 </div>
 <div class="ectl" role="group" aria-label="Layout of TAILSCALE">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=euts&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: TAILSCALE" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=edts&amp;back=app%3D1%26edit%3D1" aria-label="Later: TAILSCALE" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=ests&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: TAILSCALE" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=euts&amp;back=edit%3D1" aria-label="Earlier: TAILSCALE" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=edts&amp;back=edit%3D1" aria-label="Later: TAILSCALE" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=ests&amp;back=edit%3D1" aria-label="Narrower: TAILSCALE" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egts&amp;back=app%3D1%26edit%3D1" aria-label="Wider: TAILSCALE" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehts&amp;back=app%3D1%26edit%3D1" aria-label="TAILSCALE: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egts&amp;back=edit%3D1" aria-label="Wider: TAILSCALE" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehts&amp;back=edit%3D1" aria-label="TAILSCALE: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1318,20 +1318,20 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="docker_disk" data-rev="40aec4dcbd" id="c-docker_disk" data-state="ok" data-title="DOCKER · DISK">
+<article class="card s1 st-ok" data-card="docker_disk" data-rev="552750b23e" id="c-docker_disk" data-state="ok" data-title="DOCKER · DISK">
 <div class="ch">
 <h3>DOCKER · DISK</h3>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of DOCKER · DISK">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eudd&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DOCKER · DISK" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=eddd&amp;back=app%3D1%26edit%3D1" aria-label="Later: DOCKER · DISK" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esdd&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DOCKER · DISK" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eudd&amp;back=edit%3D1" aria-label="Earlier: DOCKER · DISK" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddd&amp;back=edit%3D1" aria-label="Later: DOCKER · DISK" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdd&amp;back=edit%3D1" aria-label="Narrower: DOCKER · DISK" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egdd&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DOCKER · DISK" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehdd&amp;back=app%3D1%26edit%3D1" aria-label="DOCKER · DISK: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egdd&amp;back=edit%3D1" aria-label="Wider: DOCKER · DISK" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdd&amp;back=edit%3D1" aria-label="DOCKER · DISK: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1390,20 +1390,20 @@
 </p>
 </div>
 </article>
-<article class="card s1 st-ok" data-card="disks" data-rev="288b63f6bf" id="c-disks" data-state="ok" data-title="DISKS">
+<article class="card s1 st-ok" data-card="disks" data-rev="830d4c0bf3" id="c-disks" data-state="ok" data-title="DISKS">
 <div class="ch">
 <h3>DISKS</h3>
 <span class="chip st-ok">✔ ok</span>
 </div>
 <div class="ectl" role="group" aria-label="Layout of DISKS">
 <span class="grip" data-drag aria-hidden="true" title="Drag to move">⠿</span>
-<a class="eb" data-earlier href="/?set=eudi&amp;back=app%3D1%26edit%3D1" aria-label="Earlier: DISKS" title="Earlier">↑</a>
-<a class="eb" data-later href="/?set=eddi&amp;back=app%3D1%26edit%3D1" aria-label="Later: DISKS" title="Later">↓</a>
-<a class="eb" data-shrink href="/?set=esdi&amp;back=app%3D1%26edit%3D1" aria-label="Narrower: DISKS" title="Narrower">−</a>
+<a class="eb" data-earlier href="/?set=eudi&amp;back=edit%3D1" aria-label="Earlier: DISKS" title="Earlier">↑</a>
+<a class="eb" data-later href="/?set=eddi&amp;back=edit%3D1" aria-label="Later: DISKS" title="Later">↓</a>
+<a class="eb" data-shrink href="/?set=esdi&amp;back=edit%3D1" aria-label="Narrower: DISKS" title="Narrower">−</a>
 <span class="wv" aria-hidden="true">
 </span>
-<a class="eb" data-grow href="/?set=egdi&amp;back=app%3D1%26edit%3D1" aria-label="Wider: DISKS" title="Wider">+</a>
-<a class="eb eb-hide" data-hide href="/?set=ehdi&amp;back=app%3D1%26edit%3D1" aria-label="DISKS: hide or show" title="Hide or show">
+<a class="eb" data-grow href="/?set=egdi&amp;back=edit%3D1" aria-label="Wider: DISKS" title="Wider">+</a>
+<a class="eb eb-hide" data-hide href="/?set=ehdi&amp;back=edit%3D1" aria-label="DISKS: hide or show" title="Hide or show">
 <span class="t-hide">✕</span>
 <span class="t-show">show</span>
 </a>
@@ -1448,13 +1448,13 @@
 </article>
 </main>
 <footer class="foot">
-<a href="/?app=1">Done</a>
-<span class="dot">·</span>text <a href="/?zoom=90&amp;app=1&amp;edit=1">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;edit=1">A+</a>
+<a href="/?">Done</a>
+<span class="dot">·</span>text <a href="/?zoom=90&amp;edit=1">A−</a> 100% <a href="/?zoom=110&amp;edit=1">A+</a>
 <span class="dot">·</span>
-<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=app%3D1%26edit%3D1">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26edit%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26edit%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26edit%3D1">high contrast</a>
+<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=edit%3D1">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=edit%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=edit%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=edit%3D1">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=app%3D1%26edit%3D1">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=app%3D1%26edit%3D1">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=app%3D1%26edit%3D1">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=edit%3D1">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=edit%3D1">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=edit%3D1">compact</a>
 </span>
 <span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>

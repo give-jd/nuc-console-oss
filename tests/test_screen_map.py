@@ -248,12 +248,6 @@ class Web(unittest.TestCase):
             sel = re.search(r"sel=([0-9a-f]*)", stdhtml.unescape(href))
             self.assertEqual(sel.group(1) if sel else "", "" if key == golden.SELECTED["row"] else key)
 
-    def test_the_classic_pages_are_unchanged(self):
-        classic = self.page("app=0&view=map")
-        self.assertIn('class="ro', classic)
-        self.assertNotIn("mapv", classic)
-        self.assertNotIn("mapv", self.page("app=1&view=map&as=graph"))  # the graph view is the old drawing
-
     def test_nothing_the_machine_wrote_is_markup(self):
         def evil(G):
             for n in G["nodes"].values():

@@ -20,10 +20,9 @@ import web  # noqa: E402
 import webmap  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 
 EVIL = '<script>x</script>"onmouseover=alert(1) \'x'
-ROW = re.compile(r'<div class="ro( sel)?" id="r-([0-9a-f]{10})">(.*?)</div>')
+ROW = re.compile(r'<li class="ob( [^"]*)?" data-depth="\d+">(.*?)</li>', re.S)
 
 
 def serve():
@@ -33,7 +32,6 @@ def serve():
     return srv
 
 
-@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)
@@ -43,19 +41,24 @@ def get(srv, path="/"):
     return r.status, dict(r.getheaders()), body
 
 
+def view_of(page):
+    start = page.index('data-card="__view"')
+    return page[page.rindex("<", 0, start):page.index("</main>", start)]
+
+
 def rows_of(page):
-    """[(key, selected, toggle href or None, toggle glyph, label href, label text)] of a map page."""
+    """[(key, selected, toggle href or None, toggle glyph, label href, label text)] of the tree of a map page."""
     out = []
-    for sel, key, inner in ROW.findall(page):
-        tog = re.search(r'<a class="tg"[^>]*href="([^"]*)">([^<]*)</a>', inner)
-        lab = re.search(r'<a class="lb[^"]*" href="([^"]*)">([^<]*)</a>', inner)
-        out.append((key, bool(sel), html.unescape(tog.group(1)) if tog else None, tog.group(2) if tog else None,
-                    html.unescape(lab.group(1)), html.unescape(lab.group(2))))
+    for sel, inner in ROW.findall(view_of(page)):
+        tog = re.search(r'<(?:a|span) class="tg[^"]*"(?: href="([^"]*)")?[^>]*>(?:<span[^>]*>)?([^<]*)', inner)
+        lab = re.search(r'<a class="oa"[^>]* href="([^"]*)"[^>]* data-k="o-([0-9a-f]{10})"[^>]*>(.*?)</a>', inner, re.S)
+        out.append((lab.group(2), "sel" in sel.split(), html.unescape(tog.group(1)) if tog.group(1) else None, tog.group(2),
+                    html.unescape(lab.group(1)), html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", lab.group(3)))).strip()))
     return out
 
 
 def link(page, text):
-    m = re.search(r'<a href="([^"]*)">' + re.escape(text) + "</a>", page)
+    m = re.search(r'<a [^>]*href="([^"]*)"[^>]*>' + re.escape(text) + "</a>", page)
     return html.unescape(m.group(1)) if m else None
 
 
@@ -90,28 +93,25 @@ class MapPage(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
-        self.assertNotIn("<script", body.lower())
-        self.assertNotIn("<form", body.lower())
+        self.assertNotIn("<script", view_of(body).lower())
+        self.assertNotIn("<form", view_of(body).lower())
         self.assertIsNone(re.search(r"\son[a-z]+=", body))                          # no inline event handler
         self.assertIn(html.escape(graph.LEGEND.split("  ")[0].split(" ")[1]), body)
         self.assertIn("━━►", body)
-        self.assertIn("demo-host │ MAP", body)
-        self.assertIn('class="hd w bR B"', body)                                    # the demo has problems: the red banner
+        self.assertIn("<title>demo-host · map · nuc-console</title>", body)
         self.assertIn('<meta http-equiv="refresh" content="2">', body)
         rs = rows_of(body)
         labels = [r[5] for r in rs]
         for root in ("INTERNET", "LAN", "LOCAL", "STACKS"):
-            self.assertIn(root, labels)
+            self.assertTrue(any(root in x for x in labels), root)
         self.assertEqual(len({r[0] for r in rs}), len(rs))                          # one id per row
-        for key, _, tog, _, lab, _ in rs:                                           # the browser stays on the clicked row
-            self.assertTrue(lab.endswith("#r-" + key), lab)
+        for key, _, tog, _, lab, _ in rs:
             self.assertEqual(params(lab)["sel"], key)
-            if tog:
-                self.assertTrue(tog.endswith("#r-" + key), tog)
-        self.assertRegex(body, r'<a class="lb r" href="[^"]*">✖ worker-1</a>')       # down: red, and a symbol besides the colour
+        self.assertRegex(body, r'<span class="sym">✖</span> <span class="t-err">worker-1</span>')   # down: red, and a symbol besides the colour
         G, _ = render.map_graph()
-        self.assertEqual(labels, [graph.parts(G, r)["label"] if graph.parts(G, r)["state"] not in webmap.STATE_MARK
-                                  else webmap.STATE_MARK[graph.parts(G, r)["state"]] + graph.parts(G, r)["label"] for r in graph.rows(G)])
+        self.assertEqual(len(rs), len(graph.rows(G)))
+        for r, row in zip(rs, graph.rows(G)):
+            self.assertIn(graph.parts(G, row)["label"], r[5])
 
     def test_toggle_links_add_and_remove_keys(self):
         body = self.page("/?view=map")
@@ -136,53 +136,49 @@ class MapPage(unittest.TestCase):
 
     def test_footer_expand_collapse_only_pause(self):
         body = self.page("/?view=map&zoom=150&refresh=5")
-        everything = self.page(link(body, "expand all"))
-        self.assertEqual(params(link(body, "expand all"))["all"], True)
+        view, foot = view_of(body), body[body.index("<footer"):]
+        everything = self.page(link(view, "expand all"))
+        self.assertEqual(params(link(view, "expand all"))["all"], True)
         self.assertNotIn("▸", [r[3] for r in rows_of(everything)])                 # every branch open
         self.assertGreater(len(rows_of(everything)), len(rows_of(body)))
         for k in rows_of(everything)[3:6]:                                          # with everything open, closing = shut
             if k[2]:
                 self.assertIn(k[0], params(k[2])["shut"])
-        folded = self.page(link(everything, "collapse all"))
+        folded = self.page(link(view_of(everything), "collapse all"))
         self.assertEqual(rows_of(folded), rows_of(body))
-        only = self.page(link(body, "problems only"))
-        self.assertTrue(params(link(body, "problems only"))["only"])
+        only = self.page(link(view, "problems only"))
+        self.assertTrue(params(link(view, "problems only"))["only"])
         self.assertLessEqual(len(rows_of(only)), len(rows_of(body)))
-        self.assertIsNotNone(link(only, "all paths"))
+        self.assertIsNotNone(link(view_of(only), "all paths"))
         G, _ = render.map_graph()
         self.assertEqual([r[0] for r in rows_of(only)], [r["key"] for r in graph.rows(G, graph.State(only=True))])
-        paused = self.page(link(body, "pause"))
+        paused = self.page(link(foot, "pause"))
         self.assertNotIn('http-equiv="refresh"', paused)
         self.assertIn("paused", paused)
-        self.assertIn('http-equiv="refresh"', self.page(link(paused, "live")))
-        for url in (link(body, "expand all"), link(body, "pause"), rows_of(body)[0][4], rows_of(body)[0][2]):  # every link keeps them
+        self.assertIn('http-equiv="refresh"', self.page(link(paused[paused.index("<footer"):], "resume")))
+        for url in (link(view, "expand all"), link(foot, "pause"), rows_of(body)[0][4], rows_of(body)[0][2]):  # every link keeps them
             self.assertEqual([params(url)[k] for k in ("view", "zoom", "refresh")], ["map", 150, 5], url)
-        self.assertEqual([params(link(body, "A+"))[k] for k in ("view", "zoom", "refresh")], ["map", 175, 5])
-        self.assertEqual([params(link(body, "+"))[k] for k in ("view", "zoom", "refresh")], ["map", 150, 6])
-        dash = link(body, "dashboard")                                              # back, same size and refresh
-        self.assertEqual((params(dash)["view"], params(dash)["zoom"], params(dash)["refresh"]), ("", 150, 5))
+        self.assertEqual([params(link(foot, "A+"))[k] for k in ("view", "zoom", "refresh")], ["map", 175, 5])
+        self.assertEqual([params(link(foot, "+"))[k] for k in ("view", "zoom", "refresh")], ["map", 150, 6])
 
     def test_selected_row_shows_the_details_of_its_node(self):
         body = self.page("/?view=map&all=1")
-        self.assertNotIn('id="details"', body)
-        target = next(r for r in rows_of(body) if r[5] == "shop-db-1")
-        page = self.page(target[4].split("#")[0])
-        self.assertIn('id="details"', page)
-        self.assertIn('class="mp two"', page)
+        self.assertNotIn('class="props"', body)
+        target = next(r for r in rows_of(body) if "shop-db-1" in r[5])
+        page = self.page(target[4])
+        self.assertIn('class="props"', page)
         self.assertTrue([r for r in rows_of(page) if r[0] == target[0]][0][1])     # highlighted
         G, _ = render.map_graph()
-        for label, value, _ in graph.details(G, "ct:shop-db-1"):
-            self.assertIn(html.escape(str(value)), page, label)
+        shown = re.search(r'<aside class="props">.*?</aside>', page, re.S).group(0)
+        self.assertGreaterEqual(shown.count("<dt"), len(graph.details(G, "ct:shop-db-1")))   # every fact of the node is a line
         self.assertIn("postgres:16", page)
         close = re.search(r'<a href="([^"]*)">close ✕</a>', page).group(1)
         self.assertEqual(params(html.unescape(close))["sel"], "")
-        self.assertTrue(html.unescape(close).endswith("#r-" + target[0]))
         self.assertIn("expand all", page)
-        self.assertTrue(link(page, "pause").endswith("#r-" + target[0]))            # the footer keeps the row in sight
         hidden = self.page(f"/?view=map&sel={target[0]}")                           # its branch closed: still described
         self.assertIn("postgres:16", hidden)
-        gone = self.page("/?view=map&sel=0123456789")
-        self.assertIn("no longer on the map", gone)
+        gone = self.page("/?view=map&sel=0123456789")                               # no such row: dropped, nothing described
+        self.assertNotIn('class="props"', gone)
 
     def test_invalid_parameters_are_dropped(self):
         q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
@@ -196,10 +192,10 @@ class MapPage(unittest.TestCase):
         self.assertEqual(q("shut=" + many)["shut"], tuple("%010x" % i for i in range(weburl.MAX_KEYS)))
         plain = rows_of(self.page("/?view=map"))
         for path in ("/?view=map&open=" + many, "/?view=map&shut=" + many + "&all=1", "/?view=map&sel=" + "a" * 5000,
-                     "/?view=map&zoom=99999999999999999999&refresh=-1&cols=x&open=%3Cscript%3E", "/?view=map&open=&shut=&sel=",
+                     "/?view=map&zoom=99999999999999999999&refresh=-1&open=%3Cscript%3E", "/?view=map&open=&shut=&sel=",
                      "/?view=map&all=1&open=" + many):
             body = self.page(path)
-            self.assertNotIn("<script", body.lower())
+            self.assertNotIn("<script", view_of(body).lower())
             self.assertNotIn("0000000001", body)                                   # keys naming no row are not repeated
         self.assertEqual(rows_of(self.page("/?view=map&open=" + many)), plain)
         self.assertLess(len(self.page("/?view=map&open=" + many)), 3 * len(self.page("/?view=map")))
@@ -235,8 +231,8 @@ class MapPage(unittest.TestCase):
             for i in range(40):
                 body = self.page("/?view=map&refresh=10&sel=%010x&open=%010x" % (i, i + 1000))
             self.assertEqual(len(calls), 1)
-            self.assertEqual(len([k for k in self.srv.cache if k[0] == "map"]), 40)   # forty pages, one graph
-            self.assertIn("no longer on the map", body)
+            self.assertEqual(len([k for k in self.srv.cache if k[:2] == ("shell", "map")]), 40)   # forty pages, one graph
+            self.assertNotIn('class="props"', body)
             t, graph_pb = self.srv.cache[("map graph",)]
             self.srv.cache[("map graph",)] = (t - 5, graph_pb)                        # r/2 later: the map follows the state
             self.page("/?view=map&refresh=10&sel=0123456789")
@@ -259,8 +255,8 @@ class MapPage(unittest.TestCase):
         render.map_graph = evil
         try:
             body = self.page("/?view=map&all=1")
-            key = next(r for r in rows_of(body) if r[5] == EVIL)[0]
-            body += self.page(f"/?view=map&all=1&sel={key}")
+            key = next(r for r in rows_of(body) if EVIL in r[5])[0]
+            body = view_of(body) + view_of(self.page(f"/?view=map&all=1&sel={key}"))
         finally:
             render.map_graph = saved
         self.assertNotIn("<script", body.lower())
@@ -268,9 +264,10 @@ class MapPage(unittest.TestCase):
         self.assertNotIn("'x", body)
         self.assertIn("&lt;script&gt;x&lt;/script&gt;&quot;onmouseover=alert(1) &#x27;x", body)
 
-    def test_map_link_on_the_dashboard_and_the_feature_switch(self):
+    def test_map_tab_and_the_feature_switch(self):
+        tabs = lambda b: re.search(r'<nav class="tabs".*?</nav>', b).group(0)  # noqa: E731
         _, _, dash = get(self.srv, "/?zoom=150")
-        self.assertEqual(link(dash, "map"), "/?view=map&zoom=150")
+        self.assertIn('href="/?zoom=150&amp;view=map"', tabs(dash))
         saved = render.CFG["features"].get("map", True)
         render.CFG["features"]["map"] = False
         try:
@@ -279,22 +276,20 @@ class MapPage(unittest.TestCase):
             st, h, off = get(self.srv, "/?view=map&all=1")
         finally:
             render.CFG["features"]["map"] = saved
-        self.assertIsNone(link(dash, "map"))
-        self.assertNotIn("view=map", dash)
+        self.assertNotIn("view=map", tabs(dash))
         self.assertEqual(st, 200)
         self.assertIn("map disabled in config.ini", off)
-        self.assertNotIn('class="ro', off)
+        self.assertNotIn('class="ob', off)
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
-        self.assertEqual(link(off, "dashboard"), "/?")
+        self.assertIn('href="/?" data-key="1"', off)                                # the way out is still there
 
-    @classic_default()
     def test_cache_is_bounded(self):
         for i in range(web.CACHE_MAX * 2):
             self.srv.page(**weburl.view_params(web.parse_qs("view=map&sel=%010x" % i)))
-        self.srv.page(cols=100)
+        self.srv.page(zoom=150)
         self.assertEqual(len(self.srv.cache), web.CACHE_MAX)
         self.assertIn(next(reversed(self.srv.cache)), self.srv.cache)
-        self.assertEqual(next(reversed(self.srv.cache))[:2], (100, 0))              # the latest stays, the oldest went
+        self.assertEqual(next(reversed(self.srv.cache))[3], 150)              # the latest stays, the oldest went
         self.assertNotIn("%010x" % 0, "".join(str(k) for k in self.srv.cache))
         first = self.srv.page(**weburl.view_params(web.parse_qs("view=map")))
         self.assertIs(self.srv.page(**weburl.view_params(web.parse_qs("view=map"))), first)  # within r/2: the same render
@@ -308,7 +303,7 @@ class MapPage(unittest.TestCase):
             self.assertLessEqual(self.srv.cache_chars(), web.CACHE_CHARS)
             self.assertIn("%010x" % 9, str(next(reversed(self.srv.cache))))            # the latest stays, the oldest went
             web.CACHE_CHARS = 1                                                        # a page bigger than the limit is still served
-            self.assertTrue(self.srv.page(cols=100))
+            self.assertTrue(self.srv.page(zoom=150))
             self.assertEqual(len(self.srv.cache), 1)
         finally:
             web.CACHE_CHARS = orig
@@ -333,8 +328,6 @@ class MapPage(unittest.TestCase):
             render.map_graph = saved
         self.assertIn("network collector not running", body)
         self.assertIn("nothing to show yet", body)
-        self.assertIn('class="hd rv B"', body)                                      # no problems: the plain pill
-        self.assertIn("ALL OK", body)
 
         def broken(smp=None):
             raise ValueError("secret detail /etc/x")
@@ -351,7 +344,7 @@ class MapPage(unittest.TestCase):
         self.assertNotIn("secret detail", body)                                     # the detail goes to the log only
         self.assertNotIn("Traceback", body)
         self.assertIn("secret detail", err.getvalue())
-        self.assertIn("dashboard", body)
+        self.assertIn('href="/?" data-key="1"', body)                                # the way out is still there
 
 
 if __name__ == "__main__":

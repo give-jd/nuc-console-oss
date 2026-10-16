@@ -1,6 +1,6 @@
 # Web view
 
-The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)), and **`/app`** draws the screens from it in the browser, live, without a reload ([below](#the-live-app)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-default-web-interface)); the older **classic** pages (the console's text turned into HTML) are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will then be removed. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
+The same screen as the monitor, in a browser: over your LAN, your Tailscale tailnet or a VPN. **Read-only, opt-in, GET (and HEAD) only.** What every screen shows is also a read-only **data API**, JSON and a live stream ([below](#the-data-api)), and **`/app`** draws the screens from it in the browser, live, without a reload ([below](#the-live-app)). The web view is **the shell** (cards, key figures, five screens; [below](#the-shell-the-web-interface)). The older **classic** pages (the console's text turned into HTML, once kept as `[ui] web = classic` / `?app=0`) are gone; a config file that still says `web = classic` loads, and the key is ignored. No JavaScript is needed, and four exceptions are boxed in: the **AI page** (`/?view=ai`) has buttons (forms that POST to `/ai/...`: choose a model,
 switch the AI on or off, delete, ask: [below](#the-ai-pages-buttons)), the **Telegram page** (`/?view=telegram`) has buttons too (pair the notifier with your bot, switch it on or off, send a test: [below](#the-telegram-pages-buttons)), the shell carries three small first-party scripts per page (four in all, with the layout editor's), pinned by their hashes ([below](#the-shells-scripts)), and the MAP's graph view one small script of its own, pinned the same way ([below](#the-graph-views-script)). Configuration is *not* editable from the web on purpose (see below), except in a portable run and in the desktop app, whose `config.ini` is your own file: there the settings page turns the `[features]` switches on and off ([below](#the-settings-pages-switches)) and edits the other keys ([below](#the-settings-pages-configini)), all but the locks; an installation's page changes presentation keys only, in [an overlay file](#an-installations-settings-overlay) laid over `config.ini` (opt-in: `[web] settings_actions = yes` and a `[web] token_file`); `[ai] web_actions = no` makes the AI page read-only too, `[telegram] web_actions = no` the Telegram page.
 
 It is a separate service (`nuc-console-web`, unprivileged user, hardened unit). It is **off** until you enable it:
@@ -61,15 +61,13 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 
 ## What it serves
 
-**The shell is what `/` serves by default** ([below](#the-shell-the-default-web-interface)); this table lists the **classic** pages, which `[ui] web = classic` or `app=0` (`/?app=0&view=cpu`) still give for this release. The query parameters that name a view (`view=`, `sort=`, `sel=`, `period=`, `all=`, `as=graph` ...) work on both.
+**The shell is what `/` serves** ([below](#the-shell-the-web-interface)). The query parameters that name a view (`view=`, `sort=`, `sel=`, `period=`, `all=`, `as=graph` ...) are the ones of the table; an old link with `app=`, `cols=`, `rows=`, `fit=` or `full=` still works, and those are ignored.
 
 | Path | |
 |---|---|
-| `/` | the overview screen as HTML (`?cols=100` compact, `?cols=200` wide; 60–300), auto-refresh by `<meta refresh>` every `[dashboard] refresh_seconds` |
-| `/?full=1` | the overview **plus every Details page**: everything the overview cuts ("… +N more"), stacked |
+| `/` | the overview, as the shell ([below](#the-shell-the-web-interface)); auto-refresh by `<meta refresh>` (inside `<noscript>`) every `[dashboard] refresh_seconds` |
 | `/?zoom=150` | text size in % (50–200, the **A− / A+** links); default `[display] zoom` |
-| `/?fit=1` | the text fills the window width: a bigger zoom means fewer columns, re-laid out; every section and item is shown and the page scrolls. With `rows=` it fills the height instead (one screen, like the console) |
-| `/?rotate=1` | overview and Details pages take turns, as on the console (the full-screen window uses it) |
+| `/?rotate=N` | on the wall display (`kiosk=1` with the wall density) the seconds between two one-screen scrolls (3–600; default `[dashboard] rotate_seconds`) |
 | `/?view=map` | the **MAP** (the **map** link in the bottom bar): every row is a link. ▸/▾ opens or closes a branch, a name shows its details pane. The whole state is in the URL, so a view can be bookmarked: `open=`/`shut=` the branches opened/closed by hand (row keys), `all=1` everything open, `sel=` the row whose details are shown, `only=1` problems only, `pause=1` no reload while you read. Off with `[features] map = no` |
 | `/?view=map&as=graph` | the MAP as a **graph**: circles and lines, like Obsidian's graph view (the **tree \| graph** switch on the MAP page). Zones, ports, processes, containers and remote addresses are circles coloured by state and sized by how connected they are; seen links are solid, declared dashed, same-network dotted. A click on a circle selects it (details pane, its neighbours highlighted); `local=1` / `local=2` show only it and what is 1 or 2 links away, `only=1` the paths to a problem, `ext=0` hides remote addresses, `stacks=1` adds the compose projects, `z=50`…`300` zooms without a script. With the script: drag a circle (it stays where you put it, double-click to release it), drag the background to pan, mouse wheel or pinch to zoom, `+` `-` `0` and arrows on the keyboard; the view survives the page's refresh. At most 400 circles are drawn ("+N more" says what is left out) |
 | `/?view=cpu` | the **CPU** screen (the **cpu** link in the bottom bar): processor, per-core load, frequency and temperature, processes. `sort=mem` / `time` / `pid` / `user` (CPU% by default), `sel=<pid>` the details of one process (each row is a link). Process names only, never command lines. Off with `[features] cpu = no` |
@@ -86,13 +84,12 @@ Security headers, on every response: strict CSP (`default-src 'none'`), `no-stor
 `Cross-Origin-Resource-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`; the AI page differs in two, see below.
 No access log (URLs may carry a token).
 
-## The shell (the default web interface)
+## The shell (the web interface)
 
-The web view is a shell made of cards. It is **the default** (`[ui] web = app`). The classic pages, the older interface, are kept for one release as a
-fallback and will be removed: `[ui] web = classic` in `config.ini` serves them for every page, `?app=0` for one URL (`?app=1` gives the shell back when
-`web = classic`).
-Every control is a link or a form, so it works with scripts off, and the page then reloads by `<meta refresh>` (inside `<noscript>`) like the
-classic one. With scripts on, three small inline ones refresh it in place and add keys and instant preferences ([below](#the-shells-scripts)).
+The web view is a shell made of cards, and the only web interface: the older classic pages (the console's text turned into HTML) and the switches that
+chose them, `[ui] web = classic` and `?app=0`, are gone. A `config.ini` that still has a `web` key in `[ui]` loads; the key is ignored and reported once on
+stderr (`[ui] web is gone: the app shell is the only web interface`).
+Every control is a link or a form, so it works with scripts off, and the page then reloads by `<meta refresh>` (inside `<noscript>`). With scripts on, three small inline ones refresh it in place and add keys and instant preferences ([below](#the-shells-scripts)).
 
 - **Top bar**: the host, the status pill (✔ ALL OK, ! warnings, ✖ problems, with its symbol), the five screens as tabs (keys 1–5; badges for the
   Map's problems, the Health findings and the AI), the clock, `?` (the keys, `#help`, shown by the browser's `:target`) and ⚙ (the settings).
@@ -106,13 +103,13 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
   card, and one that is too high leaves a small hole. The layout editor (`?edit=1`) and a single card (`?card=`) are not packed: they stay in strict order.
   On a one-column window nothing spans. A card holds the text the console draws for that section (colours by the theme); a card that hid items says so and links to `/?card=<id>`, the card in full.
   **Edit layout** (footer, and Appearance in the settings) opens the layout editor ([below](#edit-the-layout)).
-- **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The CPU, Health and AI screens are drawn natively from the components the console draws too (no `<pre>`). The AI screen (`?app=1&view=ai`): the switch as a pill with what it is doing and a progress bar for a download (a moving bar when its size is not known yet), the chat (shown when it can be used or has something to show: the exchanges in a box that scrolls, its newest in sight, the question box, each answer with "AI, check before acting", "advice now", **Clear chat**) with **MODEL USAGE** beside it (the models loaded and where, the CPU and memory of the model server, how busy each GPU is; [AI.md](AI.md#from-the-browser-and-the-console)), the hardware and the status as labelled values, the models as a table (rows the keys move over with Enter to select, the less important columns dropped on a narrow screen, the verdict a pill with its symbol, a **use this model** button per row, the selected one's details beside it with **delete its files**), the folder and **delete everything**, and the question that waits (**Yes** / **No**). Every button is the same POST form as on the classic page (same endpoints, field names and CSRF token) and carries `data-key` from the keymap (`e` on/off, `c` cancel, `u` use, `x` delete, `X` delete all, `y` / `n` the answers). When `[ai] web_actions = no` locks it, it shows a notice and has no form and no button. The classic page (`?app=0&view=ai`) is unchanged.
+- **Map, CPU, Health, AI**: their existing pages, inside the same frame (their own controls in a bar above them). The CPU, Health and AI screens are drawn natively from the components the console draws too (no `<pre>`). The AI screen (`?view=ai`): the switch as a pill with what it is doing and a progress bar for a download (a moving bar when its size is not known yet), the chat (shown when it can be used or has something to show: the exchanges in a box that scrolls, its newest in sight, the question box, each answer with "AI, check before acting", "advice now", **Clear chat**) with **MODEL USAGE** beside it (the models loaded and where, the CPU and memory of the model server, how busy each GPU is; [AI.md](AI.md#from-the-browser-and-the-console)), the hardware and the status as labelled values, the models as a table (rows the keys move over with Enter to select, the less important columns dropped on a narrow screen, the verdict a pill with its symbol, a **use this model** button per row, the selected one's details beside it with **delete its files**), the folder and **delete everything**, and the question that waits (**Yes** / **No**). Every button is a POST form (same endpoints, field names and CSRF token) and carries `data-key` from the keymap (`e` on/off, `c` cancel, `u` use, `x` delete, `X` delete all, `y` / `n` the answers). When `[ai] web_actions = no` locks it, it shows a notice and has no form and no button.
   The **CPU** page is built of components, not text: key figures, a meter per logical CPU, the temperatures, and the process table, whose column heads are
   links (`p m t n u` do the same by keyboard) and whose rows are links to `sel=`; with a process selected its details sit beside the table (below it in a narrow window).
   The **Map** (tree view) is built of components too: the figures and the arrows' legend, a segmented control of links (`e` expand all, `c` collapse all, `p` problems
   only, and the graph view), the tree as a list whose rows are links (a row selects it, the selected one deselects it; its ▸ ▾ mark opens or closes the branch; the state
   is a symbol and a class, the depth an indent), and the selected node's details beside the tree with a link that closes them (the pane is sticky: it stays in sight while a long tree scrolls; in a narrow window it is drawn right under the selected row instead, a copy that CSS shows in place of the pane). j / k and the
-  arrows move over the rows, Enter follows. The graph view (`as=graph`) and the classic pages are as before.
+  arrows move over the rows, Enter follows. The graph view (`as=graph`) is its own drawing.
 - **Footer**: refresh − / +, pause, Edit layout, A− / A+ (`z50` … `z200`), theme and density as links, "read-only · AI actions".
 - **Blocks**: the top bar (`__top`), the key figures (`__kpis`) and every card are elements with `data-card` and a `data-rev` that changes when,
   and only when, their HTML does. The Map, CPU, Health and AI pages are one block (`__view`, the bar above them and their body). The refresh
@@ -120,9 +117,9 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 
 | Path | |
 |---|---|
-| `/` | the shell (every view above takes it: `/?view=cpu`); `?app=1` forces it when `[ui] web = classic`, `?app=0` gives the classic page |
+| `/` | the shell (every view above takes it: `/?view=cpu`) |
 | `/?card=<id>` | one card of the overview in full (a section id of `[dashboard] sections`) |
-| `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); `/?edit=1` (`/?app=1&edit=1` when `[ui] web = classic`). Only on the overview: with `app=0` or on another view it is ignored |
+| `/?edit=1` | the **layout editor**: the overview in edit mode ([below](#edit-the-layout)); Only on the overview: on another view it is ignored |
 | `/?view=settings` | **Appearance** (theme, density, preset, layout with its **Edit layout** link, order, start view, key figures: each choice a link; the theme and the density switch in place, and the chosen one stays a link so you can come back to it; with 8 key figures chosen the others are dimmed until you untick one), **Export** (the `[ui]` block for `config.ini`, and the cookie value), **Screens and sections** (every `[features]` switch, on or off: in a portable run or the desktop app a button turns each one on or off, [below](#the-settings-pages-switches); in an installation a button switches a section off, into [the overlay](#an-installations-settings-overlay), and `config.ini` alone switches one on), **config.ini** (every other key of the file, a section at a time: its value, what it does, the values it takes, its default and when a change applies; a form per section in a portable run or the desktop app, [below](#the-settings-pages-configini); in an installation forms for `[dashboard]`, `[ui]` and `[display] zoom` only, the rest read-only), **Phone alerts** (are the Telegram alerts on and do they reach a phone, and a button to the Telegram page, which walks you through the setup and the test), **About this machine** (read-only: the version and how to update, installed or portable with the folders, the web access, the display mode and zoom, Telegram, `[ai] web_actions`, errors in `config.ini`). Each value says where it comes from |
 | `/?view=telegram` | the **Telegram page** (linked from the settings' About): whether the alerts are on and reach someone, the notifier's last message and error, **Switch on** / **Switch off**, **Send a test**, and the pairing (the steps, the bot token and your @username, then the link to press Start on, with **Cancel**). Forms unless `[telegram] web_actions = no`, a portable run, or a notifier that does not take requests ([below](#the-telegram-pages-buttons)). It reloads by itself only while a pairing waits or an answer is due. `&open=1`: a redirect to the `t.me` link of the pairing that waits (the page's *Open in Telegram*), else back to the page |
 | `/?set=<field>&back=<view>` | stores one choice and redirects: `<field>` is one field of the cookie grammar (`tl` light, `dw` wall, `pv` server, `kpb_in_la` ...; `reset` forgets all), `back` the query of the view to return to. Anything invalid is `400`; the redirect is rebuilt from the validated view parameters, never from the text given, so it always stays on this server. A request marked cross-site by the browser (`Sec-Fetch-Site`) is `403`. The layout editor's links are fields too (`euat`: move ATTENTION one place earlier; [below](#edit-the-layout)) |
@@ -134,14 +131,13 @@ classic one. With scripts on, three small inline ones refresh it in place and ad
 **The cookie.** `nuc_ui` (`HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`) holds the grammar of [CONFIGURATION.md](CONFIGURATION.md#ui--look-and-layout-of-the-screens)
 (`1.tl.dw.pv`), at most 256 bytes; the server validates and canonicalises it on every request and ignores a value that is wrong, a field at a time.
 Only the browser keeps it: the server writes nothing for the interface. Pages vary by it (`Vary: Cookie`) and the cache key holds the canonical preferences.
-The shell's pages have the strict CSP of the classic ones, but with `style-src 'self'` and no `'unsafe-inline'` (the page loads its style sheet from `/s/`
+The pages have a strict CSP (`default-src 'none'`), with `style-src 'self'` and no `'unsafe-inline'` (the page loads its style sheet from `/s/`
 and carries no `<style>` element and no `style=` attribute; the graph's size per zoom step is a class of `<html>`, `gz<NN>` / `gzfit`, that the sheet
 sizes; the scripts only set CSSOM properties, never the `style` attribute), and the policy for their scripts, composed per page by `web.page_csp()` ([below](#the-shells-scripts)).
 
 | page | `style-src` |
 |---|---|
-| shell (`?app=1`: overview, settings, layout editor, MAP tree and graph, CPU, HEALTH, AI, wall) | `'self'` |
-| classic (`?app=0`) | `'unsafe-inline'` (each page has its own `<style>`) |
+| every page (overview, settings, layout editor, MAP tree and graph, CPU, HEALTH, AI, wall) | `'self'` |
 
 ### The shell's scripts
 
@@ -157,7 +153,7 @@ They only ever **GET**: nothing they do sends a form, and the AI page's POSTs st
 
 ### Wall and kiosk
 
-`/?app=1&ui=1.dw&kiosk=1` is the shell as a wall display: the **wall** density (big type, lists cut to three rows with a "+N more", no small print) and `kiosk=1`.
+`/?ui=1.dw&kiosk=1` is the shell as a wall display: the **wall** density (big type, lists cut to three rows with a "+N more", no small print) and `kiosk=1`.
 Only that combination (not the settings page, not the editor) changes the page:
 
 - `main[data-rotate="N"]`: `REFRESH_JS` scrolls one screen (90 % of the window) every `N` seconds, back to the top at the end, and waits while someone is at the
@@ -170,15 +166,15 @@ Only that combination (not the settings page, not the editor) changes the page:
   other links of a card are plain text too.
 - The footer holds only what a wall can use: the refresh interval, `read-only`, the hint of how to close the window (`Alt+F4 closes · F11 leaves full screen`;
   macOS: `Cmd+Q`) and the time of the last update; no pause, edit, size, theme or density links.
-- Without JavaScript the `<noscript>` meta refresh still reloads the page every refresh interval; it shows the first screen (nothing scrolls; there is no server-side paging). `rotate=1` (the classic page's "take turns") does nothing here.
+- Without JavaScript the `<noscript>` meta refresh still reloads the page every refresh interval; it shows the first screen (nothing scrolls; there is no server-side paging).
 
-The display opens it (`[ui] web = app`, the default): `render.py --kiosk` (`[display] mode = fullscreen`) starts the full-screen window on
-`http://127.0.0.1:<port>/?app=1&ui=1.dw&kiosk=1` and `render.py --open` (a normal window) on `/?app=1`, with the token as before; with `web = classic`
-they open the classic page as before. The fallback page written to a file (`--file`, or a `[web] token_file` this user cannot read) is the classic one.
+The display opens it: `render.py --kiosk` (`[display] mode = fullscreen`) starts the full-screen window on
+`http://127.0.0.1:<port>/?ui=1.dw&kiosk=1` and `render.py --open` (a normal window) on `/`, with the token as before. The fallback page written to a file
+(`--file`, or a `[web] token_file` this user cannot read) is a page the console draws itself, not the web view.
 
 ### Edit the layout
 
-`Edit layout` (the overview's footer, or Appearance in the settings) opens `/?app=1&edit=1`: the overview as a grid of **previews** (the card
+`Edit layout` (the overview's footer, or Appearance in the settings) opens `/?edit=1`: the overview as a grid of **previews** (the card
 bodies cannot be clicked here), in the order of the layout and never by severity, with a bar above it (**Done**, **Reset layout** and a short help)
 and these buttons in every card:
 
@@ -216,9 +212,6 @@ The editor page does not reload by itself and has no pause link: a page that mov
 
 | Page | `script-src` | `connect-src` | `require-trusted-types-for 'script'; trusted-types nuc-frag` | `form-action` |
 |---|---|---|---|---|
-| classic pages | none (`default-src 'none'`) | none | no | `'none'` |
-| classic AI page | none | none | no | `'self'` (not when locked) |
-| classic map graph | the graph script's hash | none | no | `'none'` |
 | shell pages | the hashes of `REFRESH_JS`, `KEYS_JS`, `PREFS_JS` | `'self'` | yes | `'none'` |
 | shell edit page (`?edit=1`) | the hashes of `KEYS_JS`, `PREFS_JS`, `BUILDER_JS` | `'self'` | no (no script there parses markup) | `'none'` |
 | shell AI page | the same three as the shell pages | `'self'` | yes | `'self'` (not when locked) |
@@ -249,7 +242,7 @@ The markup tests are static; `tools/browser_check.py` (the `browser` job of the 
 - `304` when `If-None-Match` carries the current tag;
 - `401` without the token, `421` for an unknown `Host`: the same checks as the page. `HEAD` works.
 
-A classic page ignores `frag`. The refresh script parses the fragment inertly and takes over only the tags and attributes of two allowlists
+The edit page ignores `frag`. The refresh script parses the fragment inertly and takes over only the tags and attributes of two allowlists
 (`webjs.FRAG_TAGS`, `webjs.FRAG_ATTRS`: no script, style, link, image, frame, `on…`, `style`; `href` only `/?…` or `#`; `action` only a path of this server);
 a test parses every fragment and checks the same lists.
 
@@ -307,7 +300,7 @@ up to date from its stream. Nothing reloads: a new document is drawn and morphed
 followed inside the page (`history.pushState`, the back button works), and the buttons of the AI screen are posted in the background, their
 effect arriving with the stream. It looks exactly like the shell: it draws the same components into the same markup (`src/appjs.py` is
 `htmlview.html` in the browser, and `tools/browser_check.py` checks, screen by screen, that the two give the same markup), with the same style
-sheet, themes, densities, keys and help. The shell has a **live app** link in its footer, and the app a **classic pages** one.
+sheet, themes, densities, keys and help. The shell has a **live app** link in its footer, and the app a **shell** one.
 
 | Path | What |
 |---|---|
@@ -456,12 +449,12 @@ at most 4 KB and 20 fields, Post/Redirect/Get (`303` to `/?view=telegram#tg`), `
 ## The graph view's script
 
 The MAP's graph view carries one small inline script (`src/graphjs.py`, ~16 KB, no library) for dragging, zooming and panning. On the
-classic pages it is the only script; on the shell's graph page it comes with the shell's own ([above](#the-shells-scripts)). It is boxed in:
+graph page it comes with the shell's own scripts ([above](#the-shells-scripts)). It is boxed in:
 
-- its SHA-256 is in that page's CSP (`script-src 'sha256-…'`, next to the shell's scripts' on the shell): no other script, inline or
-  loaded, can run, and every other classic page keeps a CSP without `script-src`;
-- it only moves what the server drew: it never builds HTML from data and uses no network API (`tests/test_graphjs.py`); on the classic
-  page `default-src 'none'` (no `connect-src`) means it could not open a connection anyway; it keeps the view (zoom, pan, circles
+- its SHA-256 is in that page's CSP (`script-src 'sha256-…'`, next to the shell's scripts'): no other script, inline or
+  loaded, can run;
+- it only moves what the server drew: it never builds HTML from data and uses no network API (`tests/test_graphjs.py`); the page's CSP allows
+  connections to this server only; it keeps the view (zoom, pan, circles
   placed by hand) in `sessionStorage`;
 - the page works without it: every circle is a link, zoom has links, and the page then refreshes by `<meta refresh>`
   (inside `<noscript>`; with the script, the script reloads the page itself, never while you are dragging);

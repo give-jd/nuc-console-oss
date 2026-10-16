@@ -315,13 +315,12 @@ class KpisNoneOnTheWeb(World):
         self.assertIn('data-card="__kpis"', htmlview.kpis_block([]))
         self.assertIn('class="kpis"', htmlview.kpis_block(["<a>x</a>"]))
 
-    def test_the_shell_and_the_classic_page_draw_no_row(self):
+    def test_the_shell_draws_no_row(self):
         with golden.FrozenWorld(cfg={"ui": {"kpis": []}}) as world:
-            shell, classic = world.page(""), world.page("app=0")
+            shell = world.page("")
             app = str(world.server.app_page("1", {}))  # the live app: its #cfg carries the key figures to draw
-        for page in (shell, classic):
-            self.assertNotIn('aria-label="Key figures"', page)
-            self.assertNotRegex(page, r'class="kpi[ "]')
+        self.assertNotIn('aria-label="Key figures"', shell)
+        self.assertNotRegex(shell, r'class="kpi[ "]')
         self.assertIn('"kpis":[],', app.replace(" ", ""))
 
     def test_the_app_script_draws_no_row_for_an_empty_list(self):

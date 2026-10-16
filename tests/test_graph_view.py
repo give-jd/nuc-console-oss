@@ -25,10 +25,8 @@ import nuc_config  # noqa: E402
 import render  # noqa: E402
 import web  # noqa: E402
 import webmap  # noqa: E402
-import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 
 ZONES = {"root:internet", "root:lan", "root:tailnet", "root:local"}
 HEX = re.compile(r"[0-9a-f]{10}")
@@ -43,7 +41,6 @@ def serve():
     return srv
 
 
-@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=30)
     c.request("GET", path)
@@ -57,12 +54,26 @@ def params(url):
     return weburl.view_params(web.parse_qs(web.urlsplit(url).query))
 
 
+def view_of(page):
+    start = page.index('data-card="__view"')
+    return page[page.rindex("<", 0, start):page.index("</main>", start)]
+
+
+def script_src(headers):
+    """The hashes the page's policy lets run: exactly those of its inline scripts, nothing else."""
+    return set(re.findall(r"'sha256-([^']+)'", headers["Content-Security-Policy"]))
+
+
+def digest(text):
+    return base64.b64encode(hashlib.sha256(text.encode("utf-8")).digest()).decode()
+
+
 def key(nid):
     return graph.path_key((nid,))
 
 
 def link(page, text):
-    m = re.search(r'<a href="([^"]*)">' + re.escape(text) + "</a>", page)
+    m = re.search(r'<a [^>]*href="([^"]*)"[^>]*>' + re.escape(text) + "</a>", page)
     return html.unescape(m.group(1)) if m else None
 
 
@@ -155,7 +166,7 @@ class GraphPage(unittest.TestCase):
 
     def test_the_toggle_in_both_modes_keeps_the_view(self):
         tree = self.page("/?view=map&only=1&pause=1&zoom=150&refresh=5")
-        m = re.search(r'<span class="mv"><b>tree</b><a href="([^"]*)">graph</a></span>', tree)
+        m = re.search(r'<span aria-current="true">tree</span><a href="([^"]*)">graph</a>', tree)
         self.assertIsNotNone(m)                                                     # tree highlighted, graph a link
         to_graph = html.unescape(m.group(1))
         self.assertEqual([params(to_graph)[k] for k in ("view", "as", "only", "pause", "zoom", "refresh")],
@@ -165,21 +176,18 @@ class GraphPage(unittest.TestCase):
         self.assertIsNotNone(m)                                                     # graph highlighted, tree a link
         back = html.unescape(m.group(1))
         self.assertEqual([params(back)[k] for k in ("view", "as", "only", "pause", "zoom", "refresh")], ["map", "", True, True, 150, 5])
-        self.assertIn('class="ro', self.page(back))
-        self.assertNotIn("<svg", tree)                                               # the tree has no drawing, no script
-        self.assertNotIn("<script", tree)
-        self.assertNotIn("data-refresh", tree)
-        self.assertNotIn("<noscript>", tree)
+        self.assertIn('class="scr mapv"', self.page(back))
+        self.assertNotIn("<svg", view_of(tree))                                      # the tree has no drawing, no graph script
+        self.assertEqual(Drawing(tree).scripts, Drawing(self.page("/?view=cpu")).scripts)
 
-    @classic_default()
     def test_tree_mode_ignores_the_graph_parameters(self):
         """The graph's filters mean nothing to the tree: not in its links, not in its cache key (the very same page)."""
         plain = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1")))
         same = self.srv.page(**weburl.view_params(web.parse_qs("view=map&all=1&as=tree&stacks=1&ext=0&local=2&z=200&sel=")))
         self.assertIs(same, plain)
-        for word in ("stacks=", "ext=", "local=", "z=", "as="):
-            self.assertNotIn(word, re.sub(r'<span class="mv">.*?</span>', "", plain))
-        self.assertEqual(getattr(plain, "csp", webhttp.CSP), webhttp.CSP)
+        tree = re.sub(r'<div class="seg" role="group" aria-label="view">.*?</div>', "", view_of(plain))
+        self.assertIsNone(re.search(r"[?&;](stacks|ext|local|z|as)=", tree))
+        self.assertNotIn(graphjs.csp_source(graphjs.SCRIPT), plain.csp)             # the graph's script is not in the tree's policy
 
     def test_the_selection_follows_the_toggle(self):
         G = self.graph()
@@ -193,10 +201,9 @@ class GraphPage(unittest.TestCase):
         back = link(self.page(to_graph), "tree")
         p = params(back)
         self.assertEqual(G["nodes"][next(r for r in every if r["key"] == p["sel"])["node"]]["id"], "ct:shop-db-1")
-        self.assertTrue(back.endswith("#r-" + p["sel"]))
         shown = self.page(back.split("#")[0])
-        self.assertRegex(shown, r'<div class="ro sel" id="r-%s">' % p["sel"])        # its branch is open: the row is on the page
-        self.assertIn('id="details"', shown)
+        self.assertRegex(view_of(shown), r'(?s)<li class="ob [^"]*\bsel\b[^"]*" data-depth="\d+">(?:(?!</li>).)*data-k="o-%s"' % p["sel"])  # its branch is open: the row is on the page
+        self.assertIn('class="props"', shown)
         stack = next(r for r in every if r["node"] == "stack:shop")                 # a compose project: the graph shows the stacks
         p = params(link(self.page(f"/?view=map&sel={stack['key']}"), "graph"))
         self.assertEqual((p["sel"], p["stacks"]), (key("stack:shop"), True))
@@ -303,7 +310,7 @@ class GraphPage(unittest.TestCase):
         k = key("ct:shop-db-1")
         page = self.page(f"/?view=map&as=graph&zoom=150&refresh=5&sel={k}")
         self.assertIn('id="details"', page)
-        self.assertIn('<main class="mp two">', page)                                 # beside the drawing (below it when narrow)
+        self.assertIn('<div class="mp two">', page)                                 # beside the drawing (below it when narrow)
         for label, value, _ in graph.details(G, "ct:shop-db-1"):
             self.assertIn(html.escape(str(value)), page, label)
         close = html.unescape(re.search(r'<a href="([^"]*)">close ✕</a>', page).group(1))
@@ -324,9 +331,9 @@ class GraphPage(unittest.TestCase):
         d = Drawing(page)
         w, h = int(d.svg["data-w"]), int(d.svg["data-h"])
         self.assertEqual((d.svg["width"], d.svg["height"]), (str(w * 2), str(h * 2)))    # z=200: twice the size, the box scrolls
-        self.assertIn("#gsvg{width:200%}", page)
-        bar = page[page.index("<footer>"):]
-        urls = dict((t, html.unescape(u)) for u, t in re.findall(r'<a href="([^"]*)">([^<]*)</a>', bar))
+        self.assertRegex(page, r'<html [^>]*class="[^"]*\bgz200\b')               # the size is a class of <html>
+        bar = page[page.index('<div class="toolbar">'):]
+        urls = dict((t, html.unescape(u)) for u, t in re.findall(r'<a [^>]*href="([^"]*)"[^>]*>([^<]*)</a>', bar))
         self.assertEqual(params(urls["off"])["ext"], "0")                            # remote addresses: on, off is the link
         self.assertTrue(params(urls["on"])["stacks"])                                # stacks: off, on is the link
         self.assertTrue(params(urls["pause"])["pause"])
@@ -335,19 +342,19 @@ class GraphPage(unittest.TestCase):
         self.assertEqual((params(html.unescape(zoom.group(1)))["z"], params(html.unescape(zoom.group(2)))["z"]), (150, 250))
         for text, u in urls.items():                                                # every link keeps the rest of the view
             p = params(u)
-            if text not in ("−", "+", "A−", "A+", "dashboard"):
+            if u.startswith("/?view=map") and text not in ("−", "+", "A−", "A+"):
                 self.assertEqual((p["view"], p["zoom"], p["refresh"]), ("map", 150, 5), text)
                 self.assertEqual(p["z"], 200 if text != "tree" else 0, text)
         self.assertEqual(params(urls["pause"])["sel"], key("ct:shop-db-1"))
         top = self.page("/?view=map&as=graph&z=300")
-        self.assertRegex(top, r"zoom <a [^>]*>−</a> 300% \+ ")                        # no step beyond 300
+        self.assertRegex(top, r"zoom <a [^>]*>−</a> 300% \+<")                        # no step beyond 300
         plain = self.page("/?view=map&as=graph")
-        self.assertIn("#gsvg{width:100%;max-height:", plain)                          # z=100: the drawing fits the window
+        self.assertRegex(plain, r'<html [^>]*class="[^"]*\bgzfit\b')                # z=100: the drawing fits the window
         self.assertRegex(plain, r'zoom <a href="[^"]*z=80[^"]*">−</a> 100% <a href="[^"]*z=125[^"]*">\+</a>')
         paused = self.page("/?view=map&as=graph&pause=1")
         self.assertNotIn('http-equiv="refresh"', paused)
         self.assertEqual(Drawing(paused).gv["data-paused"], "1")
-        self.assertEqual(params(link(paused, "live"))["pause"], False)
+        self.assertEqual(params(link(paused, "resume"))["pause"], False)
 
     # ---- the DOM contract with graphjs.SCRIPT --------------------------------------------------------------------------
 
@@ -478,34 +485,31 @@ class GraphPage(unittest.TestCase):
             self.srv.cache.clear()
 
     def test_the_csp_pins_the_one_script_of_the_graph_page(self):
-        self.assertEqual(webhttp.page_csp([graphjs.SCRIPT]), webhttp.CSP + f"; script-src {graphjs.csp_source(graphjs.SCRIPT)}")  # the graph page's policy: its one hash
         fake = "/* nuc-console ✓ */ document.documentElement.dataset.ok = '1';"
+        base = Drawing(self.page("/?view=map")).scripts                              # the shell's own scripts, the same on every page
         with self.script(fake):
             st, h, page = get(self.srv, "/?view=map&as=graph&sel=" + key("ct:shop-db-1"))
-            others = [get(self.srv, p) for p in ("/", "/?view=map", "/?view=map&all=1", "/?cols=100&full=1")]
+            others = [get(self.srv, p) for p in ("/", "/?view=map", "/?view=map&all=1", "/?view=cpu")]
         self.assertEqual(st, 200)
         d = Drawing(page)
-        self.assertEqual(d.scripts, [fake])                                          # once, exactly the script
-        self.assertTrue(page.endswith("</footer><script>" + fake + "</script></html>"))
-        self.assertEqual(page.count("<script"), 1)
-        digest = base64.b64encode(hashlib.sha256(d.scripts[0].encode("utf-8")).digest()).decode()
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP + f"; script-src 'sha256-{digest}'")
+        self.assertEqual(d.scripts, base + [fake])                                   # the graph's script once, after the shell's
+        self.assertEqual(page.count("<script"), len(d.scripts))
+        self.assertEqual(script_src(h), {digest(x) for x in d.scripts})              # the policy lets exactly these run
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"], h["Referrer-Policy"], h["X-Frame-Options"]),
                          ("no-store", "nosniff", "no-referrer", "DENY"))
         self.assertIn('<noscript><meta http-equiv="refresh" content="2"></noscript>', page)  # the script reloads the page itself
         self.assertEqual(page.count('http-equiv="refresh"'), 1)
         self.assertIsNone(re.search(r"\son[a-z]+=", page))                          # no inline event handler
-        for st, h, body in others:                                                  # no other page has a script
+        for st, h, body in others:                                                  # no other page has the graph's script
             self.assertEqual(st, 200)
-            self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
-            self.assertNotIn("script-src", h["Content-Security-Policy"])
-            self.assertNotIn("<script", body.lower())
+            self.assertNotIn(digest(fake), script_src(h))
+            self.assertNotIn(fake, body)
         with self.script(fake):                                                     # the script never comes from the request
             for path in ("/?view=map&as=graph&sel=%3Cscript%3E", "/?view=map&as=graph&ext=0&only=1&z=50&x=</script>"):
                 st, h, body = get(self.srv, path)
-                self.assertEqual(Drawing(body).scripts, [fake], path)
-                self.assertEqual(h["Content-Security-Policy"], webhttp.page_csp([fake]))
+                self.assertEqual(Drawing(body).scripts, base + [fake], path)
+                self.assertEqual(script_src(h), {digest(x) for x in base + [fake]})
 
     def test_the_real_script_can_be_inlined(self):
         """Inline, the script ends at the first '</script' and '<!--' changes how the browser reads it: neither may be in it."""
@@ -515,12 +519,12 @@ class GraphPage(unittest.TestCase):
         self.assertEqual(self.srv.page(view="map", **{"as": "graph"}, z=137, local=7)[:15], "<!doctype html>")  # never a 500
 
     def test_no_script_no_script_src(self):
+        base = get(self.srv, "/?view=map")
         with self.script(""):
             st, h, page = get(self.srv, "/?view=map&as=graph")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
-        self.assertNotIn("<script", page.lower())
-        self.assertNotIn("<noscript>", page)                                         # no script to reload it: the meta refresh does
+        self.assertEqual(script_src(h), script_src(base[1]))                         # nothing but the shell's scripts is pinned
+        self.assertEqual(Drawing(page).scripts, Drawing(base[2]).scripts)
         self.assertIn('<meta http-equiv="refresh" content="2">', page)
 
     # ---- bounds ------------------------------------------------------------------------------------------------------
@@ -642,8 +646,9 @@ class GraphPage(unittest.TestCase):
                 body += self.page("/?view=map&as=graph&local=2&sel=" + key("ct:shop-api-1"))
         finally:
             render.map_graph = saved
-        self.assertEqual(body.count("<script"), 2)                                    # ours, once per page
-        self.assertEqual(body.count("</script>"), 2)
+        scripts = len(Drawing(self.page("/?view=map")).scripts) + 1                  # the shell's and ours, once per page
+        self.assertEqual(body.count("<script"), 2 * scripts)
+        self.assertEqual(body.count("</script>"), 2 * scripts)
         self.assertNotIn("<script>alert", body)
         self.assertNotIn("]]>", body)
         self.assertNotIn("<!--", body)
@@ -663,6 +668,7 @@ class GraphPage(unittest.TestCase):
 
     def test_render_error_is_generic_and_carries_no_script(self):
         saved = render.map_graph
+        base = get(self.srv, "/?view=map")[1]
 
         def broken(smp=None):
             raise ValueError("secret detail /etc/x")
@@ -678,10 +684,10 @@ class GraphPage(unittest.TestCase):
         self.assertNotIn("secret detail", body)
         self.assertNotIn("Traceback", body)
         self.assertIn("secret detail", err.getvalue())
-        self.assertNotIn("<script", body)
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
+        self.assertNotIn("void 0;", body)                                            # no graph script on the error page
+        self.assertEqual(script_src(h), script_src(base))
         self.assertIn('<meta http-equiv="refresh" content="2">', body)               # no script: the plain refresh
-        self.assertIn("dashboard", body)
+        self.assertIn('href="/?" data-key="1"', body)                                # the way out (the tabs) is still there
         self.assertEqual(params(link(body, "tree"))["as"], "")
 
     def test_empty_graph_and_the_feature_switch(self):
@@ -698,6 +704,7 @@ class GraphPage(unittest.TestCase):
         d = Drawing(page)
         self.assertEqual(d.nodes, {})
         self.assertIsNotNone(d.gv)                                                   # the script still finds its box (and reloads)
+        base = get(self.srv, "/?view=cpu")[1]
         flag = render.CFG["features"].get("map", True)
         render.CFG["features"]["map"] = False
         try:
@@ -707,7 +714,7 @@ class GraphPage(unittest.TestCase):
             render.CFG["features"]["map"] = flag
         self.assertIn("map disabled in config.ini", off)
         self.assertNotIn("<svg", off)
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
+        self.assertEqual(script_src(h), script_src(base))                            # no graph script on the disabled page
 
 
 class Pure(unittest.TestCase):

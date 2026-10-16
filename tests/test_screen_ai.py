@@ -381,19 +381,15 @@ class Web(unittest.TestCase):
             return world.page(query)
 
     def test_the_shell_draws_the_screen_natively_in_the_view_block(self):
-        view = view_of(self.page("app=1&view=ai&sel=qwen3-4b"))
+        view = view_of(self.page("view=ai&sel=qwen3-4b"))
         self.assertNotIn("<pre", view)
         for needle in ('class="scr av"', '<table class="tbl">', '<svg class="bar', 'class="tag ok"', '<dl class="spec-dl">', '<form class="f" method="post" action="/ai/off">',
                        'data-key="e"', 'data-key="x"', 'data-key="X"', "check before acting", 'name="q"'):
             self.assertIn(needle, view)
         self.assertEqual(view.count('data-card="__view"'), 1)
-        classic = self.page("app=0&view=ai&sel=qwen3-4b")
-        self.assertIn('<pre class="ht">', classic)
-        self.assertNotIn('class="scr av"', classic)
 
-    def test_every_form_keeps_the_token_the_back_page_and_the_endpoints_of_the_classic_page(self):
-        view = view_of(self.page("app=1&view=ai&sel=qwen3-30b-a3b"))
-        classic = self.page("app=0&view=ai&sel=qwen3-30b-a3b")
+    def test_every_form_keeps_the_token_the_back_page(self):
+        view = view_of(self.page("view=ai&sel=qwen3-30b-a3b"))
         p = Frag()
         p.feed(view)
         self.assertTrue(p.forms)
@@ -402,22 +398,20 @@ class Web(unittest.TestCase):
             self.assertRegex(form, r'<input type="hidden" name="csrf" value="[^"]+">')
             self.assertRegex(form, r'<input type="hidden" name="back" value="[^"]*view=ai')
         actions = {f["action"] for f in p.forms}
-        self.assertLessEqual(actions, set(re.findall(r'action="(/ai/[a-z-]+)"', classic)))  # no endpoint the classic page has not
         self.assertIn("/ai/use", actions)
-        self.assertEqual(set(re.findall(r'name="csrf" value="([^"]+)"', view)), set(re.findall(r'name="csrf" value="([^"]+)"', classic)))
 
     def test_a_click_that_asks_a_question_shows_it_with_yes_and_no(self):
-        view = view_of(self.page("app=1&view=ai&sel=qwen3-1.7b&confirm=delete"))
+        view = view_of(self.page("view=ai&sel=qwen3-1.7b&confirm=delete"))
         self.assertIn('<div class="ask" role="group"', view)
         self.assertIn("Delete the files of Qwen3 1.7B", view)
         self.assertRegex(view, r'(?s)action="/ai/delete">.*?name="confirm" value="yes">.*?data-key="y"')
         self.assertRegex(view, r'<a class="btn" href="[^"]*view=ai[^"]*" data-key="n">No</a>')
         self.assertNotRegex(re.search(r'<a class="btn" href="([^"]*)" data-key="n"', view).group(1), "confirm=")
-        self.assertIn("Delete the runtime and every downloaded model", view_of(self.page("app=1&view=ai&confirm=delete-all")))
-        self.assertNotIn('class="ask"', view_of(self.page("app=1&view=ai&sel=qwen3-8b&confirm=delete")))  # not installed: nothing to ask
+        self.assertIn("Delete the runtime and every downloaded model", view_of(self.page("view=ai&confirm=delete-all")))
+        self.assertNotIn('class="ask"', view_of(self.page("view=ai&sel=qwen3-8b&confirm=delete")))  # not installed: nothing to ask
 
     def test_locked_shows_the_notice_and_has_no_form_no_button_no_question(self):
-        for query in ("app=1&view=ai&sel=qwen3-4b", "app=1&view=ai&sel=qwen3-4b&confirm=delete"):
+        for query in ("view=ai&sel=qwen3-4b", "view=ai&sel=qwen3-4b&confirm=delete"):
             view = view_of(self.page(query, locked=True))
             self.assertIn("locked by config.ini ([ai] web_actions = no): this page only shows", view)
             for needle in ("<form", "<button", "<input", 'class="ask"', "use this model", "data-key=\"e\""):
@@ -427,7 +421,7 @@ class Web(unittest.TestCase):
     def test_only_what_a_fragment_may_hold(self):
         for locked in (False, True):
             p = Frag()
-            p.feed(view_of(self.page("app=1&view=ai&sel=qwen3-4b&confirm=delete", locked)))
+            p.feed(view_of(self.page("view=ai&sel=qwen3-4b&confirm=delete", locked)))
             self.assertEqual(sorted(set(p.tags) - set(webjs.FRAG_TAGS)), [])
             self.assertEqual(sorted(p.attrs - {a.lower() for a in webjs.FRAG_ATTRS}), [])
 

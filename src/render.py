@@ -32,7 +32,7 @@ import wizard  # same directory: the setup guide's text and its marker
 import screens  # same directory: the full screens' view-models and the components of each screen
 from ansi import ANSI, bar, c, cc, clip, columns, kv, msg, msg_wrap, pad, section, vlen
 from ui import dd, dget, fmt_ago, hclean, hnum, human, idict, num, plural, safe
-from screens import (CPU_SORT_KEYS, CPU_SORT_NAME, CPU_SORT_SHORT, CPU_SORTS, HEALTH_DAYS, HEALTH_NONE, MAP_IDLE_S, AiView, HealthView, MapView,
+from screens import (CPU_SORT_KEYS, CPU_SORT_SHORT, CPU_SORTS, HEALTH_DAYS, HEALTH_NONE, MAP_IDLE_S, AiView, HealthView, MapView,
                      ai_key, ai_mb, ai_rows, ai_select, ai_sync, cpu_key, cpu_rows, cpu_select, cpu_sync, health_findings, health_key,
                      health_nothing, health_select, health_sync, map_key, map_layout, map_select, map_sync, map_view)
 from exposure import expose_apply, exposure_rows, new_ports
@@ -1156,15 +1156,6 @@ def cpu_once(argv, w, h):
     return cpu_screen(d, cpu_problems(None if DEMO else hostdata.Sampler()), cv, w, h)[0]
 
 
-def cpu_web(d, pb, w, h, sort="cpu", sel=None, scroll=False):
-    """(the CPU screen for a browser page: one frame; [(line of the frame, pid)] of the process rows, which the page makes links).
-    sel: the pid whose details are shown, if it is one of this reading's processes. scroll: as tall as its content."""
-    sel = sel if any(p["pid"] == sel for p in d["procs"]["procs"]) else None
-    body, _, rows, _, pids = cpu_view(d, w, 10 ** 4 if scroll else h - 2, sort, sel, sel is not None)
-    tail = c(90, f" by {CPU_SORT_NAME.get(sort, sort)} · {len(rows)} processes listed" + (" · details of the highlighted row" if sel is not None else ""))
-    return frame(("CPU", 1, 1, body), 0, 1, w, len(body) + 2 if scroll else h, pb, foot=tail, page=True), [(i + 1, pid) for i, pid in pids]
-
-
 def render_screen(smp, w, h, mode=None, n=0, at=None, keys=True, page=False, scroll=False, cpu_feed=None):
     """One frame as an ANSI string and the number of slides: used by --once and by the web view (web.py).
     at = a time: the slide shown at that moment of the rotation (overview, then Details pages), as on the console."""
@@ -1731,7 +1722,7 @@ def open_in_browser(argv):
         return 1
     print(f"open -> {url}" + (" (with the token of [web] token_file)" if token else ""), file=sys.stderr, flush=True)  # never the token itself
     if token:
-        url += "&token=" + token
+        url += ("&" if "?" in url else "?") + "token=" + token
     if WINDOWS:
         os.startfile(url)  # the default browser, as this user
     elif MACOS:
@@ -1755,7 +1746,7 @@ def kiosk(argv):
     cols, rows = display.kiosk_grid()
     web = CFG["web"]
     if "--file" not in argv and not web["token_file"] and display.web_up(web["port"], 60):
-        url = display.dashboard_url(fullscreen=True, cols=cols, rows=rows)
+        url = display.dashboard_url(fullscreen=True)
         exe = display.find_browser()
         cmd = display.kiosk_command(exe, url, base)
         print(f"kiosk -> {url}", file=sys.stderr, flush=True)

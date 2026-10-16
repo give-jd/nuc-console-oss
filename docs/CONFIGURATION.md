@@ -71,15 +71,14 @@ Sections fill the columns in the given order and never back-fill, so a line more
 ## `[ui]` — look and layout of the screens
 
 > **The console uses this section.** Its theme, density, card order and visibility, KPI row and first screen follow these keys (what each one does there is in
-> the table and under "On the console" below). **The web interface** (a shell of cards, [WEB.md](WEB.md#the-shell-the-default-web-interface)) is the default and reads this
-> section; `web = classic` (or `?app=0` in one URL) serves the older classic pages instead, kept for one release as a fallback and then removed, and they ignore every other key here.
-> A wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
+> the table and under "On the console" below). **The web shell reads this section** as well ([WEB.md](WEB.md#the-shell-the-web-interface)).
+> `web` is gone: the older classic pages it chose are removed, the shell is the only web interface, and an older file that still has `web = classic` or `web = app` loads as before
+> (the key is ignored and reported once on stderr; `nuc-console-config migrate` keeps the line under a `# legacy:` marker). A wrong value is reported on stderr and only that key is skipped, like everywhere else in this file.
 
 Every key is optional. A key left out, blank or wrong means the default, **except** that `hidden =` left blank means "nothing is hidden".
 
 | Key | Default | Meaning |
 |---|---|---|
-| `web` | `app` | Which web interface is served: `app` (the shell of cards) or `classic` (the older pages, kept for one release as a fallback and then removed). `?app=0` / `?app=1` choose for one URL |
 | `theme` | `auto` | `auto` (follows the browser's light or dark setting; the console keeps its usual colours), `dark` (the same on the console), `light` (a light terminal background) or `high-contrast`. The `NO_COLOR` environment variable (set and not empty) turns every console colour off whatever this says |
 | `density` | `desk` | `wall` (big text for a monitor across the room, the least detail: the console starts at the third level of detail), `desk` or `compact` (small text, the most on one screen: the console draws no empty line under the section titles, as `[dashboard] spacing = 0`) |
 | `start_view` | `overview` | The screen that opens first: `overview`, `map`, `cpu`, `health` or `ai`. On the console only on one with a keyboard, and the screen where an idle one goes back to (a monitor with no keyboard always rotates) |
@@ -158,7 +157,7 @@ macOS and Windows have no text console to take over. The installers start the we
 | `zoom` | `100` | Text size in percent, 50–200. Bigger text = fewer columns, re-laid out (no sideways scrolling). In a browser window **nothing is left out**: every section and every item, the page scrolls; full screen shows what does not fit on the rotating Details pages. The **A− / A+** links at the bottom of the page change it while you look |
 | `browser` | `auto` | The browser of the full-screen window. `auto`: Microsoft Edge, then Google Chrome, then Firefox (Windows: Firefox cannot start full screen, press F11; with none of them the default browser opens a normal window, F11 again); Chrome, Edge, Brave, Chromium, else Safari (macOS: press Ctrl+Cmd+F once). Or the full path of a Chromium-based browser |
 
-By default (`[ui] web = app`) the full-screen window opens the shell's wall display (`/?app=1&ui=1.dw&kiosk=1`: wall density, scrolling one screen every `[dashboard] rotate_seconds` seconds, [WEB.md](WEB.md#wall-and-kiosk)) and a normal window opens `/?app=1`; with `web = classic` they open the classic page as before.
+The full-screen window opens the shell's wall display (`/?ui=1.dw&kiosk=1`: wall density, scrolling one screen every `[dashboard] rotate_seconds` seconds, [WEB.md](WEB.md#wall-and-kiosk)) and a normal window opens `/`.
 
 The full-screen window is a plain browser window with a profile of its own (never your tabs or logins), not a locked kiosk:
 **Alt+F4** (Cmd+Q) closes it until the next login, **F11** (Ctrl+Cmd+F) leaves full screen, Alt+Tab reaches the other windows.
@@ -198,7 +197,6 @@ n8n     = tailnet
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
 | `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
-| `columns`, `rows` | `200`, `60` | Layout of the page (`?cols=100` for compact, `?full=1` for the overview plus every Details page) |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
 ### The settings overlay: an installation's settings page

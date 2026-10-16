@@ -39,7 +39,6 @@ DENSITIES = ("wall", "desk", "compact")
 VIEWS = ("overview", "map", "cpu", "health", "ai")
 PRESETS = ("default", "security", "server", "desktop")
 ORDERS = ("severity", "fixed")
-WEB_MODES = ("classic", "app")  # [ui] web only: which web interface is served (config.ini, never the cookie)
 KPI_IDS = ("problems", "internet", "lan", "beyond", "db_lan", "firewall", "cpu", "ram", "disk", "temp", "load", "containers",
            "unhealthy", "failed_units", "ssh", "tailnet", "rx", "tx", "uptime", "health", "ai")
 CARDS = tuple(nuc_config.SECTIONS)  # the card ids: the overview sections
@@ -62,7 +61,8 @@ CARD_CODES = dict(zip(CARDS, ("at", "ex", "wa", "fw", "sy", "ct", "db", "bo", "n
 DEFAULTS = {"theme": "auto", "density": "desk", "start_view": "overview", "preset": "default", "order": "severity"}
 FIELDS = ("theme", "density", "start_view", "preset", "order", "kpis", "layout", "hidden")
 SOURCES = ("url", "browser", "config.ini", "preset", "default")  # where a value of effective() comes from
-UI_KEYS = ("web",) + FIELDS  # the keys of config.ini [ui]
+UI_KEYS = FIELDS  # the keys of config.ini [ui]
+GONE_KEYS = {"web": "[ui] web is gone: the app shell is the only web interface"}  # keys older files still carry: ignored, said once
 
 # (field, cookie letter, allowed values -> cookie code), in the canonical order of the cookie
 _SCALARS = (("theme", "t", THEME_CODES), ("density", "d", DENSITY_CODES), ("start_view", "v", VIEW_CODES),
@@ -412,18 +412,19 @@ def _show(text):
 def parse_ui(section, sections_default=None):
     """config.ini [ui] (a dict of the section's keys) -> (ui, warnings). Never raises: a bad value is a warning and that key is not set.
 
-    ui always has "web" (app | classic; app by default) and "sections" ([dashboard] sections, completed), and then only the keys the file sets and
-    that are valid: theme, density, start_view, preset, order (str), kpis (ids), layout [(card, width)] and hidden [card].
+    ui always has "sections" ([dashboard] sections, completed), and then only the keys the file sets and that are valid: theme, density, start_view, preset, order (str), kpis (ids), layout [(card, width)] and hidden [card].
     Unknown names are dropped with a warning; a blank value sets nothing, except `hidden =` (nothing is hidden)."""
     warns = []
-    ui = {"web": "app", "sections": _section_order(sections_default)}
+    ui = {"sections": _section_order(sections_default)}
     sec = {}
     for k, v in (section.items() if isinstance(section, dict) else ()):
         sec[str(k).strip().lower()] = "" if v is None else str(v)
     for key in sec:
-        if key not in UI_KEYS:
+        if key in GONE_KEYS:
+            warns.append(GONE_KEYS[key])
+        elif key not in UI_KEYS:
             warns.append(f"[ui] unknown key '{_show(key)}' ignored (known: {', '.join(UI_KEYS)})")
-    for key, allowed in (("web", WEB_MODES), ("theme", THEMES), ("density", DENSITIES), ("start_view", VIEWS),
+    for key, allowed in (("theme", THEMES), ("density", DENSITIES), ("start_view", VIEWS),
                          ("preset", PRESETS), ("order", ORDERS)):
         v = sec.get(key, "").strip().lower()
         if not v:
@@ -508,8 +509,6 @@ def export_ini(prefs):
     button gives. parse_ui() reads it back to the same preferences. `hidden =` is always written: blank means nothing is hidden."""
     p = _clean(prefs)
     lines = ["[ui]"]
-    if isinstance(prefs, dict) and prefs.get("web") in WEB_MODES:
-        lines.append(f"web = {prefs['web']}")
     for field, _, _ in _SCALARS:
         if field in p:
             lines.append(f"{field} = {p[field]}")

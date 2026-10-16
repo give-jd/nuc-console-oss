@@ -104,7 +104,7 @@ class Tables(unittest.TestCase):
         self.assertEqual(set(prefs.CARD_CODES), set(nuc_config.SECTIONS), "a new section needs a card code in prefs.py")
 
     def test_ui_keys_are_the_documented_ones(self):
-        self.assertEqual(prefs.UI_KEYS, ("web", "theme", "density", "start_view", "preset", "order", "kpis", "layout", "hidden"))
+        self.assertEqual(prefs.UI_KEYS, ("theme", "density", "start_view", "preset", "order", "kpis", "layout", "hidden"))
 
 
 class CookieGrammar(unittest.TestCase):
@@ -389,23 +389,23 @@ class ApplySet(unittest.TestCase):
 class ParseUi(unittest.TestCase):
     def test_empty_section(self):
         ui, warns = prefs.parse_ui({}, None)
-        self.assertEqual(ui, {"web": "app", "sections": ALL})
+        self.assertEqual(ui, {"sections": ALL})
         self.assertEqual(warns, [])
         self.assertEqual(prefs.parse_ui(None, None)[0], ui)
         self.assertEqual(prefs.parse_ui("not a dict", 5)[0], ui)
 
     def test_every_key_with_valid_values(self):
-        sec = {"web": "app", "theme": "high-contrast", "density": "wall", "start_view": "health", "preset": "server", "order": "fixed",
+        sec = {"theme": "high-contrast", "density": "wall", "start_view": "health", "preset": "server", "order": "fixed",
                "kpis": "problems, internet, lan", "layout": "attention:2, exposure:2, webapps, firewall, system, containers:2", "hidden": "sessions, docker_disk"}
         ui, warns = prefs.parse_ui(sec, ALL)
         self.assertEqual(warns, [])
-        self.assertEqual(ui, {"web": "app", "sections": ALL, "theme": "high-contrast", "density": "wall", "start_view": "health", "preset": "server", "order": "fixed",
+        self.assertEqual(ui, {"sections": ALL, "theme": "high-contrast", "density": "wall", "start_view": "health", "preset": "server", "order": "fixed",
                               "kpis": ["problems", "internet", "lan"],
                               "layout": [("attention", 2), ("exposure", 2), ("webapps", 1), ("firewall", 1), ("system", 1), ("containers", 2)],
                               "hidden": ["sessions", "docker_disk"]})
 
     def test_every_allowed_value(self):
-        for key, allowed in (("web", prefs.WEB_MODES), ("theme", prefs.THEMES), ("density", prefs.DENSITIES), ("start_view", prefs.VIEWS),
+        for key, allowed in (("theme", prefs.THEMES), ("density", prefs.DENSITIES), ("start_view", prefs.VIEWS),
                              ("preset", prefs.PRESETS), ("order", prefs.ORDERS)):
             for v in allowed:
                 with self.subTest(key=key, value=v):
@@ -419,15 +419,15 @@ class ParseUi(unittest.TestCase):
                          ("dark", "wall", ["problems", "cpu"], [("attention", 2), ("exposure", 1)], ["sessions"]))
 
     def test_blank_values_set_nothing_except_hidden(self):
-        ui, warns = prefs.parse_ui({"theme": "", "density": "  ", "start_view": "", "kpis": "", "layout": "", "preset": "", "order": "", "web": "", "hidden": ""}, None)
+        ui, warns = prefs.parse_ui({"theme": "", "density": "  ", "start_view": "", "kpis": "", "layout": "", "preset": "", "order": "", "hidden": ""}, None)
         self.assertEqual(warns, [])
-        self.assertEqual(ui, {"web": "app", "sections": ALL, "hidden": []})
+        self.assertEqual(ui, {"sections": ALL, "hidden": []})
 
     def test_bad_values_warn_and_are_not_set(self):
-        ui, warns = prefs.parse_ui({"web": "new", "theme": "neon", "density": "huge", "start_view": "x", "preset": "all", "order": "random"}, None)
-        self.assertEqual(ui, {"web": "app", "sections": ALL})
-        self.assertEqual(len(warns), 6)
-        for key, w in zip(("web", "theme", "density", "start_view", "preset", "order"), warns):
+        ui, warns = prefs.parse_ui({"theme": "neon", "density": "huge", "start_view": "x", "preset": "all", "order": "random"}, None)
+        self.assertEqual(ui, {"sections": ALL})
+        self.assertEqual(len(warns), 5)
+        for key, w in zip(("theme", "density", "start_view", "preset", "order"), warns):
             self.assertTrue(w.startswith("[ui] %s must be one of" % key), w)
 
     def test_one_bad_value_does_not_cost_the_others(self):
@@ -488,7 +488,7 @@ class ParseUi(unittest.TestCase):
 
     def test_values_that_are_not_strings(self):
         ui, warns = prefs.parse_ui({"theme": None, "density": 5, "kpis": None, 7: "x", None: "y"}, None)
-        self.assertEqual(ui, {"web": "app", "sections": ALL})
+        self.assertEqual(ui, {"sections": ALL})
         self.assertTrue(warns)
 
     def test_random_sections_never_raise(self):
@@ -563,7 +563,7 @@ class Presets(unittest.TestCase):
 
 class Effective(unittest.TestCase):
     def test_nothing_set_is_the_default_preset(self):
-        for args in ((), (None,), ({},), ({"web": "app", "sections": ALL}, "", None), (prefs.parse_ui({}, ALL)[0], "1", "1")):
+        for args in ((), (None,), ({},), ({"sections": ALL}, "", None), (prefs.parse_ui({}, ALL)[0], "1", "1")):
             p, src = prefs.effective(*args)
             self.assertEqual(p, dict(prefs.DEFAULTS, **prefs.preset_prefs("default")), args)
             self.assertEqual(set(src.values()), {"default"})
@@ -699,7 +699,7 @@ class Effective(unittest.TestCase):
     def test_random_layers_are_always_valid(self):
         rnd = random.Random(99)
         for _ in range(400):
-            ui = dict(random_prefs(rnd), sections=rnd.sample(ALL, rnd.randint(0, 13)), web="classic")
+            ui = dict(random_prefs(rnd), sections=rnd.sample(ALL, rnd.randint(0, 13)))
             p, src = prefs.effective(ui, prefs.dump_cookie(random_prefs(rnd)), prefs.dump_cookie(random_prefs(rnd)))
             self.assertEqual(set(p) - {"hidden_w"}, set(prefs.FIELDS))
             self.assertEqual(prefs._clean(p).get("layout", []), p["layout"])
@@ -786,7 +786,7 @@ class ExportIni(unittest.TestCase):
                      "hidden = webapps, containers, databases, tailscale, docker_disk"):
             self.assertIn(line + "\n", text)
         self.assertNotIn("web =", text)
-        self.assertEqual(prefs.export_ini(dict(p, web="app")).splitlines()[1], "web = app")
+        self.assertNotIn("web =", prefs.export_ini(dict(p, web="app")))  # [ui] web is gone: never written
 
     def test_round_trip_of_every_preset(self):
         for name in prefs.PRESETS:
@@ -820,7 +820,7 @@ class ExportIni(unittest.TestCase):
             self.assertEqual(back, p)
 
     def test_what_is_not_valid_is_not_written(self):
-        text = prefs.export_ini({"theme": "neon", "kpis": ["nope"], "layout": [("nope", 1)], "web": "weird", "hidden": ["nope"]})
+        text = prefs.export_ini({"theme": "neon", "kpis": ["nope"], "layout": [("nope", 1)], "hidden": ["nope"]})
         self.assertEqual(text, "[ui]\nhidden =\n")
         self.assertEqual(prefs.export_ini(None), "[ui]\n")
 
@@ -837,23 +837,23 @@ class ExportIni(unittest.TestCase):
 class LoadConfig(unittest.TestCase):
     def test_no_file_no_section(self):
         cfg = nuc_config.load("/nonexistent/config.ini")
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL})
+        self.assertEqual(cfg["ui"], {"sections": ALL})
         cfg, err = load_ini("[features]\nmap = no\n")
-        self.assertEqual((cfg["ui"], err), ({"web": "app", "sections": ALL}, ""))
+        self.assertEqual((cfg["ui"], err), ({"sections": ALL}, ""))
         cfg, err = load_ini("[ui]\n")
-        self.assertEqual((cfg["ui"], err), ({"web": "app", "sections": ALL}, ""))
+        self.assertEqual((cfg["ui"], err), ({"sections": ALL}, ""))
 
     def test_a_valid_section(self):
-        cfg, err = load_ini("[ui]\nweb = app\ntheme = dark\ndensity = wall\nstart_view = map\npreset = security\norder = fixed\n"
+        cfg, err = load_ini("[ui]\ntheme = dark\ndensity = wall\nstart_view = map\npreset = security\norder = fixed\n"
                             "kpis = problems, internet, lan   # three\nlayout = attention:2, exposure:2, webapps\nhidden = sessions ; the rest\n")
         self.assertEqual(err, "")
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL, "theme": "dark", "density": "wall", "start_view": "map", "preset": "security", "order": "fixed",
+        self.assertEqual(cfg["ui"], {"sections": ALL, "theme": "dark", "density": "wall", "start_view": "map", "preset": "security", "order": "fixed",
                                      "kpis": ["problems", "internet", "lan"], "layout": [("attention", 2), ("exposure", 2), ("webapps", 1)], "hidden": ["sessions"]})
         p, src = prefs.effective(cfg["ui"])
         self.assertEqual((p["theme"], src["theme"], p["kpis"], src["kpis"]), ("dark", "config.ini", ["problems", "internet", "lan"], "config.ini"))
 
     def test_the_example_of_the_plan(self):
-        cfg, err = load_ini("[ui]\nweb = classic            # classic | app\ntheme = auto             # auto | dark | light | high-contrast\n"
+        cfg, err = load_ini("[ui]\ntheme = auto             # auto | dark | light | high-contrast\n"
                             "density = desk           # wall | desk | compact\nstart_view = overview    # overview | map | cpu | health | ai\n"
                             "preset = default         # default | security | server | desktop\norder = severity        # severity | fixed\n"
                             "kpis = problems, internet, lan, cpu, ram, disk, temp\n"
@@ -866,18 +866,18 @@ class LoadConfig(unittest.TestCase):
 
     def test_broken_values_go_to_stderr_and_the_rest_is_kept(self):
         cfg, err = load_ini("[dashboard]\nrotate_seconds = 20\n[ui]\ntheme = neon\ndensity = wall\nkpis = problems, nope\nlayout = attention:9, nope, exposure:x\n"
-                            "hidden = nope\nweb = maybe\ncolour = red\n")
+                            "hidden = nope\ncolour = red\n")
         self.assertEqual(cfg["rotate_seconds"], 20, "the other sections are not touched")
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL, "density": "wall", "kpis": ["problems"], "layout": [("attention", 4), ("exposure", 1)],
+        self.assertEqual(cfg["ui"], {"sections": ALL, "density": "wall", "kpis": ["problems"], "layout": [("attention", 4), ("exposure", 1)],
                                      "hidden": []})
         lines = err.strip().splitlines()
         self.assertTrue(all(ln.startswith("nuc-console: ") and "[ui]" in ln for ln in lines), err)
-        for part in ("theme must be one of", "unknown name 'nope'", "attention:9", "exposure:x", "unknown card 'nope'", "web must be one of", "unknown key 'colour'"):
+        for part in ("theme must be one of", "unknown name 'nope'", "attention:9", "exposure:x", "unknown card 'nope'", "unknown key 'colour'"):
             self.assertIn(part, err)
 
     def test_every_value_wrong_still_loads(self):
-        cfg, err = load_ini("[ui]\ntheme = 1\ndensity = 2\nstart_view = 3\npreset = 4\norder = 5\nkpis = 6\nlayout = 7\nhidden = 8\nweb = 9\n")
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL, "hidden": []})
+        cfg, err = load_ini("[ui]\ntheme = 1\ndensity = 2\nstart_view = 3\npreset = 4\norder = 5\nkpis = 6\nlayout = 7\nhidden = 8\n")
+        self.assertEqual(cfg["ui"], {"sections": ALL, "hidden": []})
         self.assertGreaterEqual(len(err.strip().splitlines()), 9)
 
     def test_the_section_order_comes_from_dashboard_sections(self):
@@ -893,7 +893,7 @@ class LoadConfig(unittest.TestCase):
 
     def test_default_section_keys_are_not_ours(self):
         cfg, err = load_ini("[DEFAULT]\ntheme = dark\nlayout = disks\n[ui]\ndensity = wall\n")
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL, "density": "wall"})
+        self.assertEqual(cfg["ui"], {"sections": ALL, "density": "wall"})
         self.assertEqual(err, "")
 
     def test_a_file_that_cannot_be_read_has_the_defaults(self):
@@ -904,30 +904,49 @@ class LoadConfig(unittest.TestCase):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 cfg = nuc_config.load(bad)
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL})
+        self.assertEqual(cfg["ui"], {"sections": ALL})
         self.assertTrue(cfg["config_error"])
+
+    def test_the_old_web_key_is_ignored_with_one_warning(self):
+        for value in ("classic", "app"):
+            nuc_config._REPORTED.clear()  # a complaint is printed once per process: this test is another process
+            cfg, err = load_ini("[ui]\nweb = %s\ntheme = dark\n" % value)
+            self.assertEqual(cfg["ui"], {"sections": ALL, "theme": "dark"}, value)
+            self.assertNotIn("web", cfg["ui"])
+            self.assertEqual(len(err.strip().splitlines()), 1, err)
+            self.assertIn("[ui] web is gone: the app shell is the only web interface", err)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.ini")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("[ui]\nweb = classic\n")
+            nuc_config._REPORTED.clear()
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                nuc_config.load(path)
+                nuc_config.load(path)  # the collector reads the file again and again: one line per process, not a flood
+            self.assertEqual(err.getvalue().count("[ui] web is gone"), 1)
 
     def test_a_bug_in_prefs_never_stops_the_dashboard(self):
         with mock.patch.object(prefs, "parse_ui", side_effect=RuntimeError("boom")):
             cfg, err = load_ini("[features]\nmap = no\n[ui]\ntheme = dark\n")
         self.assertFalse(cfg["features"]["map"])
-        self.assertEqual(cfg["ui"], {"web": "app", "sections": ALL})
+        self.assertEqual(cfg["ui"], {"sections": ALL})
         self.assertIn("[ui] ignored: boom", err)
 
     def test_prefs_is_stdlib_only_and_has_no_import_cycle(self):
         src = os.path.join(ROOT, "src")
         for code in ("import prefs; print(prefs.CARDS[0])",
-                     "import nuc_config; print(nuc_config.load('/nonexistent')['ui']['web'])",
+                     "import nuc_config; print(nuc_config.load('/nonexistent')['ui']['sections'][0])",
                      "import prefs, nuc_config; print(nuc_config.load('/nonexistent')['ui']['sections'][0])"):
             out = subprocess.run([sys.executable, "-c", code], cwd=src, capture_output=True, text=True, timeout=60)
             self.assertEqual(out.returncode, 0, out.stderr)
         with tempfile.TemporaryDirectory() as d:  # the installers' way in: nuc_config.py run as a script
             ini = os.path.join(d, "config.ini")
             with open(ini, "w", encoding="utf-8") as f:
-                f.write("[ui]\nweb = app\n")
+                f.write("[ui]\ntheme = dark\n")
             env = dict(os.environ, NUC_CONSOLE_CONFIG=ini)
-            out = subprocess.run([sys.executable, os.path.join(src, "nuc_config.py"), "--get", "ui", "web"], capture_output=True, text=True, timeout=60, env=env)
-            self.assertEqual((out.returncode, out.stdout.strip(), out.stderr), (0, "app", ""))
+            out = subprocess.run([sys.executable, os.path.join(src, "nuc_config.py"), "--get", "ui", "theme"], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual((out.returncode, out.stdout.strip(), out.stderr), (0, "dark", ""))
         with open(os.path.join(src, "prefs.py"), encoding="utf-8") as f:
             imports = re.findall(r"(?m)^(?:import|from)\s+(\w+)", f.read())
         self.assertEqual(sorted(imports), ["nuc_config", "re"])
@@ -945,13 +964,12 @@ class Docs(unittest.TestCase):
     def test_every_key_and_value_is_documented(self):
         for key in prefs.UI_KEYS:
             self.assertIn("| `%s` |" % key, self.doc, key)
-        words = (prefs.WEB_MODES + prefs.THEMES + prefs.DENSITIES + prefs.VIEWS + prefs.PRESETS + prefs.ORDERS + prefs.KPI_IDS + prefs.CARDS)
+        words = (prefs.THEMES + prefs.DENSITIES + prefs.VIEWS + prefs.PRESETS + prefs.ORDERS + prefs.KPI_IDS + prefs.CARDS)
         for w in words:
             self.assertIn("`%s`" % w, self.doc, w)
 
     def test_the_documented_defaults_are_the_codes(self):
         rows = {m.group(1): m.group(2) for m in re.finditer(r"(?m)^\| `([a-z_]+)` \| `?([^|`]*)`? \|", self.doc)}
-        self.assertEqual(rows["web"], "app")
         for key in ("theme", "density", "start_view", "preset", "order"):
             self.assertEqual(rows[key], prefs.DEFAULTS[key], key)
         self.assertIn("up to %d" % prefs.MAX_KPIS, self.doc)
@@ -970,13 +988,13 @@ class Docs(unittest.TestCase):
     def test_it_says_who_reads_it(self):
         low = self.doc.lower()
         self.assertIn("the console uses this section", low)  # the console reads [ui]
-        self.assertIn("is the default and reads this", low)  # the web shell is the default interface and reads [ui]...
-        self.assertIn("web = classic", low)  # ...the classic pages (kept for one release) ignore it
+        self.assertIn("the web shell reads this", low)  # the web shell reads [ui] as well
+        self.assertIn("`web` is gone", low)  # and an older file with [ui] web still loads: the key is ignored
 
     def test_the_shipped_config_has_a_commented_ui_block_that_works(self):
         block = self.ini[self.ini.index("\n[ui]\n") + 1:].split("\n[")[0]
         ui, warns = prefs.parse_ui(ini_section(block), ALL)
-        self.assertEqual((ui, warns), ({"web": "app", "sections": ALL}, []), "shipped as a commented example")
+        self.assertEqual((ui, warns), ({"sections": ALL}, []), "shipped as a commented example")
         example = re.sub(r"(?m)^# (%s)(\s*=)" % "|".join(prefs.UI_KEYS), r"\1\2", block)
         self.assertNotEqual(example, block)
         ui, warns = prefs.parse_ui(ini_section(example), ALL)
@@ -985,7 +1003,6 @@ class Docs(unittest.TestCase):
         p, src = prefs.effective(ui)
         for field in ("theme", "density", "start_view", "preset", "order"):
             self.assertEqual(p[field], prefs.DEFAULTS[field], "the example shows the defaults")
-        self.assertEqual(ui["web"], "app")
         self.assertLessEqual(len(ui["kpis"]), prefs.MAX_KPIS)
 
     def test_the_shipped_config_is_strict_and_loads(self):
@@ -993,7 +1010,7 @@ class Docs(unittest.TestCase):
         cp.read_string(self.ini)
         self.assertIn("ui", cp.sections())
         cfg, err = load_ini(self.ini)
-        self.assertEqual((cfg["ui"], err), ({"web": "app", "sections": ALL}, ""))
+        self.assertEqual((cfg["ui"], err), ({"sections": ALL}, ""))
 
 
 class LayoutEditor(unittest.TestCase):

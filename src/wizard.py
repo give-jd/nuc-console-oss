@@ -232,7 +232,7 @@ def step2(cfg, f, x):
                         "on" if live else "off: [features] %s = no" % feat))
     rows.append(row('<a class="lnk" href="/?view=settings">Settings</a>', "theme, density, the key figures, the sections, config.ini", "web: the gear in the top bar"))
     rows.append(row('<a class="lnk" href="/?view=telegram">Telegram</a>', "alerts on your phone, through a bot of your own", "off unless you pair it"))
-    rows.append(row('<a class="lnk" href="/?app=1&amp;ui=1.dw&amp;kiosk=1">Wall</a>', "big type for a monitor across the room; lists cut to three rows", "the wall density"))
+    rows.append(row('<a class="lnk" href="/?ui=1.dw&amp;kiosk=1">Wall</a>', "big type for a monitor across the room; lists cut to three rows", "the wall density"))
     return ('<p>Keys <kbd>1</kbd>-<kbd>5</kbd> open the screens on the console, the tabs do on the web; <kbd>?</kbd> shows the keys, <kbd>Esc</kbd> goes back. '
             'A screen switched off in <code>[features]</code> has no key and no tab.</p>'
             f'<ul class="wz-list">{"".join(rows)}</ul>')

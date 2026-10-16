@@ -71,7 +71,7 @@ def load(path=None, warn=None, overlay=True):
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
-           "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "columns": 200, "rows": 60,
+           "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "",
                    "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
@@ -83,7 +83,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
-    cfg["ui"] = {"web": "app", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
+    cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
             if os.path.exists(path):  # read() ignores a file it cannot open: that is not "no config.ini"
@@ -189,11 +189,10 @@ def load(path=None, warn=None, overlay=True):
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
-        for key, lo, hi in (("port", 1, 65535), ("columns", 60, 300), ("rows", 20, 120)):
-            try:
-                w[key] = max(lo, min(hi, cp.getint("web", key, fallback=w[key])))
-            except ValueError:
-                say(f"nuc-console: {path}: [web] {key} must be an integer")
+        try:
+            w["port"] = max(1, min(65535, cp.getint("web", "port", fallback=w["port"])))
+        except ValueError:
+            say(f"nuc-console: {path}: [web] port must be an integer")
         if cp.has_option("web", "refresh_seconds"):  # the old place of the setting: used while [dashboard] has none
             try:
                 web_refresh = refresh("web")

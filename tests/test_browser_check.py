@@ -38,7 +38,7 @@ class Matrix(unittest.TestCase):
 
     def test_paths_use_the_ui_grammar_of_prefs(self):
         for p in bc.build_matrix():
-            self.assertTrue(p.path.startswith("/app?ui=1." if p.kind.startswith("app-") else "/?app=1&ui=1."), p.path)
+            self.assertTrue(p.path.startswith("/app?ui=1." if p.kind.startswith("app-") else "/?ui=1."), p.path)
             ui = p.path.split("ui=")[1].split("&")[0]
             got = prefs.parse_cookie(ui)
             self.assertEqual(set(got), {"theme", "density"}, (p.path, got))

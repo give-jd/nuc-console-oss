@@ -1,4 +1,4 @@
-"""The shell as a wall display: `?app=1&ui=1.dw&kiosk=1` (wall density, kiosk), and the URL the display opens for `[ui] web = app`."""
+"""The shell as a wall display: `?ui=1.dw&kiosk=1` (wall density, kiosk), and the URL the display opens for the display."""
 import base64
 import hashlib
 import os
@@ -21,7 +21,7 @@ import webcss  # noqa: E402
 import webjs  # noqa: E402
 from test_web import get_any as get, serve  # noqa: E402
 
-WALL = "/?app=1&ui=1.dw&kiosk=1"
+WALL = "/?ui=1.dw&kiosk=1"
 
 
 class WallPage(unittest.TestCase):
@@ -43,8 +43,8 @@ class WallPage(unittest.TestCase):
     def test_data_rotate_only_on_a_kiosk_page_in_the_wall_density(self):
         _, wall = self.page(WALL)
         self.assertRegex(wall, r'<main [^>]*data-rotate="%d"' % render.CFG["rotate_seconds"])
-        for path in ("/?app=1&ui=1.dw", "/?app=1&ui=1.dd&kiosk=1", "/?app=1&ui=1.dc&kiosk=1", "/?app=1", "/?app=1&ui=1.dw&kiosk=1&view=settings",
-                     "/?app=1&ui=1.dw&kiosk=1&edit=1", "/?app=0&kiosk=1&ui=1.dw"):
+        for path in ("/?ui=1.dw", "/?ui=1.dd&kiosk=1", "/?ui=1.dc&kiosk=1", "/", "/?ui=1.dw&kiosk=1&view=settings",
+                     "/?ui=1.dw&kiosk=1&edit=1"):
             self.assertNotRegex(self.page(path)[1], r"<main [^>]*data-rotate", path)
         for view in ("cpu", "health", "ai"):
             self.assertIn('data-rotate="', self.page(WALL + "&view=" + view)[1], view)
@@ -73,14 +73,14 @@ class WallPage(unittest.TestCase):
         self.assertNotIn("<a ", foot)
         for word in ("pause", "Edit layout", "theme:", "density:", "text "):
             self.assertNotIn(word, foot)
-        _, desk = self.page("/?app=1&ui=1.dd")
+        _, desk = self.page("/?ui=1.dd")
         self.assertIn("Edit layout", desk)  # the same page without the kiosk keeps its controls
 
     def test_a_wall_has_nothing_to_click_in_its_cards(self):
         _, body = self.page(WALL)
         self.assertNotIn("the whole card", body)  # the link to /?card= is not even sent
         self.assertNotIn("?card=", body)
-        _, desk = self.page("/?app=1&ui=1.dd")
+        _, desk = self.page("/?ui=1.dd")
         self.assertIn("the whole card", desk)
         css = webcss.CSS
         for rule in ('html[data-density="wall"] .card p.more', 'html[data-density="wall"] details.fix',
@@ -110,41 +110,31 @@ class WallPage(unittest.TestCase):
         self.assertIn(webjs.REFRESH_JS, inline)
         self.assertEqual(len(inline), 3)  # refresh, keys, prefs
 
-    def test_a_classic_kiosk_page_is_not_a_wall(self):
-        _, body = self.page("/?app=0&rotate=1&kiosk=1&fit=1")
-        self.assertNotRegex(body, r"<main [^>]*data-rotate")
-        self.assertIn(display.KIOSK_HINT, body)
-
 
 class DisplayUrl(unittest.TestCase):
-    def url(self, web_mode, **kw):
-        with mock.patch.dict(render.CFG, {"ui": {"web": web_mode}}), mock.patch.dict(render.CFG["web"], {"port": 8787}):
+    def url(self, **kw):
+        with mock.patch.dict(render.CFG["web"], {"port": 8787}):
             return display.dashboard_url(**kw)
 
-    def test_classic_is_unchanged(self):
-        self.assertEqual(self.url("classic"), "http://127.0.0.1:8787/?fit=1")
-        self.assertEqual(self.url("classic", fullscreen=True, cols=200, rows=64), "http://127.0.0.1:8787/?fit=1&cols=200&rows=64&rotate=1&kiosk=1")
-
-    def test_app_opens_the_shell_and_its_wall_display(self):
-        self.assertEqual(self.url("app", fullscreen=True, cols=200, rows=64), "http://127.0.0.1:8787/?app=1&ui=1.dw&kiosk=1")
-        self.assertEqual(self.url("app"), "http://127.0.0.1:8787/?app=1")
+    def test_the_display_opens_the_shell_and_its_wall_display(self):
+        self.assertEqual(self.url(fullscreen=True), "http://127.0.0.1:8787/?ui=1.dw&kiosk=1")
+        self.assertEqual(self.url(), "http://127.0.0.1:8787/")
 
     def test_the_url_is_a_wall_page_for_the_server(self):
-        q = weburl.view_params(parse_qs("app=1&ui=1.dw&kiosk=1"))
-        self.assertEqual((q["app"], q["ui"], q["kiosk"]), ("1", "1.dw", True))
+        q = weburl.view_params(parse_qs("app=0&cols=200&ui=1.dw&kiosk=1"))  # app= and cols= of older links are ignored
+        self.assertEqual((q["ui"], q["kiosk"]), ("1.dw", True))
+        self.assertFalse({"app", "cols", "rows", "fit", "full"} & set(q))
 
     def test_the_launcher_hands_the_browser_that_url(self):
         import tempfile
-        for mode, want in (("app", "--app=http://127.0.0.1:8787/?app=1&ui=1.dw&kiosk=1"), ("classic", "--app=http://127.0.0.1:8787/?fit=1&cols=")):
-            started = []
-            with tempfile.TemporaryDirectory() as d, mock.patch.dict(render.CFG, {"ui": {"web": mode}}), \
-                    mock.patch.dict(render.CFG["web"], {"port": 8787, "token_file": ""}), \
-                    mock.patch.object(display, "web_up", lambda port, wait: True), mock.patch.object(display, "find_browser", lambda *a: "/opt/browser"), \
-                    mock.patch.object(display, "launch", started.append), mock.patch.object(display, "user_dir", lambda: d), \
-                    mock.patch.object(display, "kiosk_grid", lambda: (200, 64)), \
-                    mock.patch.object(render.nuc_config, "log_to", lambda path: None):  # --log would send this process's stdout and stderr to the file
-                self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
-            self.assertTrue(started[0][1].startswith(want), (mode, started[0][1]))
+        started = []
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(render.CFG["web"], {"port": 8787, "token_file": ""}), \
+                mock.patch.object(display, "web_up", lambda port, wait: True), mock.patch.object(display, "find_browser", lambda *a: "/opt/browser"), \
+                mock.patch.object(display, "launch", started.append), mock.patch.object(display, "user_dir", lambda: d), \
+                mock.patch.object(display, "kiosk_grid", lambda: (200, 64)), \
+                mock.patch.object(render.nuc_config, "log_to", lambda path: None):  # --log would send this process's stdout and stderr to the file
+            self.assertEqual(render.kiosk(["render.py", "--kiosk", "--log", os.path.join(d, "k.log")]), 0)
+        self.assertTrue(started[0][1].startswith("--app=http://127.0.0.1:8787/?ui=1.dw&kiosk=1"), started[0][1])
 
 
 if __name__ == "__main__":

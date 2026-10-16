@@ -1,13 +1,12 @@
 """nuc-console web view: the MAP, as a tree and as a graph.
 
-The tree page (`map_nodes`, `map_native`, `map_body`, `map_row`, `details_panel`: the rows are links, the state is all in the URL, `prune`
+The tree page (`map_nodes`, `map_native`, `details_panel`: the rows are links, the state is all in the URL, `prune`
 and `universe` bound what a URL may name) and the graph page (`graph_select` picks the nodes and edges to draw, `graph_svg` and `graph_body`
-draw them as one SVG with `place_labels`, `graph_doc` wraps the document; the one script of the page is graphjs.SCRIPT, which web.py sends and
+draw them as one SVG with `place_labels`; the one script of the page is graphjs.SCRIPT, which web.py sends and
 pins in the CSP). Moved from web.py unchanged. Functions of a graph and of the URL parameters; the Server of web.py owns the caches and the layout
 cache and calls them."""
 import html
 import math
-import socket
 import sys
 import time
 
@@ -15,15 +14,12 @@ import graph
 import htmlview
 import render
 import screens
-from htmlview import CSS, GRAPH_CSS, MAP_CSS, sgr_class
+from htmlview import sgr_class
 from weburl import GZOOMS, LEVEL_CLASS, choice, gzoom, page_url
 
 MAP_ROWS = 1000      # rows on one map page: a bigger tree is unreadable in a browser anyway (close branches, problems only)
 UNIVERSE = 3000      # rows of the fully open map, to drop keys that name nothing
-STATE_CLASS = {"err": "r", "down": "r", "warn": "y", "unknown": "y", "ok": "g", "info": "n"}  # htmlview.PALETTE (n: plain text)
 STATE_MARK = {"down": "✖ ", "unknown": "? "}  # a symbol besides the colour
-EV_CLASS = {"seen": "w B", "declared": "n", "possible": "d", "bind": "d"}  # evidence: seen bright, declared plain, possible dim
-EV_OF = {glyph: ev for (_, ev), glyph in graph.ARROW.items()}
 
 
 # the MAP's graph view (?view=map&as=graph): the same graph as circles and lines
@@ -86,41 +82,6 @@ def map_head(pb, host):
             f'<span>{html.escape(text)} </span></div>')
 
 
-def map_body(G, pb, st, sel, here, host, found=None):
-    """Header, legend, notes, the tree (one row per line, every row a link) and the details of the selected row, as HTML.
-    Everything from the graph is escaped: labels are container and process names. found: gets the selected row's node."""
-    esc = html.escape
-    out = [map_head(pb, host)]
-    legend = []
-    for item in graph.LEGEND.split("  "):
-        glyph, _, word = item.partition(" ")
-        legend.append(f'<span class="{EV_CLASS.get(EV_OF.get(glyph), "")}">{esc(glyph)}</span> {esc(word)}' if glyph in EV_OF else esc(item))
-    n = graph.counts(G)
-    out.append(f'<div class="lg">{n["nodes"]} nodes · {n["edges"]} links · '
-               + (f'<span class="r">{n["problems"]} need attention</span>' if n["problems"] else "nothing needs attention")
-               + f' │ {"  ".join(legend)}  <span class="r">✖ down</span>  <span class="y">? unknown</span>  ▸ ▾ open/close · a name: its details</div>')
-    out += [f'<div class="nt">· {esc(x)}</div>' for x in G.get("notes") or []]
-    rs = graph.rows(G, st, limit=MAP_ROWS)
-    tree = [map_row(G, row, st, sel, here) for row in rs]
-    if rs.truncated:
-        tree.append(f'<div class="nt">… more than {MAP_ROWS} rows: close some branches, or show problems only</div>')
-    if not rs:
-        tree.append('<div class="nt">nothing to show yet' + (": see the notes above" if G.get("notes") else "") + '</div>')
-    panel = ""
-    if sel:
-        i = graph.find(rs, sel)
-        row = rs[i] if i is not None else None
-        if row is None:  # its branch is closed: still the same row of the fully open map
-            every = universe(G)
-            j = graph.find(every, sel)
-            row = every[j] if j is not None else None
-        panel = details_panel(G, row["node"] if row else None, st, sel, here)
-        if found is not None and row:
-            found.update(node=row["node"], kind=G["nodes"].get(row["node"], {}).get("kind"))
-    out.append(f'<main class="mp{" two" if panel else ""}"><div class="tree">{"".join(tree)}</div>{panel}</main>')
-    return "".join(out)
-
-
 def map_nodes(G, st, sel, here, base, pause, found=None):
     """The Map screen's components for the web (screens.map_web): the title with its choices, the tree's rows (links) and the details of the selected
     row. here: the map's URL parameters, base: the page's own; found gets the selected row's node. The page (map_native) and the data API draw these."""
@@ -163,36 +124,6 @@ def map_native(G, st, sel, here, base, pause, found=None):
 
 def map_url(here, st, sel, anchor):
     return page_url(here, sel=sel, **state_params(st)) + (f"#r-{anchor}" if anchor else "")
-
-
-def map_row(G, row, st, sel, here):
-    """One row: tree glyphs, the toggle link (▸ opens, ▾ closes, ↻ already on this path), the arrow coloured by evidence,
-    the name (a link that selects it) coloured by state, the port's owner in bold, the qualifier dim, the worst finding."""
-    esc, k = html.escape, row["key"]
-    p = graph.parts(G, row)
-    if row["kids"] and not row["cycle"]:
-        tip = "close" if row["open"] else f"open: {row['kids']} below"
-        out = [f'<a class="tg" title="{tip}" href="{esc(map_url(here, st.toggled(row), sel, k))}">{esc(p["toggle"])}</a>']
-    else:
-        tip = "already shown above on this path" if row["cycle"] else "nothing below"
-        out = [f'<span class="tg d" title="{tip}">{esc(p["toggle"])}</span>']
-    if p["arrow"]:
-        out.append(f'<span class="{EV_CLASS.get(p.get("ev"), "")}">{esc(p["arrow"])}</span> ')
-    label = STATE_MARK.get(p["state"], "") + p["label"]
-    out.append(f'<a class="lb {STATE_CLASS.get(p["state"], "n")}" href="{esc(map_url(here, st, k, k))}">{esc(label)}</a>')
-    if p.get("port"):
-        out.append(f' <span class="d">{esc(p["port"])}</span>')
-    if p.get("owner"):
-        out.append(f' <b class="{"y" if p["owner"] == "?" else "n"}">{esc(p["owner"])}</b>')
-    if p.get("sub"):
-        out.append(f'  <span class="d">{esc(p["sub"])}</span>')
-    if p.get("note"):
-        lv = next((lv for lv, t in G["nodes"][row["node"]].get("findings") or [] if t == p["note"]), "")  # else: when it was seen
-        out.append(f'  <span class="{LEVEL_CLASS.get(lv, "d") if lv != "ok" else "d"}">{esc(p["note"])}</span>')
-    if k == sel:
-        out.append(' <a class="dl" href="#details">details ↓</a>')
-    return (f'<div class="ro{" sel" if k == sel else ""}" id="r-{esc(k)}"><span class="tr">{esc(p["tree"])}</span>'
-            f'<span class="bd">{"".join(out)}</span></div>')
 
 
 def details_panel(G, nid, st, sel, here, close=None, tools=""):
@@ -480,14 +411,3 @@ def graph_body(G, pb, v, pos, w, h, gh, r, host):
                f'data-state="{esc(page_url(gh, sel=""))}">{graph_svg(G, v, pos, w, h, gh["z"], gh)}</div>{panel}</main>')
     return "".join(out)
 
-
-def graph_doc(r, zoom, z, body, foot, refresh, script):
-    """The graph page: with a script, the meta refresh only for browsers that run none (the script reloads the page itself);
-    the drawing fills the column at z=100 (no scrolling), z% of it otherwise (the box scrolls)."""
-    meta = f'<meta http-equiv="refresh" content="{r}">'
-    size = f"#gsvg{{width:{z}%}}" if z else "#gsvg{width:100%;max-height:calc(100vh - 150px)}"
-    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            + ((f"<noscript>{meta}</noscript>" if script else meta) if refresh else "")
-            + f'<title>{html.escape(socket.gethostname())} · map · nuc-console</title><style>{CSS}{MAP_CSS}{GRAPH_CSS}'
-            + "body{font-size:%.1fpx}" % (14 * zoom / 100) + size + f'</style>{body}<footer>{" · ".join(foot)}</footer>'
-            + (f"<script>{script}</script>" if script else "") + "</html>")
