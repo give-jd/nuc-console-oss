@@ -6,23 +6,21 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ## [Unreleased]
 
 ### Added
-<<<<<<< HEAD
 - **The settings page of an installation can change settings**, without making `config.ini` writable and without any privileged helper: what it changes is kept in
   `settings.ini` in the AI folder (`/var/lib/nuc-console/ai`, the folder the web view's account already owns; the same on macOS and Windows) and laid over `config.ini`
   for the screens, the web view and the collector. Only presentation keys can be changed that way: the `[features]` switches (to **off** only: `config.ini` alone switches
   on), `[dashboard]`, `[ui]`, `[display] zoom`. `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]` and every lock stay in `config.ini`, and the new key
   `[web] settings_actions` (default `no`: opt-in, and a value that is not yes/no counts as `no`) turns it on, **only together with `[web] token_file`**; switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off from the page raises the ATTENTION problem `feature-hidden`, which cannot be accepted. Each value set from the page is marked, with a **Reset to config.ini** button; `rm` of the file resets all.
   See [docs/WEB.md](docs/WEB.md#an-installations-settings-overlay), [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and [SECURITY.md](SECURITY.md#the-installations-settings-overlay).
-=======
+
 - `sudo nuc-console-config migrate [--dry-run] [--yes]` ([#55](https://github.com/give-jd/nuc-console-oss/issues/55)) brings an installed, old-layout `config.ini` to the shipped one without losing a setting:
   values you changed and your `[ui]`, `[webapps]` and `[expose]` lines are kept, unknown keys stay under a `# legacy:` line, the configuration in force is checked to be the same before
   the file is replaced, and the old file is kept as `config.ini.bak-YYYYMMDD-HHMMSS`. `nuc-console-update` prints one line when your file is in the old layout; it never migrates by itself.
   See [Upgrading config.ini](docs/CONFIGURATION.md#upgrading-configini).
->>>>>>> origin/main
 
 - `[ui] kpis = none` shows no KPI row, on the console and on the web, and the space goes to the cards (as `hidden = none` hides nothing).
 - `[alerts] mute = id, id, ...` silences operational ATTENTION alarms from a closed list (`journal-errors`, `thermal`, `throttling`, `container-exited`,
-  `unhealthy-container`, `failed-units`, `collector-boot`: `nuc_config.MUTABLE_ALERTS`). A muted alarm leaves the list, the Problems figure and Telegram, ATTENTION
+  `unhealthy-container`, `collector-boot`: `nuc_config.MUTABLE_ALERTS`). A muted alarm leaves the list, the Problems figure and Telegram, ATTENTION
   counts it as `N muted`, `nuc-console-problems` lists it under `muted`, and the collectors still produce its data. Security alarms can never be muted: a security or
   unknown name is ignored, logged and raised as `mute-ignored`. It is not `nuc-console-accept` (a root command with a reason, kept in `accepted.json`); both are on the settings page.
 
