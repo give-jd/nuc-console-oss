@@ -28,6 +28,7 @@ import prefs  # same directory: [ui], the console's theme, density, order and KP
 import problems  # same directory: the problem list, its advice and what was accepted
 import procs
 import ui
+import wizard  # same directory: the setup guide's text and its marker
 import screens  # same directory: the full screens' view-models and the components of each screen
 from ansi import ANSI, bar, c, cc, clip, columns, kv, msg, msg_wrap, pad, section, vlen
 from ui import dd, dget, fmt_ago, hclean, hnum, human, idict, num, plural, safe
@@ -1226,6 +1227,8 @@ def once(argv):
         out = health_once(argv, w, h)
         if out is None:
             return 2
+    elif view == "guide":  # the setup guide as text: steps 1-3 of the web wizard (wizard.guide_lines), what the first start and `? ?` show
+        out = "\n".join(["nuc-console: setup guide", ""] + wizard.guide_lines(CFG, min(wizard.GUIDE_W, max(20, w))))
     elif view == "ai":  # the AI screen (see ai_once for its options)
         if not on("ai"):
             print("the AI screen is off: [features] ai = no in config.ini", file=sys.stderr)
@@ -1891,6 +1894,22 @@ def new_view(name, opened):
     return tuple(v if n == name else None for n in ("map", "cpu", "health", "ai"))
 
 
+def guide_box(w, h):
+    """The setup guide's box, over the frame like the keys' help: wizard.guide_lines (steps 1-3 of the web wizard) in a box of equal-width lines.
+    The lines are written to fit; on a console too small for them the last ones go and the box says how many."""
+    bw = max(20, min(wizard.GUIDE_W + 4, w - 2))
+    inner = bw - 4
+    lines = wizard.guide_lines(CFG, inner)
+    room = max(1, h - 4)  # the frame's header and footer, the box's two borders
+    if len(lines) > room:
+        dropped = len(lines) - (room - 1)
+        lines = lines[:room - 1] + ["+%d more: --view guide" % dropped]
+    lines = [c(ui.sgr("accent_strong"), x) if x.isupper() else x for x in lines]
+    top = c(ui.sgr("accent"), "┌─ ") + c(ui.sgr("accent_strong"), "Guide") + c(ui.sgr("accent"), " " + "─" * (bw - 10) + "┐")
+    box = [c(ui.sgr("accent"), "│") + " " + pad(clip(x, inner), inner) + " " + c(ui.sgr("accent"), "│") for x in lines]
+    return [top] + box + [c(ui.sgr("accent"), "└" + "─" * (bw - 2) + "┘")]
+
+
 def help_box(scope, w, h, enabled, portable=None, paused=False):
     """The `?` overlay's box: the screen's own keys and the global ones from ui.KEYMAP, as many as fit in a frame w x h (the header and the
     footer stay visible): the last ones of the table go first and the box says how many are left. Lines of equal width, ANSI allowed."""
@@ -1916,16 +1935,16 @@ def help_box(scope, w, h, enabled, portable=None, paused=False):
             lines += [c(ui.sgr("strong"), pad(k[:lw - 2], lw)) + v[:inner - lw] for k, v in g]
     if dropped:
         lines.append(c(ui.sgr("muted"), f"+{dropped} more"))
-    lines.append(c(ui.sgr("muted"), "any key closes this help"))
+    lines.append(c(ui.sgr("muted"), "any key closes this help \u00b7 ? again: the guide"))
     top = c(ui.sgr("accent"), "┌─ ") + c(ui.sgr("accent_strong"), "Keys") + c(ui.sgr("accent"), " " + "─" * (bw - 9) + "┐")
     box = [c(ui.sgr("accent"), "│") + " " + pad(clip(x, inner), inner) + " " + c(ui.sgr("accent"), "│") for x in lines]
     return [top] + box + [c(ui.sgr("accent"), "└" + "─" * (bw - 2) + "┘")]
 
 
-def help_overlay(screen, scope, w, h, enabled, paused=False):
-    """The frame (as frame() returns it) with the help box over its middle."""
+def help_overlay(screen, scope, w, h, enabled, paused=False, guide=False):
+    """The frame (as frame() returns it) with the help box over its middle; guide: the setup guide's box instead."""
     lines = screen.split("\x1b[K\r\n")
-    return "\x1b[K\r\n".join(ansi.overlay(lines, help_box(scope, w, h, enabled, paused=paused), w))
+    return "\x1b[K\r\n".join(ansi.overlay(lines, guide_box(w, h) if guide else help_box(scope, w, h, enabled, paused=paused), w))
 
 
 def main(argv):
@@ -1977,6 +1996,7 @@ def main(argv):
         sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
         paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
         dirty, help_open = True, False  # a frame is due even when paused; the `?` overlay is shown
+        guide_open = bool(old or win_keys) and not wizard.state()  # the setup guide, once: the first start with a keyboard (the marker says it was seen); `? ?` shows it again
         start = ui_cfg().get("start_view", "overview")  # [ui] start_view: the screen at the start, and where an idle one goes back to
         start = start if start != "overview" and avail.get(start) else "overview"  # a screen needs its keyboard (and its feature on)
         if start != "overview":
@@ -2093,8 +2113,8 @@ def main(argv):
                                aikey=ai_ok, ctx=kctx)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
             scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
-            if help_open:
-                screen = help_overlay(screen, scope, w, h, enabled, paused)
+            if help_open or guide_open:
+                screen = help_overlay(screen, scope, w, h, enabled, paused, guide_open)
             if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
                 wait = REFRESH_S
             if dirty or not paused:
@@ -2113,8 +2133,13 @@ def main(argv):
                 time.sleep(max(0.0, wait))
             for k in keys:
                 dirty = True
-                if help_open:  # any key closes the help, and does nothing else
-                    help_open = False
+                if guide_open:  # any key closes the guide (the first time it also writes the marker, so that it does not come back)
+                    guide_open = False
+                    if not wizard.state():
+                        wizard.mark("console")
+                    continue
+                if help_open:  # `?` again shows the guide; any other key closes the help, and does nothing else
+                    help_open, guide_open = False, k == "?"
                     continue
                 view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
                 if view is not None:

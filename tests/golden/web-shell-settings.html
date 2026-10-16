@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <title>demo-host · settings · nuc-console</title>
-<link rel="stylesheet" href="/s/app.44b6dfbf.css">
+<link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="f4f2ffe5d5">
@@ -39,6 +39,11 @@
 </div>
 <main class="view">
 <div class="settings">
+<section class="sec" aria-labelledby="sec-guide">
+<h3 class="sech" id="sec-guide">Setup guide</h3>
+<p class="hintl">What the screens show, what is on and off and what each piece costs, in five short steps. <a class="lnk" href="/setup?step=1">Open the setup guide</a>
+</p>
+</section>
 <section class="sec" aria-labelledby="sec-app">
 <h3 class="sech" id="sec-app">Appearance</h3>
 <div class="fs">
@@ -222,7 +227,7 @@ hidden =
 </section>
 <section class="sec" id="features" aria-labelledby="sec-feat">
 <h3 class="sech" id="sec-feat">Screens and sections</h3>
-<p class="hintl">Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit <b>[features]</b> in <code class="cmd">/nonexistent</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
+<p class="hintl">Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit <b>[features]</b> in <code class="cmd">/etc/nuc-console/config.ini</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
 <ul class="feats">
 <li class="on" data-feature="map">
 <span class="ft">
@@ -330,7 +335,7 @@ hidden =
 </section>
 <section class="sec" id="config" aria-labelledby="sec-cfg">
 <h3 class="sech" id="sec-cfg">config.ini</h3>
-<p class="hintl">What <code class="cmd">/nonexistent</code> sets, key by key, and what each one does. Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
+<p class="hintl">What <code class="cmd">/etc/nuc-console/config.ini</code> sets, key by key, and what each one does. Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
 <div class="cfgl">
 <details class="cfgs" id="cfg-dashboard">
 <summary>
@@ -793,7 +798,7 @@ shop-web = lan</pre>
 <dd>installed on this machine</dd>
 <dt>config</dt>
 <dd>
-<code class="cmd">/nonexistent</code> <span class="sm">no file: the defaults are in use</span>
+<code class="cmd">/etc/nuc-console/config.ini</code> <span class="sm">no file: the defaults are in use</span>
 </dd>
 <dt>web access</dt>
 <dd>loopback only (127.0.0.1), no token</dd>
@@ -809,6 +814,8 @@ shop-web = lan</pre>
 </div>
 </main>
 <footer class="foot">text <a href="/?zoom=90&amp;app=1&amp;view=settings">A−</a> 100% <a href="/?zoom=110&amp;app=1&amp;view=settings">A+</a>
+<span class="dot">·</span>
+<a class="lnk" href="/setup?step=1">setup guide</a>
 <span class="dot">·</span>
 <span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=app%3D1%26view%3Dsettings">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=app%3D1%26view%3Dsettings">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=app%3D1%26view%3Dsettings">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=app%3D1%26view%3Dsettings">high contrast</a>
 </span>

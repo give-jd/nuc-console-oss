@@ -53,6 +53,7 @@ import ui
 import webapi
 import webcss
 import webjs
+import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import (canvas, graph_body, graph_doc, graph_here, graph_select, graph_url, map_body, map_here, map_native, map_nodes, map_state,
                     mode_switch, prune, state_params, tree_url, zoom_steps)
@@ -137,6 +138,8 @@ KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", 
             "unhealthy": "containers", "failed_units": "boot", "ssh": "sessions", "tailnet": "tailscale", "rx": "network_traffic", "tx": "network_traffic"}
 KPI_VIEW = {"health": "health", "ai": "ai"}  # the key figures that open a screen
 STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "stale-net", "collector-boot")  # a collector that is not running
+QUIET_VIEWS = ("settings", "telegram", "setup")  # shell-only pages to change things on or read: no key figures, no refresh or pause links
+PLAIN_VIEWS = ("settings", "setup")  # and the ones that never reload or poll
 FEATURE_WORDS = confedit.FEATURE_WORDS  # the settings page's [features] switches: (key, title, what it is)
 CONFIG_NOTE_S = 300  # how long the settings page shows what its last save of config.ini did
 SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
@@ -263,6 +266,10 @@ class Server(http.server.ThreadingHTTPServer):
         if view == "telegram":  # the shell only (uses_shell); a pairing that waits, an answer of the notifier: a new page
             norm = {"version": tgweb.version()}
             return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
+        if view == "setup":  # the shell only: the setup guide, a step of it (wizard.clamp), its marker (a new page when it is written)
+            step = wizard.clamp(state.get("step"))
+            norm = {"step": step}
+            return serve(("setup", zoom, r, step, wizard.state()) + tuple(here.items()), r / 2, lambda sh: self.setup_page(here, step))
         return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
 
     # ---- the live app: /app (src/appjs.py draws the screens from the data API) -------------------------------------------------------
@@ -304,11 +311,13 @@ class Server(http.server.ThreadingHTTPServer):
         groups = ['<span class="live">live</span>',
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="{html.escape(here)}">pause</a>',
                   f'<a class="lnk" href="{html.escape(page_url({"view": view} if view else {}) if view else "/")}">classic pages</a>',
+                  f'<a class="lnk" href="{wizard.link(1)}">setup guide</a>',
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>"]
         data = lambda obj, ident: ('<script type="application/json" id="%s">' % ident) + json.dumps(obj, separators=(",", ":"), ensure_ascii=False).replace(
             "<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "</script>"  # noqa: E731 - nothing in it can end the element
-        body = (top_bar + '<div class="kpiblock" id="kpis"></div><div id="stale" class="stale-banner" role="status" hidden></div>'
+        tour = wizard.banner_html(self.csrf, "app") if not wizard.state() else ""
+        body = (top_bar + tour + '<div class="kpiblock" id="kpis"></div><div id="stale" class="stale-banner" role="status" hidden></div>'
                 + f'<main id="app" class="{"view" if view else "grid"}"{" data-static" if (q.get("live") or [""])[0] == "0" else ""}>'
                 + '<noscript><p class="msg lv-info"><span class="sym">\u00b7</span> the live app needs JavaScript: the <a href="/">classic pages</a> do not.</p></noscript>'
                 + "</main>" + htmlview.foot(groups, time.strftime("%H:%M:%S"))
@@ -454,7 +463,7 @@ class Server(http.server.ThreadingHTTPServer):
     def uses_shell(self, view, app, card, edit=False):
         """The shell is the page for ?app=1, for the settings, the Telegram page, a single card and the layout editor (they exist only there), and for every page
         when [ui] web = app (?app=0 asks for the classic page anyway)."""
-        return view in ("settings", "telegram") or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
+        return view in QUIET_VIEWS or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
 
     def shell_frame(self, r):
         """The data of a shell page (cards.Ctx), read once per half refresh interval whatever the number of viewers."""
@@ -513,14 +522,14 @@ class Server(http.server.ThreadingHTTPServer):
         note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
                                f'restart it: <code class="cmd">{html.escape(render.CMD.get("restart", ""))}</code>') if stale else ""
         top = htmlview.topbar(host, *self.shell_pill(ctx.problems), self.shell_tabs(ctx, here, view, r, feats), clock, "#help",
-                              page_url(dict(here, view="settings")), view in ("settings", "telegram"))
-        kpis = "" if view in ("settings", "telegram") else htmlview.kpis_block(tiles, note)
+                              page_url(dict(here, view="settings")), view in QUIET_VIEWS)
+        kpis = "" if view in QUIET_VIEWS else htmlview.kpis_block(tiles, note)
         # the page
         r_live = int(v.wait or r) if v.live and not pause else 0  # the meta refresh (inside <noscript>: with the scripts, they poll)
         tools = "".join(f'<span class="tl">{t}</span>' for t in v.tools)
-        wall = bool(here["kiosk"]) and eff["density"] == "wall" and view != "settings" and not edit  # a screen on a wall: it scrolls by itself
+        wall = bool(here["kiosk"]) and eff["density"] == "wall" and view not in PLAIN_VIEWS and not edit  # a screen on a wall: it scrolls by itself
         attrs = f' data-rotate="{wall_seconds(here["rotate"])}"' if wall else ""
-        if (v.live or pause) and view != "settings" and not v.script:  # a graph reloads itself with its own script; a paused page can be resumed by it
+        if (v.live or pause) and view not in PLAIN_VIEWS and not v.script:  # a graph reloads itself with its own script; a paused page can be resumed by it
             attrs += f' data-refresh="{int(v.wait or r)}" data-frag="{html.escape(page_url(vhere, frag="1"))}"'
         if pause:
             attrs += ' data-paused="1"'
@@ -532,13 +541,13 @@ class Server(http.server.ThreadingHTTPServer):
         else:
             inner = v.body.replace("<main ", "<div ").replace("</main>", "</div>") if v.legacy else v.body  # one <main> a page: the old bodies' became <div>
             inner = (f'<div class="toolbar">{tools}</div>' if tools else "") + inner
-            if view != "settings" and not v.script:  # the view is one block of the page, so that the poll can replace it
+            if view not in PLAIN_VIEWS and not v.script:  # the view is one block of the page, so that the poll can replace it
                 inner = htmlview.block("div", "__view", "vb", inner)
                 blocks = inner
             else:
                 blocks = ""
             main = f'<main class="view{" legacy" if v.legacy else ""}"{attrs}>{inner}</main>'
-        quiet = view in ("settings", "telegram")  # pages to change things on: no refresh or pause links (the Telegram page reloads by itself only while it waits)
+        quiet = view in QUIET_VIEWS  # pages to change things on: no refresh or pause links (the Telegram page reloads by itself only while it waits)
         groups = ["refresh every " + self.every(link, r) if not quiet and not edit and not wall else "",
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="{"true" if pause else "false"}" href="'
                   + html.escape(page_url(vhere, pause=not pause)) + f'">{"resume" if pause else "pause"}</a>' if not quiet and not edit else "",
@@ -546,6 +555,7 @@ class Server(http.server.ThreadingHTTPServer):
                   f'<a class="lnk" href="{html.escape(app_url(dict(vhere, view=view if view in APP_VIEWS else "")))}">live app</a>'
                   if not quiet and not edit and not wall and not (view == "map" and vhere.get("as") == "graph") else "",
                   "text " + self.sizes(link, zoom),
+                  f'<a class="lnk" href="{wizard.link(1)}">setup guide</a>' if not wall and not edit else "",
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
                   "Telegram setup" if view == "telegram" else
@@ -554,19 +564,20 @@ class Server(http.server.ThreadingHTTPServer):
             groups = [f"refreshed every {r} s", "read-only"]
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
-        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view in ("settings", "telegram") else "overview"
+        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view in QUIET_VIEWS else "overview"
         groups_help = (ui.help_rows("editor", feats) + ui.help_rows("global", feats, bool(nuc_config.PORTABLE))) if edit \
             else ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause)
         helps = htmlview.help_dialog(groups_help)
-        body = top + kpis + '<div id="stale" class="stale-banner" role="status" hidden></div>' + main + htmlview.foot([g for g in groups if g], clock) + helps
+        tour = "" if view in QUIET_VIEWS or edit or here["kiosk"] else self.tour_banner()  # "New here?" until the guide is finished or skipped
+        body = top + kpis + tour + '<div id="stale" class="stale-banner" role="status" hidden></div>' + main + htmlview.foot([g for g in groups if g], clock) + helps
         name = "layout" if edit else {"": "overview", "settings": "settings"}.get(view, view)
         scripts = [webjs.KEYS_JS, webjs.PREFS_JS, webjs.BUILDER_JS] if edit else \
             [webjs.REFRESH_JS, webjs.KEYS_JS, webjs.PREFS_JS] + ([v.script] if v.script else [])
         page = Page(htmlview.shell_doc(f"{host} · {name} · nuc-console", webcss.asset_path("app"), body, eff["theme"], eff["density"], zoom,
                                        int(time.time() // 600) % 3, here["kiosk"], "url" if here["ui"] else "cookie" if cookie != prefs.COOKIE_VERSION else "config",
                                        cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.cls, scripts, pause))
-        page.csp = page_csp(scripts, shell=True, forms=v.forms)
-        page.referrer = "same-origin" if v.forms else "no-referrer"
+        page.csp = page_csp(scripts, shell=True, forms=v.forms or bool(tour))
+        page.referrer = "same-origin" if v.forms or tour else "no-referrer"
         page.blocks = None if edit else top + kpis + blocks  # the editor has no refresh script: ?frag=1 gets the whole page, as a classic page does
         return page
 
@@ -597,7 +608,7 @@ class Server(http.server.ThreadingHTTPServer):
 
     def shell_tabs(self, ctx, here, view, r, feats):
         """The tabs: a link per screen with its key, a badge where there is something to say (the Map's problems, the Health findings, the AI)."""
-        data, badges = self.tab_badges(ctx, r, feats, view not in ("settings", "telegram")), {}
+        data, badges = self.tab_badges(ctx, r, feats, view not in QUIET_VIEWS), {}
         if "map" in data:
             badges["map"] = str(data["map"]) if data["map"] else ""
         if "health" in data:
@@ -738,10 +749,12 @@ class Server(http.server.ThreadingHTTPServer):
                       f'<p class="hintl">Saved in this browser (the cookie above). To make it everyone\'s default, paste the block into config.ini.</p></div>'
                       f'<div class="fs"><a class="lnk" data-set href="{href("reset")}">Reset to the defaults</a></div></section>')
         feats, forms = self.features_html(back)
-        return View(f'<div class="settings">{appearance}{feats}{self.config_html(back)}{self.alerts_html(here)}{self.about_html(here)}</div>', [],
+        guide = (f'<section class="sec" aria-labelledby="sec-guide"><h3 class="sech" id="sec-guide">Setup guide</h3><p class="hintl">What the screens show, what is on and off '
+                 f'and what each piece costs, in five short steps. <a class="lnk" href="{wizard.link(1)}">Open the setup guide</a></p></section>')
+        return View(f'<div class="settings">{guide}{appearance}{feats}{self.config_html(back)}{self.alerts_html(here)}{self.about_html(here)}</div>', [],
                     vhere, False, forms=forms, legacy=False)
 
-    def features_html(self, back):
+    def features_html(self, back, to=""):
         """(the 'Screens and sections' block of the settings page, whether it has forms): every [features] switch with its state in words and a
         symbol; in a portable run (the desktop app) a button that turns it on or off (a form posting to /settings/feature with the CSRF token),
         in an installation the switches as they are and how to change them (config.ini is the administrator's: the page never writes it)."""
@@ -750,7 +763,7 @@ class Server(http.server.ThreadingHTTPServer):
         ok, overlay = bool(mode), mode == "overlay"
         path = nuc_config.config_path()
         base = nuc_config.load(path, overlay=False)["features"] if overlay else {}  # config.ini alone: the page can only switch off what it says on
-        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back)))
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("back", back), ("to", to)) if v or k != "to")
         rows = []
         for key, title, what in FEATURE_WORDS:
             on = bool(feats.get(key, True))
@@ -777,9 +790,45 @@ class Server(http.server.ThreadingHTTPServer):
             restart = render.CMD.get("restart") or "restart nuc-console"
             note = (f'Read-only here ({esc(why)}): edit <b>[features]</b> in <code class="cmd">{esc(path)}</code>, then '
                     f'<code class="cmd">{esc(restart)}</code>.')
+        if to:  # inside the setup guide's step: the same list and the same forms, without a section of its own
+            return f'<p class="hintl">{note}</p><ul class="feats">{"".join(rows)}</ul>', ok
         html_ = (f'<section class="sec" id="features" aria-labelledby="sec-feat"><h3 class="sech" id="sec-feat">Screens and sections</h3>'
                  f'<p class="hintl">{note}</p><ul class="feats">{"".join(rows)}</ul></section>')
         return html_, ok
+
+    def tour_banner(self):
+        """The "New here?" banner: until the setup guide was finished or skipped (the marker), on the shell's pages."""
+        return "" if wizard.state() else wizard.banner_html(self.csrf)
+
+    def setup_page(self, here, step):
+        """The View of the setup guide's step (wizard.step_html): the facts are read from the configuration in force now. Step 4 carries the settings
+        page's own forms (features_html, config_row: /settings/feature and /settings/config, with to=setup) when this run may write, else the lines to
+        put in config.ini; nothing here writes by itself."""
+        there = dict(here, view="setup", step=step)
+        cfg = render.CFG
+        f = wizard.facts(cfg, token=self.token, serving=True)
+        x = {"path": nuc_config.config_path(), "overlay": nuc_config.overlay_path(), "marker": wizard.marker_path(),
+             "apply": render.CMD.get("apply") or render.CMD["restart"], "note": None}
+        forms = True  # the Finish and Skip buttons
+        if step == 4 and f["mode"]:
+            esc, overlay = html.escape, f["mode"] == "overlay"
+            note = self.config_note if self.config_note and time.time() - self.config_note["at"] < CONFIG_NOTE_S and self.config_note["section"] == "ui" else None
+            typed = note["form"] if note and not note["ok"] else {}
+            x["note"] = note
+            x["features"], _ = self.features_html("", to="setup")
+            rows = "".join(self.config_row(confedit.KEY[("ui", n)], typed.get(n), True, overlay) for n in ("preset", "kpis", "theme", "density"))
+            hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v, quote=True)}">' for k, v in (("csrf", self.csrf), ("to", "setup"), ("section", "ui")))
+            x["ui"] = (f'<form class="cfgf" method="post" action="/settings/config">{hidden}{rows}'
+                       '<div class="cfgb"><button class="btn pri" type="submit">Save</button></div></form>')
+        return View(wizard.step_html(step, cfg, f, x, self.csrf), [], there, False, forms=forms, legacy=False)
+
+    def setup_action(self, act, form):
+        """POST /setup/finish | /setup/skip: write the marker (wizard.mark; a folder that will not take it only means the banner comes back) and go
+        home (to=app: the live app). It changes no setting."""
+        wizard.mark("finished" if act == "finish" else "skipped")
+        with self.lock:
+            self.cache.clear()
+        return APP_PATH if ((form.get("to") or [""])[0]) == "app" else "/"
 
     def config_html(self, back):
         """The settings page's 'config.ini' block: every key of every section (confedit.KEYS) with its value in force, what it does, the values
@@ -1243,6 +1292,11 @@ class Server(http.server.ThreadingHTTPServer):
         return page_url(dict({"view": "telegram"}, **{k: back[k] for k in HERE_KEYS})) + "#tg"
 
     def settings_action(self, act, form):
+        """The settings page's actions; a form of the setup guide (to=setup) comes back to its step 4 instead of the settings page."""
+        where = self._settings_action(act, form)
+        return wizard.link(4) if (form.get("to") or [""])[0] == "setup" else where
+
+    def _settings_action(self, act, form):
         """A [features] switch of the settings page (a portable run: do_POST checked that config.ini is this account's): the key is one of
         nuc_config.FEATURES and the value yes or no, nothing else of the request is written. config.ini keeps every other line; the screens
         follow at once, the collector within a cycle. -> the settings page again."""

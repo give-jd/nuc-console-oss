@@ -1592,6 +1592,9 @@ exec "%s" "$@"
         import select
         import struct
         import termios
+        os.makedirs(os.path.join(self.dir, "data", "ai"), exist_ok=True)  # the setup guide was seen (its marker): else the first key only closes its box
+        with open(os.path.join(self.dir, "data", "ai", "setup.json"), "w") as f:
+            f.write('{"how": "skipped", "at": 0, "version": "0"}')
         pid, fd = pty.fork()
         if pid == 0:  # the child: run.sh, with the pseudo-terminal as its keyboard and screen
             try:

@@ -30,6 +30,7 @@ import webapi
 import webcss
 import webjs
 from weburl import APP_PATH, NUM, app_url, view_params, view_url
+from wizard import SETUP_PATH, link as setup_link
 
 MIN_TOKEN = 16
 TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
@@ -46,7 +47,8 @@ UI_COOKIE_AGE = 31536000  # the appearance cookie lives a year
 AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advise", "clear", "load")  # POST /ai/<action>
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 SETTINGS_ACTIONS = ("feature", "config", "reset")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
-POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS}
+SETUP_ACTIONS = ("finish", "skip")  # POST /setup/<action>: the setup guide's marker (wizard.mark): finished or skipped; it writes no setting
+POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS}
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 
 
@@ -267,7 +269,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if act in POST_AREAS.get(area, ()):
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         api = u.path == API_PATH or u.path.startswith(API_PATH + "/")
-        if u.path not in ("/", APP_PATH) and not u.path.startswith("/s/") and not api:
+        if u.path not in ("/", APP_PATH, SETUP_PATH) and not u.path.startswith("/s/") and not api:
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
@@ -275,8 +277,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             given = self._token_from(q)
             if not hmac.compare_digest(given.encode(), srv.token.encode()):
                 return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
-            if "token" in q and u.path in ("/", APP_PATH):  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
-                where = view_url(view_params(q)) if u.path == "/" else app_url(view_params(q))
+            if "token" in q and u.path in ("/", APP_PATH, SETUP_PATH):  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
+                where = (view_url(view_params(q)) if u.path == "/" else app_url(view_params(q)) if u.path == APP_PATH
+                         else setup_link(view_params(dict(q, view=["setup"]))["step"]))
                 return self._send(302, extra=(("Location", where), ("Set-Cookie",
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000" + self._secure())))
         if api:
@@ -284,9 +287,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path == APP_PATH:
             page = srv.app_page(self._cookie(prefs.COOKIE_NAME), q)
             return self._send(200, page.encode(), "text/html; charset=utf-8", csp=page.csp, referrer="same-origin", extra=(("Vary", "Cookie"),))
-        if u.path != "/":
+        if u.path == SETUP_PATH:  # the setup guide: /setup?step=N is /?view=setup&step=N (plain links, no script)
+            q = dict(q, view=["setup"])
+        elif u.path != "/":
             return self._asset(u.path)
-        if "set" in q:
+        if "set" in q and u.path == "/":
             return self._set(q)
         if (q.get("view") or [""])[0] == "telegram" and (q.get("open") or [""])[0] == "1":
             return self._tg_open()
@@ -443,7 +448,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not hmac.compare_digest(((form.get("csrf") or [""])[0]).encode(), srv.csrf.encode()):
             return self._send(403, b"the form is not from this page (reload the page and try again)\n")
         try:
-            where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form) if area == "telegram" else srv.settings_action(act, form)
+            where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form) if area == "telegram" else \
+                srv.setup_action(act, form) if area == "setup" else srv.settings_action(act, form)
         except BadRequest as e:
             return self._send(400, ("%s\n" % e).encode())
         except OSError as e:  # the settings: config.ini could not be written (a full disk, a file made read-only meanwhile)
