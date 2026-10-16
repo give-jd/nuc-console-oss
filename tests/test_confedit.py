@@ -48,7 +48,8 @@ def samples(key):
     return {
         ("dashboard", "sections"): [("disks, attention", "disks, attention, exposure, webapps, firewall, system, containers, databases, boot, "
                                                          "network_traffic, sessions, tailscale, docker_disk")],
-        ("ui", "kpis"): [("problems, cpu", "problems, cpu"), ("", "")],
+        ("ui", "kpis"): [("problems, cpu", "problems, cpu"), (confedit.NOTHING, confedit.NOTHING), ("", "")],
+        ("alerts", "mute"): [("journal-errors, thermal", "journal-errors, thermal"), ("", "")],
         ("ui", "layout"): [("attention:2, disks", "attention:2, disks"), ("", "")],
         ("ui", "hidden"): [("sessions", "sessions"), (confedit.NOTHING, confedit.NOTHING), ("", "")],
         ("display", "browser"): [("auto", "auto"), ("/opt/Example Browser/browser", "/opt/Example Browser/browser")],
@@ -70,7 +71,7 @@ class Schema(unittest.TestCase):
         text = read(SHIPPED)
         for key in confedit.KEYS:
             if (key.section, key.name) not in shipped:  # [ui] and [dashboard] sections: there, commented out, with their default
-                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections")])
+                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections"), ("alerts", "mute")])
                 self.assertRegex(text, r"(?m)^# %s = " % key.name)
         self.assertEqual(set(cp.sections()), set(confedit.TITLES) | {"features"})
         self.assertEqual([s for s, _t, _w in confedit.SECTIONS][-2:], list(confedit.MAPS))

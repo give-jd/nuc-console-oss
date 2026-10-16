@@ -364,8 +364,9 @@ def print_problems(argv):
     if not recs:
         print("no problems")
         return 0
-    print(f"{len(recs)} problems ({sum(r['accepted'] for r in recs)} accepted)\n")
-    for r in recs:
+    live, muted = [r for r in recs if not r.get("muted")], [r for r in recs if r.get("muted")]
+    print(f"{len(live)} problems ({sum(r['accepted'] for r in live)} accepted" + (f", {len(muted)} muted" if muted else "") + ")\n")
+    for r in live:
         print(f"[{r['severity']}] {r['id']}" + ("   (ACCEPTED: " + safe(r["reason"]) + ")" if r["accepted"] else ""))
         print(f"    {safe(r['text'])}")
         if r["why"]:
@@ -376,6 +377,10 @@ def print_problems(argv):
             print(f"    accept if known:  {problems.ACCEPT_CMD} --problem {r['id']} --reason \"...\"")
         else:
             print(f"    port changes are accepted with the baseline: {problems.ACCEPT_CMD}")
+    if muted:  # silenced by [alerts] mute: still collected and listed here, off the screen's list, the problems KPI and Telegram
+        print(f"muted ({len(muted)}, by {problems.MUTED_HINT}):")
+        for r in muted:
+            print(f"  [{r['severity']}] {r['id']}: {safe(r['text'])}")
     return 0
 
 
@@ -642,7 +647,7 @@ def pick_slide(sl, t):
 # what the console draws except the header's tab bar, the KPI line (on a tall screen) and the state symbol on a section's title.
 
 UI_THEMES = {"light": "light", "high-contrast": "hc"}  # [ui] theme -> ui.ANSI_THEMES (auto and dark: the default one)
-KPI_MIN_ROWS = 30  # the KPI line shows from this many rows up, or whenever [ui] kpis is set
+KPI_MIN_ROWS = 30  # the KPI line shows from this many rows up, or whenever [ui] kpis is set (and never with kpis = none)
 TAB_SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar when the line is narrow
 KPI_TOKEN = {"ok": "ok", "warn": "warn", "err": "err", "down": "err", "unknown": "unknown", "info": "info"}
 TITLE_STATES = ("warn", "err", "down", "unknown")  # the states a section's title says besides the colour (ok and info are quiet)
@@ -672,7 +677,8 @@ def spacing_on():
 
 def kpi_on(h, page=False):
     """Is there a KPI line on a screen h rows tall? A browser page (page=True) has its own."""
-    return not page and (h >= KPI_MIN_ROWS or bool(ui_cfg().get("kpis")))
+    ks = ui_cfg().get("kpis")
+    return not page and ks != [] and (h >= KPI_MIN_ROWS or bool(ks))  # [ui] kpis = none: no line, and its row goes to the body
 
 
 def body_rows(h, page=False):
