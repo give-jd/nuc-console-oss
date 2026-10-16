@@ -429,7 +429,7 @@ class Docs(unittest.TestCase):
         read = lambda *p: open(os.path.join(ROOT, *p), encoding="utf-8").read()  # noqa: E731
         self.assertIn("/setup", read("docs", "WEB.md"))
         self.assertIn("WIZARD.md", read("README.md"))
-        self.assertIn("setup guide", read("CHANGELOG.md").split("## [", 2)[1].lower())
+        self.assertIn("setup guide", "".join(read("CHANGELOG.md").split("## [", 3)[1:]).lower())
         guide = read("docs", "WIZARD.md")
         for link in ("WEB.md", "CONFIGURATION.md", "SECURITY.md"):
             self.assertIn(link, guide)

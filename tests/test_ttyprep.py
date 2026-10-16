@@ -18,13 +18,14 @@ class Fake:
     """Stands for the tools: no real setfont or setterm runs. have: the names that 'exist'; rc: their exit status."""
 
     def __init__(self, have=("setfont", "setterm"), rc=0):
-        self.have, self.rc, self.calls = have, rc, []
+        self.have, self.rc, self.calls, self.stdin = have, rc, [], []
 
     def which(self, name):
         return "/usr/bin/" + name if name in self.have else None
 
     def run(self, cmd, **kw):
         self.calls.append(cmd)
+        self.stdin.append(kw.get("stdin"))
         return subprocess.CompletedProcess(cmd, self.rc, b"", b"boom")
 
 
@@ -42,6 +43,25 @@ def go(ini, fake, env=None):
 
 
 class Console(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(nuc_config, "RUN_DIR", tmp.name)  # the marker of an earlier start lives here, not in the host's /run
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.mark = os.path.join(tmp.name, "ttyprep-blank")
+        self.fds = []
+        self.fb = os.path.join(tmp.name, "graphics")
+        os.makedirs(os.path.join(self.fb, "fb0"))
+        with open(os.path.join(self.fb, "fb0", "blank"), "w") as fh:
+            fh.write("4\n")
+        patcher = mock.patch.object(ttyprep, "FB_DIR", self.fb)  # not the host's sysfs
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(ttyprep, "open_tty", lambda tty: self.fds.append(tty) or os.open(os.devnull, os.O_RDONLY))  # the tty itself is root's
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_off_by_default_nothing_runs(self):
         for ini in (None, "[console]\n", "[console]\nfont =\nblank_minutes = 0\n"):
             f = Fake()
@@ -54,8 +74,29 @@ class Console(unittest.TestCase):
         go(ini, f)
         go(ini, f)
         once = [["/usr/bin/setfont", "-C", "/dev/tty3", "Lat15-TerminusBold32x16"],
-                ["/usr/bin/setterm", "--term", "linux", "--blank", "10", "--powerdown", "10", "--file", "/dev/tty3"]]
+                ["/usr/bin/setterm", "--term", "linux", "--blank", "10", "--powerdown", "10", "--file", "/dev/tty3"],
+                ["/usr/bin/setterm", "--term", "linux", "--blank", "poke"]]
         self.assertEqual(f.calls, once + once)  # idempotent: the same commands, nothing accumulates
+
+    def test_zero_after_a_number_takes_the_timer_back_and_wakes_the_screen_once(self):
+        f = Fake()
+        go("[console]\nblank_minutes = 1\n", f)
+        self.assertTrue(os.path.exists(self.mark))
+        f.calls.clear()
+        go("[console]\nblank_minutes = 0\n", f)
+        self.assertEqual(f.calls, [["/usr/bin/setterm", "--term", "linux", "--blank", "0", "--powerdown", "0", "--file", "/dev/tty3"],
+                                   ["/usr/bin/setterm", "--term", "linux", "--blank", "poke"]])
+        self.assertFalse(os.path.exists(self.mark))
+        self.assertNotEqual(f.stdin[-1], subprocess.DEVNULL, "poke acts on its standard input: the tty, not /dev/null")
+        f.calls.clear()
+        go("[console]\nblank_minutes = 0\n", f)
+        self.assertEqual(f.calls, [], "and then it leaves the tty alone again")
+
+    def test_the_framebuffer_left_in_powerdown_is_brought_back(self):
+        blank = os.path.join(self.fb, "fb0", "blank")
+        go("[console]\nblank_minutes = 1\n", Fake())
+        with open(blank) as fh:
+            self.assertEqual(fh.read(), "0", "fb0/blank was 4 (powerdown): a start that sets blanking leaves the screen on")
 
     def test_missing_tools_are_skipped_not_errors(self):
         f = Fake(have=())

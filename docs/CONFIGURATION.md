@@ -142,7 +142,7 @@ Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root ea
 | Key | Default | Meaning |
 |---|---|---|
 | `font` | empty | A font for `setfont`, e.g. `Lat15-TerminusBold32x16` (Terminus 16x32: readable on a full-HD monitor; Debian/Ubuntu: `sudo apt install console-terminus`). Empty: the font stays as it is. Letters, digits and `_ . + -` only |
-| `blank_minutes` | `0` | Minutes without a key before the screen goes black and the monitor sleeps (`setterm --blank` and `--powerdown`), 0–60; `0` = never. The header already moves every 10 minutes against burn-in; this is what lets the monitor rest |
+| `blank_minutes` | `0` | Minutes without a key before the screen goes black and the monitor sleeps (`setterm --blank` and `--powerdown`), 0–60; `0` = never: after a number, the next start of the service takes the timer back and wakes a black screen. The header already moves every 10 minutes against burn-in; this is what lets the monitor rest |
 
 Why not the kernel parameter `consoleblank=` (and `dpkg-reconfigure console-setup`)? Both need a bootloader or system-wide change and a reboot, apply to every console and not only the dashboard's, and one wrong edit of the kernel command line can stop the machine booting: the installer never does it. The cost of this way: it is set when the service starts (a reboot or restart re-applies it) and only on the dashboard's terminal. If you want the kernel way anyway, add `consoleblank=600` to `GRUB_CMDLINE_LINUX_DEFAULT` yourself. **Check once** that the monitor really sleeps with the dashboard redrawing every couple of seconds: output to the console can wake a blanked screen on some kernels; if it does, use the monitor's own sleep timer.
 
