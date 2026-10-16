@@ -101,6 +101,8 @@ main() {
         (cd "$top" && bash ./install.sh) || rc=$?
         rm -rf "$stage"
         [ "$rc" -eq 0 ] || die "the installer failed (exit code $rc): the previous version may be partly replaced, run it again"
+        # one line, never run for you: an old, long config.ini is brought to the new layout by `nuc-console-config migrate`
+        env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG "$PY" -B "$APP/confmigrate.py" notice 2>/dev/null || true
     fi
     exit 0
 }

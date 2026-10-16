@@ -6,6 +6,11 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ## [Unreleased]
 
 ### Added
+- `sudo nuc-console-config migrate [--dry-run] [--yes]` ([#55](https://github.com/give-jd/nuc-console-oss/issues/55)) brings an installed, old-layout `config.ini` to the shipped one without losing a setting:
+  values you changed and your `[ui]`, `[webapps]` and `[expose]` lines are kept, unknown keys stay under a `# legacy:` line, the configuration in force is checked to be the same before
+  the file is replaced, and the old file is kept as `config.ini.bak-YYYYMMDD-HHMMSS`. `nuc-console-update` prints one line when your file is in the old layout; it never migrates by itself.
+  See [Upgrading config.ini](docs/CONFIGURATION.md#upgrading-configini).
+
 - `[ui] kpis = none` shows no KPI row, on the console and on the web, and the space goes to the cards (as `hidden = none` hides nothing).
 - `[alerts] mute = id, id, ...` silences operational ATTENTION alarms from a closed list (`journal-errors`, `thermal`, `throttling`, `container-exited`,
   `unhealthy-container`, `failed-units`, `collector-boot`: `nuc_config.MUTABLE_ALERTS`). A muted alarm leaves the list, the Problems figure and Telegram, ATTENTION

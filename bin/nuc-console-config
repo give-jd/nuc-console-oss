@@ -1,0 +1,7 @@
+#!/bin/sh
+# Maintenance of config.ini.
+#   nuc-console-config migrate [--dry-run] [--yes]   bring an old, long config.ini to the layout of this release (config.ini.dist), keeping every
+#                                                    setting you made; the old file is kept as config.ini.bak-DATE-TIME. --dry-run: only the diff
+# Needs the rights to edit config.ini: sudo. Nothing runs by itself (nuc-console-update only mentions it).
+# env -u: NUC_CONSOLE_* variables must not be able to redirect a write done by root (e.g. with sudo -E): use --config
+exec env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG /usr/bin/python3 -E -B /opt/nuc-console/confmigrate.py "$@"
