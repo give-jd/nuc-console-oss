@@ -1,10 +1,9 @@
 """The first-run wizard (issue #56): five steps at /setup?step=N, each its own URL and plain links; step 4 writes only through the settings page's own guarded
 actions (token, CSRF, Origin, the overlay's allowlist), or gives the lines to put in config.ini; a marker (setup.json) says it was finished or skipped, and
-until then the shell offers a banner; the console has the text version of steps 1-3 (`render.py --view guide`, `?` twice, once on the first start)."""
+until then the shell offers a banner; the text console has none (the wizard is the web view's and the desktop app's)."""
 import contextlib
 import copy
 import http.client
-import io
 import json
 import os
 import re
@@ -29,7 +28,6 @@ from test_web import get_any, serve  # noqa: E402
 
 TOKEN = "t" * 24
 SHIPPED = os.path.join(ROOT, "config", "config.ini")
-ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def text(html_):
@@ -355,8 +353,8 @@ class Portable(World):
         os.environ.pop("NUC_CONSOLE_SETUP")
         self.assertEqual(wizard.marker_path(), os.path.join(self.dir, "ai", "setup.json"))
         shutil.rmtree(self.folder)
-        self.assertTrue(wizard.mark("console"), "a portable run makes its own folder")
-        self.assertEqual(wizard.state(), "console")
+        self.assertTrue(wizard.mark("finished"), "a portable run makes its own folder")
+        self.assertEqual(wizard.state(), "finished")
 
 
 class Layout(unittest.TestCase):
@@ -424,62 +422,6 @@ class Marker(unittest.TestCase):
 
     def test_clamp(self):
         self.assertEqual([wizard.clamp(x) for x in (None, "", "x", 0, 1, 3, 5, 6, -1, "4")], [1, 1, 1, 1, 1, 3, 5, 5, 1, 4])
-
-
-class Console(unittest.TestCase):
-    def lines(self, box):
-        return [ANSI.sub("", x) for x in box]
-
-    def test_the_guide_box_shows_the_whole_guide_at_80x24_and_120x33(self):
-        for cols, rows in ((80, 24), (120, 33)):
-            box = self.lines(render.guide_box(cols - 1, rows))  # the loop draws one column less
-            self.assertLessEqual(len(box), rows - 3, (cols, rows))
-            self.assertEqual({len(x) for x in box}, {len(box[0])}, "lines of equal width")
-            self.assertLessEqual(len(box[0]), cols - 1)
-            inside = [x[2:-2].rstrip() for x in box[1:-1]]
-            self.assertEqual(inside, wizard.guide_lines(render.CFG, wizard.GUIDE_W), "nothing is cut or left out")
-            self.assertFalse(any("more" in x for x in inside))
-
-    def test_a_console_too_small_for_it_says_how_much_is_left(self):
-        box = self.lines(render.guide_box(39, 10))
-        self.assertLessEqual(len(box), 10 - 2)
-        self.assertTrue(any("more: --view guide" in x for x in box))
-        self.assertEqual(len({len(x) for x in box}), 1)
-
-    def test_view_guide_prints_the_text_version(self):
-        for cols, rows in ((80, 24), (120, 33)):
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                render.once(["--once", "--view", "guide", "--cols", str(cols), "--rows", str(rows)])
-            lines = out.getvalue().split("\n")
-            self.assertTrue(lines[0].startswith("nuc-console: setup guide"))
-            self.assertLessEqual(max(len(x) for x in lines), cols)
-            self.assertLessEqual(len(lines), rows)
-            body = "\n".join(lines)
-            for needle in ("HOW TO READ IT", "SCREENS  1 Overview  2 Map  3 CPU  4 Health  5 AI", "ON AND OFF NOW", "/setup"):
-                self.assertIn(needle, body)
-
-    def test_the_guide_tells_the_configuration_in_force(self):
-        cfg = copy.deepcopy(render.CFG)
-        cfg["telegram"].update(enabled=True, detail="full")
-        cfg["features"]["map"] = cfg["features"]["ai"] = False
-        cfg["web"]["enabled"], cfg["web"]["port"] = True, 8787
-        body = "\n".join(wizard.guide_lines(cfg))
-        self.assertIn("web view on (port 8787)", body)
-        self.assertIn("Telegram on (full detail)", body)
-        self.assertIn("Sections switched off: 2 (map, ai)", body)
-        self.assertIn("SCREENS  1 Overview  3 CPU  4 Health", body)
-        self.assertNotIn("✔ on", body)
-        self.assertEqual(max(len(x) for x in wizard.guide_lines(cfg)), max(len(x) for x in wizard.guide_lines(cfg, wizard.GUIDE_W)))
-
-    def test_the_help_points_at_the_guide(self):
-        box = "\n".join(self.lines(render.help_box("overview", 100, 40, lambda f: True)))
-        self.assertIn("any key closes this help \u00b7 ? again: the guide", box)
-
-    def test_the_key_handling_stays_inside_the_existing_loop(self):
-        src = open(os.path.join(ROOT, "src", "render.py"), encoding="utf-8").read()
-        self.assertIn('help_open, guide_open = False, k == "?"', src)
-        self.assertIn("guide_open = bool(old or win_keys) and not wizard.state()", src, "the first start only, and only with a keyboard")
 
 
 class Docs(unittest.TestCase):
