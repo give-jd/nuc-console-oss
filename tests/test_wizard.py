@@ -396,6 +396,17 @@ class Marker(unittest.TestCase):
                 f.write(body)
             self.assertEqual(wizard.state(self.path), "", body[:20])
 
+    @unittest.skipIf(not hasattr(os, "mkfifo"), "fifo")
+    def test_a_fifo_in_the_place_of_the_marker_does_not_block(self):
+        os.mkfifo(self.path)
+        import signal
+        signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(AssertionError("state() blocked on a FIFO")))
+        signal.alarm(5)
+        try:
+            self.assertEqual(wizard.state(self.path), "")
+        finally:
+            signal.alarm(0)
+
     @unittest.skipIf(os.name != "posix", "links")
     def test_it_is_never_written_or_read_through_a_link(self):
         target = os.path.join(self.dir, "target")

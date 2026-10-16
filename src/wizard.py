@@ -12,6 +12,7 @@ Writing a setting is not done here: step 4's forms post to the settings page's o
 import html
 import json
 import os
+import stat
 import textwrap
 import time
 
@@ -45,10 +46,15 @@ def state(path=None):
     """"" while the guide was never finished, skipped or shown; else which one (MARKS). A link, a big file, a file that is not JSON: absent."""
     path = path or marker_path()
     try:
-        if os.path.islink(path) or os.path.getsize(path) > MARKER_MAX:
-            return ""
-        with open(path, encoding="utf-8") as f:
-            how = (json.load(f) or {}).get("how")
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))  # a FIFO planted here must not block a page
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MARKER_MAX:
+                return ""
+            with os.fdopen(fd, encoding="utf-8", closefd=False) as f:
+                how = (json.load(f) or {}).get("how")
+        finally:
+            os.close(fd)
     except (OSError, ValueError, AttributeError):
         return ""
     return how if how in MARKS else ""
@@ -157,9 +163,9 @@ def guide_lines(cfg, w=GUIDE_W):
                                                       yn(f["telegram"]) + (" (full detail)" if f["telegram"] and f["detail"] == "full" else ""),
                                                       yn(f["ai_on"])),
            "Sections switched off: " + (str(len(f["off"])) + " (" + ", ".join(f["off"][:3]) + (", ..." if len(f["off"]) > 3 else "") + ")" if f["off"] else "none"),
-           "Only the web view listens. Telegram sends titles only." if f["detail"] != "full" else "Only the web view listens. Telegram sends full detail.",
-           "AI stays on this machine" + (" (models %s)." % ai_size if ai_size else "."),
-           "Collector runs as root: a section off is not collected.",
+           ("Only the web view listens. " if f["web"] else "Nothing listens. ") + ("Telegram sends titles only." if f["detail"] != "full" else "Telegram sends full detail."),
+           ("AI talks to ANOTHER machine (allow_remote)." if f.get("ai_remote") else "AI stays on this machine") + (" (models %s)." % ai_size if ai_size and not f.get("ai_remote") else "" if f.get("ai_remote") else "."),
+           "Nothing runs as root here: a portable run." if f["portable"] else "Collector runs as root: a section off is not collected.",
            "",
            "Setup, in the web view: /setup (5 short steps)",
            "Any key closes it. To read it again: ? then ?"]
@@ -245,7 +251,7 @@ def step3(cfg, f, x):
         row("Telegram", flag(f["telegram"]),
             esc("Off until you pair a bot. Leaves the machine: the host name and the problem titles"
                 + (", and the detail (container names, ports) because detail = full" if f["detail"] == "full" else " (detail = titles: nothing more)") + ", over HTTPS to api.telegram.org.")),
-        row("Settings overlay", flag(f["mode"] == "overlay", "available", "not available") if not f["portable"] else flag(True, "writes config.ini"),
+        row("Settings overlay", flag(f["mode"] == "overlay", "available", "not available") if not f["portable"] else flag(f["mode"] == "file", "writes config.ini", "read-only"),
             esc("An installation's config.ini is the administrator's. The settings page can change presentation only if config.ini has "
                 "[web] settings_actions = yes and [web] token_file." if not f["portable"] else "A portable run or the desktop app: config.ini is your own file.")),
     ]
