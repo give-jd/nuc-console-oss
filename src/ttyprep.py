@@ -9,20 +9,38 @@ import sys
 import nuc_config
 
 
-def run(cmd, say):
-    """Runs one command; False (and a line for the journal) when it is missing or fails. Never raises."""
+def run(cmd, say, stdin=subprocess.DEVNULL):
+    """Runs one command (stdin: setterm --blank poke acts on the terminal it is given as input); False (and a line for the journal) when it is missing or fails. Never raises."""
     exe = shutil.which(cmd[0])
     if not exe:
         say(f"nuc-console: {cmd[0]} not found: skipped")
         return False
     try:
-        r = subprocess.run([exe] + cmd[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+        r = subprocess.run([exe] + cmd[1:], stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     except (OSError, subprocess.SubprocessError) as e:
         say(f"nuc-console: {cmd[0]}: {e}")
         return False
     if r.returncode:
         say(f"nuc-console: {cmd[0]} failed: {r.stderr.decode('utf-8', 'replace').strip()[:200]}")
     return r.returncode == 0
+
+
+def open_tty(tty):
+    return os.open(tty, os.O_RDONLY | os.O_NOCTTY | getattr(os, "O_NONBLOCK", 0))
+
+
+def poke(tty, say):
+    """setterm --blank poke: unblank the screen. setterm does the ioctl on its standard input, so the tty is given as stdin (--file is only where
+    it writes its escape sequences)."""
+    try:
+        fd = open_tty(tty)
+    except OSError as e:
+        say(f"nuc-console: {tty}: {e}")
+        return False
+    try:
+        return run(["setterm", "--term", "linux", "--blank", "poke"], say, stdin=fd)
+    finally:
+        os.close(fd)
 
 
 def main(env=None, say=None):
@@ -42,14 +60,14 @@ def main(env=None, say=None):
     if cfg["blank_minutes"]:  # --powerdown too: the monitor goes to sleep, not only black. Any key (or the next start) wakes it
         m = str(cfg["blank_minutes"])
         if run(["setterm", "--term", "linux", "--blank", m, "--powerdown", m, "--file", tty], say):
-            run(["setterm", "--term", "linux", "--blank", "poke", "--file", tty], say)  # wake it now: a screen already black comes back
+            poke(tty, say)  # wake it now: a screen already black comes back
         try:
             open(mark, "w").close()
         except OSError:
             pass
     elif os.path.exists(mark):  # 0 after a number: the timer set on an earlier start stays in the kernel until it is told otherwise
         if run(["setterm", "--term", "linux", "--blank", "0", "--powerdown", "0", "--file", tty], say):
-            run(["setterm", "--term", "linux", "--blank", "poke", "--file", tty], say)
+            poke(tty, say)
         try:
             os.remove(mark)
         except OSError:
