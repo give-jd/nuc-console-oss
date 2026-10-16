@@ -128,6 +128,11 @@ class Migrate(unittest.TestCase):
             self.assertIn(confmigrate.LEGACY + "\nweb = %s\n" % value, new)
             self.assertNotIn("# web =", new.split("[ui]")[1].split("\n[")[0], "the shipped file no longer lists the key")
 
+    def test_the_old_web_grid_keys_are_legacy(self):
+        new = self.migrated(add_to(add_to(OLD, "web", "columns = 120"), "web", "rows = 40"))
+        for line in ("columns = 120", "rows = 40"):
+            self.assertIn(confmigrate.LEGACY + "\n" + line + "\n", new)
+
     def test_second_run_is_already_current_and_changes_nothing(self):
         new = self.migrated(add_to(set_old(OLD, "web", "port", "9000"), "web", "tls_cert = /etc/x.pem"))
         baks = self.backups()

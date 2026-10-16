@@ -193,7 +193,7 @@ class Shell(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertEqual([a["data-card"] for t, a, _ in Tree(body).tags if "data-card" in a and not a["data-card"].startswith("__")], ["exposure"])
         self.assertIn("overview", body)
-        self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the classic page
+        self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the overview
 
     def test_the_overview_packs_densely_and_the_editor_and_a_single_card_do_not(self):
         import htmlview
