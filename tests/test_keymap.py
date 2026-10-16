@@ -521,32 +521,19 @@ class Dispatch(MapCase):
         frames = self.run_main([b"?", b"?"])
         self.assertEqual(["┌─ Keys" in "\n".join(f) for f in frames], [False, True, False])
 
-    def test_question_mark_twice_shows_the_guide_and_a_third_key_closes_it_without_acting(self):
-        frames = self.run_main([b"?", b"?", b"2", b"2"])
-        self.assertEqual(["Keys" in "\n".join(f) for f in frames[:3]], [False, True, False])
-        self.assertIn("┌─ Guide", "\n".join(frames[2]))
-        self.assertIn("HOW TO READ IT", "\n".join(frames[2]))
-        self.assertEqual(self.shown(frames)[3:], ["overview", "map"], "the key that closes the guide does nothing else")
-
-    def test_the_first_start_shows_the_guide_once_and_writes_the_marker(self):
+    def test_there_is_no_console_guide_at_the_first_start_nor_on_a_second_question_mark(self):
         import tempfile
-        import wizard
         folder = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, folder, True)
-        marker = os.path.join(folder, "setup.json")
+        marker = os.path.join(folder, "setup.json")  # no marker: the first start
         old = os.environ.get("NUC_CONSOLE_SETUP")
         os.environ["NUC_CONSOLE_SETUP"] = marker
         self.addCleanup(lambda: os.environ.__setitem__("NUC_CONSOLE_SETUP", old))
-        frames = self.run_main([b"2", b"2"])
-        self.assertIn("┌─ Guide", "\n".join(frames[0]), "the first frame is the guide")
-        self.assertEqual(self.shown(frames)[1:], ["overview", "map"], "its closing key does nothing else")
-        self.assertEqual(wizard.state(), "console")
-        self.assertNotIn("Guide", "\n".join("\n".join(f) for f in frames[1:]))
-        frames = self.run_main([b"2"])  # the next start: the marker is there
-        self.assertNotIn("┌─ Guide", "\n".join(frames[0]))
-        os.remove(marker)
-        frames = self.run_main([b"2"], keyboard=False)  # a monitor with no keyboard has no key to close it: nothing is shown over the rotation
-        self.assertNotIn("┌─ Guide", "\n".join("\n".join(f) for f in frames))
+        frames = self.run_main([b"?", b"?", b"2"])
+        self.assertEqual(self.shown(frames), ["overview", "overview", "overview", "map"], "the first key is not swallowed by a box")
+        self.assertEqual(["Keys" in "\n".join(f) for f in frames], [False, True, False, False])
+        self.assertNotIn("Guide", "\n".join("\n".join(f) for f in frames))
+        self.assertFalse(os.path.exists(marker), "the console writes no marker")
 
     def test_the_help_fits_the_smallest_console_and_says_how_many_rows_it_dropped(self):
         for scope, digit in (("map", b"2"), ("ai", b"5"), ("overview", b"")):
