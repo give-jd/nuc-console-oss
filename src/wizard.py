@@ -46,12 +46,12 @@ def state(path=None):
     """"" while the guide was never finished, skipped or shown; else which one (MARKS). A link, a big file, a file that is not JSON: absent."""
     path = path or marker_path()
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))  # a FIFO planted here must not block a page
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))  # a FIFO planted here must not block a page
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode) or st.st_size > MARKER_MAX:
                 return ""
-            with os.fdopen(fd, encoding="utf-8", closefd=False) as f:
+            with os.fdopen(os.dup(fd), encoding="utf-8") as f:
                 how = (json.load(f) or {}).get("how")
         finally:
             os.close(fd)
