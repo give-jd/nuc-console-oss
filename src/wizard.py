@@ -1,19 +1,17 @@
-"""The first-run wizard: what the console shows, how to set it up, and the marker that says it was seen.
+"""The first-run wizard: what the web view shows, how to set it up, and the marker that says it was seen.
 
 Three things live here and nothing else:
   - the marker `setup.json` (state(), mark()): in the folder of the AI and overlay files, or the portable run's `ai` folder. It says the guide was
-    finished, skipped or shown once on the console. Until it exists the web shell offers a banner ("New here?") and the console shows its one-time screen;
+    finished or skipped. Until it exists the web shell offers a banner ("New here?");
     a marker that cannot be read counts as absent, one that cannot be written costs only a banner that comes back. It holds no setting.
   - the facts (facts()): what is on now, read from the configuration in force. The wizard explains; it never shows a state the data does not support.
-  - the words: the five steps as HTML (step_html(), used by web.py) and the compact console version of steps 1-3 (guide_lines(), used by render.py and
-    `render.py --once --view guide`).
+  - the words: the five steps as HTML (step_html(), used by web.py). The wizard is the web view's and the desktop app's; the text console has none.
 Writing a setting is not done here: step 4's forms post to the settings page's own actions (/settings/feature, /settings/config), behind the same guard
 (token, CSRF, Origin, the allowlist nuc_config.OVERLAY_ALLOW). Pure functions; stdlib only."""
 import html
 import json
 import os
 import stat
-import textwrap
 import time
 
 import cards
@@ -23,11 +21,10 @@ import ui
 
 MARKER_FILE = "setup.json"
 MARKER_MAX = 2048  # bytes; a bigger file counts for nothing
-MARKS = ("finished", "skipped", "console")
+MARKS = ("finished", "skipped")
 STEPS = ("What you see", "The screens", "On and off", "Set it up", "Where things live")
 SETUP_PATH = "/setup"
 DOCS = "https://github.com/give-jd/nuc-console-oss/blob/main/docs/"
-GUIDE_W = 58  # the console guide's lines are at most this wide (the box around them is 4 wider)
 
 
 # ---- the marker ---------------------------------------------------------------------------------------------------------------------
@@ -43,7 +40,7 @@ def marker_path():
 
 
 def state(path=None):
-    """"" while the guide was never finished, skipped or shown; else which one (MARKS). A link, a big file, a file that is not JSON: absent."""
+    """"" while the guide was never finished or skipped; else which one (MARKS). A link, a big file, a file that is not JSON: absent."""
     path = path or marker_path()
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))  # a FIFO planted here must not block a page
@@ -136,43 +133,6 @@ def kpi_names(cfg):
     """The key figures in force, by label (the preset's, or [ui] kpis); [] when the row is switched off."""
     eff = prefs.effective(cfg.get("ui"), "", "")[0]
     return [cards.KPI_LABELS.get(k, k) for k in eff["kpis"]]
-
-
-# ---- the console's guide: a compact text of steps 1-3 ------------------------------------------------------------------------------
-
-
-def guide_lines(cfg, w=GUIDE_W):
-    """The console's guide as plain lines of at most `w` characters (no ANSI): how to read a state, the screens, what is on and off now. Used by the
-    one-time first-start box, by `?` twice, and by `render.py --once --view guide`."""
-    f = facts(cfg)
-    sym = ui.SYMBOLS
-    keys = ui.screen_keys(lambda feat: feat in f["on"])
-    names = {n: t for n, _feat, t in ui.SCREENS}
-    ai_size = ai_cost()[1]
-    out = ["HOW TO READ IT",
-           "%s fine  %s look  %s wrong  %s unreadable  %s note" % (sym["ok"], sym["warn"], sym["err"], sym["unknown"], sym["info"]),
-           "A colour never stands alone: each state has its symbol.",
-           "Key figures on top; ATTENTION lists what needs you, first.",
-           "A value that cannot be read shows %s, never a fine." % sym["unknown"],
-           "",
-           "SCREENS  " + "  ".join("%s %s" % (d, names[n]) for d, n in keys),
-           "Tab next screen, ? keys, Z pause, Esc or q back.",
-           "",
-           "ON AND OFF NOW",
-           "web view %s%s | Telegram %s | AI model %s" % (yn(f["web"]), " (port %s)" % f["port"] if f["web"] and f["port"] else "",
-                                                      yn(f["telegram"]) + (" (full detail)" if f["telegram"] and f["detail"] == "full" else ""),
-                                                      yn(f["ai_on"])),
-           "Sections switched off: " + (str(len(f["off"])) + " (" + ", ".join(f["off"][:3]) + (", ..." if len(f["off"]) > 3 else "") + ")" if f["off"] else "none"),
-           ("Only the web view listens. " if f["web"] else "Nothing listens. ") + ("Telegram sends titles only." if f["detail"] != "full" else "Telegram sends full detail."),
-           ("AI talks to ANOTHER machine (allow_remote)." if f.get("ai_remote") else "AI stays on this machine") + (" (models %s)." % ai_size if ai_size and not f.get("ai_remote") else "" if f.get("ai_remote") else "."),
-           "Nothing runs as root here: a portable run." if f["portable"] else "Collector runs as root: a section off is not collected.",
-           "",
-           "Setup, in the web view: /setup (5 short steps)",
-           "Any key closes it. To read it again: ? then ?"]
-    lines = []
-    for ln in out:
-        lines += textwrap.wrap(ln, w, subsequent_indent="  ", break_long_words=True) or [""]
-    return lines
 
 
 # ---- the web steps ------------------------------------------------------------------------------------------------------------------
