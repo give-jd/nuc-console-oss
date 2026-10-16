@@ -1,6 +1,6 @@
 """Console font and screen blanking of the dashboard's tty (Linux), run by nuc-console.service before the dashboard starts (ExecStartPre=-+,
 as root: setfont needs it). Reads [console] of config.ini. Both settings are off by default. Every step is skipped, never an error, when its
-tool, its font or the tty is not there: the dashboard starts anyway. Running it twice leaves the same state (docs/CONFIGURATION.md)."""
+tool, its font or the tty is not there: the dashboard starts anyway. Running it twice leaves the same state; blank_minutes back to 0 takes the timer it set before back (docs/CONFIGURATION.md)."""
 import os
 import shutil
 import subprocess
@@ -38,9 +38,22 @@ def main(env=None, say=None):
     tty = "/dev/tty" + vt
     if cfg["font"]:
         run(["setfont", "-C", tty, cfg["font"]], say)
+    mark = os.path.join(nuc_config.RUN_DIR, "ttyprep-blank")  # in /run: gone at reboot, when the kernel's own timer is back too
     if cfg["blank_minutes"]:  # --powerdown too: the monitor goes to sleep, not only black. Any key (or the next start) wakes it
         m = str(cfg["blank_minutes"])
-        run(["setterm", "--term", "linux", "--blank", m, "--powerdown", m, "--file", tty], say)
+        if run(["setterm", "--term", "linux", "--blank", m, "--powerdown", m, "--file", tty], say):
+            run(["setterm", "--term", "linux", "--blank", "poke", "--file", tty], say)  # wake it now: a screen already black comes back
+        try:
+            open(mark, "w").close()
+        except OSError:
+            pass
+    elif os.path.exists(mark):  # 0 after a number: the timer set on an earlier start stays in the kernel until it is told otherwise
+        if run(["setterm", "--term", "linux", "--blank", "0", "--powerdown", "0", "--file", tty], say):
+            run(["setterm", "--term", "linux", "--blank", "poke", "--file", tty], say)
+        try:
+            os.remove(mark)
+        except OSError:
+            pass
     return 0
 
 

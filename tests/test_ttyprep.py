@@ -42,6 +42,14 @@ def go(ini, fake, env=None):
 
 
 class Console(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(nuc_config, "RUN_DIR", tmp.name)  # the marker of an earlier start lives here, not in the host's /run
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.mark = os.path.join(tmp.name, "ttyprep-blank")
+
     def test_off_by_default_nothing_runs(self):
         for ini in (None, "[console]\n", "[console]\nfont =\nblank_minutes = 0\n"):
             f = Fake()
@@ -54,8 +62,22 @@ class Console(unittest.TestCase):
         go(ini, f)
         go(ini, f)
         once = [["/usr/bin/setfont", "-C", "/dev/tty3", "Lat15-TerminusBold32x16"],
-                ["/usr/bin/setterm", "--term", "linux", "--blank", "10", "--powerdown", "10", "--file", "/dev/tty3"]]
+                ["/usr/bin/setterm", "--term", "linux", "--blank", "10", "--powerdown", "10", "--file", "/dev/tty3"],
+                ["/usr/bin/setterm", "--term", "linux", "--blank", "poke", "--file", "/dev/tty3"]]
         self.assertEqual(f.calls, once + once)  # idempotent: the same commands, nothing accumulates
+
+    def test_zero_after_a_number_takes_the_timer_back_and_wakes_the_screen_once(self):
+        f = Fake()
+        go("[console]\nblank_minutes = 1\n", f)
+        self.assertTrue(os.path.exists(self.mark))
+        f.calls.clear()
+        go("[console]\nblank_minutes = 0\n", f)
+        self.assertEqual(f.calls, [["/usr/bin/setterm", "--term", "linux", "--blank", "0", "--powerdown", "0", "--file", "/dev/tty3"],
+                                   ["/usr/bin/setterm", "--term", "linux", "--blank", "poke", "--file", "/dev/tty3"]])
+        self.assertFalse(os.path.exists(self.mark))
+        f.calls.clear()
+        go("[console]\nblank_minutes = 0\n", f)
+        self.assertEqual(f.calls, [], "and then it leaves the tty alone again")
 
     def test_missing_tools_are_skipped_not_errors(self):
         f = Fake(have=())

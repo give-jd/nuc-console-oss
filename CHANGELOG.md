@@ -3,6 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Fixed
+- `[console] blank_minutes = 0` after a number now takes the blanking back: the timer set by an earlier start stayed in the kernel until a reboot, so a monitor could stay black with no keyboard to wake it. The start that applies blanking also wakes a screen that is already black.
+
 ## [2.5.0] - 2026-10-16
 
 A lighter, easier-to-run configuration. A shorter shipped `config.ini` and `sudo nuc-console-config migrate` for the long one you already have; `[ui] kpis = none`
