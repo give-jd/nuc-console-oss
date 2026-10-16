@@ -3,7 +3,13 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.5.0] - 2026-10-16
+
+A lighter, easier-to-run configuration. A shorter shipped `config.ini` and `sudo nuc-console-config migrate` for the long one you already have; `[ui] kpis = none`
+and `[alerts] mute` to switch more things off; an opt-in way to change presentation settings from the settings page of an installation; and a setup guide for new
+users in the web view and the desktop app. **The classic web pages and `[ui] web = classic` are gone**: you get the shell, and a `config.ini` that still names
+the key only logs one line. A minor version: `config.ini` is kept, nothing needs doing after the update, and the installed updater still needs `gh` logged in
+(or `--allow-unattested`) as in 2.4.0. Still Python 3.8+, standard library only.
 
 ### Added
 - **A setup guide for new users** (issue #56): `/setup?step=N` in the web view and the desktop app only (the text console has none), five short steps (what you see and how to read a state; the screens and
@@ -29,7 +35,7 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   unknown name is ignored, logged and raised as `mute-ignored`. It is not `nuc-console-accept` (a root command with a reason, kept in `accepted.json`); both are on the settings page.
 
 ### Changed
-- The shipped `config/config.ini` is about half as long (106 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
+- The shipped `config/config.ini` is about 40% shorter (110 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
   [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and on the settings page. An installed machine keeps its own `config.ini` untouched; `diff /etc/nuc-console/config.ini{,.dist}` shows the new reference.
 
 ### Removed
