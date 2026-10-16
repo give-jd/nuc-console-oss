@@ -19,7 +19,7 @@ APPLIES = {  # when a change applies, as the page says it
     LOCK: "a lock: only config.ini changes it, never this page",
 }
 BOOL, INT, CHOICE, TEXT, LIST, MAP = "bool", "int", "choice", "text", "list", "map"
-NOTHING = "none"  # [ui] hidden: the word the page uses for `hidden =` (nothing hidden), which is not the same as no line at all
+NOTHING = prefs.NOTHING  # [ui] hidden: the word the page uses for `hidden =` (nothing hidden); [ui] kpis: no row. Not the same as no line at all
 MAX_TEXT = 300    # characters of one value
 MAX_ITEMS = 64    # lines of [webapps] or [expose]
 GROUP_WORDS = {"LOCALE": "local", "TAILNET": "tailnet", "LAN": "lan", "INTERNET": "internet"}  # [expose]: load()'s groups -> the file's words
@@ -73,6 +73,10 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
     ("web", "Web view (an installation's service)",
      "The optional web service of an installation, the dashboard's only network listener. The desktop app and a portable run always "
      "serve 127.0.0.1 on a port of their own, without a token: they use the grid size and allowed_hosts only."),
+    ("alerts", "Alarms you may mute",
+     "ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems "
+     "figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as "
+     "nuc-console-accept: that one is a root command with a reason."),
     ("telegram", "Telegram alerts",
      "New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram "
      "page: the token is never in config.ini."),
@@ -162,7 +166,8 @@ KEYS = (
          "severity: a card that needs attention moves up; fixed: the cards keep the layout's order. On the console the cards keep their "
          "order unless this says severity.", {"choices": prefs.ORDERS, "unset": True}),
         ("kpis", LIST, "", NOW,
-         "Up to %d key figures for the top row, in order, of: %s. Empty: the preset's." % (prefs.MAX_KPIS, ", ".join(prefs.KPI_IDS)),
+         "Up to %d key figures for the top row, in order, of: %s. %s = no row at all; empty: the preset's." % (
+             prefs.MAX_KPIS, ", ".join(prefs.KPI_IDS), NOTHING),
          {"pattern": re.compile(r"[a-z_]{2,20}"), "unset": True}),
         ("layout", LIST, "", NOW,
          "The cards that show, in order: name or name:width (1-%d columns on the web), of: %s. Cards left out of layout and hidden are "
@@ -205,6 +210,12 @@ KEYS = (
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
         ("columns", INT, "200", NOW, "Width of the classic web pages' grid in characters (a page can ask ?cols=).", {"lo": 60, "hi": 300}),
         ("rows", INT, "60", NOW, "Height of that grid in lines.", {"lo": 20, "hi": 120}),
+    ))
+    + _k("alerts", (
+        ("mute", LIST, "", NOW,
+         "ATTENTION alarms to silence, comma-separated, of: %s. A muted alarm is still collected: it only leaves the list, the problems "
+         "figure and Telegram, and is counted as muted. Anything else is ignored and reported." % ", ".join(nuc_config.MUTABLE_ALERTS),
+         {"choices": nuc_config.MUTABLE_ALERTS, "unset": True}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,
@@ -272,6 +283,8 @@ def value(cfg, key):
             return ""
         if name == "layout":
             v = [c if w == 1 else "%s:%d" % (c, w) for c, w in v]
+        elif name == "kpis":
+            v = list(v) or NOTHING
         elif name == "hidden":
             hw = ui.get("hidden_w") or {}
             v = [c if c not in hw else "%s:%d" % (c, hw[c]) for c in v] or NOTHING
@@ -315,7 +328,7 @@ def check(key, raw):
         v = str(n)
     elif key.kind == LIST:
         items = [t.strip().lower() for t in v.split(",") if t.strip()]
-        if key.section == "ui" and key.name == "hidden" and items == [NOTHING]:
+        if key.section == "ui" and key.name in ("hidden", "kpis") and items == [NOTHING]:
             return NOTHING
         bad = [t for t in items if (t not in key.choices if key.choices else not key.pattern.fullmatch(t))]
         if bad:
@@ -412,7 +425,7 @@ def changes(cfg, section, form):
         if v == "" and key.unset:
             drop.append(key.name)
         else:
-            items.append((key.name, "" if v == NOTHING else v))
+            items.append((key.name, "" if v == NOTHING and key.name == "hidden" else v))  # hidden = (blank) is nothing hidden; kpis = none
     if why:
         raise Refused(why)
     return items, drop

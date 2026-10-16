@@ -42,6 +42,12 @@ NOTIFY_DIR = os.environ.get("NUC_CONSOLE_NOTIFY_DIR") or (os.path.join(BASE_DIR,
 TELEGRAM_DETAILS = ("titles", "full")  # titles: only the problem's title leaves the machine; full: its text too (names, ports)
 TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page chose (on/off, the paired @username); written by the notifier
 
+# [alerts] mute: the ATTENTION alarms a person may silence, by problem id (problems.CATALOG). OPERATIONAL ones only: something that runs or
+# heats up wrong. Nothing about exposure, ports, the firewall, authentication or the data those judgements read (the network and container
+# collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
+# mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
+MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot")
+
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
                 "lan": "LAN", "internet": "INTERNET", "public": "INTERNET"}
@@ -71,6 +77,7 @@ def load(path=None, warn=None):
            "console": {"font": "", "blank_minutes": 0}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
+    cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["ui"] = {"web": "app", "sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the web flag, the section order and only the keys the file sets
@@ -146,6 +153,18 @@ def load(path=None, warn=None):
                 cfg["expose"][key] = EXPOSE_WORDS[word]
             else:
                 say(f"nuc-console: {path}: [expose] {key}: '{word}' is not local, tailnet, lan or internet")
+    if cp.has_section("alerts"):  # mute = id, id: operational ATTENTION alarms shown as a count only (MUTABLE_ALERTS); anything else is ignored and said
+        for key in [k for k in cp.options("alerts") if k not in cp.defaults() and k != "mute"]:
+            say(f"nuc-console: {path}: [alerts] unknown key '{key[:40]}' ignored (known: mute)")
+        asked = [x.strip().lower() for x in re.split(r"[,;\s]+", cp.get("alerts", "mute", fallback="")) if x.strip()]
+        for x in asked:
+            if x in MUTABLE_ALERTS:
+                if x not in cfg["alerts"]["mute"]:
+                    cfg["alerts"]["mute"].append(x)
+            elif x not in cfg["alerts"]["ignored"]:
+                cfg["alerts"]["ignored"].append(x[:40])
+                say(f"nuc-console: {path}: [alerts] mute: '{x[:40]}' cannot be muted: ignored (it may be a security alarm or unknown; "
+                    f"mutable: {', '.join(MUTABLE_ALERTS)})")
     if cp.has_section("web"):
         w = cfg["web"]
         try:

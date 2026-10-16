@@ -513,11 +513,11 @@ def problem_key(rec):
 
 
 def collect(records):
-    """-> (Counter of key -> how many, {key: record}) of the problems nobody accepted. Ids repeat (several new ports): a multiset.
+    """-> (Counter of key -> how many, {key: record}) of the problems nobody accepted or muted ([alerts] mute). Ids repeat (several new ports): a multiset.
     The notifier's own problems (telegram-unpaired, telegram-failing) are not among them."""
     keys, recs = collections.Counter(), {}
     for r in records:
-        if not r.get("accepted") and not r["id"].startswith(OWN):
+        if not r.get("accepted") and not r.get("muted") and not r["id"].startswith(OWN):
             k = problem_key(r)
             keys[k] += 1
             recs[k] = r
