@@ -3,7 +3,9 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.5.1] - 2026-10-16
+
+A fix for the console blanking added in 2.4.0. A monitor put to sleep by `[console] blank_minutes` could stay black with no way to wake it from the service: setting `blank_minutes = 0` did not take the timer back, and the framebuffer stayed in power-down. A patch version: nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).
 
 ### Fixed
 - `[console] blank_minutes = 0` after a number now takes the blanking back: the timer set by an earlier start stayed in the kernel until a reboot, so a monitor could stay black with no keyboard to wake it. The start that applies or clears blanking also wakes a screen that is already black, including a framebuffer left in power-down (`/sys/class/graphics/fbN/blank` back to 0).
