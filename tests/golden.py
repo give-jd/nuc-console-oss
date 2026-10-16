@@ -388,6 +388,9 @@ def _cases():
     # problems the user accepted as known (a line under ATTENTION), and the Telegram notifier that is on and silent
     add("overview-accepted-120x33", _size(120, 33), accepted=ACCEPTED)
     add("overview-telegram-200x50", _size(200, 50), cfg={"telegram": {"enabled": True}})
+    # [alerts] mute (the counter under ATTENTION; one name the file asked for and cannot be muted is raised) and [ui] kpis = none (no row)
+    add("overview-muted-120x33", _size(120, 33), cfg={"alerts": {"mute": ["container-exited", "journal-errors"], "ignored": ["port-new"]}})
+    add("ui-kpis-none-120x33", _size(120, 33), cfg={"ui": {"kpis": []}})
 
     # [ui] on the console: the themes (light, high contrast, NO_COLOR = mono), the densities (compact: no air under the titles; wall: starts
     # at the coarser level), a layout with hidden cards and the severity order, and the screen the console starts at (--view start)

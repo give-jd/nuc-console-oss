@@ -11,6 +11,12 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
   the file is replaced, and the old file is kept as `config.ini.bak-YYYYMMDD-HHMMSS`. `nuc-console-update` prints one line when your file is in the old layout; it never migrates by itself.
   See [Upgrading config.ini](docs/CONFIGURATION.md#upgrading-configini).
 
+- `[ui] kpis = none` shows no KPI row, on the console and on the web, and the space goes to the cards (as `hidden = none` hides nothing).
+- `[alerts] mute = id, id, ...` silences operational ATTENTION alarms from a closed list (`journal-errors`, `thermal`, `throttling`, `container-exited`,
+  `unhealthy-container`, `failed-units`, `collector-boot`: `nuc_config.MUTABLE_ALERTS`). A muted alarm leaves the list, the Problems figure and Telegram, ATTENTION
+  counts it as `N muted`, `nuc-console-problems` lists it under `muted`, and the collectors still produce its data. Security alarms can never be muted: a security or
+  unknown name is ignored, logged and raised as `mute-ignored`. It is not `nuc-console-accept` (a root command with a reason, kept in `accepted.json`); both are on the settings page.
+
 ### Changed
 - The shipped `config/config.ini` is about half as long (106 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
   [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and on the settings page. An installed machine keeps its own `config.ini` untouched; `diff /etc/nuc-console/config.ini{,.dist}` shows the new reference.

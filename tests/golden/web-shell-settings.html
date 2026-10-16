@@ -490,7 +490,7 @@ hidden =
 <code>kpis</code>
 </span>
 <span class="sm">not set</span>
-<p class="hintl">Up to 8 key figures for the top row, in order, of: problems, internet, lan, beyond, db_lan, firewall, cpu, ram, disk, temp, load, containers, unhealthy, failed_units, ssh, tailnet, rx, tx, uptime, health, ai. Empty: the preset&#x27;s.</p>
+<p class="hintl">Up to 8 key figures for the top row, in order, of: problems, internet, lan, beyond, db_lan, firewall, cpu, ram, disk, temp, load, containers, unhealthy, failed_units, ssh, tailnet, rx, tx, uptime, health, ai. none = no row at all; empty: the preset&#x27;s.</p>
 </div>
 <div class="ck cko" id="k-ui-layout">
 <span class="cn">
@@ -612,6 +612,19 @@ hidden =
 </span>
 <code class="cv">60</code>
 <p class="hintl">Height of that grid in lines. <span class="sm">20-120 · default 60</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-alerts">
+<summary>
+<code>[alerts]</code> Alarms you may mute</summary>
+<p class="hintl">ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as nuc-console-accept: that one is a root command with a reason.</p>
+<div class="ck cko" id="k-alerts-mute">
+<span class="cn">
+<code>mute</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot</span>
 </p>
 </div>
 </details>

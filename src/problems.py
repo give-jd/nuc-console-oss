@@ -124,6 +124,10 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     now, out = now or time.time(), []
     if CFG.get("config_error"):  # config.ini exists but could not be read: nothing in it ([expose], [webapps]) is applied
         out.append((2, "config.ini unreadable: defaults in use ([expose] and [webapps] not applied)", "config-unreadable"))
+    bad = (CFG.get("alerts") or {}).get("ignored") or []
+    if bad:  # [alerts] mute named something that cannot be muted: said on the screen too, never accepted in silence
+        out.append((1, "[alerts] mute: " + ", ".join(f"'{safe(x)[:40]}'" for x in bad[:3]) + (" … " if len(bad) > 3 else " ")
+                    + "cannot be muted: ignored", "mute-ignored"))
     if not hostdata.on("containers"):
         pass
     elif cont is None:
@@ -264,6 +268,8 @@ CATALOG = {
                          "fix the name under [expose] in config.ini (container, compose service or project, process, unit, database, [webapps] name) or remove the line; ports are never checked"),
     "config-unreadable": ("config.ini unreadable", "the file exists but could not be read, so the defaults are in use: [expose] and [webapps] are not applied and nothing is checked against them",
                           "check config.ini for a key starting with ':' (write ports as 8080) or a section without a header; the exact error is in the service logs / stderr; restart the services after fixing it"),
+    "mute-ignored": ("[alerts] mute names an alarm that cannot be muted", "the alarm stays on: security alarms and unknown names are never muted, whatever the file says",
+                     "remove the name from [alerts] mute in config.ini; the mutable ones are listed in docs/CONFIGURATION.md; restart the services after fixing it"),
     "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "sudo nuc-console-accept"),
     "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "sudo nuc-console-accept"),
     "port-compare-suspended": ("Port comparison suspended", "network sections were unreadable", "see net-sections"),
@@ -365,6 +371,7 @@ if nuc_config.PORTABLE:
     }.items()})
 
 
+MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
@@ -384,6 +391,8 @@ class ProblemList(list):
     item, in the same order (the catalog's words for this OS and this install); .known = what was accepted, [{id, text, reason, ts}] (as
     many as .accepted); .cmds = the commands the advice refers to: {problems, accept, forget}."""
     accepted = 0
+    muted = 0  # [alerts] mute: how many alarms the person silenced (only MUTABLE_ALERTS can be), shown under ATTENTION as a count
+    muted_known = None  # [{id, text}] of them, as many as .muted
     pids = None
     info = None
     known = None
@@ -406,13 +415,23 @@ def load_accepted(path=None):
             and isinstance(v.get("fp"), str) and isinstance(v.get("reason", ""), str)}
 
 
+def muted_ids():
+    """The ids [alerts] mute silences: what nuc_config.load kept of it, held once more to MUTABLE_ALERTS (a security alarm is never one of them,
+    whoever filled CFG)."""
+    return set((CFG.get("alerts") or {}).get("mute") or ()) & set(nuc_config.MUTABLE_ALERTS)
+
+
 def problems(*a, **kw):
     """Anomalies to show, by decreasing severity: ProblemList of (3|2|1, text), without the ones you accepted. Empty = all ok."""
     acc = load_accepted()
     out = ProblemList()
-    out.pids, out.info, out.known = [], [], []
+    out.pids, out.info, out.known, out.muted_known = [], [], [], []
+    mute = muted_ids()
     for sev, text, pid in problems_raw(*a, **kw):
-        if pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
+        if pid in mute:
+            out.muted += 1
+            out.muted_known.append({"id": pid, "text": text})
+        elif pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
             out.accepted += 1
             out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
@@ -424,14 +443,14 @@ def problems(*a, **kw):
 
 
 def problem_records(*a, **kw):
-    """Every anomaly with its analysis, for `nuc-console-problems`: [{id, severity, text, accepted, reason, title, why, fix, fingerprint}]."""
-    acc = load_accepted()
+    """Every anomaly with its analysis, for `nuc-console-problems`: [{id, severity, text, accepted, muted, reason, title, why, fix, fingerprint}]."""
+    acc, mute = load_accepted(), muted_ids()
     out = []
     for sev, text, pid in problems_raw(*a, **kw):
         title, why, fix = CATALOG.get(pid, (pid, "", ""))
         fp = fingerprint(sev, text, pid)
         out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
-                    "accepted": pid in acc and acc[pid]["fp"] == fp, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
+                    "accepted": pid not in mute and pid in acc and acc[pid]["fp"] == fp, "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
                     "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
     return out
 

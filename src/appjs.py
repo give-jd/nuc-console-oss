@@ -458,7 +458,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     const note = doc.stale ?
       el("div", {class: "stale-banner", role: "status"}, el("span", {class: "sym"}, "!"), " ", el("b", {}, "some of the data is old or missing: a collector is not running?"),
         " ", el("span", {class: "sm"}, "restart it: ", el("code", {class: "cmd"}, say(doc.restart || "")))) : null;
-    return [note, el("div", {class: "kpis", role: "list", "aria-label": "Key figures"}, tiles)];
+    return [note, tiles.length ? el("div", {class: "kpis", role: "list", "aria-label": "Key figures"}, tiles) : null];  // kpis = none: no row, no space
   }
   function overview(doc) {
     const by = new Map((doc.cards || []).map(c => [c.id, c]));
