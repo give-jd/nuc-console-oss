@@ -220,7 +220,7 @@ class Writing(Folder):
             self.assertIn("/inheritance:r", args)
             self.assertIn("*%s:F" % sid, args)
             self.assertFalse([a for a in args if "USERNAME" in a or a.startswith("HOST")], "granted by SID, not by a name from the environment")
-        self.assertEqual(nuc_config.read_overlay(self.ov), {"ui.theme": "dark"} if POSIX else {})
+        self.assertEqual(nuc_config.read_overlay(self.ov), {"ui.theme": "dark"})
 
     def test_save_overlay_checks_like_save_and_keeps_config_ini_as_it_is(self):
         self.assertEqual(confedit.save_overlay(self.path, "ui", {"theme": ["dark"], "density": [""]}, self.ov), ["theme"])

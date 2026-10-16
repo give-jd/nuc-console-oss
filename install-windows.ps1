@@ -279,4 +279,4 @@ if ($aiTask) { Start-ScheduledTask -TaskPath $TaskPath -TaskName 'ai' -ErrorActi
 
 $how = @{ browser = "opens in your browser at every logon (again: Start menu > nuc-console, or $url)"; fullscreen = "opens full screen at every logon (Alt+F4 closes it, F11 leaves full screen; again: Start menu > nuc-console)"; none = 'never opens by itself (-Display none)' }[$mode]
 Say "ok: collector running as SYSTEM; dashboard $how. Text size: A- / A+ at the bottom of the page"
-Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept, nuc-console-ai, nuc-console-ask (open a new prompt for the PATH)"
+Say "config: $cfg   logs: $Data\logs   commands: nuc-console-problems, nuc-console-accept, nuc-console-ai, nuc-console-ask, nuc-console-config (open a new prompt for the PATH)"

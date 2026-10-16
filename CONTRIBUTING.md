@@ -15,7 +15,7 @@ python3 src/render.py --once --demo --view ai --select qwen3-8b --details    # t
 python3 src/web.py --demo --port 8796                                        # the web view with the AI page's buttons, simulated: nothing is downloaded or started
 python3 -m unittest tests.test_golden            # every screen and page, byte for byte (see "Golden outputs and the render benchmark")
 python3 tools/bench_render.py                    # the CPU a frame costs, per view and size (--json, --compare before.json)
-shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask}   # if you touch shell
+shellcheck install.sh install-macos.sh run.sh scripts/*.sh bin/nuc-console-{accept,problems,update,ai,ask,config}   # if you touch shell
 python3 tools/browser_check.py --out shots      # the web shell in a real headless Chrome/Chromium: every view, theme and density, scripts on and off, the wall page (--quick, --only TEXT, --chrome PATH or $CHROME)
 python3 tools/desktop_core.py --checkout && (cd desktop/src-tauri && cargo test && cargo tauri dev)   # the desktop app, if you touch desktop/ (docs/DESKTOP.md)
 ```
