@@ -6,7 +6,7 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ## [Unreleased]
 
 ### Fixed
-- `[console] blank_minutes = 0` after a number now takes the blanking back: the timer set by an earlier start stayed in the kernel until a reboot, so a monitor could stay black with no keyboard to wake it. The start that applies blanking also wakes a screen that is already black.
+- `[console] blank_minutes = 0` after a number now takes the blanking back: the timer set by an earlier start stayed in the kernel until a reboot, so a monitor could stay black with no keyboard to wake it. The start that applies or clears blanking also wakes a screen that is already black, including a framebuffer left in power-down (`/sys/class/graphics/fbN/blank` back to 0).
 
 ## [2.5.0] - 2026-10-16
 

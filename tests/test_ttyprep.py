@@ -51,6 +51,13 @@ class Console(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.mark = os.path.join(tmp.name, "ttyprep-blank")
         self.fds = []
+        self.fb = os.path.join(tmp.name, "graphics")
+        os.makedirs(os.path.join(self.fb, "fb0"))
+        with open(os.path.join(self.fb, "fb0", "blank"), "w") as fh:
+            fh.write("4\n")
+        patcher = mock.patch.object(ttyprep, "FB_DIR", self.fb)  # not the host's sysfs
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch.object(ttyprep, "open_tty", lambda tty: self.fds.append(tty) or os.open(os.devnull, os.O_RDONLY))  # the tty itself is root's
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -84,6 +91,12 @@ class Console(unittest.TestCase):
         f.calls.clear()
         go("[console]\nblank_minutes = 0\n", f)
         self.assertEqual(f.calls, [], "and then it leaves the tty alone again")
+
+    def test_the_framebuffer_left_in_powerdown_is_brought_back(self):
+        blank = os.path.join(self.fb, "fb0", "blank")
+        go("[console]\nblank_minutes = 1\n", Fake())
+        with open(blank) as fh:
+            self.assertEqual(fh.read(), "0", "fb0/blank was 4 (powerdown): a start that sets blanking leaves the screen on")
 
     def test_missing_tools_are_skipped_not_errors(self):
         f = Fake(have=())

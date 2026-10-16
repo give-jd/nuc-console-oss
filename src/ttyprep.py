@@ -29,9 +29,33 @@ def open_tty(tty):
     return os.open(tty, os.O_RDONLY | os.O_NOCTTY | getattr(os, "O_NONBLOCK", 0))
 
 
+FB_DIR = "/sys/class/graphics"
+
+
+def unblank_fb(say, base=None):
+    """--powerdown leaves the framebuffer in FB_BLANK_POWERDOWN (/sys/class/graphics/fbN/blank = 4) and a poke of the console does not always bring it
+    back: every fbN that is not 0 gets 0, which is what a key press does. Root only; a missing or read-only file is skipped."""
+    base = base or FB_DIR
+    try:
+        names = sorted(n for n in os.listdir(base) if n.startswith("fb") and n[2:].isdigit())
+    except OSError:
+        return
+    for n in names:
+        path = os.path.join(base, n, "blank")
+        try:
+            with open(path) as f:
+                if f.read().strip() in ("", "0"):
+                    continue
+            with open(path, "w") as f:
+                f.write("0")
+        except OSError as e:
+            say(f"nuc-console: {path}: {e}")
+
+
 def poke(tty, say):
     """setterm --blank poke: unblank the screen. setterm does the ioctl on its standard input, so the tty is given as stdin (--file is only where
     it writes its escape sequences)."""
+    unblank_fb(say)
     try:
         fd = open_tty(tty)
     except OSError as e:
