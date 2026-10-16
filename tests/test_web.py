@@ -13,12 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import nuc_config  # noqa: E402
 import render  # noqa: E402
-import ansi  # noqa: E402
+import htmlview  # noqa: E402
 import web  # noqa: E402
 import webmap  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 
 TOKEN = "t" * 24
 
@@ -56,7 +55,7 @@ def get_any(srv, path="/", method="GET", headers=None):  # the interface the con
     return r.status, dict(r.getheaders()), body
 
 
-get = classic_default()(get_any)  # the classic pages: what most of this file looks at (the shell has its own files)
+get = get_any
 
 
 class Web(unittest.TestCase):
@@ -77,8 +76,11 @@ class Web(unittest.TestCase):
         st, h, body = get(self.open)
         self.assertEqual(st, 200)
         self.assertIn("EXPOSURE", body)
-        self.assertNotIn("<script", body.lower())
-        self.assertIn("default-src 'none'", h["Content-Security-Policy"])
+        self.assertNotIn("src=", "".join(re.findall(r"<script[^>]*>", body)))                     # no external script: only the inline ones the CSP pins
+        csp = h["Content-Security-Policy"]
+        self.assertIn("default-src 'none'", csp)
+        self.assertNotIn("unsafe", csp)
+        self.assertIn("'sha256-", csp.split("script-src")[1].split(";")[0])
         self.assertEqual(h["Cache-Control"], "no-store")
         self.assertEqual(h["X-Content-Type-Options"], "nosniff")
 
@@ -164,18 +166,18 @@ class Web(unittest.TestCase):
             self.assertNotIn(TOKEN, h["Location"])
             return h["Location"]
         self.assertEqual(moved("&view=map&sort=mem"), "/?view=map")                                  # sort= is the CPU page's
-        self.assertEqual(moved("&sort=mem&view=map&refresh=5&zoom=133&fit=1"), "/?view=map&zoom=125&fit=1&refresh=5")  # clamped like the page
-        self.assertEqual(moved("&view=cpu&sort=mem&sel=0042&cols=133"), "/?view=cpu&cols=140&sort=mem&sel=42")
+        self.assertEqual(moved("&sort=mem&view=map&refresh=5&zoom=133&fit=1"), "/?view=map&zoom=125&refresh=5")  # clamped like the page
+        self.assertEqual(moved("&view=cpu&sort=mem&sel=0042&cols=133"), "/?view=cpu&sort=mem&sel=42")
         self.assertEqual(moved("&view=health&period=30&pause=1&sel=cpu-hog:chrome"), "/?view=health&period=30&sel=cpu-hog%3Achrome&pause=1")
         self.assertEqual(moved("&view=ai&sel=qwen&pause=1&period=30"), "/?view=ai&sel=qwen&pause=1")
         self.assertEqual(moved("&view=map&open=0123456789.abcdef0123&shut=zz&all=1&only=1&sel=0123456789&pause=1"),
                          "/?view=map&open=0123456789.abcdef0123&all=1&sel=0123456789&only=1&pause=1")
         self.assertEqual(moved("&view=map&as=graph&local=2&sel=0123456789&z=140&stacks=1&ext=0&open=0123456789"),
                          "/?view=map&sel=0123456789&as=graph&stacks=1&ext=0&local=2&z=150")          # the tree's open= means nothing to the graph
-        self.assertEqual(moved("&open=0123456789&sel=1&pause=1&only=1&fit=1"), "/?fit=1")            # the dashboard reads only the size and refresh
+        self.assertEqual(moved("&open=0123456789&sel=1&pause=1&only=1&zoom=75"), "/?zoom=75&pause=1")  # the dashboard reads only the size, refresh and pause
         self.assertEqual(moved(""), "/")
         self.assertEqual(moved("&view=map&token=again"), "/?view=map")                               # the first token is the one checked; no token comes back
-        for junk in ("&evil=1&view=nope", "&view=%0d%0aSet-Cookie:%20a=b", "&cols=%C2%B2&refresh=" + "9" * 5000):  # unknown, malformed, huge
+        for junk in ("&evil=1&view=nope", "&view=%0d%0aSet-Cookie:%20a=b", "&zoom=%C2%B2&refresh=" + "9" * 5000):  # unknown, malformed, huge
             self.assertEqual(moved(junk), "/", junk)
         loc = moved("&view=health&sel=x%0d%0aSet-Cookie:%20evil=1%3b%20Domain=.example.com")         # a free-text value is encoded, never echoed raw
         self.assertEqual(loc.count("\n") + loc.count("\r") + loc.count(" "), 0)
@@ -191,7 +193,7 @@ class Web(unittest.TestCase):
         self.assertEqual(q("view=map&open=bbbbbbbbbb.aaaaaaaaaa"), weburl.page_url(dict(webmap.map_here({k: 0 for k in weburl.HERE_KEYS}, web.graph.State(
             open=("aaaaaaaaaa", "bbbbbbbbbb")), "", False))))
         self.assertEqual(q("view=cpu&sort=cpu"), "/?view=cpu")                                       # the default is not written
-        self.assertEqual(q("fit=1&kiosk=1&rotate=1&cols=220&rows=64"), "/?cols=220&rows=64&fit=1&rotate=1&kiosk=1")
+        self.assertEqual(q("fit=1&kiosk=1&rotate=1&cols=220&rows=64"), "/?rotate=1&kiosk=1")  # fit, cols, rows of older links are ignored
 
     def test_host_header_guard_blocks_dns_rebinding(self):
         self.assertIn(" 421 ", raw(self.open, "/", [("Host", "evil.example.com")]).split("\r\n")[0] + " ")
@@ -208,23 +210,6 @@ class Web(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
-    def test_full_view_shows_everything_the_overview_cuts(self):
-        saved = dict(render.CFG["webapps"])
-        render.CFG["webapps"] = {"app%02d" % i: [9000 + i] for i in range(20)}   # 20 declared apps: the compact overview cuts them
-        render.CFG["details"] = True
-        try:
-            self.open.cache.clear()
-            _, _, short = get(self.open, "/?cols=100")
-            _, _, full = get(self.open, "/?cols=100&full=1")
-        finally:
-            render.CFG["webapps"] = saved
-            render.CFG["details"] = False
-        self.assertNotIn("app19", short)
-        self.assertIn("more", short)
-        for i in range(20):
-            self.assertIn("app%02d" % i, full)
-        self.assertIn("full details", short)
-
     def test_cols_parameter_is_clamped(self):
         self.assertEqual(get(self.open, "/?cols=abc")[0], 200)
         self.assertEqual(get(self.open, "/?cols=5")[0], 200)
@@ -235,40 +220,25 @@ class Web(unittest.TestCase):
         connection. Anything but a few ASCII digits is ignored: a normal page, the parameter at its default."""
         q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         for bad in ("%C2%B2", "%D9%A3", "1%C2%B2", "%EF%BC%95", "9" * 5000, "+5", "-5", " 5"):
-            p = q(f"zoom={bad}&cols={bad}&rows={bad}&refresh={bad}")
-            self.assertEqual([p[k] for k in ("zoom", "cols", "rows", "refresh")], [0, 0, 0, 0], bad)
-        for path in ("/?view=map&zoom=%C2%B2", "/?cols=%C2%B2&rows=%D9%A3&refresh=%C2%B9&zoom=%EF%BC%95", "/?zoom=" + "9" * 5000):
+            p = q(f"zoom={bad}&refresh={bad}")
+            self.assertEqual([p[k] for k in ("zoom", "refresh")], [0, 0], bad)
+        for path in ("/?view=map&zoom=%C2%B2", "/?refresh=%C2%B9&zoom=%EF%BC%95", "/?zoom=" + "9" * 5000):
             st, _, body = get(self.open, path)
             self.assertEqual(st, 200, path)
             self.assertNotIn("render error", body)
-        self.assertIn("font-size:14.0px", get(self.open, "/?zoom=%C2%B2")[2])                         # ignored: the default size
+        self.assertIn('class="z100 ', get(self.open, "/?zoom=%C2%B2")[2])                            # ignored: the default size
 
-    def test_text_size_and_fit(self):
+    def test_text_size(self):
         q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
         self.assertEqual(q("zoom=133")["zoom"], 125)                                                 # snapped to a step
         self.assertEqual((q("zoom=9999")["zoom"], q("zoom=1")["zoom"], q("zoom=x")["zoom"]), (200, 50, 0))  # 0 = [display] zoom
-        self.assertEqual((q("rows=7")["rows"], q("rows=999")["rows"], q("cols=133")["cols"]), (20, 120, 140))
-        self.assertIn("font-size:14.0px", get(self.open, "/")[2])                                    # [display] zoom (100) by default
-        _, _, big = get(self.open, "/?fit=1&zoom=150")
-        _, _, small = get(self.open, "/?fit=1&zoom=75")
-        self.assertIn("calc(98vw /", big)                                                            # the text fills the width
-        self.assertIn("console 133x", big)                                                           # bigger text = fewer columns
-        self.assertIn("console 267x", small)
-        names = lambda page: set(re.findall(r"── ([A-Z][A-Z ·]+?) ─", ansi.ANSI.sub("", html.unescape(re.sub("<[^>]+>", "", page)))))  # noqa: E731
-        _, _, huge = get(self.open, "/?fit=1&zoom=200")
-        self.assertEqual(names(huge), names(small))                                                  # zooming in never loses a section
-        self.assertIn("NETWORK TRAFFIC", names(huge))
-        self.assertNotIn("… +", html.unescape(re.sub("<[^>]+>", "", huge)))                         # nor an item: the page scrolls
-        self.assertIn('href="/?zoom=125&amp;fit=1">A−</a> 150% <a href="/?zoom=175&amp;fit=1">A+', big)
-        self.assertIn('href="/?cols=100&amp;zoom=150&amp;fit=1">compact', big)                    # the other links keep the size
-        _, _, kiosk = get(self.open, "/?fit=1&cols=220&rows=64&rotate=1&kiosk=1")
-        self.assertIn("calc(93vh /", kiosk)                                                          # full screen: the height too
-        self.assertIn("closes", kiosk)                                                               # how to get out of it
-        self.assertNotIn("keys 1-", kiosk)                                                           # no keyboard on a web page
-        _, _, plain = get(self.open, "/?zoom=150")
-        self.assertIn("font-size:21.0px", plain)                                                     # without fit: the font grows
-        self.assertNotIn("<script", (big + kiosk + plain).lower())
-        self.assertIn("footer{position:sticky;bottom:0", big)                                        # the bar follows the scroll
+        self.assertEqual(sorted(q("rows=7&cols=133&fit=1&full=1&app=0")), sorted(q("")))             # the old parameters are ignored
+        self.assertIn('class="z100 ', get(self.open, "/")[2])                                        # [display] zoom (100) by default
+        _, _, big = get(self.open, "/?zoom=150")
+        self.assertIn('class="z150 ', big)
+        self.assertIn('href="/?zoom=125">A−</a> 150% <a href="/?zoom=175">A+', big)
+        _, _, kiosk = get(self.open, "/?rotate=1&kiosk=1")
+        self.assertIn(" data-kiosk", kiosk)
 
     def test_local_mode_serves_loopback_only_when_web_is_off(self):
         seen = {}
@@ -295,14 +265,8 @@ class Web(unittest.TestCase):
         self.assertIn('content="2"', default)                                                        # the config's value
         self.assertIn('href="/?refresh=1">−</a> 2s <a href="/?refresh=3">+</a>', default)
 
-    def test_wide_is_the_two_column_layout_with_every_section(self):
-        _, _, wide = get(self.open, "/?cols=200")
-        for name in ("NETWORK TRAFFIC", "SESSIONS", "DISKS", "DOCKER · DISK"):                       # the wide-only sections
-            self.assertIn(name, wide)
-        self.assertIn("console 200x", wide)
-
     def test_html_escapes_everything(self):
-        out = web.to_html("\x1b[31m<img src=x onerror=1>\x1b[0m & \x1b[2J\x1b[H\x1b[1;36mok\x1b[0m")
+        out = htmlview.to_html("\x1b[31m<img src=x onerror=1>\x1b[0m & \x1b[2J\x1b[H\x1b[1;36mok\x1b[0m")
         self.assertNotIn("<img", out)
         self.assertIn("&lt;img", out)
         self.assertIn('class="c B"', out)
@@ -355,12 +319,12 @@ class Safety(unittest.TestCase):
         d = nuc_config.load("/nonexistent")["web"]
         self.assertEqual((d["enabled"], d["bind"], d["port"]), (False, "127.0.0.1", 8787))
         with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as f:
-            f.write("[web]\nenabled = yes\nport = 99999\ncolumns = 5\nrefresh_seconds = x\n")
+            f.write("[web]\nenabled = yes\nport = 99999\nrefresh_seconds = x\n")
         try:
             w = nuc_config.load(f.name)["web"]
         finally:
             os.unlink(f.name)
-        self.assertEqual((w["enabled"], w["port"], w["columns"], w["refresh_seconds"]), (True, 65535, 60, 2))  # bad: the default
+        self.assertEqual((w["enabled"], w["port"], w["refresh_seconds"]), (True, 65535, 2))  # bad: the default
 
     def test_disabled_by_default_exits_cleanly(self):
         self.assertEqual(web.main(["web.py"]), 0)

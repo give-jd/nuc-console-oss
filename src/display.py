@@ -142,17 +142,12 @@ def web_up(port, wait):
         time.sleep(2)
 
 
-def dashboard_url(fullscreen=False, cols=0, rows=0):
-    """The page the display opens. [ui] web = classic: the classic page (fit to the window; full screen: sized to the grid, the pages taking
-    turns, the kiosk footer). [ui] web = app: the shell (app=1); full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by
-    itself, says how to close the window). Both take the token the caller appends."""
-    app = (CFG.get("ui") or {}).get("web") == "app"
-    if app:
-        query = {"app": 1, "ui": "1.dw", "kiosk": 1} if fullscreen else {"app": 1}
-    else:
-        query = {"fit": 1, "cols": cols, "rows": rows, "rotate": 1, "kiosk": 1} if fullscreen else {"fit": 1}
+def dashboard_url(fullscreen=False):
+    """The page the display opens: the web view's shell; full screen: its wall display (ui=1.dw: wall density; kiosk=1: scrolls by itself,
+    says how to close the window). Both take the token the caller appends."""
     from urllib.parse import urlencode
-    return f"http://127.0.0.1:{CFG['web']['port']}/?" + urlencode(query)
+    query = {"ui": "1.dw", "kiosk": 1} if fullscreen else {}
+    return f"http://127.0.0.1:{CFG['web']['port']}/" + ("?" + urlencode(query) if query else "")
 
 
 def read_web_token(path):

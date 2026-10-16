@@ -32,6 +32,14 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 - The shipped `config/config.ini` is about half as long (106 lines instead of 185): one line per key and the values it takes. The explanation of each key stays in
   [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and on the settings page. An installed machine keeps its own `config.ini` untouched; `diff /etc/nuc-console/config.ini{,.dist}` shows the new reference.
 
+### Removed
+- The classic web pages (the console's text turned into HTML), announced as kept for one release, and the two switches that chose them: `[ui] web = classic` and `?app=0`.
+  The shell (cards, key figures, the five screens) is the only web interface. A `config.ini` that still has `web = classic` or `web = app` under `[ui]` loads as before:
+  you see the shell, the key is ignored and one line is written on stderr (`[ui] web is gone: the app shell is the only web interface`); there is nothing else to do, and
+  `nuc-console-config migrate` keeps the line under a `# legacy:` marker (delete it when you like). `?app=0`, `?app=1` and the layout parameters of the classic pages
+  (`cols=`, `rows=`, `fit=`, `full=`) in an old link are ignored, and `[web] columns` / `rows`, which only sized the classic pages' grid, now do nothing. The setting is no longer
+  in the settings page's `[ui]` form or in the shipped `config/config.ini`; the full-screen window and `--open` open the shell (`/?ui=1.dw&kiosk=1`, `/`).
+
 ## [2.4.0] - 2026-10-09
 
 The result of a security review of 2.3.0, and a console that stays on one screen when it fits. **An installed `nuc-console-update` now stops when it cannot

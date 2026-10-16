@@ -74,7 +74,7 @@ def page_csp(scripts=(), shell=False, forms=False):
     return "; ".join(parts)
 
 
-CSP = page_csp()  # the classic pages: no script, no connection, no form
+CSP = page_csp()  # no script, no connection, no form (what a response that is not a shell page is sent with)
 
 
 def is_loopback(bind):
@@ -296,7 +296,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if (q.get("view") or [""])[0] == "telegram" and (q.get("open") or [""])[0] == "1":
             return self._tg_open()
         page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
-        if (q.get("frag") or [""])[0] == "1" and getattr(page, "blocks", None) is not None:  # a classic page has no blocks: it is served whole, as always
+        if (q.get("frag") or [""])[0] == "1" and getattr(page, "blocks", None) is not None:  # a page without blocks (the layout editor) is served whole
             return self._fragment(page.blocks)
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
                    extra=(("Vary", "Cookie"),))

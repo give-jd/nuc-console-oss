@@ -124,7 +124,7 @@ class Served(unittest.TestCase):
         cls.srv.server_close()
 
     def test_no_token_no_page_and_no_csrf_token(self):
-        for path in ("/", "/?app=1&view=ai", "/app", "/api/v1/summary"):
+        for path in ("/", "/?view=ai", "/app", "/api/v1/summary"):
             st, _h, body = call(self.srv, "GET", path)
             self.assertEqual(st, 401, path)
             self.assertNotIn(self.srv.csrf, body)

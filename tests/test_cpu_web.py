@@ -1,5 +1,5 @@
-"""The web CPU page (web.py ?view=cpu): the console screen through the ANSI path, process rows that are links, sort and details in the
-URL, one sampler for the whole server read once per refresh interval, bounded cache, escaping, no JavaScript."""
+"""The web CPU page (web.py ?view=cpu): the CPU screen of the shell, process rows that are links, sort and details in the
+URL, one sampler for the whole server read once per refresh interval, bounded cache, escaping."""
 import contextlib
 import html
 import http.client
@@ -22,7 +22,6 @@ import render  # noqa: E402
 import web  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 
 ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)
 EVIL = '<script>alert(1)</script>"onmouseover=alert(1) \'x' + ESC + "[2J" + BEL + CSI8 + "31m"
@@ -37,7 +36,6 @@ def serve(**cfg):
     return srv
 
 
-@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)
@@ -47,23 +45,27 @@ def get(srv, path="/"):
     return r.status, dict(r.getheaders()), body
 
 
+def view_of(page):
+    start = page.index('data-card="__view"')
+    return page[page.rindex("<", 0, start):page.index("</main>", start)]
+
+
 def text_of(page):
-    """The page's <pre> as plain text lines (tags gone, entities decoded)."""
-    pre = page[page.index("<pre>") + 5:page.index("</pre>")]
-    return html.unescape(re.sub(r"<[^>]+>", "", pre)).split("\n")
+    """The text of the screen (the view block): tags gone, entities decoded, white space collapsed."""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", view_of(page))))
 
 
 def rows_of(page):
     """[(href, pid, selected, text)] of the process rows of a page."""
     out = []
-    for href, inner in ROW.findall(page):
-        text = html.unescape(re.sub(r"<[^>]+>", "", inner))
-        out.append((html.unescape(href), int(text.split()[0]), any("rv" in x.split() for x in re.findall(r'class="([^"]*)"', inner)), text))
+    for tr in re.findall(r"<tr [^>]*data-row.*?</tr>", view_of(page), re.S):
+        text = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", tr))).strip()
+        out.append((html.unescape(re.search(r'href="([^"]*)"', tr).group(1)), int(text.split()[0]), 't-sel' in tr.split(">")[0], text))
     return out
 
 
 def link(page, text):
-    m = re.search(r'<a href="([^"]*)">' + re.escape(text) + "</a>", page)
+    m = re.search(r'<a [^>]*href="([^"]*)"[^>]*>' + re.escape(text) + "</a>", page)
     return html.unescape(m.group(1)) if m else None
 
 
@@ -112,131 +114,92 @@ class CpuPageCase(unittest.TestCase):
 
 
 class Page(CpuPageCase):
-    def test_a_cpu_link_sits_next_to_map_in_the_bottom_bar_when_the_feature_is_on(self):
-        body = self.page("/")
-        self.assertIn('">map</a> · <a href="/?view=cpu">cpu</a> · <a href="/?view=health">health</a> · <a href="/?view=ai">ai</a> · read-only', body)
-        wide = self.page("/?cols=100&zoom=150")
-        self.assertIn('<a href="/?view=cpu&amp;cols=100&amp;zoom=150">cpu</a>', wide)            # the other links' size and layout are kept
+    def test_a_cpu_tab_sits_next_to_map_when_the_feature_is_on(self):
+        tabs = lambda: re.search(r'<nav class="tabs".*?</nav>', self.page("/")).group(0)  # noqa: E731
+        self.assertRegex(tabs(), r'>Map(?: <span.*?</span>)?</a><a href="/\?view=cpu"[^>]*><kbd>3</kbd>CPU</a><a href="/\?view=health"')
+        self.assertIn('href="/?zoom=150&amp;view=cpu"', self.page("/?zoom=150"))                    # the other tabs' size is kept
         render.CFG["features"]["cpu"] = False
         self.srv.cache.clear()
-        self.assertNotIn(">cpu</a>", self.page("/"))
-        self.assertIn(">map</a>", self.page("/"))
+        self.assertNotIn("view=cpu", tabs())
+        self.assertIn("view=map", tabs())
         render.CFG["features"].update(cpu=True, map=False)
         self.srv.cache.clear()
-        body = self.page("/")
-        self.assertIn(">cpu</a>", body)
-        self.assertNotIn(">map</a>", body)
+        self.assertIn("view=cpu", tabs())
+        self.assertNotIn("view=map", tabs())
 
     def test_the_page_has_the_screen_the_rows_as_links_and_is_locked_down(self):
         st, h, body = get(self.srv, "/?view=cpu")
         self.assertEqual(st, 200)
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
-        self.assertNotIn("<script", body.lower())
-        self.assertNotIn("<form", body.lower())
-        self.assertNotIn("<input", body.lower())
+        self.assertNotIn("<form", view_of(body).lower())
+        self.assertNotIn("<input", view_of(body).lower())
+        self.assertNotIn("<script", view_of(body).lower())
         self.assertIsNone(re.search(r"\son[a-z]+=", body))                                       # no inline event handler
         self.assertIn('<meta http-equiv="refresh" content="2">', body)
         self.assertIn("<title>demo-host · cpu · nuc-console</title>", body)
-        txt = "\n".join(text_of(body))
-        for want in ("demo-host │ CPU │", "── CPU ", "AMD Ryzen 7 5800X 8-Core Processor", "ALL ", "── TEMPERATURES", "source k10temp", "── PROCESSES",
-                     "PID USER", "NAME", "ffmpeg", "by CPU%", "processes listed"):
+        txt = text_of(body)
+        for want in ("CPU AMD Ryzen 7 5800X 8-Core Processor", "TEMPERATURES", "source k10temp", "PROCESSES", "PID USER", "ffmpeg"):
             self.assertIn(want, txt)
-        self.assertIn('class="w bR B"', body)                                                     # the demo has problems: the red banner
         rows = rows_of(body)
         self.assertGreater(len(rows), 20)
         self.assertEqual(len({r[1] for r in rows}), len(rows))
-        shown = [x for x in text_of(body) if re.match(r"\s+\d+ \S", x) and "PID" not in x]
-        self.assertEqual([r[3] for r in rows], [x for x in shown if x.split()[0] in {str(r[1]) for r in rows}])
         for href, pid, selected, text in rows:
             q = params(href)
             self.assertEqual((q["view"], q["sel"], q["sort"]), ("cpu", str(pid), ""), href)      # a row's link: its details, the view kept
             self.assertFalse(selected)
         self.assertEqual(rows[0][1], 2210)                                                        # sorted by CPU%: ffmpeg first
 
-    def test_footer_links_sort_text_size_refresh_dashboard_and_map(self):
+    def test_sort_links_keep_the_view_the_size_the_refresh_and_the_selection(self):
         body = self.page("/?view=cpu&zoom=150&refresh=5&sort=mem&sel=2350")
-        foot = body[body.index("<footer>"):]
-        self.assertIn("sort <a href=", foot)
-        self.assertIn("<b>mem</b>", foot)
-        for name in ("cpu", "time", "pid", "user"):
-            href = link(foot, name)
+        view = view_of(body)
+        for name, label in (("cpu", "CPU%"), ("mem", "MEM%"), ("time", "TIME"), ("pid", "PID"), ("user", "USER")):
+            href = link(view, label)
             self.assertTrue(href, name)
             q = params(href)
-            self.assertEqual((q["view"], q["sort"] if name != "cpu" else "", q["sel"], q["zoom"], q["refresh"]), ("cpu", name if name != "cpu" else "", "2350", 150, 5))
-        self.assertEqual(link(foot, "dashboard"), "/?zoom=150&refresh=5")
-        self.assertEqual(params(link(foot, "map"))["view"], "map")
-        self.assertEqual(params(link(foot, "close details"))["sel"], "")
-        self.assertEqual(params(link(foot, "close details"))["sort"], "mem")                       # closing keeps the sort
-        self.assertEqual(params(link(foot, "A+"))["sel"], "2350")
-        self.assertIn(" 150% ", foot)
-        self.assertIn("read-only", foot)
-        self.assertEqual(params(link(foot, "−"))["refresh"], 4)
-        render.CFG["features"]["map"] = False
-        self.srv.cache.clear()
-        self.assertIsNone(link(self.page("/?view=cpu"), "map"))
-
-    def test_the_page_is_the_screen_at_the_asked_size_and_every_line_fits(self):
-        for cols, rows in SIZES:
-            body = self.page(f"/?view=cpu&cols={cols}&rows={rows}&sel=2210")
-            lines = text_of(body)
-            self.assertLessEqual(max(len(x) for x in lines), cols, (cols, rows))
-            self.assertEqual(len(lines), rows, (cols, rows))
-            self.assertIn("demo-host │ CPU │", lines[0])
-            self.assertIn("── PROCESS 2210", "\n".join(lines))
-
-    def test_fit_without_rows_scrolls_and_shows_every_process(self):
-        body = self.page("/?view=cpu&fit=1&cols=140&zoom=100")
-        self.assertIn("calc(98vw /", body)
-        lines = text_of(body)
-        self.assertEqual(len(rows_of(body)), 40)                                                  # all of them: the page is as tall as its content
-        self.assertNotIn("more processes", "\n".join(lines))
-        self.assertLessEqual(max(len(x) for x in lines), 140)
-        self.assertNotIn("\n\n\n", "\n".join(lines))                                              # no blank filler
-        short = self.page("/?view=cpu&fit=1&rows=32&cols=140")                                    # with rows: one screen, cut and counted
-        self.assertIn("calc(93vh /", short)
-        self.assertEqual(len(text_of(short)), 32)
-        self.assertIn("more processes", "\n".join(text_of(short)))
-        big = self.page("/?view=cpu&fit=1&cols=200&zoom=200")                                       # a bigger text = fewer columns, re-laid out
-        self.assertLessEqual(max(len(x) for x in text_of(big)), 100)
+            self.assertEqual((q["view"], q["sort"], q["sel"], q["zoom"], q["refresh"]), ("cpu", name if name != "cpu" else "", "2350", 150, 5))
+        self.assertEqual(params(link(view, "close details"))["sel"], "")
+        self.assertEqual(params(link(view, "close details"))["sort"], "mem")                       # closing keeps the sort
+        self.assertIn("150%", body[body.index("<footer"):])
+        self.assertEqual(params(link(body[body.index("<footer"):], "−"))["refresh"], 4)
 
     def test_windows_and_macos_demos_render(self):
         for name, wants in (("windows", ("AMD Ryzen 7 5800X", "source LibreHardwareMonitor", "hottest core 3 90°C")),
                             ("darwin", ("Apple M2", "thermal pressure Moderate", "E-Cluster 2064 MHz", "source smctemp"))):
             render.DEMO_OS = name
             self.srv.cache.clear()                                                                # the page cache is keyed by the URL, not by the demo's OS
-            body = self.page("/?view=cpu&cols=200&rows=60")
-            txt = "\n".join(text_of(body))
+            body = self.page("/?view=cpu")
+            txt = text_of(body)
             for want in wants:
                 self.assertIn(want, txt, name)
             self.assertGreater(len(rows_of(body)), 20, name)
         render.DEMO_OS = "windows"
         self.srv.cache.clear()
-        txt = "\n".join(text_of(self.page("/?view=cpu&cols=200&rows=60&sel=3990")))
-        self.assertIn("── PROCESS 3990", txt)
-        self.assertIn("state     ?", txt)                                                            # Windows has no process state: '?'
+        txt = text_of(self.page("/?view=cpu&sel=3990"))
+        self.assertIn("PROCESS 3990", txt)
+        self.assertIn("state ? threads", txt)                                                       # Windows has no process state: '?'
         render.DEMO_OS = None
         self.srv.cache.clear()
-        self.assertIn("Ryzen 7 5800X 8-Core", "\n".join(text_of(self.page("/?view=cpu"))))                      # and back: the feed follows the demo OS
+        self.assertIn("Ryzen 7 5800X 8-Core", text_of(self.page("/?view=cpu")))                    # and back: the feed follows the demo OS
 
     def test_a_render_error_is_logged_not_shown(self):
-        saved = render.cpu_problems
+        saved = web.screens.cpu_view
 
-        def broken(smp=None):
+        def broken(*a):
             raise ValueError("secret detail /etc/x")
-        render.cpu_problems = broken
+        web.screens.cpu_view = broken
         err = io.StringIO()
         try:
             with contextlib.redirect_stderr(err):
                 st, _, body = get(self.srv, "/?view=cpu&sel=2210")
         finally:
-            render.cpu_problems = saved
+            web.screens.cpu_view = saved
         self.assertEqual(st, 200)
         self.assertIn("render error (see the service log)", body)
         self.assertNotIn("secret detail", body)
         self.assertNotIn("Traceback", body)
         self.assertIn("secret detail", err.getvalue())
-        self.assertIn(">dashboard</a>", body)                                                       # the way out is still there
+        self.assertIn("view=cpu", body)                                                             # the way out (the tabs) is still there
 
     def test_the_feature_off_says_so(self):
         render.CFG["features"]["cpu"] = False
@@ -248,15 +211,6 @@ class Page(CpuPageCase):
         self.assertNotIn("PROCESSES", body)
         self.assertNotIn("ffmpeg", body)
 
-    def test_the_cpu_slide_joins_the_full_and_rotating_dashboard_views_when_asked(self):
-        self.assertNotIn("PROCESSES", self.page("/?full=1"))                                        # off by default: the full view has no CPU page
-        render.CFG["cpu_in_rotation"] = True
-        self.srv.cache.clear()
-        full = self.page("/?full=1")
-        self.assertIn("PROCESSES", html.unescape(re.sub(r"<[^>]+>", "", full)))
-        self.assertIn("│ CPU │", html.unescape(re.sub(r"<[^>]+>", "", full)))
-        self.assertNotIn("PROCESSES", html.unescape(re.sub(r"<[^>]+>", "", self.page("/"))))       # the plain page is the overview only
-        render.CFG["cpu_in_rotation"] = False
 
 
 class Parameters(CpuPageCase):
@@ -285,54 +239,48 @@ class Parameters(CpuPageCase):
 
     def test_other_parameters_of_the_dashboard_still_apply(self):
         q = lambda s: weburl.view_params(web.parse_qs(s))  # noqa: E731
-        got = q("view=cpu&cols=133&rows=7&zoom=133&fit=1&refresh=99&kiosk=1")
-        self.assertEqual((got["cols"], got["rows"], got["zoom"], got["fit"], got["refresh"], got["kiosk"]), (140, 20, 125, True, 10, True))
+        got = q("view=cpu&zoom=133&refresh=99&kiosk=1")
+        self.assertEqual((got["zoom"], got["refresh"], got["kiosk"]), (125, 10, True))
 
     def test_hostile_values_never_reach_the_page(self):
         for path in ("/?view=cpu&sel=%3Cscript%3E", "/?view=cpu&sort=%22%3E%3Cscript%3E", "/?view=cpu&sel=" + "9" * 5000, "/?view=cpu&sel=%C2%B2",
-                     "/?view=cpu&zoom=99999999999999999999&refresh=-1&cols=x&sel=%3Cb%3E", "/?view=cpu&sort=&sel=", "/?view=cpu&sel=%00&sort=%00"):
+                     "/?view=cpu&zoom=99999999999999999999&refresh=-1&sel=%3Cb%3E", "/?view=cpu&sort=&sel=", "/?view=cpu&sel=%00&sort=%00"):
             body = self.page(path)
-            self.assertNotIn("<script", body.lower(), path)
-            self.assertNotIn("PROCESS 9", body, path)
-            self.assertNotIn("── PROCESS ", "\n".join(text_of(body)).replace("PROCESSES", ""), path)
+            self.assertNotIn("<script", view_of(body).lower(), path)
+            self.assertNotIn("9999", html.unescape(body), path)
+            self.assertNotIn("PROCESS ", text_of(body).replace("PROCESSES", ""), path)
 
     def test_a_pid_that_does_not_exist_is_dropped_everywhere(self):
         body = self.page("/?view=cpu&sel=99999")
         self.assertNotIn("PROCESS 99999", body)
-        self.assertNotIn("close details", body)
+        self.assertIsNone(link(view_of(body), "close details"))
         self.assertNotIn("sel=99999", html.unescape(body))                                           # not repeated in any link
-        self.assertEqual(self.page("/?view=cpu&sel=0") == "", False)
-        self.assertNotIn("close details", self.page("/?view=cpu&sel=0"))                              # pid 0 is not in the Linux demo
+        self.assertIsNone(link(view_of(self.page("/?view=cpu&sel=0")), "close details"))             # pid 0 is not in the Linux demo
         render.DEMO_OS = "darwin"
         self.srv.cache.clear()
-        self.assertIn("close details", self.page("/?view=cpu&sel=0"))                                 # but it is kernel_task on the macOS one
-        self.assertIn("── PROCESS 0 ", "\n".join(text_of(self.page("/?view=cpu&sel=0"))))
+        self.assertTrue(link(view_of(self.page("/?view=cpu&sel=0")), "close details"))              # but it is kernel_task on the macOS one
+        self.assertIn("PROCESS 0 ", text_of(self.page("/?view=cpu&sel=0")))
 
     def test_sel_shows_the_details_and_the_selected_row_is_highlighted_and_closes_on_click(self):
-        body = self.page("/?view=cpu&sel=2210&cols=200&rows=60")
-        txt = "\n".join(text_of(body))
-        self.assertIn("── PROCESS 2210", txt)
-        for want in ("parent    1  systemd", "user      alice", "state     R  running", "threads   18", "CPU time  2:32:00", "started   "):
+        body = self.page("/?view=cpu&sel=2210")
+        txt = text_of(body)
+        self.assertIn("PROCESS 2210", txt)
+        for want in ("parent 1 systemd", "user alice", "state R running", "threads 18", "CPU time 2:32:00", "started "):
             self.assertIn(want, txt)
         rows = rows_of(body)
         selected = [r for r in rows if r[2]]
-        self.assertEqual([r[1] for r in selected], [2210])                                           # the reverse-video row
+        self.assertEqual([r[1] for r in selected], [2210])                                           # the highlighted row
         self.assertEqual(params(selected[0][0])["sel"], "")                                          # clicking it again closes the pane
         other = next(r for r in rows if r[1] != 2210)
         self.assertEqual(params(other[0])["sel"], str(other[1]))
-        self.assertIn("details of the highlighted row", txt)
-        self.assertIn(">close details</a>", body)
-        narrow = "\n".join(text_of(self.page("/?view=cpu&sel=2210&cols=100&rows=40")))
-        self.assertIn("── PROCESS 2210", narrow)                                                     # below the table, not beside it
-        self.assertNotIn(" │ ── PROCESS", narrow)
-        self.assertIn(" │ ── PROCESS 2210", txt)
+        self.assertEqual(params(link(view_of(body), "close details"))["sel"], "")
+
 
 
 class CacheAndSampling(CpuPageCase):
     def pg(self, query):
         return self.srv.page(**weburl.view_params(web.parse_qs(query)))
 
-    @classic_default()
     def test_the_cache_key_has_the_view_the_sort_and_the_selection(self):
         a = self.pg("view=cpu")
         self.assertIs(self.pg("view=cpu"), a)                                                       # within r/2: the same render
@@ -340,11 +288,10 @@ class CacheAndSampling(CpuPageCase):
         self.assertIs(self.pg("view=cpu&sel=007") is self.pg("view=cpu&sel=7"), True)
         b, c, d = self.pg("view=cpu&sort=mem"), self.pg("view=cpu&sel=2210"), self.pg("view=cpu&sort=mem&sel=2210")
         self.assertEqual(len({id(x) for x in (a, b, c, d)}), 4)
-        self.assertEqual(len([k for k in self.srv.cache if k[0] == "cpu"]), 5)
-        keys = [k for k in self.srv.cache if k[0] == "cpu"]
-        self.assertTrue(any("mem" in k and "2210" in k for k in keys))
-        self.assertNotIn(a, [self.srv.cache[k][1] for k in self.srv.cache if k[0] != "cpu"])
-        self.assertNotEqual(self.pg("view=cpu&cols=100&rows=40"), a)                                # the size is part of it too
+        keys = [k for k in self.srv.cache if k[:2] == ("shell", "cpu")]
+        self.assertEqual(len(keys), 5)
+        self.assertTrue(any("mem" in str(k) and "2210" in str(k) for k in keys))
+        self.assertNotIn(a, [self.srv.cache[k][1] for k in self.srv.cache if k[:2] != ("shell", "cpu")])
         self.assertNotEqual(self.pg("view=cpu&zoom=150"), a)
         self.assertNotEqual(self.pg("view=cpu&refresh=5") is a, True)
 
@@ -395,13 +342,13 @@ class CacheAndSampling(CpuPageCase):
         self.addCleanup(srv.server_close)
         log = self.producers(clock)
         render.DEMO = False
-        for q in ("", "full=1", "cols=100", "view=map"):                                               # nobody looks at the CPU: nothing is made or read
+        for q in ("", "zoom=150", "view=map"):                                               # nobody looks at the CPU: nothing is made or read
             try:
                 srv.page(**weburl.view_params(web.parse_qs(q)))
             except Exception:  # noqa: BLE001 - this server has no containers/net state: not what is tested here
                 pass
         self.assertEqual((log["cpu_made"], log["proc_made"], log["proc_sampled"]), (0, 0, 0))
-        views = ["view=cpu", "view=cpu&sort=mem", "view=cpu&sort=time&sel=2210", "view=cpu&sel=1", "view=cpu&cols=100&rows=40", "view=cpu&zoom=150",
+        views = ["view=cpu", "view=cpu&sort=mem", "view=cpu&sort=time&sel=2210", "view=cpu&sel=1", "view=cpu&kiosk=1", "view=cpu&zoom=150",
                  "view=cpu&sort=pid", "view=cpu&sort=user&sel=2350"]
         pages = [srv.page(**weburl.view_params(web.parse_qs(v))) for v in views]
         self.assertTrue(all("PROCESSES" in x for x in pages))
@@ -478,21 +425,21 @@ class Hostile(CpuPageCase):
         self.poison()
         for os_name in (None, "windows", "darwin"):
             render.DEMO_OS = os_name
-            for query in ("", "&sel=31337", "&sort=user&sel=31337", "&sort=pid&cols=100&rows=40&sel=31337"):
+            for query in ("", "&sel=31337", "&sort=user&sel=31337", "&sort=pid&sel=31337"):
                 self.srv.cache.clear()
                 self.srv.cpu_feed.data = None
-                body = self.page("/?view=cpu" + query)
+                body = view_of(self.page("/?view=cpu" + query))
                 for raw in (ESC, BEL, CSI8):
                     self.assertNotIn(raw, body, (os_name, query))
                 self.assertNotIn("<script", body.lower(), (os_name, query))
-                self.assertNotIn("<b>", re.sub(r"<footer>.*", "", body, flags=re.S).replace("<b class", ""), (os_name, query))   # the payload's <b>: text, not a tag
+                self.assertNotIn("<b>", body, (os_name, query))                                       # the payload's <b>: text, not a tag
                 self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;&quot;onmouseover=alert(1) &#x27;x?[2J??31m", body, (os_name, query))
                 self.assertIsNone(re.search(r"\son[a-z]+=", body), (os_name, query))
-                self.assertIsNone(re.search(r'href="[^"]*(<|>|script)', body), (os_name, query))                                   # no name in a link
+                self.assertIsNone(re.search(r'href="[^"]*(<|>|script)', body), (os_name, query))      # no name in a link
         render.DEMO_OS = None
-        body = self.page("/?view=cpu&sel=31337&cols=200&rows=60")
-        txt = "\n".join(text_of(body))
-        self.assertIn("── PROCESS 31337 ", txt)
+        body = self.page("/?view=cpu&sel=31337")
+        txt = text_of(body)
+        self.assertIn("PROCESS 31337 ", txt)
         self.assertIn("note " + EVIL.replace(ESC, "?").replace(BEL, "?").replace(CSI8, "?"), txt)
         for href, pid, selected, text in rows_of(body):
             self.assertRegex(href, r"^/\?view=cpu(?:&[a-z]+=\w+)*$")                                  # a link holds digits and fixed words, never a name

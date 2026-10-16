@@ -587,11 +587,6 @@ class NativeRenderer(unittest.TestCase):
 
 
 class Kiosk(unittest.TestCase):
-    def setUp(self):  # the classic page's addresses (the shell's are in tests/test_wall.py): [ui] web = classic
-        patcher = mock.patch.dict(render.CFG["ui"], {"web": "classic"})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def test_html_colours_banner_and_escaping(self):
         out = htmlview.to_html("\x1b[1;41;37m ✖ 2 PROBLEMS \x1b[0m <b>\x1b[1;7m ok \x1b[0m")
         self.assertIn('class="w bR B"', out)
@@ -671,9 +666,7 @@ class Kiosk(unittest.TestCase):
                 display.web_up, display.find_browser, display.launch, display.user_dir = saved
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
         cmd = started[0]
-        self.assertTrue(cmd[1].startswith("--app=http://127.0.0.1:8787/?fit=1&cols="))
-        for part in ("rows=", "rotate=1", "kiosk=1"):
-            self.assertIn(part, cmd[1])
+        self.assertTrue(cmd[1].startswith("--app=http://127.0.0.1:8787/?ui=1.dw&kiosk=1"))
         self.assertIn("--start-fullscreen", cmd)
 
     def test_browser_mode_opens_a_normal_window_of_the_default_browser(self):
@@ -697,7 +690,7 @@ class Kiosk(unittest.TestCase):
                     render.os.startfile = saved[2]
                 webbrowser.open = saved_wb
                 sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
-        self.assertEqual(opened, ["http://127.0.0.1:8787/?fit=1"])                                  # a plain tab: no kiosk, no grid
+        self.assertEqual(opened, ["http://127.0.0.1:8787/"])                                  # a plain tab: no kiosk
 
     TOKEN = "k" * 24
 
@@ -741,11 +734,11 @@ class Kiosk(unittest.TestCase):
         with mock.patch.object(display, "web_up", lambda port, wait: True):
             rc, opened, files, log, _ = self.open_browser("web.token")
             self.assertEqual((rc, files), (0, []))
-            self.assertEqual(opened, ["http://127.0.0.1:8787/?fit=1&token=" + self.TOKEN])           # the web view moves it into a cookie
+            self.assertEqual(opened, ["http://127.0.0.1:8787/?token=" + self.TOKEN])           # the web view moves it into a cookie
             self.assertNotIn(self.TOKEN, log)                                                        # the log is readable by others: never the token
-            self.assertIn("open -> http://127.0.0.1:8787/?fit=1 (with the token", log)
+            self.assertIn("open -> http://127.0.0.1:8787/ (with the token", log)
             rc, opened, files, log, _ = self.open_browser(None)                                      # no token configured: as before
-            self.assertEqual((rc, opened, files), (0, ["http://127.0.0.1:8787/?fit=1"], []))
+            self.assertEqual((rc, opened, files), (0, ["http://127.0.0.1:8787/"], []))
             self.assertNotIn("token", log)
         with mock.patch.object(display, "web_up", lambda port, wait: False):
             rc, opened, files, log, _ = self.open_browser("web.token")                               # a token does not make a dead web view alive
@@ -830,7 +823,7 @@ class Kiosk(unittest.TestCase):
         return rc, launched, opened, text, d
 
     def test_windows_with_no_supported_browser_opens_the_default_one(self):
-        url = "http://127.0.0.1:8787/?fit=1&cols=200&rows=64&rotate=1&kiosk=1"
+        url = "http://127.0.0.1:8787/?ui=1.dw&kiosk=1"
         rc, launched, opened, log, _ = self.kiosk_on_windows(lambda p: False)
         self.assertEqual((rc, launched, opened), (0, [], [url]))                                     # it used to open nothing, and say "open <url>"
         self.assertIn("no supported browser found for full screen: opened the default browser (F11 for full screen)", log)
@@ -886,7 +879,7 @@ class Kiosk(unittest.TestCase):
             self.assertEqual(display.browser_command(path, "http://x/", r"C:\p"), [path, "--new-window", "http://x/"])  # not --kiosk: it swallows Alt+F4
         rc, launched, opened, log, _ = self.kiosk_on_windows(lambda p: p == firefox[1])
         self.assertEqual((rc, opened), (0, []))
-        self.assertEqual(launched, [[firefox[1], "--new-window", "http://127.0.0.1:8787/?fit=1&cols=200&rows=64&rotate=1&kiosk=1"]])
+        self.assertEqual(launched, [[firefox[1], "--new-window", "http://127.0.0.1:8787/?ui=1.dw&kiosk=1"]])
         self.assertIn("Firefox does not start full screen: press F11", log)
         rc, launched, opened, log, _ = self.kiosk_on_windows(lambda p: p.endswith(("msedge.exe", "firefox.exe")))
         self.assertTrue(launched[0][1].startswith("--app="))                                         # Edge: full screen by itself

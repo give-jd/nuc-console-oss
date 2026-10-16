@@ -381,8 +381,9 @@ class Page(Folder):
 
     def test_the_web_views_own_figures_follow_and_a_start_key_says_how_to_restart(self):
         self.portable()
-        self.post({"section": "web", "columns": "120", "allowed_hosts": "nuc.example.lan"})
-        self.assertEqual(self.srv.cfg["columns"], 120)
+        self.post({"section": "dashboard", "refresh_seconds": "5"})
+        self.assertEqual(self.srv.cfg["refresh_seconds"], 5)
+        self.post({"section": "web", "allowed_hosts": "nuc.example.lan"})
         self.assertIn("allowed_hosts: applies at the next start.", self.settings())
         self.post({"section": "display", "zoom": "150"})
         self.assertEqual(self.srv.zoom, 150)

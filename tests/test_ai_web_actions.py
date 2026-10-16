@@ -45,7 +45,6 @@ import ansi  # noqa: E402
 import web  # noqa: E402
 import webhttp  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 import test_advisor as ta  # noqa: E402  (the fake model server, the history and the report of that file)
 import test_aisetup as tas  # noqa: E402  (the fake download server, the fake advice of aihw)
 import fakeollama as fo  # noqa: E402  (the fake model server)
@@ -1748,7 +1747,6 @@ class WebBase(Base):
         render._AIPROBE.update(res=None, at=0.0, key=None, thread=None, started=0.0)
 
     # ---- http
-    @classic_default()
     def request(self, method, path, body=None, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
         c.request(method, path, body=body, headers=headers or {})
@@ -1798,6 +1796,9 @@ class WebBase(Base):
             out.append((m.group(1), {n: html.unescape(v) for n, v in re.findall(r'<input type="hidden" name="([a-z]+)" value="([^"]*)">', m.group(2))}))
         return out
 
+    def text(self, body):
+        return html.unescape(re.sub(r"<[^>]+>", "", body))
+
     def form(self, body, action, **has):
         for a, f in self.forms(body):
             if a == action and all(f.get(k) == v for k, v in has.items()):
@@ -1818,20 +1819,19 @@ class WebUse(WebBase):
 
     def test_the_page_has_the_switch_the_chat_the_models_and_every_form_carries_the_token(self):
         body = self.page()
-        self.assertIn('<span class="pl d big">OFF</span>', body)
+        self.assertIn('<span class="tag">○ OFF</span>', body)
         self.assertEqual(self.form(body, "on")["csrf"], self.srv.csrf, "the token the server checks is the one in the page")
         for action, f in self.forms(body):
             self.assertEqual(f["csrf"], self.srv.csrf, action)
             self.assertEqual(f["back"], "view=ai", action)
         uses = {f["model"] for a, f in self.forms(body) if a == "use"}
         self.assertEqual(uses, {"tiny", "other"}, "one button per model")
-        self.assertRegex(body, r'<input class="q" type="text" name="q" maxlength="500"[^>]*autocomplete="off"> <button class="bt on" type="submit" disabled>Ask')
+        self.assertRegex(body, r'<input class="q" type="text" name="q" maxlength="500"[^>]*autocomplete="off"> <button class="bt bt-ok" type="submit" disabled>Ask')
         # the box takes a question at any time; the button wakes up when the AI is on
         self.assertIn("turn AI on to ask", body)
         self.assertIn("models are downloaded to", body)
         self.assertIn(html.escape(self.d), body)
         self.assertIn("nothing downloaded", body)
-        self.assertNotIn("<script", body.lower())
 
     def test_one_click_on_a_model_sets_it_up_and_the_page_shows_it_working_and_then_on(self):
         reached, release = threading.Event(), threading.Event()
@@ -1840,24 +1840,24 @@ class WebUse(WebBase):
         self.assertEqual(where, "/?view=ai&sel=tiny")
         self.assertTrue(reached.wait(30))
         body = self.page(where)
-        self.assertIn('<span class="pl c big">WORKING</span>', body)
-        self.assertRegex(body, r'<progress max="100" value="\d+"></progress> \d+%')
+        self.assertIn('<span class="tag accent">◐ WORKING</span>', body)
+        self.assertRegex(body, r'<svg class="bar[^>]*>.*?</svg><span class="n">\d+%')
         self.assertIn("tiny: downloading the model", body)
-        self.assertIn('<meta http-equiv="refresh" content="2">', body, "while a job runs the page reloads by itself every 2 s")
+        self.assertIn('data-refresh="2"', body, "while a job runs the page reloads by itself every 2 s")
         self.assertIsNotNone(self.form(body, "cancel"), "and the button is Cancel")
         self.assertIsNone(self.form(body, "on"))
-        self.assertRegex(body, r'<button class="bt use" type="submit"[^>]* disabled>use this model</button>', "the other buttons wait")
+        self.assertRegex(body, r'<button class="bt bt-ok" type="submit"[^>]* disabled>use this model</button>', "the other buttons wait")
         release.set()
         self.assertEqual(self.job()["state"], "done")
         body = self.page(where)
-        self.assertIn('<span class="pl g big">ON</span>', body)
+        self.assertIn('<span class="tag ok">● ON</span>', body)
         self.assertIn("tiny runs here and answers at http://127.0.0.1:", body)
         self.assertIsNotNone(self.form(body, "off"))
-        self.assertNotIn('http-equiv="refresh"', body, "idle again: no reload")
-        self.assertIn('<span class="g">● in use</span>', body)
-        self.assertNotRegex(body, r'<input class="q"[^>]* disabled>', "usable now: the server answers")
+        self.assertNotIn("downloading", body, "idle again: no job line")
+        self.assertIn('<span class="t-ok">● in use</span>', body)
+        self.assertNotRegex(body, r'type="submit" disabled>Ask', "usable now: the server answers")
         self.assertIn("tiny is in use", body)
-        self.assertIn("<code class=\"cmd\">%s</code>" % html.escape(self.d), body)
+        self.assertIn('<span class="mono">%s</span>' % html.escape(self.d), body)
 
     def test_the_chat_answers_and_what_the_model_writes_is_inert(self):
         self.go("use", {"model": "tiny"})
@@ -1879,7 +1879,7 @@ class WebUse(WebBase):
         body = self.page()
         self.assertIn("&lt;i&gt;why&lt;/i&gt; &quot;slow&quot;?", body, "the question is escaped")
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body, "so is what the model wrote")
-        self.assertNotIn("<script", body.lower())
+        self.assertNotIn("<script>alert", body.lower())
         self.assertNotIn("<img", body.lower())
         self.assertNotIn("<b>bold", body)
         self.assertIsNone(re.search(r"<[^>]*\son[a-z]+=", body))
@@ -1896,7 +1896,7 @@ class WebUse(WebBase):
         body = self.page()
         self.assertLess(body.index("&lt;i&gt;why"), body.index("and now?"))
         self.assertLess(body.index("&lt;script&gt;alert"), body.index("second answer"))
-        self.assertLess(body.index("second answer"), body.index('id="ask"'), "the box is after the answers")
+        self.assertLess(body.index("second answer"), body.index('action="/ai/ask"'), "the box is after the answers")
 
     def test_advice_now_and_its_errors(self):
         self.go("use", {"model": "tiny"})
@@ -1930,13 +1930,13 @@ class WebUse(WebBase):
         self.go("off")
         self.assertTrue(info["gone"].wait(30))
         body = self.page()
-        self.assertIn('<span class="pl d big">OFF</span>', body)
+        self.assertIn('<span class="tag">○ OFF</span>', body)
         self.assertIsNotNone(self.form(body, "on"))
-        self.assertIn("turning it on uses <strong>Tiny test model</strong> (chosen on this page; installed here)", body)
+        self.assertIn("turning it on uses Tiny test model (chosen on this page; installed here)", self.text(body))
         n = len(self.httpd.requests)
         self.go("on")
         self.assertEqual(self.job()["state"], "done")
-        self.assertIn('<span class="pl g big">ON</span>', self.page())
+        self.assertIn('<span class="tag ok">● ON</span>', self.page())
         self.assertEqual(len(self.httpd.requests), n, "nothing fetched again")
 
     def test_turn_on_with_nothing_chosen_asks_first_about_the_recommended_model_and_its_size(self):
@@ -1944,21 +1944,21 @@ class WebUse(WebBase):
         self.hw.update(hw)
         with mock.patch.dict(sys.modules, {"aihw": tas.FakeAihw(hw)}):
             body = self.page()
-            self.assertIn("no model is chosen yet: turning it on asks about the recommended one, <strong>Tiny test model</strong>", body)
+            self.assertIn("no model is chosen yet: turning it on asks about the recommended one, Tiny test model", self.text(body))
             where = self.go("on")
             self.assertEqual(where, "/?view=ai&sel=tiny&confirm=on")
             self.assertEqual(self.httpd.requests, [], "nothing is fetched before the answer")
             body = self.page(where)
-            self.assertIn('<div class="cf" id="confirm">', body)
-            self.assertIn("Turn AI on with <strong>Tiny test model</strong>?", body)
+            self.assertIn('<div class="ask" role="group" aria-label="question">', body)
+            self.assertIn("Turn AI on with Tiny test model?", body)
             self.assertIn("to download (the SHA-256 is checked)", body)
             yes = self.form(body, "on", confirm="yes")
             self.assertEqual((yes["model"], yes["csrf"]), ("tiny", self.srv.csrf))
-            self.assertIn('<a class="bt" href="/?view=ai&amp;sel=tiny">No</a>', body)
+            self.assertIn('<a class="btn" href="/?view=ai&amp;sel=tiny" data-key="n">No</a>', body)
             self.assertEqual(self.go("on", yes), "/?view=ai&sel=tiny")
             self.assertEqual(self.job()["state"], "done")
         self.assertEqual((self.requests(), self.pulls()), (["/" + self.archive[0]], ["tiny:test"]))
-        self.assertIn('<span class="pl g big">ON</span>', self.page())
+        self.assertIn('<span class="tag ok">● ON</span>', self.page())
 
     def test_without_a_recommendation_there_is_nothing_to_ask_the_notice_says_so(self):
         where = self.go("on")
@@ -1974,14 +1974,14 @@ class WebUse(WebBase):
         self.assertEqual(where, "/?view=ai&sel=tiny&confirm=delete&zoom=125")
         self.assertTrue(self.installed("tiny"), "asked, not done")
         body = self.page(where)
-        self.assertIn("Delete the files of <strong>Tiny test model</strong>", body)
+        self.assertIn("Delete the files of Tiny test model", body)
         yes = self.form(body, "delete", confirm="yes")
         self.assertEqual(yes["model"], "tiny")
         self.assertEqual(self.go("delete", yes), "/?view=ai&sel=tiny&zoom=125", "the page's own view comes back, the question does not")
         self.assertEqual(self.job()["state"], "done")
         self.assertFalse(self.installed("tiny"))
         self.assertTrue(self.installed("other"))
-        self.assertNotIn('id="confirm"', self.page("/?view=ai&sel=tiny&confirm=delete"), "nothing there to delete: no question")
+        self.assertNotIn('aria-label="question"', self.page("/?view=ai&sel=tiny&confirm=delete"), "nothing there to delete: no question")
         where = self.go("delete-all")
         self.assertEqual(where, "/?view=ai&confirm=delete-all")
         self.assertIn("Delete the runtime and every downloaded model", self.page(where))
@@ -1990,7 +1990,7 @@ class WebUse(WebBase):
         self.assertEqual(self.job()["state"], "done")
         self.assertFalse(self.installed("other"))
         self.assertFalse(os.path.exists(aisetup.runtime_path(self.d, self.runtime)))
-        self.assertNotIn('id="confirm"', self.page(self.go("delete-all")), "nothing left: the question is not asked")
+        self.assertNotIn('aria-label="question"', self.page(self.go("delete-all")), "nothing left: the question is not asked")
 
     def test_cancel_over_http(self):
         reached, release = threading.Event(), threading.Event()
@@ -2008,8 +2008,8 @@ class WebUse(WebBase):
         self.go("use", {"model": "tiny"})
         self.job()
         body = self.page()
-        self.assertRegex(body, r'<div class="note bad">[^<]*HTTP 404')
-        self.assertIn('<span class="pl d big">OFF</span>', body)
+        self.assertRegex(body, r'<p class="msg notice lv-err"[^>]*><span class="sym">✖</span>[^<]*HTTP 404')
+        self.assertIn('<span class="tag">○ OFF</span>', body)
 
 
 class WebSecurity(WebBase):
@@ -2030,7 +2030,7 @@ class WebSecurity(WebBase):
     def test_clear_needs_the_token_and_forgets_the_chat_the_page_draws_in_its_box(self):
         self.eng.history.append({"kind": "ask", "q": "why <so> slow?", "res": {"text": "busy", "tools_used": [], "model": "m", "calls": [], "state": True},
                                  "error": "", "at": 0})
-        body = self.page("/?app=1&view=ai")
+        body = self.page("/?view=ai")
         self.assertIn('<div class="log" role="log" aria-label="chat"><div class="log-in"><div class="qa">', body)
         self.assertIn("why &lt;so&gt; slow?", body)
         self.assertIn('action="/ai/clear"', body)
@@ -2041,13 +2041,13 @@ class WebSecurity(WebBase):
         where = self.go("clear")
         self.assertEqual(where, "/?view=ai&confirm=clear#ask", "the chat goes for good: the page asks first")
         self.assertEqual(len(self.eng.snapshot()["chat"]["history"]), 1)
-        body = self.page("/?app=1&view=ai&confirm=clear")
+        body = self.page("/?view=ai&confirm=clear")
         self.assertIn("Clear the chat? Its 1 question and answer, and the prompts they were sent, are deleted for good.", body)
         self.assertIsNotNone(self.form(body, "clear", confirm="yes"))
         self.assertTrue(self.go("clear", {"confirm": "yes"}).endswith("#ask"))
         self.assertEqual(self.eng.snapshot()["chat"]["history"], [])
         self.assertEqual(self.notice(), "the chat is cleared")
-        body = self.page("/?app=1&view=ai")
+        body = self.page("/?view=ai")
         self.assertNotIn('class="log"', body)
         self.assertNotIn('action="/ai/clear"', body, "nothing to clear: no button")
 
@@ -2063,25 +2063,24 @@ class WebSecurity(WebBase):
         e = aiweb.chat_entry({"kind": "ask", "q": "why <slow>?", "at": 0, "res": {"text": "busy", "tools_used": [], "model": "m", "calls": [], "state": True},
                               "prompt": [{"role": "system", "text": "rules <b>"}, {"role": "user", "text": "line one\nline two"}]})
         self.eng.history.append(e)
-        body = self.page("/?app=1&view=ai")
-        self.assertIn('<a href="/?view=ai&amp;app=1&amp;prompt=%s#prompt">the prompt it was sent</a>' % e["id"], body)
+        body = self.page("/?view=ai")
+        self.assertIn('<a href="/?view=ai&amp;prompt=%s#prompt">the prompt it was sent</a>' % e["id"], body)
         self.assertNotIn("rules &lt;b&gt;", body)
-        body = self.page("/?app=1&view=ai&prompt=%s" % e["id"])
+        body = self.page("/?view=ai&prompt=%s" % e["id"])
         self.assertIn('<section class="prompt" id="prompt">', body)
         self.assertIn('<pre class="pm-t">line one\nline two</pre>', body)
         self.assertIn("rules &lt;b&gt;", body)
         self.assertIn("for: you: why &lt;slow&gt;?", body)
-        self.assertNotIn('class="prompt"', self.page("/?app=1&view=ai&prompt=000000000000"), "an exchange the chat does not have: nothing")
-        self.assertNotIn('class="prompt"', self.page("/?app=1&view=ai&prompt=../../etc"), "not an id: dropped")
+        self.assertNotIn('class="prompt"', self.page("/?view=ai&prompt=000000000000"), "an exchange the chat does not have: nothing")
+        self.assertNotIn('class="prompt"', self.page("/?view=ai&prompt=../../etc"), "not an id: dropped")
         st, _h, doc = self.get("/api/v1/ai?prompt=%s" % e["id"])
         d = json.loads(doc)
         self.assertEqual((st, d["prompt"]), (200, e["id"]))
         self.assertNotIn("rules", json.dumps(d["engine"]), "the engine's state carries no prompt: only the nodes of the one asked for")
         self.assertIn("line one\\nline two", doc)
-        self.assertIn("rules &lt;b&gt;", self.page("/?app=0&view=ai&prompt=%s" % e["id"]), "the classic page shows it too")
 
     def test_clear_asks_only_when_there_is_a_chat_and_load_is_a_post_like_the_others(self):
-        self.assertNotIn("Clear the chat?", self.page("/?app=1&view=ai&confirm=clear"))
+        self.assertNotIn("Clear the chat?", self.page("/?view=ai&confirm=clear"))
         with mock.patch.object(self.eng, "load_model", return_value=(True, "x")) as load:
             self.assertEqual(self.post("load", csrf=False)[0], 403)
             self.assertEqual(self.go("load"), "/?view=ai")
@@ -2187,7 +2186,7 @@ class WebSecurity(WebBase):
 
     def test_the_redirect_is_always_a_page_of_ours_whatever_back_says(self):
         for back in ("http://evil.example/", "//evil.example/x", "view=map&open=aaaaaaaaaa&all=1", "view=ai&sel=%0d%0aSet-Cookie:x=1", "\r\nX: y", "x" * 300,
-                     "view=ai&cols=999999&zoom=-3&refresh=%C2%B2"):
+                     "view=ai&zoom=-3&refresh=%C2%B2"):
             with self.subTest(back=back[:30]):
                 st, h, _b = self.post("off", {"back": back})
                 self.assertEqual(st, 303)
@@ -2196,8 +2195,8 @@ class WebSecurity(WebBase):
                 self.assertNotIn("\r", where)
                 self.assertNotIn("\n", where)
                 self.assertNotIn("evil", where)
-        st, h, _b = self.post("off", {"back": "view=ai&cols=100&zoom=125&sel=tiny&pause=1"})
-        self.assertEqual(h["Location"], "/?view=ai&sel=tiny&cols=100&zoom=125", "the view comes back, a pause does not (the progress must show)")
+        st, h, _b = self.post("off", {"back": "view=ai&zoom=125&sel=tiny&pause=1"})
+        self.assertEqual(h["Location"], "/?view=ai&sel=tiny&zoom=125", "the view comes back, a pause does not (the progress must show)")
 
     def test_the_lock_refuses_the_post_the_page_shows_no_form_and_nothing_changes(self):
         render.CFG["ai"]["web_actions"] = False
@@ -2221,10 +2220,10 @@ class WebSecurity(WebBase):
 
     def test_a_page_is_never_cached_between_viewers_and_the_post_clears_what_was_cached(self):
         before = self.page()
-        self.assertIn('<span class="pl d big">OFF</span>', before)
+        self.assertIn('<span class="tag">○ OFF</span>', before)
         self.go("use", {"model": "other"})
         self.job()
-        self.assertIn('<span class="pl g big">ON</span>', self.page(), "the page after a post shows what it did, not the cached one")
+        self.assertIn('<span class="tag ok">● ON</span>', self.page(), "the page after a post shows what it did, not the cached one")
 
 
 class WebToken(WebBase):
@@ -2252,12 +2251,13 @@ class WebToken(WebBase):
 class WebHttpHeaders(WebBase):
     def test_the_responses_carry_the_policy_of_the_page_that_made_them(self):
         st, h, _b = self.get()
-        self.assertEqual((h["Content-Security-Policy"], h["Referrer-Policy"]), (webhttp.page_csp(forms=True), "same-origin"))
+        self.assertIn("form-action 'self'", h["Content-Security-Policy"])
+        self.assertEqual(h["Referrer-Policy"], "same-origin")
         st, h, _b = self.post("off")
         self.assertEqual((st, h["Referrer-Policy"], h["Cache-Control"]), (303, "same-origin", "no-store"))
         self.assertIn("form-action 'none'", h["Content-Security-Policy"], "a redirect has no form: the strict one")
-        self.assertEqual(self.get("/?view=health")[1]["Content-Security-Policy"], webhttp.CSP, "every other page keeps form-action 'none'")
-        self.assertEqual(self.get("/")[1]["Content-Security-Policy"], webhttp.CSP)
+        self.assertIn("form-action 'none'", self.get("/?view=health")[1]["Content-Security-Policy"], "every other page keeps form-action 'none'")
+        self.assertIn("form-action 'none'", self.get("/")[1]["Content-Security-Policy"])
         self.assertEqual(self.get("/")[1]["Referrer-Policy"], "no-referrer")
         self.assertIn("form-action 'none'", webhttp.CSP)
 

@@ -240,7 +240,7 @@ class Installation(World):
         self.assertNotIn("New here?", self.get("/app")[2])
 
     def test_the_footer_and_the_settings_page_link_to_the_guide(self):
-        self.assertIn('<a class="lnk" href="/setup?step=1">setup guide</a>', self.get("/?app=1")[2])
+        self.assertIn('<a class="lnk" href="/setup?step=1">setup guide</a>', self.get("/")[2])
         settings = self.get("/?view=settings")[2]
         self.assertIn("Open the setup guide", settings)
         self.assertIn('href="/setup?step=1"', settings)

@@ -1,7 +1,4 @@
-"""Tests for the web shell (`?app=1`, `[ui] web = app`): its markup, /?set= and the nuc_ui cookie, /s/ assets, the settings page and the CSP.
-
-The classic pages (`?app=0`, `[ui] web = classic`) are unchanged (tests/golden/ locks them byte for byte).
-"""
+"""Tests for the web shell: its markup, /?set= and the nuc_ui cookie, /s/ assets, the settings page and the CSP."""
 import base64
 import hashlib
 import os
@@ -70,7 +67,7 @@ class Shell(unittest.TestCase):
     def setUpClass(cls):
         cls.srv, cls.locked = serve(), serve("t" * 24)
         cls.expose = render.CFG["expose"]
-        cls.status, cls.headers, cls.body = get(cls.srv, "/?app=1")
+        cls.status, cls.headers, cls.body = get(cls.srv, "/")
         cls.tree = Tree(cls.body)
 
     @classmethod
@@ -102,7 +99,6 @@ class Shell(unittest.TestCase):
         (_, a, _), = self.tree.find("main")
         self.assertEqual(a["data-refresh"], "2")
         self.assertTrue(a["data-frag"].startswith("/?") and "frag=1" in a["data-frag"])
-        self.assertIn("app=1", a["data-frag"])
         self.assertIn('<noscript><meta http-equiv="refresh" content="2"></noscript>', self.body)  # with the scripts the page polls; without them it reloads
         self.assertEqual(self.body.count('http-equiv="refresh"'), 1)
 
@@ -111,7 +107,7 @@ class Shell(unittest.TestCase):
         self.assertEqual([a["data-key"] for a in tabs], ["1", "2", "3", "4", "5"])
         self.assertEqual(sum(a.get("aria-current") == "page" for a in tabs), 1)
         self.assertTrue(self.tree.find("a", href="#help"))
-        self.assertTrue(self.tree.find("a", href="/?app=1&view=settings"))
+        self.assertTrue(self.tree.find("a", href="/?view=settings"))
 
     def test_every_interactive_control_is_a_link_or_a_form(self):
         for t, a, _ in self.tree.tags:
@@ -176,18 +172,18 @@ class Shell(unittest.TestCase):
         order = lambda body: re.findall(r'<article class="card s\d st-(\w+)"', body)  # noqa: E731
         rank = [web.STATE_RANK[x] for x in order(self.body)]
         self.assertEqual(rank, sorted(rank))
-        _, _, fixed = get(self.srv, "/?app=1&ui=1.of")
+        _, _, fixed = get(self.srv, "/?ui=1.of")
         self.assertEqual(re.findall(r'data-card="(\w+)"', fixed)[2:4], ["attention", "exposure"])
 
     def test_the_other_views_live_inside_the_shell(self):
         for view in ("map", "cpu", "health", "ai"):
-            st, h, body = get(self.srv, f"/?view={view}&app=1")
+            st, h, body = get(self.srv, f"/?view={view}")
             self.assertEqual(st, 200, view)
             self.assertIn('data-card="__top"', body)
             self.assertIn('stylesheet" href="/s/app.', body)
             self.assertEqual(body.count("<main"), 1, view)  # the old bodies' <main> became <div>
             self.assertTrue(Tree(body).find("a", aria_current="page"), view)
-        st, h, body = get(self.srv, "/?view=map&as=graph&app=1")
+        st, h, body = get(self.srv, "/?view=map&as=graph")
         self.assertIn("<script>", body)  # the graph's own fixed script, pinned by its hash
         self.assertRegex(h["Content-Security-Policy"], r"script-src 'sha256-[A-Za-z0-9+/=]+'")
         self.assertIn("style-src 'self'", h["Content-Security-Policy"])
@@ -197,7 +193,7 @@ class Shell(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertEqual([a["data-card"] for t, a, _ in Tree(body).tags if "data-card" in a and not a["data-card"].startswith("__")], ["exposure"])
         self.assertIn("overview", body)
-        self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the classic page
+        self.assertEqual(get(self.srv, "/?card=nonsense")[0], 200)  # not a card: the overview
 
     def test_the_overview_packs_densely_and_the_editor_and_a_single_card_do_not(self):
         import htmlview
@@ -209,7 +205,7 @@ class Shell(unittest.TestCase):
             self.assertTrue(n == 1 or ".card.r%d{grid-row:span %d}" % (n, n) in webcss.CSS, c)
         self.assertIn("main.grid:not([data-edit]){grid-auto-flow:row dense", webcss.CSS)
         self.assertEqual(htmlview.ROW_MAX, webcss.ROW_MAX)
-        edit = get(self.srv, "/?app=1&edit=1")[2]
+        edit = get(self.srv, "/?edit=1")[2]
         self.assertTrue(re.search(r'<article[^>]*class="card ', edit))
         self.assertNotRegex(edit, r'<article[^>]*class="card [^"]*\br\d+\b')
         full = get(self.srv, "/?card=exposure")[2]
@@ -235,7 +231,7 @@ class Shell(unittest.TestCase):
         self.assertLess(htmlview.est_rows(hidden, 1, wall=True), htmlview.est_rows(hidden, 1))  # the wall hides it
 
     def test_pause_stops_the_reload(self):
-        _, _, body = get(self.srv, "/?app=1&pause=1")
+        _, _, body = get(self.srv, "/?pause=1")
         self.assertNotIn('http-equiv="refresh"', body)
         self.assertIn('data-paused="1"', body)
         self.assertIn('aria-pressed="true"', body)
@@ -250,7 +246,7 @@ class Shell(unittest.TestCase):
         self.assertEqual(self.headers["Cache-Control"], "no-store")
 
     def test_the_ai_page_keeps_its_forms_and_csrf(self):
-        st, h, body = get(self.srv, "/?view=ai&app=1&sel=qwen3-4b")
+        st, h, body = get(self.srv, "/?view=ai&sel=qwen3-4b")
         self.assertIn("form-action 'self'", h["Content-Security-Policy"])
         self.assertIn("style-src 'self'", h["Content-Security-Policy"])
         self.assertEqual(h["Content-Security-Policy"].count("sha256-"), 3)  # the shell's three scripts, and nothing of the form's
@@ -258,18 +254,18 @@ class Shell(unittest.TestCase):
         forms = Tree(body).find("form", method="post")
         self.assertTrue(forms)
         self.assertRegex(body, r'name="csrf" value="[^"]+"')
-        self.assertIn("app=1", re.search(r'name="back" value="([^"]*)"', body).group(1))  # a post comes back to the shell
+        self.assertIn("view=ai", re.search(r'name="back" value="([^"]*)"', body).group(1))  # a post comes back to the page
         render_cfg = render.CFG["ai"]
         with mock.patch.dict(render_cfg, {"web_actions": False}):
-            _, h, body = get(self.srv, "/?view=ai&app=1")
+            _, h, body = get(self.srv, "/?view=ai")
         self.assertIn("form-action 'none'", h["Content-Security-Policy"])
         self.assertNotIn('method="post"', body)
 
     # ---- /?set=
     def test_set_stores_the_cookie_and_redirects_to_a_canonical_view(self):
-        st, h, _ = get(self.srv, "/?set=tl&back=view%3Dhealth%26period%3D30%26app%3D1%26junk%3D1")
+        st, h, _ = get(self.srv, "/?set=tl&back=view%3Dhealth%26period%3D30%26junk%3D1")
         self.assertEqual(st, 302)
-        self.assertEqual(h["Location"], "/?view=health&app=1&period=30")
+        self.assertEqual(h["Location"], "/?view=health&period=30")
         ck = cookie_of(h)
         self.assertTrue(ck.startswith("nuc_ui=1.tl;"), ck)
         for part in ("HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=31536000"):
@@ -306,23 +302,23 @@ class Shell(unittest.TestCase):
         self.assertEqual(get(self.locked, "/?set=tl", headers={"Authorization": "Bearer " + "t" * 24})[0], 302)
 
     def test_the_cookie_changes_the_page_and_an_invalid_one_is_ignored(self):
-        _, _, body = get(self.srv, "/?app=1", headers={"Cookie": "nuc_ui=1.tl.dw"})
+        _, _, body = get(self.srv, "/", headers={"Cookie": "nuc_ui=1.tl.dw"})
         self.assertRegex(body, r'data-theme="light" data-density="wall" class="[^"]*" data-prefs-src="cookie" data-prefs="1.tl.dw"')
         for bad in ("nuc_ui=1.tz", "nuc_ui=2.tl", "nuc_ui=" + "1." + "t" * 300, "nuc_ui=1.tl.é", "nuc_ui=junk"):
-            _, _, body = get(self.srv, "/?app=1", headers={"Cookie": bad.encode("utf-8").decode("latin-1")})
+            _, _, body = get(self.srv, "/", headers={"Cookie": bad.encode("utf-8").decode("latin-1")})
             self.assertIn('data-theme="auto" data-density="desk"', body, bad)
             self.assertIn('data-prefs-src="config"', body, bad)
 
     def test_ui_in_the_url_wins_over_the_cookie_for_that_url_only(self):
-        _, _, body = get(self.srv, "/?app=1&ui=1.td", headers={"Cookie": "nuc_ui=1.tl"})
+        _, _, body = get(self.srv, "/?ui=1.td", headers={"Cookie": "nuc_ui=1.tl"})
         self.assertIn('data-theme="dark"', body)
         self.assertIn('data-prefs-src="url"', body)
         self.assertIn("ui=1.td", self.tree and body)  # it travels with the links of that page
-        _, _, body = get(self.srv, "/?app=1&ui=1.zz", headers={"Cookie": "nuc_ui=1.tl"})
+        _, _, body = get(self.srv, "/?ui=1.zz", headers={"Cookie": "nuc_ui=1.tl"})
         self.assertIn('data-theme="light"', body)  # an invalid one is dropped
 
     def test_the_hostile_cookie_does_not_reach_the_page(self):
-        _, _, body = get(self.srv, "/?app=1", headers={"Cookie": 'nuc_ui="><script>alert(1)</script>'})
+        _, _, body = get(self.srv, "/", headers={"Cookie": 'nuc_ui="><script>alert(1)</script>'})
         self.assertNotIn("alert(1)", body)
 
     # ---- the style sheet
@@ -439,7 +435,7 @@ class Shell(unittest.TestCase):
             for os_name in (None, "darwin", "windows"):
                 render.DEMO_OS = os_name
                 self.srv.cache.clear()
-                _, _, body = get(self.srv, "/?app=1")
+                _, _, body = get(self.srv, "/")
                 for art in re.findall(r"<article.*?</article>", body, re.S):
                     used.update(c for cl in re.findall(r'class="([^"]*)"', art) for c in cl.split())
         finally:
@@ -460,7 +456,7 @@ class Shell(unittest.TestCase):
             self.assertIn(text, body)
         (_, a, _), = t.find("pre", id="export")
         self.assertIn("[ui]", body)
-        self.assertRegex(body, r'<pre id="export"[^>]*>\[ui\]\nweb = app\ntheme = light\n')
+        self.assertRegex(body, r'<pre id="export"[^>]*>\[ui\]\ntheme = light\n')
         self.assertIn("preset = server", body)
         self.assertIn('id="cookie-v">1.tl.pv<', body)
         links = [a["href"] for _, a, _ in t.find("a", data_set=True)]
@@ -536,38 +532,27 @@ class Shell(unittest.TestCase):
         self.assertIn("not paired", body)
         self.assertIn("unreadable: bad line 3", body)
 
-    # ---- the shell is the default; the classic pages are the fallback (kept for one release)
-    def test_the_shell_is_the_default_and_the_classic_pages_are_the_way_back(self):
-        _, _, body = get(self.srv, "/")
-        self.assertIn("/s/app.", body)
-        self.assertNotIn("<pre>", body)
-        _, h, body = get(self.srv, "/?app=0")
-        self.assertIn("<pre>", body)
-        self.assertNotIn("/s/app.", body)
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP)
-        self.assertNotIn("script-src", webhttp.CSP)
-        self.assertNotIn("<script", body.lower())
-
-    def test_ui_web_classic_makes_the_classic_pages_the_default_and_app_1_the_way_forward(self):
-        with mock.patch.dict(render.CFG["ui"], {"web": "classic"}):
+    # ---- the classic pages are gone: their switches are ignored
+    def test_the_shell_is_always_served_and_the_classic_switches_are_ignored(self):
+        with mock.patch.dict(render.CFG["ui"], {"web": "classic"}):  # [ui] web = classic of an old configuration
             self.srv.cache.clear()
-            _, _, body = get(self.srv, "/?view=cpu")
-            self.assertNotIn("/s/app.", body)
-            self.assertIn("<pre>", body)
-            _, _, shell = get(self.srv, "/?app=1&view=cpu")
-            self.assertIn("/s/app.", shell)
+            for path in ("/", "/?view=cpu", "/?app=0", "/?view=cpu&app=0"):
+                _, h, body = get(self.srv, path)
+                self.assertIn("/s/app.", body, path)
+                self.assertNotIn("<pre>", body, path)
+                self.assertIn("script-src", h["Content-Security-Policy"], path)
         self.srv.cache.clear()
 
     def test_the_shell_cpu_page_has_no_stray_hint_and_the_footer_leaves_room(self):
-        _, _, body = get(self.srv, "/?app=1&view=cpu")
+        _, _, body = get(self.srv, "/?view=cpu")
         self.assertNotIn("a process: its details", body)
         self.assertNotIn('class="toolbar"', body)
         self.assertRegex(webcss.CSS, r"\.view,main\.grid\{padding-bottom:calc\(var\(--pad\) \+ 2\.6em\)\}")
         self.assertIn("scroll-padding-bottom", webcss.CSS)
 
     def test_the_token_redirect_keeps_the_shell(self):
-        st, h, _ = get(self.locked, "/?token=" + "t" * 24 + "&app=1&view=health")
-        self.assertEqual((st, h["Location"]), (302, "/?view=health&app=1"))
+        st, h, _ = get(self.locked, "/?token=" + "t" * 24 + "&view=health")
+        self.assertEqual((st, h["Location"]), (302, "/?view=health"))
 
 
 INLINE = re.compile(r"<script>(.*?)</script>", re.S)
@@ -621,9 +606,9 @@ def split_blocks(text):
 class Scripts(unittest.TestCase):
     """What the shell's pages carry as scripts, the CSP that lists exactly them, the fragment endpoint and /?set=...&frag=1."""
     maxDiff = None
-    PAGES = ("/?app=1", "/?app=1&pause=1", "/?app=1&view=settings", "/?card=exposure", "/?app=1&view=map", "/?app=1&view=cpu", "/?app=1&view=cpu&sel=1",
-             "/?app=1&view=health", "/?app=1&view=ai", "/?app=1&view=ai&sel=qwen3-4b", "/?app=1&view=ai&sel=qwen3-4b&confirm=delete",
-             "/?app=1&view=map&as=graph", "/?app=1&view=map&all=1")
+    PAGES = ("/?refresh=2", "/?pause=1", "/?view=settings", "/?card=exposure", "/?view=map", "/?view=cpu", "/?view=cpu&sel=1",
+             "/?view=health", "/?view=ai", "/?view=ai&sel=qwen3-4b", "/?view=ai&sel=qwen3-4b&confirm=delete",
+             "/?view=map&as=graph", "/?view=map&all=1")
 
     @classmethod
     def setUpClass(cls):
@@ -681,19 +666,12 @@ class Scripts(unittest.TestCase):
         self.assertNotIn("script-src", webhttp.page_csp([""]))
         self.assertIn("style-src 'self'", webhttp.page_csp(shell=True))
 
-    def test_the_classic_pages_have_no_script_src_except_the_graph(self):
-        for path in ("/?app=0", "/?view=cpu&app=0", "/?view=map&app=0", "/?view=health&app=0", "/?view=ai&app=0", "/?cols=100&full=1&app=0"):
-            st, h, body = get(self.srv, path)
-            csp = h["Content-Security-Policy"]
-            self.assertTrue(csp.startswith("default-src 'none'"))
-            for word in ("script-src", "connect-src", "trusted-types"):
-                self.assertNotIn(word, csp, path)
-            self.assertNotIn("<script", body.lower(), path)
-        st, h, body = get(self.srv, "/?view=map&as=graph&app=0")
+    def test_the_graph_page_csp_pins_its_scripts(self):
+        st, h, body = get(self.srv, "/?view=map&as=graph")
         self.assertEqual(script_src(h["Content-Security-Policy"]), hashes(inline_scripts(body)))
-        self.assertEqual(len(inline_scripts(body)), 1)
-        self.assertNotIn("connect-src", h["Content-Security-Policy"])
-        self.assertNotIn("trusted-types", h["Content-Security-Policy"])
+        self.assertEqual(len(inline_scripts(body)), 4)  # the shell's three and the graph's own
+        self.assertIn(graphjs.SCRIPT, inline_scripts(body))
+        self.assertNotIn("unsafe", h["Content-Security-Policy"])
 
     def test_the_meta_refresh_is_for_browsers_without_the_scripts(self):
         for path in self.PAGES:
@@ -704,15 +682,15 @@ class Scripts(unittest.TestCase):
                 self.assertEqual(wrap, "<noscript>", path)
             if "pause=1" in path or "settings" in path:
                 self.assertEqual(metas, [], path)
-        for path in ("/?app=1&view=cpu", "/?app=1&view=map&as=graph", "/?app=1"):
+        for path in ("/?view=cpu", "/?view=map&as=graph", "/"):
             self.assertIn('<noscript><meta http-equiv="refresh" content="2"></noscript>', get(self.srv, path)[2], path)
 
     def test_a_paused_page_can_still_be_resumed_by_the_script(self):
-        body = get(self.srv, "/?app=1&pause=1")[2]
+        body = get(self.srv, "/?pause=1")[2]
         (_, a, _), = Tree(body).find("main")
         self.assertEqual((a["data-paused"], a["data-refresh"]), ("1", "2"))
         self.assertIn("pause=1", a["data-frag"])
-        for path in ("/?app=1&view=map&as=graph", "/?app=1&view=settings"):  # a graph reloads itself, the settings never poll: the pause link is the server's
+        for path in ("/?view=map&as=graph", "/?view=settings"):  # a graph reloads itself, the settings never poll: the pause link is the server's
             self.assertFalse(Tree(get(self.srv, path)[2]).find("main", data_refresh=True), path)
 
     # ---- the fragment
@@ -736,11 +714,11 @@ class Scripts(unittest.TestCase):
                     self.assertEqual(raw, by_id[cid], (path, cid))
 
     def test_the_overview_fragment_has_every_card_and_a_view_has_one_block(self):
-        ids = [i for i, _ in split_blocks(get(self.srv, "/?app=1&frag=1")[2])]
+        ids = [i for i, _ in split_blocks(get(self.srv, "/?frag=1")[2])]
         self.assertEqual(ids[:2], ["__top", "__kpis"])
         self.assertEqual(set(ids[2:]), set(prefs.CARDS))
         for view in ("map", "cpu", "health", "ai"):
-            ids = [i for i, _ in split_blocks(get(self.srv, f"/?app=1&view={view}&frag=1")[2])]
+            ids = [i for i, _ in split_blocks(get(self.srv, f"/?view={view}&frag=1")[2])]
             self.assertEqual(ids, ["__top", "__kpis", "__view"], view)
 
     def test_a_fragment_has_only_the_tags_and_attributes_the_refresh_script_takes(self):
@@ -765,19 +743,19 @@ class Scripts(unittest.TestCase):
                     if k == "id":
                         unit.assertNotIn(v, ("stale", "live", "help", "export"))
             handle_startendtag = handle_starttag
-        for path in self.PAGES + ("/?app=1&view=cpu&sort=mem&sel=1", "/?app=1&view=ai&sel=qwen3-30b-a3b", "/?app=1&view=ai&confirm=delete-all",
-                                  "/?app=1&full=1", "/?app=1&ui=1.dw.ls", "/?app=1&ui=1.tl.pm"):
+        for path in self.PAGES + ("/?view=cpu&sort=mem&sel=1", "/?view=ai&sel=qwen3-30b-a3b", "/?view=ai&confirm=delete-all",
+                                  "/?ui=1.dw.ls", "/?ui=1.tl.pm"):
             w = Walk()
             w.feed(get(self.srv, path + "&frag=1")[2])
             self.assertGreater(w.seen, 10, path)
 
     def test_the_ai_fragment_keeps_its_forms_and_csrf(self):
-        frag = get(self.srv, "/?app=1&view=ai&sel=qwen3-4b&frag=1")[2]
+        frag = get(self.srv, "/?view=ai&sel=qwen3-4b&frag=1")[2]
         self.assertTrue(Tree(frag).find("form", method="post"))
         self.assertRegex(frag, r'name="csrf" value="[^"]+"')
 
     def test_etag_and_304(self):
-        path = "/?app=1&view=cpu&frag=1"
+        path = "/?view=cpu&frag=1"
         for _ in range(3):  # the clock of the top bar may tick between two requests: ask again
             _, h, body = get(self.srv, path)
             st, h2, b2 = get(self.srv, path, headers={"If-None-Match": h["ETag"]})
@@ -791,34 +769,32 @@ class Scripts(unittest.TestCase):
         st, _, b3 = get(self.srv, path, headers={"If-None-Match": '"0000"'})
         self.assertEqual(st, 200)
         self.assertTrue(b3)
-        self.assertNotEqual(get(self.srv, "/?app=1&view=health&frag=1")[1]["ETag"], h["ETag"])  # other blocks, another tag
+        self.assertNotEqual(get(self.srv, "/?view=health&frag=1")[1]["ETag"], h["ETag"])  # other blocks, another tag
 
     def test_head_is_the_headers_of_the_get(self):
-        st, h, body = get(self.srv, "/?app=1&view=health&frag=1", "HEAD")
+        st, h, body = get(self.srv, "/?view=health&frag=1", "HEAD")
         self.assertEqual((st, body), (200, ""))
         self.assertEqual((h["X-Nuc-Fragment"], h["Content-Type"]), ("1", "text/html; charset=utf-8"))
         self.assertGreater(int(h["Content-Length"]), 500)
 
-    def test_only_shell_pages_have_fragments(self):
+    def test_the_old_classic_switch_does_not_turn_the_fragment_off(self):
         for path in ("/?app=0&frag=1", "/?view=cpu&app=0&frag=1"):
             st, h, body = get(self.srv, path)
-            self.assertEqual(st, 200)
-            self.assertNotIn("X-Nuc-Fragment", h, path)
-            self.assertNotIn("ETag", h, path)
-            self.assertIn("<pre>", body)  # the classic page, as ever
+            self.assertEqual((st, h["X-Nuc-Fragment"]), (200, "1"), path)
+            self.assertNotIn("<pre>", body)
 
     def test_a_fragment_has_the_same_access_rules_as_the_page(self):
-        self.assertEqual(get(self.locked, "/?app=1&frag=1")[0], 401)
-        self.assertEqual(get(self.locked, "/?app=1&frag=1", headers={"Authorization": "Bearer " + "t" * 24})[0], 200)
-        self.assertEqual(get(self.locked, "/?app=1&frag=1", headers={"Cookie": "nuc_token=" + "t" * 24})[0], 200)
-        self.assertEqual(get(self.locked, "/?app=1&frag=1&token=" + "t" * 24)[0], 302)  # the token moves into a cookie first, like for any page
-        self.assertEqual(get(self.srv, "/?app=1&frag=1", headers={"Host": "evil.example"})[0], 421)
-        self.assertEqual(get(self.srv, "/?app=1&frag=1", "HEAD", headers={"Host": "evil.example"})[0], 421)
+        self.assertEqual(get(self.locked, "/?frag=1")[0], 401)
+        self.assertEqual(get(self.locked, "/?frag=1", headers={"Authorization": "Bearer " + "t" * 24})[0], 200)
+        self.assertEqual(get(self.locked, "/?frag=1", headers={"Cookie": "nuc_token=" + "t" * 24})[0], 200)
+        self.assertEqual(get(self.locked, "/?frag=1&token=" + "t" * 24)[0], 302)  # the token moves into a cookie first, like for any page
+        self.assertEqual(get(self.srv, "/?frag=1", headers={"Host": "evil.example"})[0], 421)
+        self.assertEqual(get(self.srv, "/?frag=1", "HEAD", headers={"Host": "evil.example"})[0], 421)
 
     def test_the_cookie_shapes_the_fragment_like_the_page(self):
-        _, _, fixed = get(self.srv, "/?app=1&frag=1", headers={"Cookie": "nuc_ui=1.of"})
+        _, _, fixed = get(self.srv, "/?frag=1", headers={"Cookie": "nuc_ui=1.of"})
         self.assertEqual([i for i, _ in split_blocks(fixed)][2:4], ["attention", "exposure"])
-        self.assertEqual(get(self.srv, "/?app=1&frag=1", headers={"Cookie": "nuc_ui=<script>"})[0], 200)
+        self.assertEqual(get(self.srv, "/?frag=1", headers={"Cookie": "nuc_ui=<script>"})[0], 200)
 
     # ---- /?set=...&frag=1
     def test_set_with_frag_answers_204_and_the_cookie(self):
@@ -853,7 +829,7 @@ class Scripts(unittest.TestCase):
         self.assertEqual(get(self.srv, "/?set=tl&frag=1", "HEAD")[0], 204)
 
     def test_the_settings_page_has_the_copy_button(self):
-        _, _, body = get(self.srv, "/?app=1&view=settings")
+        _, _, body = get(self.srv, "/?view=settings")
         (_, a, _), = Tree(body).find("button", data_copy="#export")
         self.assertEqual(a["type"], "button")
         self.assertTrue(Tree(body).find("pre", id="export"))
@@ -862,7 +838,7 @@ class Scripts(unittest.TestCase):
 class Builder(unittest.TestCase):
     """The layout editor (`?edit=1`): its page, its links (`?set=e...`, one step on the server, no script needed), its script and its policy."""
     maxDiff = None
-    EDIT = "/?app=1&edit=1"
+    EDIT = "/?edit=1"
     STEPS = ("data-earlier", "data-later", "data-shrink", "data-grow", "data-hide")
 
     @classmethod
@@ -914,7 +890,7 @@ class Builder(unittest.TestCase):
 
     def test_every_card_has_its_buttons_as_links_to_the_server(self):
         _, body, tree = self.page()
-        back = "app%3D1%26edit%3D1"
+        back = "edit%3D1"
         for cid, _ in self.cards_of(tree):
             art = body[body.index('data-card="%s"' % cid):]
             art = art[:art.index("</article>")]
@@ -934,15 +910,15 @@ class Builder(unittest.TestCase):
     def test_the_bar_has_done_reset_and_says_the_order_is_fixed(self):
         _, body, tree = self.page()
         hrefs = {a.get("href") for t, a, s in tree.tags if t == "a"}
-        self.assertIn("/?app=1", hrefs)  # done
+        self.assertIn("/?", hrefs)  # done
         (_, reset, _), = [x for x in tree.find("a", data_set=True) if "ereset" in x[1]["href"]]
-        self.assertEqual(reset["href"], "/?set=ereset&back=app%3D1%26edit%3D1")
+        self.assertEqual(reset["href"], "/?set=ereset&back=edit%3D1")
         text = " ".join(tree.text)
         self.assertIn("the order is fixed", text)
         self.assertIn("instead of moving by severity", text)
         self.assertIn("Reset layout", text)
         self.assertIn("Every change is saved at once", text)
-        self.assertIn('<a class="lnk" href="/?app=1">Done</a>', body)
+        self.assertIn('<a class="lnk" href="/?">Done</a>', body)
 
     def test_hidden_cards_are_listed_dimmed_with_a_show_button(self):
         _, body, tree = self.page(cookie="1.lat2_ex2_dbx_wax_bo1_se1")
@@ -975,9 +951,9 @@ class Builder(unittest.TestCase):
     def test_a_step_is_a_get_that_comes_back_to_the_editor(self):
         _, body, tree = self.page()
         href = [a["href"] for t, a, s in tree.tags if t == "a" and "data-later" in a and "ex" in a["href"]][0]
-        self.assertEqual(href, "/?set=edex&back=app%3D1%26edit%3D1")
+        self.assertEqual(href, "/?set=edex&back=edit%3D1")
         st, loc, ck = self.follow(href)
-        self.assertEqual((st, loc), (302, "/?app=1&edit=1"))
+        self.assertEqual((st, loc), (302, "/?edit=1"))
         got = prefs.parse_cookie(ck)
         self.assertEqual([c for c, _ in got["layout"]][:3], ["attention", "webapps", "exposure"])
         self.assertEqual(got["hidden"], [])
@@ -1003,7 +979,7 @@ class Builder(unittest.TestCase):
         self.assertEqual((got["layout"], got["hidden"]), (want["layout"], want["hidden"]))
 
     def test_steps_keep_the_other_preferences_and_the_script_may_send_a_whole_layout(self):
-        st, loc, ck = self.follow("/?set=ehbo&back=app%3D1%26edit%3D1", "1.td.dw.of.kpb_in")
+        st, loc, ck = self.follow("/?set=ehbo&back=edit%3D1", "1.td.dw.of.kpb_in")
         got = prefs.parse_cookie(ck)
         self.assertEqual((got["theme"], got["density"], got["order"], got["kpis"]), ("dark", "wall", "fixed", ["problems", "internet"]))
         self.assertEqual(got["hidden"], ["boot"])
@@ -1017,12 +993,12 @@ class Builder(unittest.TestCase):
     def test_a_step_that_moves_nothing_does_not_fix_the_layout(self):
         for field in ("euat", "esfw", "ewat"):
             st, loc, ck = self.follow("/?set=%s&back=app%%3D1%%26edit%%3D1" % field)
-            self.assertEqual((st, loc), (302, "/?app=1&edit=1"), field)
+            self.assertEqual((st, loc), (302, "/?edit=1"), field)
             self.assertTrue(ck is None or "l" not in ck, (field, ck))
 
     def test_reset_layout_drops_only_the_layout(self):
-        st, loc, ck = self.follow("/?set=ereset&back=app%3D1%26edit%3D1", "1.td.pv.lat2_ex2_wax")
-        self.assertEqual((st, loc, ck), (302, "/?app=1&edit=1", "1.td.pv"))
+        st, loc, ck = self.follow("/?set=ereset&back=edit%3D1", "1.td.pv.lat2_ex2_wax")
+        self.assertEqual((st, loc, ck), (302, "/?edit=1", "1.td.pv"))
         st, h, _ = get(self.srv, "/?set=ereset&frag=1", headers={"Cookie": "nuc_ui=1.lat2"})
         self.assertEqual((st, h["X-Nuc-Prefs"]), (204, "1"))
         self.assertIn("Max-Age=0", h["Set-Cookie"])
@@ -1041,7 +1017,7 @@ class Builder(unittest.TestCase):
 
     def test_a_hostile_cookie_does_not_break_a_step(self):
         for ck in ("<script>", "1.lzz", "1." + "l" * 300, "1.lat9", "é"):
-            st, loc, new = self.follow("/?set=ehat&back=app%3D1%26edit%3D1", ck.encode("ascii", "ignore").decode())
+            st, loc, new = self.follow("/?set=ehat&back=edit%3D1", ck.encode("ascii", "ignore").decode())
             self.assertEqual(st, 302, ck)
             self.assertEqual(prefs.parse_cookie(new)["hidden"], ["attention"], ck)
 
@@ -1058,26 +1034,26 @@ class Builder(unittest.TestCase):
 
     # ---- the overview that follows
     def test_a_layout_of_your_own_keeps_its_order_instead_of_moving_by_severity(self):
-        _, _, sev = self.page("/?app=1")
-        _, _, mine = self.page("/?app=1", cookie="1.lsy2_ct1_at2")
+        _, _, sev = self.page("/")
+        _, _, mine = self.page("/", cookie="1.lsy2_ct1_at2")
         first = lambda t: [a["data-card"] for tag, a, s in t.tags if tag == "article"][:3]  # noqa: E731
         self.assertEqual(first(sev)[0], "attention")  # by severity: what needs you first
         self.assertEqual(first(mine)[:2], ["system", "containers"])  # fixed: as the reader put them
-        self.assertEqual(first(self.page("/?app=1", cookie="1.tl")[2])[0], "attention")  # a cookie of another field: still by severity
+        self.assertEqual(first(self.page("/", cookie="1.tl")[2])[0], "attention")  # a cookie of another field: still by severity
 
     def test_a_layout_from_config_ini_fixes_the_order_unless_severity_is_written(self):
         first = lambda t: [x["data-card"] for tag, x, _ in t.tags if tag == "article"][:2]  # noqa: E731
         layout = [("system", 2), ("containers", 1), ("attention", 2)]
         with mock.patch.dict(render.CFG["ui"], {"layout": layout}):
-            self.assertEqual(first(self.page("/?app=1")[2]), ["system", "containers"])
-            _, body, _ = self.page("/?app=1&view=settings")
+            self.assertEqual(first(self.page("/")[2]), ["system", "containers"])
+            _, body, _ = self.page("/?view=settings")
             self.assertIn("so for now the cards stay in its order", body)
-            self.assertEqual(first(self.page("/?app=1", cookie="1.os")[2])[0], "attention", "By severity chosen in the browser")
-            self.assertEqual(first(self.page("/?app=1", cookie="1.of")[2]), ["system", "containers"])
-            self.assertNotIn("so for now the cards stay in its order", self.page("/?app=1&view=settings", cookie="1.os")[1])
+            self.assertEqual(first(self.page("/", cookie="1.os")[2])[0], "attention", "By severity chosen in the browser")
+            self.assertEqual(first(self.page("/", cookie="1.of")[2]), ["system", "containers"])
+            self.assertNotIn("so for now the cards stay in its order", self.page("/?view=settings", cookie="1.os")[1])
         with mock.patch.dict(render.CFG["ui"], {"layout": layout, "order": "severity"}):
-            self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "order = severity written in config.ini")
-        self.assertEqual(first(self.page("/?app=1")[2])[0], "attention", "no layout: by severity")
+            self.assertEqual(first(self.page("/")[2])[0], "attention", "order = severity written in config.ini")
+        self.assertEqual(first(self.page("/")[2])[0], "attention", "no layout: by severity")
 
     def test_a_hidden_card_comes_back_as_wide_as_it_was(self):
         ck = ""
@@ -1086,47 +1062,47 @@ class Builder(unittest.TestCase):
             self.assertEqual(st, 302)
         width = lambda tree: dict((c, [x for x in cls if re.fullmatch(r"s[1-4]", x)][0]) for c, cls in self.cards_of(tree))  # noqa: E731
         self.assertEqual(width(self.page(cookie=ck)[2])["databases"], "s4")  # three steps from 1
-        st, _, ck = self.follow("/?set=ehdb&back=app%3D1%26edit%3D1", ck)
+        st, _, ck = self.follow("/?set=ehdb&back=edit%3D1", ck)
         self.assertIn("db4x", ck)
         _, body, tree = self.page(cookie=ck)
         hidden = [(c, cls) for c, cls in self.cards_of(tree) if c == "databases"]
         self.assertIn("off", hidden[0][1])
         self.assertIn("s4", hidden[0][1], "the hidden card is drawn at its width")
-        st, _, ck = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck)
+        st, _, ck = self.follow("/?set=ewdb&back=edit%3D1", ck)
         self.assertNotIn("db4x", ck)
         cards_ = self.cards_of(self.page(cookie=ck)[2])
         self.assertEqual(cards_[-1][0], "databases", "last")
         self.assertIn("s4", cards_[-1][1])
         self.assertNotIn("off", cards_[-1][1])
         # the script's whole-layout form keeps it too
-        st, _, ck2 = self.follow("/?set=lat2_db3x&back=app%3D1%26edit%3D1")
-        st, _, ck2 = self.follow("/?set=ewdb&back=app%3D1%26edit%3D1", ck2)
+        st, _, ck2 = self.follow("/?set=lat2_db3x&back=edit%3D1")
+        st, _, ck2 = self.follow("/?set=ewdb&back=edit%3D1", ck2)
         self.assertEqual(dict(prefs.parse_cookie(ck2)["layout"])["databases"], 3)
 
     def test_the_footer_and_the_settings_lead_to_the_editor(self):
-        _, _, tree = self.page("/?app=1")
-        links = [a for t, a, s in tree.tags if t == "a" and a.get("href") == "/?app=1&edit=1"]
+        _, _, tree = self.page("/")
+        links = [a for t, a, s in tree.tags if t == "a" and a.get("href") == "/?edit=1"]
         self.assertEqual(len(links), 1)
         self.assertIn("Edit layout", " ".join(tree.text))
-        _, _, tree = self.page("/?app=1&view=settings")
-        self.assertEqual(len([a for t, a, s in tree.tags if t == "a" and a.get("href") == "/?app=1&edit=1"]), 1)
-        _, body, _ = self.page("/?app=1&view=settings", cookie="1.lat2_ex1")
+        _, _, tree = self.page("/?view=settings")
+        self.assertEqual(len([a for t, a, s in tree.tags if t == "a" and a.get("href") == "/?edit=1"]), 1)
+        _, body, _ = self.page("/?view=settings", cookie="1.lat2_ex1")
         self.assertIn("so for now the cards stay in its order", body)
-        self.assertNotIn("so for now the cards stay in its order", self.page("/?app=1&view=settings")[1])
-        _, _, tree = self.page("/?app=1&card=exposure")
+        self.assertNotIn("so for now the cards stay in its order", self.page("/?view=settings")[1])
+        _, _, tree = self.page("/?card=exposure")
         self.assertNotIn("Edit layout", " ".join(tree.text))  # one card in full: not an overview
 
     def test_the_export_shows_the_cookies_layout_and_hidden(self):
-        _, body, tree = self.page("/?app=1&view=settings", cookie="1.lwa2_at1_dbx_bo1x")
+        _, body, tree = self.page("/?view=settings", cookie="1.lwa2_at1_dbx_bo1x")
         (_, _, _), = tree.find("pre", id="export")
         text = re.search(r'<pre id="export"[^>]*>(.*?)</pre>', body, re.S).group(1)
         self.assertIn("layout = webapps:2, attention\n", text)
         self.assertIn("hidden = databases, boot\n", text)
 
     def test_the_editor_is_only_where_it_makes_sense(self):
-        for path in ("/?edit=1&app=0", "/?app=1&view=settings&edit=1", "/?app=1&view=cpu&edit=1", "/?view=map&edit=1"):
+        for path in ("/?view=settings&edit=1", "/?view=cpu&edit=1", "/?view=map&edit=1"):
             self.assertFalse(self.page(path)[2].find("main", data_edit=True), path)
-        self.assertTrue(self.page("/?app=1&edit=1&card=exposure")[2].find("main", data_edit=True))  # the editor wins over a single card
+        self.assertTrue(self.page("/?edit=1&card=exposure")[2].find("main", data_edit=True))  # the editor wins over a single card
         _, body, tree = self.page("/?edit=1")  # the editor is a shell page
         self.assertTrue(tree.find("main", data_edit=True))
         self.assertIn('href="/s/app.', body)
@@ -1147,7 +1123,7 @@ class Builder(unittest.TestCase):
 
     # ---- the scripts and the policy
     def test_the_edit_page_carries_exactly_its_scripts_and_the_csp_lists_exactly_their_hashes(self):
-        for path in (self.EDIT, "/?edit=1", self.EDIT + "&zoom=125", "/?app=1&edit=1&ui=1.tl"):
+        for path in (self.EDIT, "/?edit=1", self.EDIT + "&zoom=125", "/?edit=1&ui=1.tl"):
             st, h, body = get(self.srv, path)
             self.assertEqual(st, 200, path)
             want = [webjs.KEYS_JS, webjs.PREFS_JS, webjs.BUILDER_JS]
@@ -1165,9 +1141,9 @@ class Builder(unittest.TestCase):
 
     def test_no_shell_page_has_an_inline_style(self):
         """style-src is exactly 'self': no <style>, no style= attribute, on any page or fragment of the shell (the graph's size is a class of <html>)."""
-        pages = Scripts.PAGES + ("/?app=1&edit=1", "/?app=1&kiosk=1&wall=1", "/?app=1&view=map&as=graph&z=50", "/?app=1&view=map&as=graph&z=200",
-                              "/?app=1&view=map&as=graph&z=300", "/?app=1&frag=1", "/?app=1&view=cpu&frag=1", "/?app=1&view=ai&frag=1",
-                              "/?app=1&view=map&as=graph&frag=1")
+        pages = Scripts.PAGES + ("/?edit=1", "/?kiosk=1&wall=1", "/?view=map&as=graph&z=50", "/?view=map&as=graph&z=200",
+                              "/?view=map&as=graph&z=300", "/?frag=1", "/?view=cpu&frag=1", "/?view=ai&frag=1",
+                              "/?view=map&as=graph&frag=1")
         for path in pages:
             st, h, body = get(self.srv, path)
             self.assertEqual(st, 200, path)
@@ -1177,20 +1153,20 @@ class Builder(unittest.TestCase):
                 self.assertNotIn("unsafe-inline", csp, path)
             self.assertIsNone(re.search(r"<style\b", body, re.I), path)
             self.assertIsNone(re.search(r"\sstyle\s*=", body, re.I), path)
-        _, _, body = get(self.srv, "/?app=1&view=map&as=graph&z=125")
+        _, _, body = get(self.srv, "/?view=map&as=graph&z=125")
         self.assertRegex(body, r'<html [^>]*class="[^"]*\bgz125\b')
         self.assertIn(".gz125 #gsvg{width:125%}", webcss.CSS)
-        self.assertRegex(get(self.srv, "/?app=1&view=map&as=graph")[2], r'<html [^>]*class="[^"]*\bgzfit\b')
+        self.assertRegex(get(self.srv, "/?view=map&as=graph")[2], r'<html [^>]*class="[^"]*\bgzfit\b')
         self.assertNotIn("style", webjs.FRAG_ATTRS)
         self.assertEqual(weburl.GZOOMS, webcss.GZOOMS)
 
     def test_the_builder_script_is_on_the_edit_page_only(self):
-        for path in ("/?app=1", "/?app=1&view=settings", "/?card=exposure", "/?app=1&view=map", "/?app=1&view=ai", "/?app=1&view=cpu", "/?app=1&pause=1",
-                     "/?app=1&view=health", "/", "/?view=map&as=graph"):
+        for path in ("/", "/?view=settings", "/?card=exposure", "/?view=map", "/?view=ai", "/?view=cpu", "/?pause=1",
+                     "/?view=health", "/", "/?view=map&as=graph"):
             st, h, body = get(self.srv, path)
             self.assertNotIn(webjs.csp_source(webjs.BUILDER_JS), h["Content-Security-Policy"], path)
             self.assertNotIn(webjs.BUILDER_JS, body, path)
-        for path in ("/?app=1", "/?app=1&view=settings"):
+        for path in ("/", "/?view=settings"):
             self.assertIn(webjs.csp_source(webjs.REFRESH_JS), get(self.srv, path)[1]["Content-Security-Policy"])  # they keep refresh and preferences
 
     def test_the_edit_page_is_served_whole_even_for_a_fragment_request(self):

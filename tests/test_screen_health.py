@@ -193,13 +193,10 @@ class Web(unittest.TestCase):
         self.assertEqual(view.count('data-card="__view"'), 1)
         self.assertEqual(view.count("<details"), len(re.findall(r'class="fd lv-', view)))
 
-    def test_the_selected_finding_is_open_and_the_classic_page_is_unchanged(self):
+    def test_the_selected_finding_is_open(self):
         sel = golden.SELECTED["finding"]
         view = view_of(self.page("app=1&view=health&sel=" + sel))
         self.assertEqual(len(re.findall(r"<details [^>]*open", view)), 1)
-        classic = self.page("app=0&view=health")
-        self.assertIn('<pre class="ht">', classic)
-        self.assertNotIn('class="hv"', classic)
 
     def test_the_tables_name_the_columns_they_drop_when_the_panel_is_narrow(self):
         import webcss

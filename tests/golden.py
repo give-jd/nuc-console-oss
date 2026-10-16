@@ -363,7 +363,6 @@ SELECTED = {  # what a case selects: the key of a MAP row (graph.path_key of its
     "row": "99ae4e80a5", "node": "881afd34cb", "finding": "mem-leak:node", "pid": "1610"}
 ROTATION = {"map_in_rotation": True, "cpu_in_rotation": True, "health_in_rotation": True}  # the slides: ..., Map, CPU, Health
 LOCKED = {"ai": {"web_actions": False}}  # merged into the default [ai]
-CLASSIC = {"ui": {"web": "classic"}}  # [ui] web = classic: the classic pages (kept for one release); the default is the shell
 CHAT = (  # the AI chat after two exchanges: an answer from the state and one query, and an advice that failed (the page draws them in its log)
     {"id": "0123456789ab", "kind": "ask", "q": "why is the disk filling up?", "error": "", "at": NOW - 120, "took": 14,
      "res": {"text": "/data grows by about 2 GB a day: shop-worker writes its logs there.\n\nRotate them, then check again tomorrow.",
@@ -462,44 +461,31 @@ def _cases():
     add("ai-locked-120x33", ("--view", "ai") + _size(120, 33), cfg=LOCKED)
     add("ai-locked-details-200x50", ("--view", "ai", "--select", "qwen3-4b", "--details") + _size(200, 50), cfg=LOCKED)
 
-    # the web view: the pages web.Server serves in demo mode (?query)
-    pages = (("dashboard", ""), ("dashboard-compact", "cols=100"), ("dashboard-full", "full=1"), ("dashboard-rotate", "rotate=1"),
-             ("cpu", "view=cpu"), ("cpu-details", f"view=cpu&sort=mem&sel={SELECTED['pid']}"),
-             ("map-tree", "view=map"), ("map-tree-details", f"view=map&all=1&sel={SELECTED['row']}"),
-             ("map-graph", "view=map&as=graph"), ("map-graph-details", f"view=map&as=graph&sel={SELECTED['node']}"),
-             ("health", "view=health"), ("health-details", f"view=health&sel={SELECTED['finding']}"),
-             ("ai", "view=ai"), ("ai-details", "view=ai&sel=qwen3-8b"),
-             # the AI page's forms: the demo machine has the advisor on, qwen3-4b in use and qwen3-1.7b installed (the forms carry the masked CSRF token)
-             ("ai-on-details", "view=ai&sel=qwen3-4b"), ("ai-not-installed", "view=ai&sel=qwen3-30b-a3b"),
-             ("ai-confirm-on", "view=ai&sel=qwen3-8b&confirm=on"),
-             ("ai-confirm-delete", "view=ai&sel=qwen3-1.7b&confirm=delete"), ("ai-confirm-delete-all", "view=ai&confirm=delete-all"),
-             ("ai-no-question", "view=ai&sel=qwen3-8b&confirm=delete"))  # delete of what is not installed: no question, the plain page
-    for name, query in pages:
-        add("web-" + name, query=query, cfg=CLASSIC)
-    add("web-ai-locked", query="view=ai&sel=qwen3-4b", cfg=dict(LOCKED, **CLASSIC))  # a locked page has no forms and the stricter CSP
-    add("web-ai-locked-confirm", query="view=ai&sel=qwen3-4b&confirm=delete", cfg=dict(LOCKED, **CLASSIC))  # and no question: nothing to confirm
-    # the new shell (?app=1): the overview, the settings (appearance, export, about), the CPU, Map, Health and AI screens (native: the AI forms and CSRF as on the classic page)
-    for name, query in (("overview", "app=1"), ("settings", "app=1&view=settings"), ("ai", "app=1&view=ai&sel=qwen3-4b"),
-                        ("cpu", "app=1&view=cpu"), ("cpu-details", f"app=1&view=cpu&sort=mem&sel={SELECTED['pid']}"),
-                        ("map", "app=1&view=map"), ("map-details", f"app=1&view=map&all=1&sel={SELECTED['row']}"),
-                        ("ai-confirm-delete", "app=1&view=ai&sel=qwen3-1.7b&confirm=delete"),  # the AI screen's question (delete these files?) with its yes button
-                        ("ai-confirm-delete-all", "app=1&view=ai&confirm=delete-all"), ("ai-not-installed", "app=1&view=ai&sel=qwen3-30b-a3b"),
-                        ("health", "app=1&view=health"), ("health-details", f"app=1&view=health&period=30&sel={SELECTED['finding']}"),
-                        ("overview-wall-light", "app=1&ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
-                        ("wall-kiosk", "app=1&ui=1.dw&kiosk=1"),  # the wall display: scrolls by itself (data-rotate), the footer says how to close it
-                        ("edit", "app=1&edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
+    # the web view: the pages web.Server serves in demo mode (?query). The MAP as a graph is the one page of the shell with a script of its own
+    for name, query in (("map-graph", "view=map&as=graph"), ("map-graph-details", f"view=map&as=graph&sel={SELECTED['node']}")):
         add("web-shell-" + name, query=query)
-    add("web-shell-ai-locked", query="app=1&view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
-    add("web-shell-ai-chat", query="app=1&view=ai", chat=CHAT)  # the chat in its box that scrolls, its Clear button, and beside it MODEL USAGE
-    add("web-shell-ai-chat-prompt", query="app=1&view=ai&prompt=0123456789ab", chat=CHAT)  # the whole prompt of an answer, under the chat
-    add("web-shell-ai-confirm-clear", query="app=1&view=ai&confirm=clear", chat=CHAT)  # Clear chat asks first
+    # the shell: the overview, the settings (appearance, export, about), the CPU, Map, Health and AI screens (native, with the AI forms and the CSRF token)
+    for name, query in (("overview", ""), ("settings", "view=settings"), ("ai", "view=ai&sel=qwen3-4b"),
+                        ("cpu", "view=cpu"), ("cpu-details", f"view=cpu&sort=mem&sel={SELECTED['pid']}"),
+                        ("map", "view=map"), ("map-details", f"view=map&all=1&sel={SELECTED['row']}"),
+                        ("ai-confirm-delete", "view=ai&sel=qwen3-1.7b&confirm=delete"),  # the AI screen's question (delete these files?) with its yes button
+                        ("ai-confirm-delete-all", "view=ai&confirm=delete-all"), ("ai-not-installed", "view=ai&sel=qwen3-30b-a3b"),
+                        ("health", "view=health"), ("health-details", f"view=health&period=30&sel={SELECTED['finding']}"),
+                        ("overview-wall-light", "ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
+                        ("wall-kiosk", "ui=1.dw&kiosk=1"),  # the wall display: scrolls by itself (data-rotate), the footer says how to close it
+                        ("edit", "edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
+        add("web-shell-" + name, query=query)
+    add("web-shell-ai-locked", query="view=ai&sel=qwen3-4b", cfg=LOCKED)  # locked by the admin: the notice, no form, no button
+    add("web-shell-ai-chat", query="view=ai", chat=CHAT)  # the chat in its box that scrolls, its Clear button, and beside it MODEL USAGE
+    add("web-shell-ai-chat-prompt", query="view=ai&prompt=0123456789ab", chat=CHAT)  # the whole prompt of an answer, under the chat
+    add("web-shell-ai-confirm-clear", query="view=ai&confirm=clear", chat=CHAT)  # Clear chat asks first
     # the Telegram page: off and not paired (the steps and the form, with the masked CSRF token); locked by the admin: no form
-    add("web-shell-telegram", query="app=1&view=telegram")
-    add("web-shell-telegram-locked", query="app=1&view=telegram", cfg={"telegram": {"web_actions": False}})
+    add("web-shell-telegram", query="view=telegram")
+    add("web-shell-telegram-locked", query="view=telegram", cfg={"telegram": {"web_actions": False}})
     # the setup guide: its five steps (an installation without the overlay: step 4 gives the lines for config.ini), and the banner of a first visit
     for n in range(1, 6):
-        add(f"web-shell-setup-{n}", query=f"app=1&view=setup&step={n}")
-    add("web-shell-overview-tour", query="app=1", env={"NUC_GOLDEN_SETUP": "fresh"})
+        add(f"web-shell-setup-{n}", query=f"view=setup&step={n}")
+    add("web-shell-overview-tour", query="", env={"NUC_GOLDEN_SETUP": "fresh"})
     return out
 
 

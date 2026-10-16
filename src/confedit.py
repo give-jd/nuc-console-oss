@@ -123,7 +123,7 @@ KEYS = (
           for key, title, what in FEATURE_WORDS)
     + _k("dashboard", (
         ("sections", LIST, ", ".join(nuc_config.SECTIONS), NOW,
-         "The order of the overview's sections, first to last (the console, the classic web page, and the web shell's default preset). "
+         "The order of the overview's sections, first to last (the console, and the web shell's default preset). "
          "A section left out keeps its place at the end; one switched off under Screens and sections is not drawn.",
          {"choices": nuc_config.SECTIONS}),
         ("mode", CHOICE, "overview", START,
@@ -140,7 +140,7 @@ KEYS = (
          "it has: the layout is never larger than the real console.", {"lo": 40, "hi": 500, "zero": True}),
         ("rows", INT, "0", START, "The console's layout height in lines; 0 = the real console's.", {"lo": 10, "hi": 200, "zero": True}),
         ("spacing", INT, "1", NOW,
-         "1 = a blank line under each section title (more air, a few more rows); 0 = compact. The console and the classic web page.",
+         "1 = a blank line under each section title (more air, a few more rows); 0 = compact. The console.",
          {"lo": 0, "hi": 1}),
         ("details", BOOL, "yes", NOW,
          "yes: a monitor with no keyboard turns to Details pages that show in full what the overview cut (… +N more), then comes back; "
@@ -151,9 +151,6 @@ KEYS = (
         ("health_in_rotation", BOOL, "no", NOW, "yes: the HEALTH screen joins the pages that take turns."),
     ))
     + _k("ui", (
-        ("web", CHOICE, "app", NOW,
-         "The web interface served: app = the shell of cards (this page); classic = the older text pages, kept for one release.",
-         {"choices": prefs.WEB_MODES[::-1]}),
         ("theme", CHOICE, "auto", NOW,
          "auto follows the system's light or dark mode; dark; light; high-contrast: the strongest colours.",
          {"choices": prefs.THEMES, "unset": True}),
@@ -214,8 +211,6 @@ KEYS = (
         ("settings_actions", BOOL, "no", LOCK,
          "yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it "
          "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),
-        ("columns", INT, "200", NOW, "Width of the classic web pages' grid in characters (a page can ask ?cols=).", {"lo": 60, "hi": 300}),
-        ("rows", INT, "60", NOW, "Height of that grid in lines.", {"lo": 20, "hi": 120}),
     ))
     + _k("alerts", (
         ("mute", LIST, "", NOW,

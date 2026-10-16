@@ -105,8 +105,8 @@ def ui_string(theme_code, density_code):
 
 
 def page_path(view, theme_code, density_code, kiosk=False):
-    """The shell's address for a view in a theme and a density, e.g. /?app=1&ui=1.td.dc&view=cpu (prefs.py: ?ui= is one URL's own preferences)."""
-    path = "/?app=1&ui=" + ui_string(theme_code, density_code) + VIEW_QUERY[view]
+    """The shell's address for a view in a theme and a density, e.g. /?ui=1.td.dc&view=cpu (prefs.py: ?ui= is one URL's own preferences)."""
+    path = "/?ui=" + ui_string(theme_code, density_code) + VIEW_QUERY[view]
     return path + ("&kiosk=1" if kiosk else "")
 
 

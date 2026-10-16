@@ -119,8 +119,19 @@ class Migrate(unittest.TestCase):
         for line in ("refresh_seconds = 5   # slow link", "tls_cert = /etc/x.pem", "flag = on"):
             self.assertIn(marker + line + "\n", new)
         self.assertIn("[experimental]", new)
-        self.assertIn("\nweb = classic\n", new)  # a key of [ui] the page still honours: carried, not legacy
-        self.assertEqual(self.cfg()["ui"]["web"], "classic")
+        self.assertIn(marker + "web = classic\n", new)  # [ui] web is gone: the line is carried, as a legacy one, and the file still loads
+        self.assertNotIn("web", self.cfg()["ui"])
+
+    def test_the_old_ui_web_key_is_legacy_whatever_its_value(self):
+        for value in ("classic", "app"):
+            new = self.migrated(add_to(OLD, "ui", "web = " + value))
+            self.assertIn(confmigrate.LEGACY + "\nweb = %s\n" % value, new)
+            self.assertNotIn("# web =", new.split("[ui]")[1].split("\n[")[0], "the shipped file no longer lists the key")
+
+    def test_the_old_web_grid_keys_are_legacy(self):
+        new = self.migrated(add_to(add_to(OLD, "web", "columns = 120"), "web", "rows = 40"))
+        for line in ("columns = 120", "rows = 40"):
+            self.assertIn(confmigrate.LEGACY + "\n" + line + "\n", new)
 
     def test_second_run_is_already_current_and_changes_nothing(self):
         new = self.migrated(add_to(set_old(OLD, "web", "port", "9000"), "web", "tls_cert = /etc/x.pem"))

@@ -43,7 +43,7 @@ Linux: no X11, no browser · macOS/Windows: one full-screen local page · no dep
 | 🎛️ **Configurable** | switch every section on/off, **fixed and reorderable section order**, single screen or rotating pages, pin the layout size, refresh every 1–10 s |
 | 🌍 **Web view** | optional: a shell of cards in a browser (overview, MAP, CPU, HEALTH, AI; dark, light, wall display) over Tailscale/LAN, read-only except the AI page's buttons ([docs/WEB.md](docs/WEB.md)); off by default, token or loopback only; `[ai] web_actions = no` makes it read-only for good |
 | 📨 **Telegram alerts** | optional: new and resolved problems on your phone, through a Telegram bot of your own (free, three steps, from the web view's Telegram page or the command line: [docs/TELEGRAM.md](docs/TELEGRAM.md)). Titles only by default; it only sends (HTTPS to Telegram: no listener, no webhook, it never reads messages, no commands); off by default |
-| 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (`/?full=1`) |
+| 🔍 **Nothing hidden** | what the overview cuts ("… +N more") is shown in full on rotating **Details** pages (no keyboard needed) and in the web view (a card's own page, `/?card=<id>`) |
 | 🧪 **Try it without root** | `python3 src/render.py --once --demo` |
 
 <details>
@@ -306,7 +306,7 @@ Measured on a 14-thread x86 mini-PC: renderer (2 s refresh, the default; 240×67
 
 ## Web view (optional)
 
-Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; the pages work with scripts off, and the few small first-party scripts (partial refresh, keys, the layout editor, the MAP graph's drag and zoom) are pinned by their hashes in the page's CSP. The page is the new shell (cards, key figures, five screens, appearance settings, a layout editor, a wall display for a monitor): the older "classic" pages are kept for one release as a fallback (`[ui] web = classic`, or `?app=0` for one URL) and will be removed.
+Want the screen in a browser? `[web] enabled = yes`, then `tailscale serve --bg 8787`. Read-only (except the AI page's buttons, which `[ai] web_actions = no` locks), binds to loopback unless you give it a token; the pages work with scripts off, and the few small first-party scripts (partial refresh, keys, the layout editor, the MAP graph's drag and zoom) are pinned by their hashes in the page's CSP. The page is the new shell (cards, key figures, five screens, appearance settings, a layout editor, a wall display for a monitor); it is the only web interface (the older "classic" pages and `[ui] web = classic` are gone).
 **`/app`** is the same web view as a live app: the screens are drawn in the browser and change in place as the machine does, without a reload
 (the footer's **live app** link); what they show is also JSON, `/api/v1/<view>`, for your own scripts.
 Setup and threat model: **[docs/WEB.md](docs/WEB.md)**. New here? The **setup guide** (`/setup`, five short steps; in the web view and the desktop app only, the text console has none) explains the screens, what is on and off and how to set it up: **[docs/WIZARD.md](docs/WIZARD.md)**. Config editing from the web is deliberately not offered.

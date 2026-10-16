@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """nuc-console web view: the dashboard screen in a browser. Read-only, opt-in, stdlib only; the AI page has buttons.
 
-Two interfaces: the classic one (the screen as text, the default) and the shell (`[ui] web = app` or `?app=1`: a top bar, key figures and cards, with
-the Map, CPU, Health and AI pages inside the same frame; /s/app.<sha8>.css is its style sheet, `/?set=` writes the appearance cookie). Neither runs a
-script of its own here; the shell's scripts are a later step.
+One interface, the shell: a top bar, key figures and cards, with the Map, CPU, Health and AI pages inside the same frame; /s/app.<sha8>.css is its
+style sheet, `/?set=` writes the appearance cookie. Its scripts are first-party and pinned by their hashes (webjs.py).
 
 Off unless `[web] enabled = yes` in config.ini. Runs as the unprivileged user, reads the same state as the tty
-renderer and serves one HTML page (no JavaScript, except the one fixed script of the MAP's graph view, pinned by its hash
-in the Content-Security-Policy). GET only, except the forms of the AI page (`/?view=ai`): POST /ai/<action>, form-encoded, answered
+renderer and serves HTML pages (no script but the fixed first-party ones, pinned by their hashes in the Content-Security-Policy). GET only, except the forms of the AI page (`/?view=ai`): POST /ai/<action>, form-encoded, answered
 with a redirect (src/aiweb.py does the work in the background), and those of the Telegram page (`/?view=telegram`): POST /telegram/<action>
 (src/tgweb.py: pair, cancel, on, off, test). Those forms are guarded: the same access as viewing (loopback, or the token), a CSRF token,
 Origin/Referer/Sec-Fetch-Site checks, a 4 KB body, ids checked against the catalog, `[ai] web_actions = no` / `[telegram] web_actions = no` to lock.
@@ -55,12 +53,9 @@ import webcss
 import webjs
 import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
-from webmap import (canvas, graph_body, graph_doc, graph_here, graph_select, graph_url, map_body, map_here, map_native, map_nodes, map_state,
-                    mode_switch, prune, state_params, tree_url, zoom_steps)
-from webpages import (AiUi, ai_asked, ai_body, ai_native, ai_nodes, ai_prompt_node, health_body, health_native, health_nodes, sel_index,
-                      telegram_html)
+from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
+from webpages import ai_asked, ai_native, ai_nodes, health_native, health_nodes, telegram_html
 from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
-from htmlview import AI_CSS, CPU_CSS, CSS, HEALTH_CSS, MAP_CSS, fit_css, to_html  # noqa: F401 - to_html is part of this module's interface (tests, tools)
 
 MAX_CONN = 32        # simultaneous connections; more are dropped
 STREAMS_MAX = 8      # streams open at once (each holds a connection and a thread; the app's tabs hold one each): more get 503
@@ -68,7 +63,6 @@ STREAM_S = 300       # a stream ends after this long (the request deadline does 
 KEEPALIVE_S = 15     # a comment line when nothing changed for this long: proxies and clients see the stream is alive
 CACHE_MAX = 64       # rendered pages kept: map URLs have unbounded combinations, the least recently used goes first
 CACHE_CHARS = 32 * 2 ** 20  # and at most this much HTML: a map page that repeats many real row keys weighs megabytes
-HEALTH_COLS = 140     # the health page's default width in columns: wider than that scrolls sideways on a laptop (cols=200 asks for the 3-column layout)
 LAYOUTS_MAX = 16     # layouts kept (they are pure: the same nodes and edges give the same positions, whatever graph they come from)
 MARGIN = 70          # around the drawing: a label is centred under its circle
 GRAPH_SCRIPT = graphjs.SCRIPT  # sent as is, never built from request data
@@ -79,7 +73,7 @@ class Page(str):
     form) and the Referrer-Policy (the AI page sends its own address to itself, so that the browser's Origin on a post is the real one)."""
     csp = CSP
     referrer = "no-referrer"
-    blocks = None  # a shell page: its blocks (top bar, key figures, cards, the view), what ?frag=1 serves; a classic page has none
+    blocks = None  # a shell page: its blocks (top bar, key figures, cards, the view), what ?frag=1 serves; the layout editor has none
 
 
 class View(object):
@@ -214,63 +208,53 @@ class Server(http.server.ThreadingHTTPServer):
         """Characters of the cached pages (the cached map graph is not a page: it counts 0)."""
         return sum(len(v) for _, v in self.cache.values() if isinstance(v, (str, bytes)))
 
-    def page(self, cols=0, full=False, zoom=0, rows=0, fit=False, rotate=False, kiosk=False, refresh=0, view="", app="", ui="", card="", edit=False, cookie="", **state):
+    def page(self, zoom=0, rotate=False, kiosk=False, refresh=0, view="", ui="", card="", edit=False, cookie="", **state):
         """zoom/refresh 0 = the configured ones: only what the viewer changed is written in the links.
         view='map': the MAP page, state = its open/shut/all/sel/only/pause parameters (see view_params).
-        The shell (uses_shell) draws the same views in its own frame; cookie is the nuc_ui cookie the request came with (prefs.effective checks it)."""
+        cookie is the nuc_ui cookie the request came with (prefs.effective checks it)."""
         r = refresh or self.cfg["refresh_seconds"]
-        here = {"cols": cols, "rows": rows, "zoom": zoom, "fit": fit, "full": full, "rotate": rotate, "kiosk": kiosk, "refresh": refresh, "app": app, "ui": ui}
+        here = {"zoom": zoom, "rotate": rotate, "kiosk": kiosk, "refresh": refresh, "ui": ui}
         zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
         self.cpu_feed.max_age = r  # processes are read at most once per refresh interval, however many viewers and pages ask
-        shell = self.uses_shell(view, app, card, edit)
         pause = bool(state.get("pause")) and not edit  # the editor does not reload by itself: a page that moves under your hand is no editor
-        if shell:
-            eff, src = prefs.effective(render.CFG.get("ui"), cookie, "" if edit else ui)  # the editor edits the browser's layout, not a ?ui= one
-            cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing)
-            norm = {"": {"pause": pause, "edit": edit}, "settings": {}}.get(view, {})
-        else:
-            norm = {}
+        eff, src = prefs.effective(render.CFG.get("ui"), cookie, "" if edit else ui)  # the editor edits the browser's layout, not a ?ui= one
+        cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing)
+        norm = {"": {"pause": pause, "edit": edit}, "settings": {}}.get(view, {})
 
-        def serve(key, ttl, build):
-            """The classic page build(False), or the shell's page of the same view (build(True) is its View); one render at a time, kept ttl seconds."""
-            if not shell:
-                return self.cached(key, ttl, lambda: build(False))
+        def serve(ttl, build):
+            """The shell's page of the view (build() is its View); one render at a time, kept ttl seconds."""
             skey = ("shell", view, card, zoom, r, prefs.dump_cookie(eff), cookie, prefs.custom_layout(src, eff["order"])) + tuple(here.items()) + tuple(sorted(norm.items()))
             return self.cached(skey, ttl, lambda: self.shell_render(view, build, here, zoom, r, eff, cookie, pause, card, edit,
                                                                      prefs.custom_layout(src, eff["order"])))
         if view == "cpu":
             norm = {"sort": state.get("sort", ""), "sel": state.get("sel", ""), "pause": pause}
-            key = ("cpu", zoom, r) + tuple(here.items()) + (state.get("sort", ""), state.get("sel", ""))
-            return serve(key, r / 2, lambda sh: self.cpu_page(here, zoom, r, state.get("sort", "") or "cpu", state.get("sel", ""), sh))
+            return serve(r / 2, lambda: self.cpu_page(here, r, state.get("sort", "") or "cpu", state.get("sel", "")))
         if view == "map":
             state = map_mode(state)
             norm = dict(state)
-            key = ("map", zoom, r) + tuple(here.items()) + tuple(sorted(state.items()))
-            return serve(key, r / 2, lambda sh: self.map_page(here, state, zoom, r, sh))
+            return serve(r / 2, lambda: self.map_page(here, state, r))
         if view == "health":  # the period and the selected finding are checked here, so that the cache key holds only values that exist
             days = state.get("period") if state.get("period") in screens.HEALTH_DAYS else 7
             on = render.CFG["features"].get("health", True)
             ids = {f["id"] for f in screens.health_findings(render.health_data(days)["report"])} if on else set()  # one report a minute per period
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             norm = {"days": days, "sel": sel, "pause": pause}
-            key = ("health", zoom, r, days, sel, pause) + tuple(here.items())
-            return serve(key, r / 2, lambda sh: self.health_page(here, days, sel, pause, zoom, r, sh))
+            return serve(r / 2, lambda: self.health_page(here, days, sel, pause))
         if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
             rows = screens.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             confirm, prompt = ai_asked(rows, sel, state.get("confirm", ""), state.get("prompt", ""))
             norm = {"sel": sel, "pause": pause, "confirm": confirm, "prompt": prompt, "version": aiweb.version()}
-            key = ("ai", zoom, r, sel, pause, confirm, prompt, aiweb.version()) + tuple(here.items())  # a job that ends, a server that starts: a new page
-            return serve(key, min(r / 2, 1.0), lambda sh: self.ai_page(here, sel, pause, confirm, zoom, r, sh, prompt))  # a job's progress moves: never older than a second
-        if view == "telegram":  # the shell only (uses_shell); a pairing that waits, an answer of the notifier: a new page
+            return serve(min(r / 2, 1.0), lambda: self.ai_page(here, sel, pause, confirm, prompt))  # a job's progress moves: never older than a second
+        if view == "telegram":  # a pairing that waits, an answer of the notifier: a new page
             norm = {"version": tgweb.version()}
-            return serve(("telegram", zoom, r, tgweb.version()) + tuple(here.items()), min(r / 2, 1.0), lambda sh: self.telegram_page(here))
-        if view == "setup":  # the shell only: the setup guide, a step of it (wizard.clamp), its marker (a new page when it is written)
+            return serve(min(r / 2, 1.0), lambda: self.telegram_page(here))
+        if view == "setup":  # the setup guide, a step of it (wizard.clamp), its marker (a new page when it is written)
             step = wizard.clamp(state.get("step"))
             norm = {"step": step}
-            return serve(("setup", zoom, r, step, wizard.state()) + tuple(here.items()), r / 2, lambda sh: self.setup_page(here, step))
-        return serve((cols, rows, zoom, fit, full, rotate, kiosk, r), r / 2, lambda sh: self.dashboard(here, zoom, r))
+            return serve(r / 2, lambda: self.setup_page(here, step))
+        return serve(r / 2, lambda: None)  # the overview and the settings: shell_render builds them from the preferences
 
     # ---- the live app: /app (src/appjs.py draws the screens from the data API) -------------------------------------------------------
 
@@ -310,7 +294,7 @@ class Server(http.server.ThreadingHTTPServer):
         setlink = lambda field, label, cur, **data: set_link(field, back, label, cur, **data)  # noqa: E731
         groups = ['<span class="live">live</span>',
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="{html.escape(here)}">pause</a>',
-                  f'<a class="lnk" href="{html.escape(page_url({"view": view} if view else {}) if view else "/")}">classic pages</a>',
+                  f'<a class="lnk" href="{html.escape(page_url({"view": view} if view else {}) if view else "/")}">shell</a>',
                   f'<a class="lnk" href="{wizard.link(1)}">setup guide</a>',
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>"]
@@ -319,7 +303,7 @@ class Server(http.server.ThreadingHTTPServer):
         tour = wizard.banner_html(self.csrf, "app") if not wizard.state() else ""
         body = (top_bar + tour + '<div class="kpiblock" id="kpis"></div><div id="stale" class="stale-banner" role="status" hidden></div>'
                 + f'<main id="app" class="{"view" if view else "grid"}"{" data-static" if (q.get("live") or [""])[0] == "0" else ""}>'
-                + '<noscript><p class="msg lv-info"><span class="sym">\u00b7</span> the live app needs JavaScript: the <a href="/">classic pages</a> do not.</p></noscript>'
+                + '<noscript><p class="msg lv-info"><span class="sym">\u00b7</span> the live app needs JavaScript: the <a href="/">shell</a> does not.</p></noscript>'
                 + "</main>" + htmlview.foot(groups, time.strftime("%H:%M:%S"))
                 + htmlview.help_dialog(ui.help_rows(view or "overview", feats, bool(nuc_config.PORTABLE), False))
                 + data(conf, "cfg") + data(first, "doc"))
@@ -458,12 +442,7 @@ class Server(http.server.ThreadingHTTPServer):
         snap["status"].pop("ts", None)
         return {"engine": snap, "csrf": self.csrf if forms else None, "actions": ["/telegram/" + a for a in TG_ACTIONS] if forms else []}
 
-    # ---- the shell: `[ui] web = app` or ?app=1 --------------------------------------------------------------------------------------
-
-    def uses_shell(self, view, app, card, edit=False):
-        """The shell is the page for ?app=1, for the settings, the Telegram page, a single card and the layout editor (they exist only there), and for every page
-        when [ui] web = app (?app=0 asks for the classic page anyway)."""
-        return view in QUIET_VIEWS or bool(card) or edit or app == "1" or (app != "0" and (render.CFG.get("ui") or {}).get("web") == "app")
+    # ---- the shell --------------------------------------------------------------------------------------
 
     def shell_frame(self, r):
         """The data of a shell page (cards.Ctx), read once per half refresh interval whatever the number of viewers."""
@@ -484,7 +463,7 @@ class Server(http.server.ThreadingHTTPServer):
                          new=exposure.new_ports(st["net"], st["cont"], st["baseline"]), health=health, ai=ai)
 
     def shell_render(self, view, build, here, zoom, r, eff, cookie, pause, card, edit=False, custom=False):
-        """One page of the shell: the top bar and the key figures (blocks the page is refreshed by), the view, the footer and the help. `build(True)`
+        """One page of the shell: the top bar and the key figures (blocks the page is refreshed by), the view, the footer and the help. `build()`
         gives the View of a Map, CPU, Health or AI page (the page's own builder, which then returns its body and its controls, not a document).
         edit: the overview as the layout editor (no refresh, its own script); custom: the layout in force is the reader's own (the cards keep their order)."""
         ctx = self.shell_frame(r)
@@ -497,7 +476,7 @@ class Server(http.server.ThreadingHTTPServer):
         elif view == "":
             v = self.overview_view(here, eff, ctx, r, pause, card, visible, custom)
         else:
-            v = build(True)
+            v = build()
         vhere = dict(v.here) if v.here is not None else dict({"view": view}, **here)
         pause = bool(vhere.get("pause", pause))
         if pause:
@@ -578,7 +557,7 @@ class Server(http.server.ThreadingHTTPServer):
                                        cookie if not here["ui"] and cookie != prefs.COOKIE_VERSION else "", r_live, v.cls, scripts, pause))
         page.csp = page_csp(scripts, shell=True, forms=v.forms or bool(tour))
         page.referrer = "same-origin" if v.forms or tour else "no-referrer"
-        page.blocks = None if edit else top + kpis + blocks  # the editor has no refresh script: ?frag=1 gets the whole page, as a classic page does
+        page.blocks = None if edit else top + kpis + blocks  # the editor has no refresh script: ?frag=1 gets the whole page
         return page
 
     @staticmethod
@@ -741,7 +720,7 @@ class Server(http.server.ThreadingHTTPServer):
         edit_href = esc(page_url(dict(here, view="", edit=True)))
         layout = (f'<div class="fs"><span class="lab">Layout {where("layout")}</span><div><a class="lnk" href="{edit_href}">Edit layout</a></div>'
                   '<p class="hintl">Move, resize and hide the cards of the overview. It is kept in this browser; a preset or Reset layout brings the preset\'s back.</p></div>')
-        export = prefs.export_ini(dict(eff, web="app"))
+        export = prefs.export_ini(eff)
         appearance = (f'<section class="sec" aria-labelledby="sec-app"><h3 class="sech" id="sec-app">Appearance</h3>{theme}{dens}{preset}{layout}{order}{start}{kpis}'
                       f'<div class="fs expo"><span class="lab" id="exp-lab">Export</span><pre id="export" tabindex="0" aria-labelledby="exp-lab">{esc(export)}</pre>'
                       f'<button type="button" class="lnk" data-copy="#export" data-done="Copied" data-fail="Selected: press Ctrl+C">Copy</button>'
@@ -975,43 +954,6 @@ class Server(http.server.ThreadingHTTPServer):
                 "unpaired": "on, but not paired: pair it on the Telegram page", "down": "on, but the notifier is not running"}.get(
             state, "failing for " + why)
 
-    def grid(self, here, zoom):
-        """(columns, rows, CSS) of a screen page: the text fills the window (fit) or is a fixed grid whose font grows with the zoom."""
-        cols, rows, fit = (here[k] for k in ("cols", "rows", "fit"))
-        base_cols, base_rows = cols or self.cfg["columns"], rows or self.cfg["rows"]
-        if fit:  # the text fills the window: a bigger zoom = fewer columns and rows, re-laid out like a smaller console
-            gcols, grows = max(60, round(base_cols * 100 / zoom)), max(16, round(base_rows * 100 / zoom))
-            return gcols, grows, fit_css(gcols, grows if rows else 0)
-        return base_cols, base_rows, "body{font-size:%.1fpx}" % (14 * zoom / 100)  # like the browser's own zoom (Ctrl +/-)
-
-    def dashboard(self, here, zoom, r):
-        rows, fit, full, rotate, kiosk = (here[k] for k in ("rows", "fit", "full", "rotate", "kiosk"))
-        gcols, grows, style = self.grid(here, zoom)
-        try:
-            if full:  # overview + every detail page: nothing hidden behind "… +N more"
-                body = "</pre><hr><pre>".join(to_html(f) for f in render.render_screens(self.smp, gcols, grows, mode="overview", keys=False, page=True,
-                                                                                      cpu_feed=self.cpu_feed))
-            else:
-                # all the columns ("wide" 200 = the 2-column layout); fit without rows = a normal browser window: the page
-                # scrolls, so it shows every section in full at any text size (full screen fits instead, and rotates)
-                screen, _ = render.render_screen(self.smp, gcols, grows, mode="overview", at=time.time() if rotate else None,
-                                                 keys=False, page=True, scroll=fit and not rows, cpu_feed=self.cpu_feed)
-                body = to_html(screen)
-        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
-            print("nuc-console web: render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
-            body = "render error (see the service log)"
-        link = lambda text, **kw: f'<a href="{html.escape(page_url(here, **kw))}">{text}</a>'  # noqa: E731
-        views = [link("compact", cols=100), link("wide", cols=200), link("overview", full=False) if full else link("full details", full=True)]
-        for name in ("map", "cpu", "health", "ai"):
-            if render.CFG["features"].get(name, True):
-                views.append(f'<a href="{html.escape(page_url(dict({"view": name}, **here)))}">{name}</a>')
-        page = (f'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                f'<meta http-equiv="refresh" content="{r}"><title>{html.escape(socket.gethostname())} · nuc-console</title>'
-                f'<style>{CSS}{style}</style><pre>{body}</pre><footer>text {self.sizes(link, zoom)} · refresh every {self.every(link, r)} · '
-                f'{" · ".join(views)} · read-only · {time.strftime("%H:%M:%S")}' + (f" · {html.escape(render.KIOSK_HINT)}" if kiosk else "")
-                + '</footer></html>')
-        return page
-
     @staticmethod
     def sizes(link, zoom):
         i = ZOOMS.index(zoom)
@@ -1048,94 +990,36 @@ class Server(http.server.ThreadingHTTPServer):
         links = screens.CpuLinks(lambda by: page_url(chere, sort="" if by == "cpu" else by), lambda pid: page_url(chere, sel="" if str(pid) == sel else str(pid)))
         return screens.cpu_view(d, render.cpu_ctx(False), screens.WEB_W, 10 ** 4, sort, int(sel) if sel else None, bool(sel), 0, links).nodes, sel
 
-    def cpu_page(self, here, zoom, r, sort, sel, shell=False):
-        """The CPU screen as a page: the console's own screen through the ANSI path, its process rows links (sel= shows that process's
-        details), the sort as links in the bottom bar. The processes are read once per refresh interval, whoever asks (cpu_feed). In the
-        shell (shell=True) it is built of components instead (cpu_native)."""
-        esc = html.escape
-
-        def doc(body, foot, style="", refresh=True, tools=(), vhere=None):  # the host name after cpu_problems(): --demo names the host there
-            if shell:
-                return View(body, tools, vhere, refresh)
-            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
-                    + f'<title>{esc(socket.gethostname())} · cpu · nuc-console</title><style>{CSS}{CPU_CSS}{style}</style>{body}'
-                    f'<footer>{" · ".join(foot)}</footer></html>')
-        dash = f'<a href="{esc(page_url(here))}">dashboard</a>'  # back to the normal view, same size and refresh
+    def cpu_page(self, here, r, sort, sel):
+        """The CPU screen as a page of the shell (cpu_native); the processes are read once per refresh interval, whoever asks (cpu_feed)."""
         if not render.CFG["features"].get("cpu", True):
-            return doc("<p>CPU screen disabled in config.ini (<b>[features] cpu = no</b>)</p>", [dash, "read-only"], refresh=False)
-        if shell:
-            return self.cpu_native(here, r, sort, sel)
-        gcols, grows, style = self.grid(here, zoom)
-        chere = {"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}
-        chere.update(here)
-        try:
-            d = self.cpu_feed.read()
-            sel = sel if sel and int(sel) in {p["pid"] for p in d["procs"]["procs"]} else ""  # no such process (any more): dropped
-            chere["sel"] = sel
-            screen, rows = render.cpu_web(d, render.cpu_problems(self.smp), gcols, grows, sort, int(sel) if sel else None, here["fit"] and not here["rows"])
-            lines = [to_html(x) for x in screen.split("\x1b[K\r\n")]
-            for i, pid in rows:  # a process row is a link: its details, or (the one open) back to the table
-                lines[i] = f'<a class="pr" title="details" href="{esc(page_url(chere, sel="" if str(pid) == sel else str(pid)))}">{lines[i]}</a>'
-            body = f"<pre>{chr(10).join(lines)}</pre>"
-        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
-            print("nuc-console web: cpu render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
-            body = "<pre>render error (see the service log)</pre>"
-        link = lambda text, **kw: f'<a href="{esc(page_url(chere, **kw))}">{text}</a>'  # noqa: E731
-        sorts = " ".join(f"<b>{name}</b>" if key == sort else link(name, sort="" if key == "cpu" else key)
-                         for key, name in (("cpu", "cpu"), ("mem", "mem"), ("time", "time"), ("pid", "pid"), ("user", "user")))
-        tools = ["sort " + sorts, link("close details", sel="") if sel else "a process: its details"]
-        bar = [dash] + ([f'<a href="{esc(page_url(dict({"view": "map"}, **here)))}">map</a>'] if render.CFG["features"].get("map", True) else [])
-        bar += tools + ["text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
-        if here["kiosk"]:
-            bar.append(esc(render.KIOSK_HINT))
-        return doc(body, bar, style, tools=tools, vhere=chere)
+            return View("<p>CPU screen disabled in config.ini (<b>[features] cpu = no</b>)</p>", (), None, False)
+        return self.cpu_native(here, r, sort, sel)
 
     def map_graph(self, r):
         """render.map_graph() for as long as a page lives (r/2), shared by every map view: a new sel/open/shut walks the
         tree again, it does not rebuild the graph (bounded CPU)."""
         return self.cached(("map graph",), r / 2, lambda: render.map_graph(self.smp))
 
-    def map_page(self, here, state, zoom, r, shell=False):
+    def map_page(self, here, state, r):
         """The MAP as real HTML (rows of links, not a screen): the URL holds the whole view, so the reload keeps it."""
-        def doc(body, foot, refresh=True, tools=(), vhere=None):  # the host name after map_graph(): --demo names the host there
-            if shell:
-                return View(body, tools, vhere, refresh)
-            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
-                    + f'<title>{html.escape(socket.gethostname())} · map · nuc-console</title><style>{CSS}{MAP_CSS}'
-                    + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
-        dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'  # back to the normal view, same size and refresh
         if not render.CFG["features"].get("map", True):
-            return doc("<p>map disabled in config.ini (<b>[features] map = no</b>)</p>", [dash, "read-only"], refresh=False)
+            return View("<p>map disabled in config.ini (<b>[features] map = no</b>)</p>", (), None, False)
         if state.get("as") == "graph":
-            return self.graph_page(here, state, zoom, r, dash, shell)
+            return self.graph_page(here, state, r)
         pause, st, sel = state.get("pause", False), map_state(state), state.get("sel", "")
         found = {}
         try:
             G, pb = self.map_graph(r)
             prune(G, st)
             mhere = map_here(here, st, sel, pause)
-            if shell:  # the shell draws the screen itself: the components of screens.py, as HTML (the classic page below is unchanged)
-                body = map_native(G, st, sel, mhere, here, pause, found)
-                return View(body, [], mhere, not pause, legacy=False)
-            body = map_body(G, pb, st, sel, mhere, socket.gethostname(), found)
+            body = map_native(G, st, sel, mhere, here, pause, found)
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
             print("nuc-console web: map render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
-            mhere, body, found = map_here(here, st, sel, pause), "<pre>render error (see the service log)</pre>", {}
-        anchor = f"#r-{sel}" if sel else ""  # the footer's links keep the selected row in sight
-        link = lambda text, **kw: f'<a href="{html.escape(page_url(mhere, **kw) + anchor)}">{text}</a>'  # noqa: E731
-        tools = [mode_switch(None, graph_url(found, st.only, pause, here)),
-                 link("expand all", **state_params(graph.State(all=True, only=st.only))),
-                 link("collapse all", **state_params(graph.State(only=st.only))),
-                 link("all paths", only=False) if st.only else link("problems only", only=True)]
-        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
-               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
-        if here["kiosk"]:
-            bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause, tools=tools, vhere=mhere)
+            mhere, body = map_here(here, st, sel, pause), "<pre>render error (see the service log)</pre>"
+        return View(body, [], mhere, not pause, legacy=False)
 
-    def graph_page(self, here, state, zoom, r, dash, shell=False):
+    def graph_page(self, here, state, r):
         """The MAP as a graph: circles (nodes) and lines (edges) in an SVG, every node a link that selects it, the details
         of the selected one beside it. It works without a script; with GRAPH_SCRIPT (pinned by its hash in this page's
         CSP, the only page that has one) nodes can be dragged and the drawing zoomed and panned, and the script reloads
@@ -1165,16 +1049,7 @@ class Server(http.server.ThreadingHTTPServer):
                  "remote addresses " + choice([("on", url(ext="") if ext else None), ("off", None if ext else url(ext="0"))]),
                  "stacks " + choice([("on", None if stacks else url(stacks=True)), ("off", url(stacks=False) if stacks else None)]),
                  "zoom " + zoom_steps(link, z)]
-        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
-               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
-        if here["kiosk"]:
-            bar.append(html.escape(render.KIOSK_HINT))
-        if shell:  # the drawing's size is a class of <html> (gzNNN) the style sheet sizes: no inline style (View.cls)
-            return View(body, tools, gh, not pause, script=script, cls=f"gz{z}" if z else "gzfit")
-        page = Page(graph_doc(r, zoom, z, body, bar, not pause, script))
-        if script:
-            page.csp = page_csp([script])
-        return page
+        return View(body, tools, gh, not pause, script=script, cls=f"gz{z}" if z else "gzfit")  # the drawing's size is a class of <html> (gzNNN): no inline style
 
     def layout(self, ids, pairs, w, h):
         """graphlayout.layout() of these nodes and edges on a w x h drawing, computed once: it is pure (the same nodes and
@@ -1190,40 +1065,15 @@ class Server(http.server.ThreadingHTTPServer):
             return pos
 
 
-    def health_page(self, here, days, sel, pause, zoom, r, shell=False):
-        """The HEALTH page: the console screen's parts as HTML. The findings are links (sel=<id>) whose details show beside or under the
-        list; the sections of tables are the console's, drawn at the page's width. The URL holds the whole view, so the reload keeps it."""
-        def doc(body, foot, refresh=True, tools=(), vhere=None):
-            if shell:
-                return View(body, tools, vhere, refresh)
-            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                    + (f'<meta http-equiv="refresh" content="{r}">' if refresh else "")
-                    + f'<title>{html.escape(socket.gethostname())} · health · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}'
-                    + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
-        dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
+    def health_page(self, here, days, sel, pause):
+        """The HEALTH page: the console screen's components as HTML. The findings are links (sel=<id>) whose details show beside or under the
+        list. The URL holds the whole view, so the reload keeps it."""
         if not render.CFG["features"].get("health", True):
-            return doc("<p>health disabled in config.ini (<b>[features] health = no</b>)</p>", [dash, "read-only"], refresh=False)
+            return View("<p>health disabled in config.ini (<b>[features] health = no</b>)</p>", (), None, False)
         hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": pause}, **here)
-        if shell:  # the shell draws the screen itself: the components of screens.py, as HTML
-            return View(health_native(self.smp, days, sel, hhere), [], hhere, not pause, legacy=False)
-        cols, data = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), {"report": None}
-        try:
-            data, pb = render.health_state(self.smp, days)
-            body = health_body(data, pb, days, sel, hhere, cols, socket.gethostname())
-        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
-            print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
-            body = "<pre>render error (see the service log)</pre>"
-        anchor = f"#f-{sel_index(data, sel)}" if sel else ""  # the footer's links keep the selected finding in sight
-        link = lambda text, **kw: f'<a href="{html.escape(page_url(hhere, **kw) + anchor)}">{text}</a>'  # noqa: E731
-        periods = " ".join(f"<b>{lab}</b>" if d == days else link(lab, period=d if d != 7 else 0) for d, lab in ((1, "24h"), (7, "7d"), (30, "30d")))
-        tools = ["period " + periods, link("compact", cols=100), link("wide", cols=200)]
-        bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
-               "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only", time.strftime("%H:%M:%S")]
-        if here["kiosk"]:
-            bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause, tools=tools, vhere=hhere)
+        return View(health_native(self.smp, days, sel, hhere), [], hhere, not pause, legacy=False)
 
-    def ai_page(self, here, sel, pause, confirm, zoom, r, shell=False, prompt=""):
+    def ai_page(self, here, sel, pause, confirm, prompt=""):
         """The AI page: the AI switch and what it is doing at the top, the chat under it (the model answers as soon as the server does), then what
         this machine can run: the models as a table (a button per model: use it), their details, the hardware and the status. Forms post to /ai/*
         (see do_POST); the page reloads by itself only while something runs, so that a question being typed is not lost. The URL holds the whole
@@ -1231,46 +1081,11 @@ class Server(http.server.ThreadingHTTPServer):
         eng = render.ai_engine()
         snap = eng.snapshot(usage=True)
         live = snap["busy"] or snap["locked"]   # idle with forms: no reload (a locked page has none: it reloads as the others do)
-
-        def doc(body, foot, refresh=True, tools=(), vhere=None):
-            if shell:  # the shell reloads (a job runs: soon) only while something runs; a page with forms is not reloaded under a question being typed
-                return View(body, tools, vhere, bool(refresh and live), forms=not snap["locked"], wait=2 if snap["busy"] else 0)
-            meta = f'<meta http-equiv="refresh" content="{2 if snap["busy"] else r}">' if refresh and live else ""
-            page = Page('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-                        + meta + f'<title>{html.escape(socket.gethostname())} · ai · nuc-console</title><style>{CSS}{MAP_CSS}{HEALTH_CSS}{AI_CSS}'
-                        + "body{font-size:%.1fpx}" % (14 * zoom / 100) + f'</style>{body}<footer>{" · ".join(foot)}</footer></html>')
-            page.csp, page.referrer = (CSP, "no-referrer") if snap["locked"] else (page_csp(forms=True), "same-origin")
-            return page
-        dash = f'<a href="{html.escape(page_url(here))}">dashboard</a>'
         if not render.CFG["features"].get("ai", True):
-            return doc("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", [dash, "read-only"], refresh=False)
+            return View("<p>AI screen disabled in config.ini (<b>[features] ai = no</b>)</p>", (), None, False, forms=not snap["locked"], wait=2 if snap["busy"] else 0)
         ahere = dict({"view": "ai", "sel": sel, "pause": pause}, **here)
-        if shell:  # the shell draws the screen itself: the components of screens.py, as HTML (the forms are the ones of the classic page)
-            return View(ai_native(self, ahere, sel, confirm, snap, eng, prompt), [], ahere, bool(not pause and live), forms=not snap["locked"],
-                        wait=2 if snap["busy"] else 0, legacy=False)
-        cols, rows = here["cols"] or min(self.cfg["columns"], HEALTH_COLS), []
-        try:
-            data, pb = render.ai_state(self.smp)
-            rows = screens.ai_rows(data["cat"])
-            ui = AiUi(snap, eng.choice() if not snap["locked"] else None, data["cat"], rows, sel, confirm, self.csrf, urlsplit(page_url(ahere)).query, ahere)
-            ui.prompt = ai_prompt_node(eng, prompt, ahere)
-            body = ai_body(data, render.ai_status(), pb, rows, sel, ahere, cols, socket.gethostname(), ui)
-        except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
-            print("nuc-console web: ai render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
-            body = "<pre>render error (see the service log)</pre>"
-        anchor = f"#m-{next((i for i, m in enumerate(rows) if m['id'] == sel), 0)}" if sel else ""  # the footer's links keep the selected model in sight
-        link = lambda text, **kw: f'<a href="{html.escape(page_url(ahere, **kw) + anchor)}">{text}</a>'  # noqa: E731
-        tools = [link("compact", cols=100), link("wide", cols=200)]
-        if snap["locked"]:  # the page as it was: read-only, and it reloads like the others
-            bar = [dash] + tools + ["paused " + link("live", pause=False) if pause else link("pause", pause=True),
-                   "text " + self.sizes(link, zoom), "refresh every " + self.every(link, r), "read-only (locked by config.ini)", time.strftime("%H:%M:%S")]
-        else:  # forms: no reload while idle, so that a question being typed is not lost; it reloads by itself while a job or an answer runs
-            tools.append(link("reload"))
-            bar = [dash, tools[0], tools[1], "text " + self.sizes(link, zoom),
-                   "paused " + link("live", pause=False) if pause else "reloads by itself while something runs · " + tools[2], time.strftime("%H:%M:%S")]
-        if here["kiosk"]:
-            bar.append(html.escape(render.KIOSK_HINT))
-        return doc(body, bar, refresh=not pause, tools=tools, vhere=ahere)
+        return View(ai_native(self, ahere, sel, confirm, snap, eng, prompt), [], ahere, bool(not pause and live), forms=not snap["locked"],
+                    wait=2 if snap["busy"] else 0, legacy=False)
 
     def telegram_page(self, here):
         return telegram_view(self, here)
@@ -1328,8 +1143,7 @@ class Server(http.server.ThreadingHTTPServer):
             raise BadRequest("a key this page set, or *, is needed")
         nuc_config.update_overlay(drop=[what])
         render.reload_config()
-        for k in ("columns", "rows", "refresh_seconds"):
-            self.cfg[k] = render.CFG["web"][k]
+        self.cfg["refresh_seconds"] = render.CFG["web"]["refresh_seconds"]
         self.zoom = render.CFG["display"]["zoom"]
         with self.lock:
             self.cache.clear()
@@ -1352,8 +1166,7 @@ class Server(http.server.ThreadingHTTPServer):
             if names:
                 render.reload_config()
                 web = render.CFG["web"]
-                for k in ("columns", "rows", "refresh_seconds"):  # what this server copied at its start; the rest of [web] is read at the next one
-                    self.cfg[k] = web[k]
+                self.cfg["refresh_seconds"] = web["refresh_seconds"]  # what this server copied at its start; the rest of [web] is read at the next one
                 self.zoom = render.CFG["display"]["zoom"]
                 lines = ["Saved " + ("from this page (config.ini stays as it is): " if overlay else "in config.ini: ") + ", ".join(names) + "."]
                 for code, keys in confedit.applies(section, names).items():

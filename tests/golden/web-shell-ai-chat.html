@@ -9,23 +9,23 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="78a50561ef">
+<header class="topbar" data-card="__top" data-rev="9b618a77d6">
 <span class="host">demo-host</span>
 <span class="status err" role="status">✖ 6 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
-<a href="/?app=1" data-key="1">
+<a href="/?" data-key="1">
 <kbd>1</kbd>Overview</a>
-<a href="/?app=1&amp;view=map" data-key="2">
+<a href="/?view=map" data-key="2">
 <kbd>2</kbd>Map <span class="badge">7</span>
 </a>
-<a href="/?app=1&amp;view=cpu" data-key="3">
+<a href="/?view=cpu" data-key="3">
 <kbd>3</kbd>CPU</a>
-<a href="/?app=1&amp;view=health" data-key="4">
+<a href="/?view=health" data-key="4">
 <kbd>4</kbd>Health <span class="badge">
 <span class="s-err">✖1</span> <span class="s-warn">!6</span>
 </span>
 </a>
-<a href="/?app=1&amp;view=ai" data-key="5" aria-current="page">
+<a href="/?view=ai" data-key="5" aria-current="page">
 <kbd>5</kbd>AI <span class="badge">
 <span class="s-ok">●</span> on</span>
 </a>
@@ -33,56 +33,56 @@
 <div class="tb-r">
 <time class="clock">14:13:20</time>
 <a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
-<a class="ib" href="/?app=1&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+<a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="fba522a530">
+<div class="kpiblock" data-card="__kpis" data-rev="fe8ddc88b4">
 <div class="kpis" role="list" aria-label="Key figures">
-<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-attention">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
 <span class="sym s-err" aria-hidden="true">✖</span>6</span>
 </a>
-<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-exposure">
 <span class="kl">Internet</span>
 <span class="kv">
 <span class="sym s-err" aria-hidden="true">✖</span>1</span>
 <span class="ks">public on the Internet</span>
 </a>
-<a class="kpi st-warn" role="listitem" data-state="warn" href="/?app=1#c-exposure">
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?#c-exposure">
 <span class="kl">LAN</span>
 <span class="kv">
 <span class="sym s-warn" aria-hidden="true">!</span>3</span>
 <span class="ks">reachable from the LAN</span>
 </a>
-<a class="kpi st-err" role="listitem" data-state="err" href="/?app=1#c-exposure">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-exposure">
 <span class="kl">Beyond</span>
 <span class="kv">
 <span class="sym s-err" aria-hidden="true">✖</span>2</span>
 <span class="ks">beyond [expose]</span>
 </a>
-<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
 <span class="kl">CPU</span>
 <span class="kv">
 <span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
 </span>
 <span class="ks">16 threads</span>
 </a>
-<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
 <span class="kl">RAM</span>
 <span class="kv">
 <span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
 </span>
 <span class="ks">10.2G/31.2G</span>
 </a>
-<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-disks">
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-disks">
 <span class="kl">Disk</span>
 <span class="kv">
 <span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
 </span>
 <span class="ks">180.0G/480.0G /</span>
 </a>
-<a class="kpi st-ok" role="listitem" data-state="ok" href="/?app=1#c-system">
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
 <span class="kl">Temp</span>
 <span class="kv">
 <span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
@@ -94,7 +94,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view">
-<div class="vb" data-card="__view" data-rev="6a6153229a">
+<div class="vb" data-card="__view" data-rev="7bc70984ff">
 <div class="scr av">
 <header class="st">
 <h2>AI</h2>
@@ -121,7 +121,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/off">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <button class="bt bt-err" type="submit" title="stop the model server and turn the advisor off" data-key="e">Turn AI off</button>
 </form>
 </div>
@@ -158,7 +158,7 @@
 <p class="advice-tools">queries: disk_forecast · and this machine&#x27;s state now</p>
 </div>
 <p class="qa-f">
-<span class="d">21 Sep 14:11 · in 14 s</span> · <a href="/?view=ai&amp;app=1&amp;prompt=0123456789ab#prompt">the prompt it was sent</a>
+<span class="d">21 Sep 14:11 · in 14 s</span> · <a href="/?view=ai&amp;prompt=0123456789ab#prompt">the prompt it was sent</a>
 </p>
 </div>
 <div class="qa" data-k="qa-fedcba987654">
@@ -176,7 +176,7 @@
 </div>
 <form class="f" method="post" action="/ai/ask">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input class="q" type="text" name="q" maxlength="500" placeholder="ask: why is the disk filling up?" aria-label="ask: why is the disk filling up?" autocomplete="off"> <button class="bt bt-ok" type="submit">Ask</button>
 </form>
 <div class="controls">
@@ -186,7 +186,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="days" value="1">
 <button class="bt" type="submit">last 24 h</button>
 </form>
@@ -194,7 +194,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="days" value="7">
 <button class="bt" type="submit">last 7 days</button>
 </form>
@@ -202,7 +202,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/advise">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="days" value="30">
 <button class="bt" type="submit">last 30 days</button>
 </form>
@@ -213,7 +213,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/clear">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <button class="bt" type="submit" title="delete the questions, the answers and their prompts (asks first)">Clear chat</button>
 </form>
 </div>
@@ -356,7 +356,7 @@
 <tbody>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=gpt-oss-20b&amp;app=1">
+<a href="/?view=ai&amp;sel=gpt-oss-20b">
 <span class="b">OpenAI gpt-oss 20B</span>
 </a>
 </td>
@@ -378,7 +378,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-30b-a3b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-30b-a3b">
 <span class="b">Qwen3 30B-A3B</span>
 </a>
 </td>
@@ -397,7 +397,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="qwen3-30b-a3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -405,7 +405,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=phi-4&amp;app=1">
+<a href="/?view=ai&amp;sel=phi-4">
 <span class="b">Phi-4 14B</span>
 <span class="t-warn">  ★ recommended</span>
 </a>
@@ -425,7 +425,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="phi-4">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -433,7 +433,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-14b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-14b">
 <span class="b">Qwen3 14B</span>
 </a>
 </td>
@@ -452,7 +452,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="qwen3-14b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -460,7 +460,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-8b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-8b">
 <span class="b">Qwen3 8B</span>
 </a>
 </td>
@@ -479,7 +479,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="qwen3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -487,7 +487,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=granite-3.3-8b&amp;app=1">
+<a href="/?view=ai&amp;sel=granite-3.3-8b">
 <span class="b">IBM Granite 3.3 8B</span>
 </a>
 </td>
@@ -506,7 +506,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="granite-3.3-8b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -514,7 +514,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=phi-4-mini&amp;app=1">
+<a href="/?view=ai&amp;sel=phi-4-mini">
 <span class="b">Phi-4-mini 3.8B</span>
 </a>
 </td>
@@ -533,7 +533,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="phi-4-mini">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -541,7 +541,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-4b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-4b">
 <span class="b">Qwen3 4B</span>
 <span class="t-ok">  ✓ installed</span>
 <span class="t-accent">  ● active</span>
@@ -565,7 +565,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=smollm3-3b&amp;app=1">
+<a href="/?view=ai&amp;sel=smollm3-3b">
 <span class="b">SmolLM3 3B</span>
 </a>
 </td>
@@ -584,7 +584,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="smollm3-3b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -592,7 +592,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=granite-3.3-2b&amp;app=1">
+<a href="/?view=ai&amp;sel=granite-3.3-2b">
 <span class="b">IBM Granite 3.3 2B</span>
 </a>
 </td>
@@ -611,7 +611,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="granite-3.3-2b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -619,7 +619,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-1.7b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-1.7b">
 <span class="b">Qwen3 1.7B</span>
 <span class="t-ok">  ✓ installed</span>
 </a>
@@ -639,7 +639,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="qwen3-1.7b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -647,7 +647,7 @@
 </tr>
 <tr data-row>
 <td>
-<a href="/?view=ai&amp;sel=qwen3-0.6b&amp;app=1">
+<a href="/?view=ai&amp;sel=qwen3-0.6b">
 <span class="b">Qwen3 0.6B</span>
 </a>
 </td>
@@ -666,7 +666,7 @@
 <td>
 <form class="f" method="post" action="/ai/use">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <input type="hidden" name="model" value="qwen3-0.6b">
 <button class="bt bt-ok" type="submit" title="download it if needed, start it, turn AI on">use this model</button>
 </form>
@@ -687,7 +687,7 @@
 <div class="ci">
 <form class="f" method="post" action="/ai/delete-all">
 <input type="hidden" name="csrf" value="<csrf>">
-<input type="hidden" name="back" value="view=ai&amp;app=1">
+<input type="hidden" name="back" value="view=ai">
 <button class="bt bt-err" type="submit" title="asks first" data-key="X">delete everything</button>
 </form>
 </div>
@@ -698,19 +698,19 @@
 </div>
 </div>
 </main>
-<footer class="foot">refresh every <a href="/?view=ai&amp;refresh=1&amp;app=1">−</a> 2s <a href="/?view=ai&amp;refresh=3&amp;app=1">+</a>
+<footer class="foot">refresh every <a href="/?view=ai&amp;refresh=1">−</a> 2s <a href="/?view=ai&amp;refresh=3">+</a>
 <span class="dot">·</span>
-<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;pause=1&amp;app=1">pause</a>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=ai&amp;pause=1">pause</a>
 <span class="dot">·</span>
 <a class="lnk" href="/app?view=ai">live app</a>
-<span class="dot">·</span>text <a href="/?view=ai&amp;zoom=90&amp;app=1">A−</a> 100% <a href="/?view=ai&amp;zoom=110&amp;app=1">A+</a>
+<span class="dot">·</span>text <a href="/?view=ai&amp;zoom=90">A−</a> 100% <a href="/?view=ai&amp;zoom=110">A+</a>
 <span class="dot">·</span>
 <a class="lnk" href="/setup?step=1">setup guide</a>
 <span class="dot">·</span>
-<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=view%3Dai%26app%3D1">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai%26app%3D1">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai%26app%3D1">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai%26app%3D1">high contrast</a>
+<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=view%3Dai">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dai">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dai">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dai">high contrast</a>
 </span>
 <span class="dot">·</span>
-<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai%26app%3D1">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=view%3Dai%26app%3D1">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai%26app%3D1">compact</a>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dai">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=view%3Dai">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dai">compact</a>
 </span>
 <span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
 </footer>

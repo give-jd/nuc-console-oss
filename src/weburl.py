@@ -41,11 +41,9 @@ GZOOMS = webcss.GZOOMS  # z=: the drawing's size in % of the window (no script n
 def view_params(q):
     """Query string -> page() arguments, clamped and rounded to a few distinct values (bounded cache and CPU).
 
-    cols/rows: the layout grid (rows 0 = config); zoom: text size in % (0 = [display] zoom); fit=1: the text fills the window width (and the
-    height, when rows is given), so a bigger zoom means fewer columns, re-laid out; full=1: every Details page;
-    rotate=1: overview and Details pages take turns like on the console; kiosk=1: the footer says how to close the window;
-    rotate=N (3-600): the same, and on the shell's wall page (kiosk=1 with the wall density) the seconds between two one-screen scrolls
-    (default [dashboard] rotate_seconds);
+    zoom: text size in % (0 = [display] zoom); kiosk=1: the footer says how to close the window; rotate=N (3-600; 1: the default): on the
+    shell's wall page (kiosk=1 with the wall density) the seconds between two one-screen scrolls (default [dashboard] rotate_seconds);
+    cols=, rows=, fit=, full= and app= of older links are ignored;
     refresh: seconds between two reloads (1-10; default [dashboard] refresh_seconds).
     view=map: the MAP, whose state is all in the URL: open=/shut= the branches opened/closed by hand (row keys joined by '.'),
     all=1 everything open, sel= the row whose details are shown, only=1 problems only, pause=1 no reload.
@@ -61,24 +59,22 @@ def view_params(q):
     view=setup: the setup guide (/setup?step=N is its address), step=1-5.
     view=telegram: the Telegram page (pair this machine with your bot, switch the alerts, test); open=1 there: a redirect to the t.me link of the
     pairing that waits (Handler._tg_open).
-    edit=1: the layout editor (the shell's overview in edit mode; with app=0 or another view it is dropped).
-    The shell: app=1 (0: the classic page, whatever [ui] web says), ui=<the preferences string> for this URL only (prefs.parse_cookie: an invalid one
-    is dropped), view=settings (the settings page), card=<id> (one card of the overview in full), pause=1 (the overview too)."""
+    edit=1: the layout editor (the overview in edit mode; with another view it is dropped).
+    ui=<the preferences string> for this URL only (prefs.parse_cookie: an invalid one is dropped); app=0|1 of older links is ignored.
+    view=settings (the settings page), card=<id> (one card of the overview in full), pause=1 (the overview too)."""
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
-    cols, rows, zoom = num("cols"), num("rows"), num("zoom")
+    zoom = num("zoom")
     view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings", "telegram", "setup") else ""
-    edit = not view and one("edit") == "1" and one("app") != "0"  # the layout editor: the shell's overview in edit mode (the classic page has none)
+    edit = not view and one("edit") == "1"  # the layout editor: the overview in edit mode
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
         str(int(one("sel"))) if view == "cpu" and PID.fullmatch(one("sel")) and int(one("sel")) <= MAX_PID else ""  # '007' is pid 7: one URL
-    return {"cols": max(60, min(300, (cols + 10) // 20 * 20)) if cols else 0,
-            "rows": max(20, min(120, (rows + 2) // 4 * 4)) if rows else 0,
-            "zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0, "fit": one("fit") == "1", "full": one("full") == "1",
+    return {"zoom": min(ZOOMS, key=lambda z: abs(z - zoom)) if zoom else 0,
             "rotate": True if one("rotate") == "1" else num("rotate") if 3 <= num("rotate") <= 600 else False,
             "kiosk": one("kiosk") == "1",
             "refresh": max(nuc_config.REFRESH_MIN, min(nuc_config.REFRESH_MAX, num("refresh"))) if num("refresh") else 0,  # 0 = config
-            "app": one("app") if one("app") in ("0", "1") else "", "ui": ui_oneshot(one("ui")),
+            "ui": ui_oneshot(one("ui")),
             "card": one("card") if not view and one("card") in prefs.CARDS and not edit else "", "edit": edit,
             "view": view, "open": map_keys(one("open")), "shut": map_keys(one("shut")),
             "all": one("all") == "1", "sel": sel, "only": one("only") == "1", "pause": one("pause") == "1",
@@ -94,7 +90,7 @@ def view_params(q):
 
 
 APP_VIEWS = ("cpu", "health", "map", "ai")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
-HERE_KEYS = ("cols", "rows", "zoom", "fit", "full", "rotate", "kiosk", "refresh", "app", "ui")  # the size, refresh and interface parameters every view has
+HERE_KEYS = ("zoom", "rotate", "kiosk", "refresh", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
              "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "setup": ("step",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
 
@@ -109,7 +105,7 @@ def view_url(p):
     """The address of a view as view_params() read it, for the redirect that follows ?token=: only validated values of the parameters that
     view reads (an unknown one, `token` included, is not echoed), the defaults left out, like the links of the pages."""
     p = map_mode(p) if p["view"] == "map" else p
-    p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ()) + (("pause",) if p["app"] == "1" and p["view"] == "" else ())}  # the shell's overview pauses too
+    p = {k: p[k] for k in ("view",) + HERE_KEYS + VIEW_KEYS.get(p["view"], ()) + (("pause",) if p["view"] == "" else ())}  # the overview pauses too
     p.update({k: ".".join(p[k]) for k in ("open", "shut") if k in p})  # row keys: 'k1.k2', like the pages' own links
     return page_url(p).rstrip("?")  # nothing left: "/"
 

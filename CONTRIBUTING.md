@@ -76,7 +76,7 @@ python3 tools/desktop_core.py --checkout && (cd desktop/src-tauri && cargo test 
 `render.py --once --demo --color` raw (the ANSI colours and the `ESC[K CR LF` that ends each line of a frame included): the overview at 79x24, 120x33,
 200x50 and 226x50 with `[dashboard] spacing` 0 and 1, `--demo-os windows` and `darwin`, the rotating pages and the Details pages, the MAP, CPU, HEALTH
 and AI screens (sorted, with a selection and its details), and the rotation with those screens in it. The web files are the pages `web.Server` builds:
-the dashboard (compact, `full=1`, `rotate=1`), CPU, the MAP as a tree and as a graph, HEALTH and AI, one tag per line outside `<pre>`.
+the shell's pages (the overview and its variants, the settings, the setup guide, the Telegram page), CPU, the MAP as a tree and as a graph, HEALTH and AI, one tag per line.
 `python3 -m unittest tests.test_golden` (about 2 s) compares each case and prints the first lines of the diff of the ones that differ.
 
 `tests/golden.py` renders them in a `FrozenWorld`: a clock that stands still (UTC, whatever `TZ` says), the host name `demo-host`, the default

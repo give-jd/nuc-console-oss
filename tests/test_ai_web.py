@@ -1,5 +1,5 @@
 """The web AI page (web.py ?view=ai): the link, the models as links that carry the view, sel validation, the catalog read once per ttl, the
-feature switch, escaping, the Windows and macOS demos, no JavaScript, and the advisor's cached advice on the HEALTH page.
+feature switch, escaping, the Windows and macOS demos, and the advisor's cached advice on the HEALTH page.
 
 Hermetic: the demo machines (src/demo.py) through a real server on a loopback port; no aisetup, no hardware and no network is read; every module
 global a test changes is put back in tearDown.
@@ -31,12 +31,11 @@ import webpages  # noqa: E402
 import webhttp  # noqa: E402
 import weburl  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from webtest import classic_default  # noqa: E402
 
 ESC, BEL, CSI8 = chr(27), chr(7), chr(0x9b)
 EVIL = '<script>alert(1)</script>"onmouseover=alert(1) \'x ' + ESC + "[2J" + ESC + "]0;pwn" + BEL + CSI8
-ROW = re.compile(r'<tr( class="sel")? id="m-(\d+)">(.*?)</tr>')
-PILL = re.compile(r'<span class="pl (\w)">([^<]*)</span>')
+ROW = re.compile(r'<tr( class="t-sel")? data-row[^>]*>(.*?)</tr>')
+PILL = re.compile(r'<span class="tag (\w+)">([^<]*)</span>')
 
 
 def serve():
@@ -46,7 +45,6 @@ def serve():
     return srv
 
 
-@classic_default()
 def get(srv, path="/"):
     c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
     c.request("GET", path)
@@ -59,16 +57,16 @@ def get(srv, path="/"):
 def rows_of(page):
     """[(index, selected, href of the name link, name, params, verdict label, verdict class, marks)] of the models table of an AI page."""
     out = []
-    for sel, i, inner in ROW.findall(page):
-        m = re.search(r'<td class="mk">(.*?)</td><td[^>]*><a class="lb" href="([^"]*)">([^<]*)</a></td><td class="pm">([^<]*)</td>', inner)
+    for i, (sel, inner) in enumerate(ROW.findall(page)):
+        m = re.search(r'<td><a href="([^"]*)"><span class="(?:t-muted )?b">([^<]*)</span>(.*?)</a></td><td class="p2"><span class="t-muted">([^<]*)</span></td>', inner)
         p = PILL.search(inner)
-        marks = "".join(re.findall(r">([★✓●])<", m.group(1)))
-        out.append((int(i), bool(sel), html.unescape(m.group(2)), html.unescape(m.group(3)), html.unescape(m.group(4)), html.unescape(p.group(2)), p.group(1), marks))
+        marks = "".join(re.findall(r">\s*([★✓●])", m.group(3)))
+        out.append((i, bool(sel), html.unescape(m.group(1)), html.unescape(m.group(2)), html.unescape(m.group(4)), html.unescape(p.group(2)) if p else "", p.group(1) if p else "", marks))
     return out
 
 
 def link(page, text):
-    m = re.search(r'<a href="([^"]*)">' + re.escape(text) + "</a>", page)
+    m = re.search(r'<a (?:[^>]*? )?href="([^"]*)"(?: [^>]*)?>(?:<kbd>\d</kbd>)?' + re.escape(text) + "(?: <span.*?</span>)?</a>", page)
     return html.unescape(m.group(1)) if m else None
 
 
@@ -94,7 +92,7 @@ class AiPage(unittest.TestCase):
     def setUpClass(cls):
         cls.host, cls.webapps, cls.expose = socket.gethostname, render.CFG["webapps"], render.CFG["expose"]  # demo_defaults() changes them for good: put them back
         cls.srv = serve()
-        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]), webpages.health_extra_html)
+        cls.saved = (dict(render.CFG["features"]), render.DEMO_OS, render.ai_build, render.ai_status, dict(render.CFG["ai"]))
 
     @classmethod
     def tearDownClass(cls):
@@ -114,7 +112,7 @@ class AiPage(unittest.TestCase):
         render.ai_build = lambda now: (self.builds.append(render.DEMO_OS), real(now))[1]
 
     def tearDown(self):
-        features, render.DEMO_OS, render.ai_build, render.ai_status, ai, webpages.health_extra_html = self.saved
+        features, render.DEMO_OS, render.ai_build, render.ai_status, ai = self.saved
         render.CFG["features"].clear()
         render.CFG["features"].update(features)
         render.CFG["ai"].clear()
@@ -138,20 +136,18 @@ class AiPage(unittest.TestCase):
 
     def test_ai_link_in_the_bottom_bar_with_and_without_the_feature(self):
         dash = self.page("/")
-        self.assertEqual(link(dash, "ai"), "/?view=ai")
-        self.assertEqual(link(dash, "health"), "/?view=health")              # next to it, after it
-        self.assertLess(dash.index(">map</a>"), dash.index(">cpu</a>"))
-        self.assertLess(dash.index(">health</a>"), dash.index(">ai</a>"))
-        self.assertLess(dash.index(">ai</a>"), dash.index("read-only"))
-        self.assertEqual(link(self.page("/?cols=100&zoom=125"), "ai"), "/?view=ai&cols=100&zoom=125")   # the size is kept
+        self.assertEqual(link(dash, "AI"), "/?view=ai")
+        self.assertEqual(link(dash, "Health"), "/?view=health")              # next to it, after it
+        self.assertLess(dash.index(">Map "), dash.index(">CPU<"))
+        self.assertLess(dash.index(">Health "), dash.index(">AI "))
+        self.assertEqual(params(link(self.page("/?zoom=125"), "AI"))["zoom"], 125)   # the size is kept
         render.CFG["features"]["ai"] = False
         self.srv.cache.clear()
         off = self.page("/")
-        self.assertIsNone(link(off, "ai"))
+        self.assertIsNone(link(off, "AI"))
         self.assertNotIn("view=ai", off)
-        self.assertIn(">health</a>", off)                                    # the others stay
+        self.assertIn(">Health ", off)                                       # the others stay
         self.assertEqual(self.builds, [])                                    # the dashboard never reads the hardware
-
     def test_feature_off_the_page_says_so_and_reads_nothing(self):
         render.CFG["features"]["ai"] = False
         st, h, off = get(self.srv, "/?view=ai&sel=qwen3-4b")
@@ -159,11 +155,9 @@ class AiPage(unittest.TestCase):
         self.assertIn("AI screen disabled in config.ini", off)
         self.assertIn("[features] ai = no", off)
         self.assertNotIn("<table", off)
-        self.assertNotIn("http-equiv", off)                                  # nothing to reload
+        self.assertNotIn("<form", off)
         self.assertIn("default-src 'none'", h["Content-Security-Policy"])
-        self.assertEqual(link(off, "dashboard"), "/?")
         self.assertEqual(self.builds, [])
-
     # ---- the page ---------------------------------------------------------------------------------------------------------------------
 
     def test_page_has_header_title_hardware_models_status_and_is_locked_down(self):
@@ -171,108 +165,78 @@ class AiPage(unittest.TestCase):
         self.assertEqual(st, 200)
         csp = h["Content-Security-Policy"]
         self.assertIn("default-src 'none'", csp)
-        self.assertNotIn("script-src", csp)                                  # still no script on this page
-        self.assertEqual(csp, webhttp.page_csp(forms=True))                      # the one difference: its forms may post to this server (and nowhere else)
-        self.assertEqual(csp, webhttp.CSP.replace("form-action 'none'", "form-action 'self'"))
+        self.assertIn("form-action 'self'", csp)                             # the one difference: its forms may post to this server (and nowhere else)
+        self.assertNotIn("'unsafe-inline'", csp)
         self.assertEqual(h["Referrer-Policy"], "same-origin")                # so that the browser's Origin on a post is the real one, not "null"
         self.assertEqual((h["Cache-Control"], h["X-Content-Type-Options"]), ("no-store", "nosniff"))
-        self.assertNotIn("<script", body.lower())
-        self.assertIsNone(re.search(r"\son[a-z]+=", body))                   # no inline event handler
-        self.assertIn("demo-host │ AI", body)
-        self.assertNotIn('http-equiv="refresh"', body)                       # idle with forms: it does not reload by itself (a question being typed stays)
+        self.assertIsNone(re.search(r"<[^>]*\son[a-z]+=", body))             # no inline event handler
+        self.assertIn('<span class="host">demo-host</span>', body)
         self.assertIn("<title>demo-host · ai · nuc-console</title>", body)
         txt = plain(body)
-        self.assertIn("what this machine can run · 12 models · ✔ 10 fit  ◐ 2 gpu+cpu", txt)
-        for word in ("── HARDWARE ", "AMD Ryzen 7 5800X", "21.0 GB free of 31.2 GB", "NVIDIA GeForce RTX 3060 · CUDA", "── STATUS ", "✔ answering · 1 model: qwen3-4b",
-                     "● qwen3-4b  in the catalog", "MODELS · best first", "recommended", "installed", "tok/s: rough estimate"):
+        self.assertIn("what this machine can run12 models✔ 10 fit  ◐ 2 gpu+cpu", txt)
+        for word in ("HARDWARE", "AMD Ryzen 7 5800X", "21.0 GB free of 31.2 GB", "NVIDIA GeForce RTX 3060 · CUDA", "STATUS", "✔ answering · 1 model: qwen3-4b",
+                     "● qwen3-4b  in the catalog", "MODELS best first", "recommended", "installed", "tok/s: rough estimate"):
             self.assertIn(word, txt)
         rs = rows_of(body)
         self.assertEqual(len(rs), 12)
         self.assertEqual([r[3] for r in rs][:4], ["OpenAI gpt-oss 20B", "Qwen3 30B-A3B", "Phi-4 14B", "Qwen3 14B"])    # best first
-        self.assertEqual(len({r[0] for r in rs}), 12)                        # one anchor per model
-        for i, sel, href, name, par, label, cls, marks in rs:                # the browser stays on the clicked row; the id is in the URL
-            self.assertTrue(href.endswith("#m-%d" % i), href)
+        for i, sel, href, name, par, label, cls, marks in rs:
             self.assertIn(params(href)["sel"], {r["id"] for r in screens.ai_rows(render.ai_data()["cat"])})
         self.assertEqual({r[5] for r in rs}, {"◐ GPU+CPU", "✔ FITS GPU"})    # a symbol besides the colour
         self.assertEqual([r[7] for r in rs if r[7]], ["★", "✓●", "✓"])      # recommended, installed and active, installed
         self.assertNotIn("DETAILS", txt)                                     # nothing selected: no panel
         self.assertEqual(self.builds, [None])
-
     def test_the_verdict_pills_of_every_demo_machine(self):
         render.DEMO_OS = "windows"
         body = self.page("/?view=ai")
-        seen = {(m.group(1), m.group(2)) for m in PILL.finditer(body)}
-        self.assertEqual(seen, {("y", "! SLOW"), ("r", "✖ TOO BIG"), ("c", "◐ GPU+CPU"), ("g", "✔ FITS GPU")})
-        for cls in ("g", "c", "y", "r"):
-            self.assertIn(".pl.%s{" % cls, body)                             # every pill has its colour in the page's style
-        self.assertIn('<td class="no"><a', body)                             # a model that is too big is dimmed
-
+        seen = {(r[6], r[5]) for r in rows_of(body)}
+        self.assertEqual(seen, {("warn", "! SLOW"), ("err", "✖ TOO BIG"), ("accent", "◐ GPU+CPU"), ("ok", "✔ FITS GPU")})
     def test_footer_links_keep_the_view(self):
-        body = self.page("/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
-        self.assertEqual(link(body, "dashboard"), "/?cols=100&zoom=125&refresh=5")
-        p = params(link(body, "reload"))
-        self.assertEqual((p["view"], p["sel"], p["zoom"], p["refresh"], p["cols"], p["pause"]), ("ai", "phi-4", 125, 5, 100, False))
-        self.assertTrue(link(body, "reload").endswith("#m-2"))               # the selected model stays in sight
-        self.assertEqual(params(link(body, "compact"))["cols"], 100)
-        self.assertEqual(params(link(body, "wide"))["cols"], 200)
+        body = self.page("/?view=ai&sel=phi-4&zoom=125&refresh=5")
+        p = params(link(body, "pause"))
+        self.assertEqual((p["view"], p["sel"], p["zoom"], p["refresh"], p["pause"]), ("ai", "phi-4", 125, 5, True))
         self.assertEqual(params(link(body, "A+"))["zoom"], 150)
-        self.assertIsNone(link(body, "+"))                                   # no refresh interval: it reloads only while something runs
-        self.assertIn("reloads by itself while something runs", body)
-        self.assertNotIn("read-only", body)                                  # it has buttons
-        self.assertIsNone(link(body, "map"))                                 # the bar of this page, not the dashboard's
-
+        self.assertEqual([r[0] for r in rows_of(body) if r[1]], [2])         # the selected model is marked in the table
     def test_locked_by_config_ini_the_page_is_what_it_was_read_only_and_reloading(self):
         render.CFG["ai"]["web_actions"] = False
-        st, h, body = get(self.srv, "/?view=ai&sel=phi-4&zoom=125&refresh=5&cols=100")
+        st, h, body = get(self.srv, "/?view=ai&sel=phi-4&zoom=125&refresh=5")
         self.assertEqual(st, 200)
-        self.assertEqual(h["Content-Security-Policy"], webhttp.CSP, "form-action 'none' again")
+        self.assertIn("form-action 'none'", h["Content-Security-Policy"])    # no form: no post to allow
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
         self.assertNotIn("<form", body)
         self.assertNotIn("<input", body)
         self.assertIn("locked by config.ini ([ai] web_actions = no)", body)
-        self.assertIn("read-only (locked by config.ini)", body)
-        self.assertIn('<meta http-equiv="refresh" content="5">', body)
+        self.assertIn('data-refresh="5"', body)
         p = params(link(body, "pause"))
         self.assertEqual((p["view"], p["sel"], p["pause"]), ("ai", "phi-4", True))
         self.assertEqual(params(link(body, "+"))["refresh"], 6)
         self.assertEqual(len(rows_of(body)), 12, "everything is still shown")
-
-    def test_hardware_follows_the_width_asked(self):
-        def width(page):
-            pre = re.findall(r'<pre class="ht">(.*?)</pre>', page, re.S)[1]
-            return max(len(x) for x in plain(pre).split("\n"))
-        self.assertGreater(width(self.page("/?view=ai&cols=200")), width(self.page("/?view=ai&cols=100")))
-        self.assertLessEqual(width(self.page("/?view=ai&cols=100")), 100)
-
     def test_selecting_a_model_shows_its_details_and_commands_beside_or_under_the_table(self):
         body = self.page("/?view=ai")
         first = rows_of(body)[4]                                             # qwen3-8b
-        href = first[2].split("#")[0]
+        href = first[2]
         sel = self.page(href)
         rs = rows_of(sel)
         self.assertEqual([r[1] for r in rs].count(True), 1)
         self.assertTrue(rs[4][1])
-        self.assertIn('<aside class="dp" id="details">', sel)
-        self.assertIn('<main class="mp two">', sel)
-        panel = sel[sel.index('<aside class="dp"'):sel.index("</aside>")]
+        panel = sel[sel.index('<section class="spec">'):sel.index("</section>", sel.index('<section class="spec">'))]
         txt = plain(panel)
         for word in ("Qwen3 8B", "✔ FITS GPU", "needs 5.8 GB, the NVIDIA GeForce RTX 3060 has 11.0 GB free: all on the GPU", "about 31-51 tokens/s (a rough estimate, not a promise)",
                      "all 36 layers on the GPU", "8.2B parameters · Q4_K_M · context up to 40960 tokens", "Apache-2.0", "thinking mode: /no_think turns it off", "not installed"):
             self.assertIn(word, txt)
         self.assertIn('<code class="cmd">sudo nuc-console-ai setup qwen3-8b</code>', panel)   # the exact command, selectable in one click
         self.assertNotIn("nuc-console-ai remove", panel)                     # not installed: nothing to remove
-        close = re.search(r'<a href="([^"]*)">close ✕</a>', panel)
+        close = re.search(r'<a href="([^"]*)"[^>]*>close details ✕</a>', sel)
         self.assertEqual(params(html.unescape(close.group(1)))["sel"], "")
-        self.assertTrue(html.unescape(close.group(1)).endswith("#m-4"))
         again = [r for r in rs if r[1]][0][2]                                # the selected name link toggles it off
         self.assertEqual(params(again)["sel"], "")
-        self.assertEqual(self.page(again.split("#")[0]).count("<aside"), 0)
-        self.assertIn("nuc-console-ai remove qwen3-4b", plain(self.page("/?view=ai&sel=qwen3-4b&cols=100")))      # installed: remove (and it is the active one)
+        self.assertNotIn('<section class="spec">', self.page(again))
+        self.assertNotIn('<section class="spec">', self.page(html.unescape(close.group(1))))
+        self.assertIn("nuc-console-ai remove qwen3-4b", plain(self.page("/?view=ai&sel=qwen3-4b")))      # installed: remove (and it is the active one)
         self.assertNotIn("nuc-console-ai use qwen3-4b", plain(self.page("/?view=ai&sel=qwen3-4b")))
         self.assertIn("not pinned yet: this build cannot download it", plain(self.page("/?view=ai&sel=gpt-oss-20b")))   # no command for what cannot be downloaded
         self.assertNotIn("setup gpt-oss-20b", self.page("/?view=ai&sel=gpt-oss-20b"))
         self.assertEqual(self.builds, [None])                                # the catalog was asked for once
-
     def test_every_model_of_every_demo_opens(self):
         for os_name in (None, "windows", "darwin"):
             render.DEMO_OS = os_name
@@ -283,9 +247,8 @@ class AiPage(unittest.TestCase):
             for mid in ids:
                 with self.subTest(os=os_name, model=mid):
                     body = self.page("/?view=ai&sel=" + quote(mid, safe=""))
-                    self.assertIn('<aside class="dp"', body)
+                    self.assertIn('<section class="spec">', body)
                     self.assertEqual(len([r for r in rows_of(body) if r[1]]), 1)
-
     def test_windows_and_macos_demos(self):
         render.DEMO_OS = "windows"
         win = self.page("/?view=ai&sel=qwen3-8b")
@@ -309,10 +272,8 @@ class AiPage(unittest.TestCase):
         render._AI["hit"] = {"cat": None, "msg": "the model catalog could not be read: ImportError('x')", "err": True, "at": time.time(), "key": (True, None)}
         body = self.page("/?view=ai")
         self.assertIn("the model catalog could not be read: ImportError(&#x27;x&#x27;)", body)
-        self.assertIn('<p class="hn r">', body)
+        self.assertIn('<p class="msg lv-err">', body)
         self.assertEqual(rows_of(body), [])
-        self.assertNotIn("0 models", plain(body))
-        self.assertNotIn('http-equiv="refresh"', body)
 
     def test_an_empty_catalog_says_so(self):
         self.seed({"hw": demo.ai_catalog(None)["hw"], "models": []})
@@ -336,25 +297,24 @@ class AiPage(unittest.TestCase):
         self.assertTrue(q("view=ai&pause=1")["pause"])
         for path in ("/?view=ai&sel=" + "a" * 5000, "/?view=ai&sel=%00&period=%C2%B2", "/?view=ai&sel=<script>&zoom=%C2%B2&refresh=-1", "/?view=ai&all=1&open=x&shut=y&only=1"):
             body = self.page(path)
-            self.assertNotIn("<script", body.lower())
-            self.assertEqual(body.count("<aside"), 0, path)                  # no such model: no panel
+            self.assertNotIn("<script>alert", body.lower())
+            self.assertNotIn('<section class="spec">', body, path)           # no such model: no panel
 
     def test_a_selection_that_is_not_in_the_catalog_is_dropped(self):
         for sel in ("nope", "qwen3-4", "qwen3-4b ", "QWEN3-4B", "qwen3-4b\n", "qwen3-4b\x00", "../etc/passwd", "x" * 300, "<script>alert(1)</script>"):
             body = self.page("/?view=ai&sel=" + quote(sel))
-            self.assertEqual(body.count("<aside"), 0, repr(sel))
+            self.assertNotIn('<section class="spec">', body, repr(sel))
             self.assertEqual([r for r in rows_of(body) if r[1]], [], repr(sel))
             self.assertNotIn("alert(1)", body)                               # and never repeated in a link
             self.assertNotIn("../etc", body)
             self.assertNotIn("x" * 50, body)
-        self.assertEqual(self.page("/?view=ai&sel=qwen3-4b").count("<aside"), 1)
+        self.assertEqual(self.page("/?view=ai&sel=qwen3-4b").count('<section class="spec">'), 1)
 
     def test_pause_stops_the_reload(self):
         body = self.page("/?view=ai&pause=1")
-        self.assertNotIn("http-equiv", body)
-        self.assertIn("paused", body)
-        self.assertEqual(params(link(body, "live"))["pause"], False)
-        self.assertNotIn("pause=", link(body, "live"))
+        self.assertIn('data-paused="1"', body)
+        self.assertEqual(params(link(body, "resume"))["pause"], False)
+        self.assertNotIn("pause=", link(body, "resume"))
 
     # ---- the catalog cache ------------------------------------------------------------------------------------------------------------
 
@@ -362,7 +322,7 @@ class AiPage(unittest.TestCase):
         for i in range(30):
             self.page("/?view=ai")
             self.page("/?view=ai&sel=%s" % ("qwen3-4b", "phi-4", "nope")[i % 3])
-            self.page("/?view=ai&zoom=%d&refresh=%d&cols=%d" % (50 + 25 * (i % 3), 1 + i % 10, 100 + 20 * (i % 4)))
+            self.page("/?view=ai&zoom=%d&refresh=%d" % (50 + 25 * (i % 3), 1 + i % 10))
             self.srv.cache.clear()                                           # not even the page cache helps: only the catalog's own
         self.assertEqual(self.builds, [None])
         render._AI["hit"]["at"] -= render.AI_TTL + 1                         # a few seconds later
@@ -381,7 +341,7 @@ class AiPage(unittest.TestCase):
             return inner(now)
         render.ai_build = slow_build
         out = []
-        threads = [threading.Thread(target=lambda: out.append(get(self.srv, "/?view=ai&cols=%d" % (100 + 20 * i))[0])) for i in range(6)]
+        threads = [threading.Thread(target=lambda: out.append(get(self.srv, "/?view=ai&zoom=%d" % (50 + 10 * i))[0])) for i in range(6)]
         for t in threads:
             t.start()
         for t in threads:
@@ -420,9 +380,9 @@ class AiPage(unittest.TestCase):
         cat, status = self.hostile()
         self.seed(cat, status)
         evil_id = screens.ai_rows(cat)[0]["id"]
-        for path in ("/?view=ai", "/?view=ai&cols=100", "/?view=ai&cols=200", "/?view=ai&sel=" + quote(evil_id, safe=""), "/?view=ai&sel=qwen3-30b-a3b"):
+        for path in ("/?view=ai", "/?view=ai&sel=" + quote(evil_id, safe=""), "/?view=ai&sel=qwen3-30b-a3b"):
             body = self.page(path)
-            self.assertEqual(re.findall(r"<script|<img|<iframe|<svg|<object|<embed|<b>", body, re.I), [], path)
+            self.assertEqual(re.findall(r"<script>alert|<img|<iframe|<svg onload|<object|<embed|<b>", body, re.I), [], path)
             for form in re.findall(r"<form[^>]*>", body):                              # the forms are ours, with fixed actions: nothing hostile makes one
                 self.assertRegex(form, r'^<form class="f( ask)?"( id="ask")? method="post" action="/ai/(on|off|use|cancel|delete|delete-all|ask|advise)">$', path)
             self.assertEqual(re.findall(r'<input type="hidden" name="model" value="[^"]*[<>"][^"]*">', body), [], path)
@@ -434,10 +394,9 @@ class AiPage(unittest.TestCase):
             self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body)     # shown, as text
         body = self.page("/?view=ai&sel=" + quote(evil_id, safe=""))
         self.assertIn("?[2J?]0;pwn?", plain(body))                           # the escape sequence is visible text, not an escape
-        self.assertEqual(body.count("<aside"), 1)
         self.assertEqual(len([r for r in rows_of(body) if r[1]]), 1)
-        for href in re.findall(r'href="([^"]*)"', body):                     # every link is one of ours, the id percent-encoded
-            self.assertTrue(href.startswith("/?") or href.startswith("#"), href)
+        for href in re.findall(r'<a [^>]*?href="([^"]*)"', body):            # every link is one of ours, the id percent-encoded
+            self.assertTrue((href.startswith("/") and not href.startswith("//")) or href.startswith("#"), href)
             self.assertNotIn("<", html.unescape(href))
             self.assertNotIn('"', html.unescape(href))
         cmd = self.page("/?view=ai&sel=qwen3-30b-a3b")                       # a hostile command is text in a code element, quotes and all
@@ -461,7 +420,7 @@ class AiPage(unittest.TestCase):
         finally:
             render.ai_state = real
         self.assertEqual(st, 200)
-        self.assertIn("render error (see the service log)", body)
+        self.assertIn("could not be drawn (see the service log)", body)
         self.assertNotIn("state unreadable", body)                           # the detail goes to the log, not to the page
         self.assertNotIn(ESC, body)
 
@@ -498,7 +457,7 @@ class AiPage(unittest.TestCase):
         return calls
 
     def test_the_health_page_has_no_advice_while_the_advisor_is_off(self):
-        self.assertEqual(webpages.health_extra_html(demo.health_report(None, 7)), "")
+        self.assertIsNone(webpages.health_advice_node(demo.health_report(None, 7)))
         self.assertNotIn("ADVICE", self.page("/?view=health"))
 
     def test_the_cached_advice_goes_under_the_findings_and_over_the_sections_and_is_escaped(self):
@@ -512,7 +471,8 @@ class AiPage(unittest.TestCase):
         self.assertIn("[oom:shop-worker-1]", body)
         self.assertEqual(set(calls), {True})                                 # cached_only: a page never waits for a generation
         self.assertLessEqual(len(calls), 1)                                  # looked up once for this report
-        self.assertIn(".advice{", body)                                      # and it has its style
+        css = get(self.srv, re.search(r'<link rel="stylesheet" href="([^"]*)"', body).group(1))[2]
+        self.assertIn(".advice", css)                                        # and it has its style
 
     def test_nothing_cached_yet_the_page_says_how_to_ask(self):
         self.advisor_on(None)
