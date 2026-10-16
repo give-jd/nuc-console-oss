@@ -277,7 +277,7 @@ def step4(cfg, f, x):
         body = (f'<p>{how}</p>{note}<h4 class="wz-h">Which sections to show</h4>{x["features"]}'
                 f'<h4 class="wz-h">Key figures, preset, theme and density</h4>{x["ui"]}')
     else:
-        edit = "sudoedit " + x["path"] if os.name == "posix" else "open %s as administrator" % x["path"]
+        edit = "sudoedit " + x["path"] if str(x["apply"]).startswith("sudo") else "open %s as administrator" % x["path"]  # the apply command says which family of words
         body = (f'<p class="wz-why"><b>Why there is no form here:</b> {esc(f["why"])}. '
                 f'{code("config.ini")} is the administrator\'s on an installation, and the wizard never writes it.</p>'
                 f'<p>To choose, edit the file and apply it:</p><pre class="wz-pre" tabindex="0">{esc(edit)}</pre>'

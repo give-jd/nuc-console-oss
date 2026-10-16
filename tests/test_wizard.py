@@ -189,7 +189,7 @@ class Installation(World):
         self.assertNotIn('action="/settings/', main)
         self.assertIn("Why there is no form here", main)
         self.assertIn("off in config.ini: [web] settings_actions = yes turns it on", main)
-        self.assertIn("sudoedit " + self.path, main)
+        self.assertIn(("sudoedit " if os.name == "posix" else "open ") + self.path, main)
         self.assertIn("[features]", main)
         self.assertIn("kpis = problems, cpu, ram, disk", main)
         self.assertIn("or: none", main)
