@@ -3,6 +3,15 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Fixed
+- Adding a model: a model server that died while it loaded the model could be reported as "stopped answering" instead of with its exit status and last words, when the closed connection was noticed before the exit (a slow machine). The job now waits a few seconds for the exit when the connection broke.
+
+### Changed
+- The web API's `problems` also says how many alarms `[alerts] mute` silenced (`muted`) and which (`muted_known`).
+- The install and configuration guides describe the full-screen window as the wall display it is (one screen, lists cut, scrolling), not as pages taking turns.
+
 ## [2.5.1] - 2026-10-16
 
 A fix for the console blanking added in 2.4.0. A monitor put to sleep by `[console] blank_minutes` could stay black with no way to wake it from the service: setting `blank_minutes = 0` did not take the timer back, and the framebuffer stayed in power-down. A patch version: nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).

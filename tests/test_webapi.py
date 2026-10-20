@@ -144,8 +144,12 @@ class Documents(unittest.TestCase):
         self.assertEqual(out["items"][0]["fix"], "fix")
         self.assertNotIn("fix", out["items"][1])
         self.assertEqual((out["accepted"], out["known"][0]["id"]), (1, "thermal"))
+        pb.muted, pb.muted_known = 1, [{"id": "thermal", "text": "hot"}]
+        out = webapi.problems(pb)
+        self.assertEqual((out["muted"], out["muted_known"]), (1, [{"id": "thermal", "text": "hot"}]))
         plain = webapi.problems([(2, "something")])
         self.assertEqual(plain["items"], [{"id": None, "state": "err", "severity": 2, "text": "something", "cards": []}])
+        self.assertEqual((plain["muted"], plain["muted_known"]), (0, []))
 
 
 class Api(unittest.TestCase):

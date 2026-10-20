@@ -59,6 +59,7 @@ START_WAIT_S = 2.0        # a server that is still there this long after it was 
 ANSWER_WAIT_S = 60.0      # ... and answers within this long (Windows may scan a new executable first)
 LOAD_WAIT_S = 900.0       # then it loads the model: the job waits this long (a 19 GB model on a slow disk takes minutes)
 POLL_S = 1.0              # ... looking every second
+EXIT_WAIT_S = 5.0         # a connection that broke while the model loaded: this long to see whether the server died (its exit is noticed late)
 STOP_GRACE_S = 10         # asked to end (SIGTERM), then killed
 TAIL_LINES = 12           # the last lines the server wrote, kept to say why it stopped
 DEMO_STEPS, DEMO_STEP_S = 16, 0.15   # a simulated download: this many steps of this many seconds, per file
@@ -93,7 +94,7 @@ class Engine(object):
         self.usage, self._usage_seen, self._usage_thread, self._usage_stop, self._usage_wake = None, 0.0, None, threading.Event(), threading.Event()
         self.usage_s = USAGE_S
         self.start_wait, self.stop_grace, self.demo_step = START_WAIT_S, STOP_GRACE_S, DEMO_STEP_S  # tests shorten them
-        self.load_wait, self.answer_wait, self.poll_s = LOAD_WAIT_S, ANSWER_WAIT_S, POLL_S
+        self.load_wait, self.answer_wait, self.poll_s, self.exit_wait = LOAD_WAIT_S, ANSWER_WAIT_S, POLL_S, EXIT_WAIT_S
         self.lock = threading.RLock()
         self.version = 0                       # +1 at every change a page may show: the catalog is read again
         self.job = self.notice = self.pending = None
@@ -682,7 +683,8 @@ class Engine(object):
             self._stop_child()
             raise
         except aisetup.SetupError as e:
-            if info["gone"].wait(self.poll_s * 2):
+            lost = isinstance(e, aiollama.ConnectionLost)  # a dead server closes the connection before its exit is seen: wait for the exit
+            if info["gone"].wait(max(self.poll_s * 2, self.exit_wait) if lost else self.poll_s * 2):
                 raise aisetup.SetupError("the model server stopped while it loaded the model (exit status %s): %s"
                                          % (info["code"], aisetup.safe(" / ".join(info["tail"]) or "it wrote nothing", 240)))
             raise aisetup.SetupError("%s could not be loaded: %s" % (m["id"], aisetup.safe(e, 300)))

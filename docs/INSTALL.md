@@ -275,7 +275,7 @@ installer runs on **127.0.0.1 only** (not reachable from the network; read-only,
 | `NUC_CONSOLE_DISPLAY=` | |
 |---|---|
 | `browser` (default) | at install and at every login it opens in a normal window of your browser (http://127.0.0.1:8787) |
-| `fullscreen` (or `kiosk`) | at install and at every login it opens full screen, overview and Details pages taking turns. **Cmd+Q** closes it, **Ctrl+Cmd+F** leaves full screen |
+| `fullscreen` (or `kiosk`) | at install and at every login it opens full screen as a wall display (big type, one screen, lists cut to three rows, scrolling every `[dashboard] rotate_seconds`). **Cmd+Q** closes it, **Ctrl+Cmd+F** leaves full screen |
 | `none` | it never opens by itself (a Mac without a monitor: `nuc-console-problems`) |
 
 **Applications › nuc-console** (or Spotlight) opens it again any time. A plain re-install keeps the mode you chose.
@@ -372,7 +372,7 @@ installer runs on **127.0.0.1 only** (not reachable from the network; read-only,
 | `install-windows.cmd -Display` | |
 |---|---|
 | `browser` (default) | at install and at every logon it opens in a normal window of your browser (http://127.0.0.1:8787) |
-| `fullscreen` (or `kiosk`) | at install and at every logon it opens full screen in Edge (or Chrome; Firefox opens a window to take full screen with **F11**; with none of them, your default browser), overview and Details pages taking turns. **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
+| `fullscreen` (or `kiosk`) | at install and at every logon it opens full screen in Edge (or Chrome; Firefox opens a window to take full screen with **F11**; with none of them, your default browser) as a wall display (big type, one screen, lists cut to three rows, scrolling every `[dashboard] rotate_seconds`). **Alt+F4** closes it, **F11** leaves full screen, Alt+Tab reaches the other windows |
 | `none` | it never opens by itself (a machine without a monitor: `nuc-console-problems`) |
 
 **Start › nuc-console** opens it again any time. A plain re-install (double-click) keeps the mode you chose.
