@@ -88,7 +88,7 @@ def _items(xs):
 def problems(pb):
     """The problems of a frame (a problems.ProblemList, or a plain list of (severity, text)): each with its id, state, severity and text, the cards
     it belongs to and, when the list has them, the catalog's title, why, fix and the command that accepts it; how many were accepted as known,
-    and which."""
+    and which, and how many were muted ([alerts] mute), and which."""
     pids = getattr(pb, "pids", None) or [None] * len(pb)
     info = getattr(pb, "info", None) or [None] * len(pb)
     items = []
@@ -98,7 +98,8 @@ def problems(pb):
         if more:
             item.update(zip(("title", "why", "fix", "accept"), (ui.safe(v) if v is not None else None for v in more)))
         items.append(item)
-    return {"items": items, "accepted": int(getattr(pb, "accepted", 0) or 0), "known": data(getattr(pb, "known", None) or [])}
+    return {"items": items, "accepted": int(getattr(pb, "accepted", 0) or 0), "known": data(getattr(pb, "known", None) or []),
+            "muted": int(getattr(pb, "muted", 0) or 0), "muted_known": data(getattr(pb, "muted_known", None) or [])}
 
 
 def rev(body):

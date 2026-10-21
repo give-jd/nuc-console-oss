@@ -256,7 +256,7 @@ and Telegram pages stay their forms (below), which a client posts as a page does
 | Path | What |
 |---|---|
 | `/api/v1` | what there is: the API version, nuc-console's, the refresh interval, the views whose feature is on |
-| `/api/v1/overview` | `status` (the pill), `kpis` (every key figure), `cards` (every card whose feature is on, built in full: nothing hidden), `layout` (the cards `config.ini`'s `[ui]` shows, in order, with their widths), `problems` (each with its id, state, text, the cards it belongs to, and the catalog's title, why, fix and accept command; how many were accepted, and which) |
+| `/api/v1/overview` | `status` (the pill), `kpis` (every key figure), `cards` (every card whose feature is on, built in full: nothing hidden), `layout` (the cards `config.ini`'s `[ui]` shows, in order, with their widths), `problems` (each with its id, state, text, the cards it belongs to, and the catalog's title, why, fix and accept command; how many were accepted, and which; how many were muted by `[alerts] mute`, and which) |
 | `/api/v1/cpu?sort=&sel=` | the CPU screen (`sort` cpu, mem, time, pid or user; `sel` a pid: its details) |
 | `/api/v1/health?period=&sel=` | the HEALTH screen (`period` 1, 7 or 30 days; `sel` a finding's id) |
 | `/api/v1/map?sel=&open=&shut=&all=&only=` | the MAP as a tree (the parameters of the page), `node` (the selected row's node) and `counts` |

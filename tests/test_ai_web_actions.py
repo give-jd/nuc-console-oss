@@ -258,6 +258,19 @@ class UseModel(Base):
         self.assertNotIn("endpoint", st, "nobody answers there")
         self.assertEqual(self.eng.snapshot()["state"][0], "off")
 
+    def test_a_lost_connection_waits_for_the_exit_of_the_server_that_died(self):
+        """The connection breaks first and the exit is seen later than twice the poll: the job still says the exit (the race of #68)."""
+        self.install()
+
+        def load(api, name, cancel=None, timeout=None):
+            threading.Timer(0.6, self.eng.child.kill).start()  # well after poll_s * 2 = 0.1 s
+            raise aiollama.ConnectionLost("the model server stopped answering: Remote end closed connection without response")
+        with mock.patch.object(aiollama.Api, "load", load):
+            job = self.use("tiny")
+        self.assertEqual(job["state"], "failed")
+        self.assertIn("stopped while it loaded the model (exit status", job["error"])
+        self.assertEqual(self.eng.snapshot()["state"][0], "off")
+
     def test_a_model_the_server_cannot_load_is_said(self):
         self.install()
         self.control(load_error="model requires more system memory (12 GiB) than is available (4 GiB)")

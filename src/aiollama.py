@@ -52,6 +52,10 @@ class SetupError(Exception):
     """An expected failure: printed as one line, exit status 1 (aisetup.SetupError is this class)."""
 
 
+class ConnectionLost(SetupError):
+    """The connection broke while a request ran: what a server that died leaves behind (its exit is noticed a moment later)."""
+
+
 class Cancelled(Exception):
     """The caller asked to stop (the cancel of the web page and of the screen): what was fetched stays, a later pull resumes it."""
 
@@ -368,7 +372,7 @@ class Api(object):
         except (OSError, http.client.HTTPException) as e:
             if gone["cancelled"]:
                 raise Cancelled()
-            raise SetupError("the model server stopped answering: %s" % _safe(e, 120))
+            raise ConnectionLost("the model server stopped answering: %s" % _safe(e, 120))
         finally:
             stop.set()
             conn.close()
