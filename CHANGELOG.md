@@ -3,7 +3,9 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.5.2] - 2026-10-23
+
+A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).
 
 ### Fixed
 - Adding a model: a model server that died while it loaded the model could be reported as "stopped answering" instead of with its exit status and last words, when the closed connection was noticed before the exit (a slow machine). The job now waits a few seconds for the exit when the connection broke.
