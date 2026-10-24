@@ -17,7 +17,7 @@ import cards
 import ui
 
 VERSION = 1  # /api/v1: a field that changes meaning, or goes, is a new version; a new field is not
-VIEWS = ("overview", "cpu", "health", "map", "ai", "telegram", "summary")  # summary: the top bar and the key figures every page shows
+VIEWS = ("overview", "cpu", "health", "map", "ai", "events", "telegram", "summary")  # summary: the top bar and the key figures every page shows
 # What only the console reads: its widths, gaps, heights, indents and clipping (htmlview.py, the web's drawing, reads none of these; a column's
 # wprio and a table's titled are the web's too, so they stay).
 CONSOLE_ONLY = frozenset(("w", "gap", "clip", "pad_in", "indent", "head_line", "fill", "fit", "lw", "cw", "per", "h", "once"))

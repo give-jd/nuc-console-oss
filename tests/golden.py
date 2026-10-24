@@ -451,6 +451,15 @@ def _cases():
     for os_name in ("windows", "darwin"):
         add(f"health-{os_name}-200x50", ("--view", "health", "--demo-os", os_name) + _size(200, 50))
 
+    # the EVENTS timeline: the last 24 hours at two sizes, 7 days, one kind, the details of an event, no history yet, the history switched off, a period with nothing
+    for w, h in ((79, 24), (120, 33)):
+        add(f"events-{w}x{h}", ("--view", "events") + _size(w, h))
+    add("events-7d-oom-120x33", ("--view", "events", "--age", "7d", "--kind", "oom") + _size(120, 33))
+    add("events-details-120x33", ("--view", "events", "--select", "8", "--details") + _size(120, 33))
+    add("events-none-120x33", ("--view", "events", "--demo-health", "none") + _size(120, 33))
+    add("events-off-120x33", ("--view", "events") + _size(120, 33), cfg={"features": {"health": False}})
+    add("events-empty-79x24", ("--view", "events", "--kind", "hang") + _size(79, 24))
+
     # the AI: the three invented machines, a model selected with its details
     for w, h in SMALL:
         add(f"ai-{w}x{h}", ("--view", "ai") + _size(w, h))
@@ -471,6 +480,7 @@ def _cases():
                         ("ai-confirm-delete", "view=ai&sel=qwen3-1.7b&confirm=delete"),  # the AI screen's question (delete these files?) with its yes button
                         ("ai-confirm-delete-all", "view=ai&confirm=delete-all"), ("ai-not-installed", "view=ai&sel=qwen3-30b-a3b"),
                         ("health", "view=health"), ("health-details", f"view=health&period=30&sel={SELECTED['finding']}"),
+                        ("events", "view=events"), ("events-7d-oom", "view=events&age=7d&kind=oom"),
                         ("overview-wall-light", "ui=1.tl.dw"),  # the wall density (short lists, no small print) in the light theme
                         ("wall-kiosk", "ui=1.dw&kiosk=1"),  # the wall display: scrolls by itself (data-rotate), the footer says how to close it
                         ("edit", "edit=1")):  # the layout editor: the controls of each card, the builder's script and its policy
