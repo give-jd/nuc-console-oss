@@ -208,6 +208,9 @@ KEYS = (
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
+        ("metrics", BOOL, "yes", START,
+         "yes (the default): /metrics gives the figures of /api/v1/overview as Prometheus text, behind the very checks of /api/v1 (a token off "
+         "loopback). no: the route is a 404."),
         ("settings_actions", BOOL, "no", LOCK,
          "yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it "
          "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),

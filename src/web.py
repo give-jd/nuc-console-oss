@@ -49,6 +49,7 @@ import screens
 import tgweb
 import ui
 import webapi
+import webmetrics
 import webcss
 import webjs
 import wizard
@@ -321,6 +322,11 @@ class Server(http.server.ThreadingHTTPServer):
         return {"api": webapi.VERSION, "version": nuc_config.VERSION, "refresh": self.cfg["refresh_seconds"],
                 "views": [v for v in webapi.VIEWS if v in ("overview", "telegram", "summary") or render.CFG["features"].get(v, True)],
                 "documents": API_PATH + "/<view>", "stream": API_PATH + "/stream?view=<view>"}
+
+    def metrics(self):
+        """GET /metrics: the frame the overview is built from, as Prometheus text (webmetrics.py); built at most once per half refresh interval."""
+        r = self.cfg["refresh_seconds"]
+        return self.cached(("metrics",), r / 2, lambda: webmetrics.render(self.shell_frame(r), nuc_config.VERSION))
 
     def api(self, name, q):
         """The document of the view `name` (webapi.VIEWS) for the request's parameters (the page's: view_params checks and clamps them), as a
