@@ -188,6 +188,34 @@ n8n     = tailnet
 
 `[expose]` only adds alarms: `db-open-lan`, `docker-bypass` and the port baseline are never silenced by it. `over-exposed` can be accepted like any ATTENTION item (`nuc-console-accept --problem over-exposed --reason "…"`); a new service going beyond makes it reappear. A bad value or a port that cannot exist is reported on stderr and only that line is skipped. Never write a port as `:8080`: configparser refuses a key that starts with `:` and the **whole file** falls back to the defaults. Containers with `network_mode: host` listen as plain host processes, so declare them by process, unit or port; a broken `config.ini` (such a key, or any file that cannot be read) now raises the **config-unreadable** error in ATTENTION instead of silently dropping `[expose]`.
 
+## `[backups]` — backups that must stay fresh (none by default)
+
+```ini
+[backups]
+nightly-db = /srv/backups/db-*.sql.gz, 2
+photos     = /srv/backups/photos, 7
+```
+
+`name = /absolute/path-or-glob[, max_age_days]`. In `config.ini` the section ships commented out (remove the `#` before `[backups]` and the lines you want); with no line there is no check and no alarm. The path is **absolute** (`~` is not expanded: the collector runs as root, so there is no home to expand it to) and has no `..`; a glob (`*`, `?`, `[…]`) is expanded by the collector. The collector looks at the **newest** match, file or folder, and keeps only its name, modification time and size: it never reads a file. A match is looked at as itself (a symbolic link is not followed), and a match reached through a link that leads out of the folder the pattern starts in is ignored. A folder's date is the folder's own: it changes when something is added to it, so point at the files inside (`/srv/backups/photos/*`) when you want the newest file's date.
+
+- **backup-stale** (warning): the newest match is older than `max_age_days` (1-3650, default 2).
+- **backup-missing** (error): nothing matches (the backup never ran, the disk is not mounted, or the path is wrong).
+
+Neither can be muted (a mute would turn a guard you configured into a silent failure; remove the line to stop the check); both can be accepted with a reason. Only the administrator edits the section: the settings page does not (a path is read as root). The collector reads it at start: `sudo systemctl restart nuc-console-collector` after a change. A line the reader refuses (relative path, `~`, `..`, a bad age) is said on stderr (`journalctl -u nuc-console-collector`) and skipped.
+
+### Host hygiene: reboot, updates, clock, inodes
+
+Four more alarms come from the collector's boot data (every 5 minutes) and need `[features] boot = yes` (inodes: `disks = yes` too); there is nothing to configure:
+
+| Alarm | Level | When | Mute |
+|---|---|---|---|
+| `reboot-required` | warning | `/run/reboot-required` exists, or the running kernel (`uname -r`) is older than the newest `/boot/vmlinuz-*` of the same flavour (`7.0.0-34-generic` against `7.0.0-38-generic`); the kernel test needs both to be readable | yes |
+| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent | no |
+| `clock-unsynced` | warning | `timedatectl show` says `NTPSynchronized=no`. Without `timedatectl` (no systemd, a container) nothing is said | no |
+| `disk-inodes` | warning at 90 % of a filesystem's inodes used, error at 97 % | the filesystems of the DISKS card; those that report no fixed count (btrfs, xfs: `f_files` 0) are left out. Linux and macOS | yes |
+
+`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too); Windows has none of them, and macOS has no `reboot-required`, `updates-pending` or `clock-unsynced` (the tools that would answer, `softwareupdate`, `sntp`, `systemsetup`, are not run).
+
 ## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
 | Key | Default | Meaning |
@@ -212,7 +240,7 @@ Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Suppor
 | `[features]` | **off only.** `no` switches a section off; `yes` is ignored: a section that `config.ini` switches off stays off and only the administrator switches it on, so the overlay can make root's collector run less, never more |
 | `[dashboard]`, `[ui]`, `[display] zoom` | any value the dashboard takes; it wins over `config.ini` |
 
-Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
+Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
 overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
 or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
 notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.
@@ -225,9 +253,9 @@ mute = journal-errors, thermal
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `container-no-restart`, `containers-not-back`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `reboot-required`, `disk-inodes`, `container-no-restart`, `containers-not-back`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
-Security alarms can never be muted: ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
+Security and integrity alarms can never be muted: `updates-pending`, `clock-unsynced`, `backup-stale`, `backup-missing`; ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
 
