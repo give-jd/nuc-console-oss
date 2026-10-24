@@ -32,6 +32,10 @@ def _p(root, path):
     return os.path.join(root, path.lstrip("/"))
 
 
+def _owner_ok(file_uid, user_uid):
+    return file_uid in (0, user_uid)
+
+
 def _read(path, nofollow_uid=None):
     """Bytes of a regular file; None if it is missing or not a regular file; UNREADABLE if it cannot be read. nofollow_uid (a user's own file,
     which that user could point anywhere with a symlink): never follows a link and only accepts a file owned by that user or root."""
@@ -43,7 +47,7 @@ def _read(path, nofollow_uid=None):
         return None if e.errno == errno.ELOOP else UNREADABLE  # a link where a user's own file should be: not followed, not hashed
     try:
         st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or (nofollow_uid is not None and st.st_uid not in (0, nofollow_uid)):
+        if not stat.S_ISREG(st.st_mode) or (nofollow_uid is not None and not _owner_ok(st.st_uid, nofollow_uid)):
             return None
         with os.fdopen(fd, "rb", closefd=False) as f:
             return f.read(MAX_FILE)
@@ -58,12 +62,12 @@ def _sha(data):
 
 
 def parse_passwd(text):
-    """[(name, uid, home)] of /etc/passwd; lines that are not 7 fields are skipped."""
+    """[(name, uid, home, shell)] of /etc/passwd; lines with fewer than 6 fields are skipped (a missing shell is '')."""
     out = []
     for ln in (text or "").splitlines():
         f = ln.split(":")
         if len(f) >= 6 and f[0] and f[2].isdigit() and not ln.startswith("#"):
-            out.append((f[0][:64], int(f[2]), f[5]))
+            out.append((f[0][:64], int(f[2]), f[5], (f[6] if len(f) > 6 else "").strip()[:60]))
     return out
 
 
@@ -77,26 +81,40 @@ def parse_group(text):
     return out
 
 
-def accounts(root="/"):
-    """[(name, uid, home)] of the accounts that matter: uid 0, uid >= 1000, and the members of sudo, wheel, admin and docker."""
+NO_LOGIN = ("nologin", "false", "sync", "shutdown", "halt")
+
+
+def real_shell(shell):
+    """A shell a person can log in with: not nologin, false, sync, shutdown or halt (an empty field means /bin/sh)."""
+    return os.path.basename(shell) not in NO_LOGIN
+
+
+def passwd(root="/"):
+    """(all rows of /etc/passwd as (name, uid, home, shell), {group: members} of /etc/group); OSError when /etc/passwd cannot be read."""
     pw = _read(_p(root, "/etc/passwd"))
     if pw is None or pw == UNREADABLE:
         raise OSError("/etc/passwd unreadable")
     grp = _read(_p(root, "/etc/group"))
-    groups = parse_group(grp.decode("utf-8", "replace") if isinstance(grp, bytes) else "")
-    admins = {m for g in ADMIN_GROUPS for m in groups.get(g, ())}
-    rows = parse_passwd(pw.decode("utf-8", "replace"))
-    return sorted((n, u, h) for n, u, h in rows if u == 0 or u >= 1000 or n in admins)[:MAX_ITEMS]
+    return parse_passwd(pw.decode("utf-8", "replace")), parse_group(grp.decode("utf-8", "replace") if isinstance(grp, bytes) else "")
 
 
 def users(root="/"):
-    return sorted({n for n, _, _ in accounts(root)})
+    """{name: {"uid", "shell", "groups"}} of the accounts that matter: uid 0, uid >= 1000, any with a login shell, any member of
+    sudo, wheel, admin or docker; groups = the ones of those four it is in (sorted)."""
+    rows, groups = passwd(root)
+    out = {}
+    for n, uid, _, shell in rows:
+        mine = sorted(g for g in ADMIN_GROUPS if n in groups.get(g, ()))
+        if uid == 0 or uid >= 1000 or mine or real_shell(shell):
+            out.setdefault(n, {"uid": uid, "shell": shell, "groups": mine})
+    return dict(sorted(out.items())[:MAX_ITEMS])
 
 
 def keys(root="/"):
-    """{account: {"sha256", "n"}} of ~/.ssh/authorized_keys, for the accounts that have one (n = lines that hold a key, not blank or comment)."""
+    """{account: {"sha256", "n"}} of ~/.ssh/authorized_keys of EVERY account of /etc/passwd whose home has one (root included); n = lines
+    that hold a key, not blank or comment."""
     out = {}
-    for name, uid, home in accounts(root):
+    for name, uid, home, _ in passwd(root)[0]:
         if not home.startswith("/") or name in out:
             continue
         data = _read(_p(root, home + "/.ssh/authorized_keys"), nofollow_uid=uid)
@@ -104,7 +122,7 @@ def keys(root="/"):
             continue
         n = 0 if data == UNREADABLE else sum(1 for ln in data.splitlines() if ln.strip() and not ln.lstrip().startswith(b"#"))
         out[name] = {"sha256": _sha(data), "n": n}
-    return out
+    return dict(sorted(out.items())[:MAX_ITEMS])
 
 
 def _listdir(path):
@@ -115,12 +133,16 @@ def _listdir(path):
 
 
 def cron(root="/"):
-    """{file: sha256}: /etc/crontab, each /etc/cron.d/* file, and 'spool:<user>' for each per-user crontab."""
+    """{file: sha256}: /etc/crontab, /etc/anacrontab, each file of /etc/cron.d and of cron.hourly/daily/weekly/monthly, and 'spool:<user>' /
+    'spool-cron:<user>' for each per-user crontab (/var/spool/cron/crontabs, /var/spool/cron)."""
+    todo = [("/etc/crontab", "/etc/crontab"), ("/etc/anacrontab", "/etc/anacrontab")]
+    for d in ("/etc/cron.d", "/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"):
+        todo += [(d + "/" + n, d + "/" + n) for n in _listdir(_p(root, d))]
+    for tag, d in (("spool:", "/var/spool/cron/crontabs"), ("spool-cron:", "/var/spool/cron")):
+        todo += [(tag + n, d + "/" + n) for n in _listdir(_p(root, d))]
     out = {}
-    for label, path in [("/etc/crontab", _p(root, "/etc/crontab"))] + [
-            ("/etc/cron.d/" + n, _p(root, "/etc/cron.d/" + n)) for n in _listdir(_p(root, "/etc/cron.d"))] + [
-            ("spool:" + n, _p(root, "/var/spool/cron/crontabs/" + n)) for n in _listdir(_p(root, "/var/spool/cron/crontabs"))]:
-        data = _read(path)
+    for label, path in todo:
+        data = _read(_p(root, path))  # a folder (crontabs inside /var/spool/cron) is not a regular file: skipped
         if data is not None:
             out[safe(label)[:80]] = _sha(data)
     return out
@@ -129,20 +151,39 @@ def cron(root="/"):
 UNIT = re.compile(r"^[A-Za-z0-9:_.@\\-]+\.(service|timer|socket|path|mount|target)$")
 
 
+def _link(path):
+    return "link:" + safe(os.readlink(path))[:120]
+
+
 def units(root="/"):
-    """{unit name: sha256 or ""}: the units enabled by hand under /etc/systemd/system (the entries of its *.wants and *.requires folders), and
-    the unit files that live there (a regular file, not a vendor unit): those are hashed, a link has "" (its target is the vendor's)."""
+    """{label: value} under /etc/systemd/system: the units enabled by hand (entries of *.wants / *.requires), the unit files that live there and
+    the drop-ins (`name.service.d/override.conf`). A regular file is its sha256; a link is 'link:<target path>' (the target is never read or
+    followed: a relink shows, the vendor's file is not hashed)."""
     base, out = _p(root, "/etc/systemd/system"), {}
+
+    def add(label, full):
+        try:
+            if os.path.islink(full):
+                out.setdefault(label, _link(full))
+            elif os.path.isfile(full):
+                data = _read(full)
+                if data is not None:
+                    out.setdefault(label, _sha(data))
+        except OSError:
+            out.setdefault(label, UNREADABLE)
+
     for n in _listdir(base):
         full = os.path.join(base, n)
-        if n.endswith((".wants", ".requires")) and os.path.isdir(full):
+        if n.endswith((".wants", ".requires")) and os.path.isdir(full) and not os.path.islink(full):
             for u in _listdir(full):
                 if UNIT.match(u):
-                    out.setdefault(u, "")
-        elif UNIT.match(n) and os.path.isfile(full) and not os.path.islink(full):
-            data = _read(full)
-            if data is not None:
-                out[n] = _sha(data)
+                    add(u, os.path.join(full, u))
+        elif n.endswith(".d") and UNIT.match(n[:-2]) and os.path.isdir(full) and not os.path.islink(full):
+            for f in _listdir(full):
+                if f.endswith(".conf") and UNIT.match("x" + f[:-5] + ".service"):
+                    add(n + "/" + f, os.path.join(full, f))
+        elif UNIT.match(n):
+            add(n, full)
     return out
 
 
@@ -153,8 +194,10 @@ COLLECT = {"users": users, "keys": keys, "cron": cron, "units": units}
 
 def _valid(sec, v):
     """A section of baseline.json is usable only in its own shape; anything else counts as not there."""
-    if sec == "users":
-        return isinstance(v, list) and all(isinstance(x, str) for x in v)
+    if sec == "users":  # a list of names is the older shape (names only)
+        return (isinstance(v, list) and all(isinstance(x, str) for x in v)) or (isinstance(v, dict) and all(
+            isinstance(x, dict) and isinstance(x.get("uid"), int) and isinstance(x.get("shell"), str) and isinstance(x.get("groups"), list)
+            and all(isinstance(g, str) for g in x["groups"]) for x in v.values()))
     if sec == "keys":
         return isinstance(v, dict) and all(isinstance(x, dict) and isinstance(x.get("sha256"), str) and isinstance(x.get("n"), int) for x in v.values())
     return isinstance(v, dict) and all(isinstance(x, str) for x in v.values())
@@ -170,11 +213,30 @@ def _names(items, cap=3):
     return ", ".join(items[:cap]) + (f" (+{len(items) - cap})" if len(items) > cap else "")
 
 
+def _users_diff(cur, base):
+    """Names added and removed, and, when both sides know them, 'alice uid 1000->0', 'carol shell /bin/bash->/bin/false', 'bob joined sudo'."""
+    asd = lambda v: v if isinstance(v, dict) else {n: None for n in v}  # noqa: E731 - the older shape is a list of names
+    cur, base = asd(cur), asd(base)
+    parts, add, rem = [], sorted(set(cur) - set(base)), sorted(set(base) - set(cur))
+    for n in sorted(set(cur) & set(base)):
+        c, o = cur[n], base[n]
+        if not isinstance(c, dict) or not isinstance(o, dict):
+            continue
+        n = safe(n)[:40]
+        if c["uid"] != o["uid"]:
+            parts.append(f"{n} uid {o['uid']}->{c['uid']}")
+        if c["shell"] != o["shell"]:
+            parts.append(f"{n} shell {safe(o['shell'])[:30] or '(none)'}->{safe(c['shell'])[:30] or '(none)'}")
+        parts += [f"{n} joined {safe(g)[:20]}" for g in sorted(set(c["groups"]) - set(o["groups"]))]
+        parts += [f"{n} left {safe(g)[:20]}" for g in sorted(set(o["groups"]) - set(c["groups"]))]
+    parts = ([f"added {_names(add)}"] if add else []) + ([f"removed {_names(rem)}"] if rem else []) + parts
+    return "; ".join(parts[:6]) + (f"; +{len(parts) - 6} more" if len(parts) > 6 else "")
+
+
 def diff(sec, cur, base):
     """What changed in a section, in words, without any content; "" when nothing."""
     if sec == "users":
-        add, rem = sorted(set(cur) - set(base)), sorted(set(base) - set(cur))
-        parts = ([f"added {_names(add)}"] if add else []) + ([f"removed {_names(rem)}"] if rem else [])
+        return _users_diff(cur, base)
     else:
         add, rem = sorted(set(cur) - set(base)), sorted(set(base) - set(cur))
         if sec == "keys":
@@ -192,7 +254,7 @@ LABEL = {"users": "login/sudo accounts", "keys": "authorized_keys", "cron": "cro
 
 def baseline_problems(net, base, accept_cmd):
     """[(severity, text, id)] against a baseline dict: the changes of each section, and one note for the sections the baseline does not have."""
-    out, missing = [], []
+    out, missing, names_only = [], [], False
     if not isinstance(net, dict):
         return out
     for sec in SECTIONS:
@@ -203,11 +265,14 @@ def baseline_problems(net, base, accept_cmd):
         if old is None or not _valid(sec, old):
             missing.append(sec)
             continue
+        names_only = names_only or (sec == "users" and isinstance(old, list) and isinstance(cur, dict))  # compared by name until re-accepted
         d = diff(sec, cur, old)
         if d:
             out.append((SECTION_SEV[sec], f"{LABEL[sec]} changed: {d}", SECTION_ID[sec]))
-    if missing:
-        out.append((1, f"baseline predates {', '.join(missing)}: run {accept_cmd} to include them (not tracked until then)", "baseline-incomplete"))
+    if missing or names_only:
+        text = (f"baseline predates {', '.join(missing)}" if missing else "baseline lists account names only")
+        text += f": run {accept_cmd} to include " + ("them (not tracked until then)" if missing else "uid, shell and groups")
+        out.append((1, text, "baseline-incomplete"))
     return out
 
 

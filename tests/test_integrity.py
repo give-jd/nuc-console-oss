@@ -40,17 +40,27 @@ def put(root, path, text, mode="w"):
 
 def build(root, extra_user=None, keys="ssh-ed25519 AAAA1 a@x\n# c\n\nssh-ed25519 AAAA2 b@x\n", cron="0 3 * * * root backup\n", unit="[Service]\nExecStart=/bin/true\n"):
     users = ["root:x:0:0:root:/root:/bin/bash", "daemon:x:1:1::/usr/sbin:/usr/sbin/nologin", "alice:x:1000:1000::/home/alice:/bin/bash",
-             "bob:x:1001:1001::/home/bob:/bin/bash", "svc:x:998:998::/srv:/bin/false"]
+             "bob:x:1001:1001::/home/bob:/bin/bash", "svc:x:998:998::/srv:/bin/false", "sync:x:4:65534:sync:/bin:/bin/sync", "ops:x:500:500::/home/ops:/bin/bash"]
     if extra_user:
         users.append(extra_user)
     put(root, "/etc/passwd", "\n".join(users) + "\n")
     put(root, "/etc/group", "sudo:x:27:alice\ndocker:x:998:svc\nusers:x:100:bob\n")
     put(root, "/home/alice/.ssh/authorized_keys", keys)
+    put(root, "/root/.ssh/authorized_keys", "ssh-ed25519 AAAAroot r@x\n")
+    put(root, "/srv/.ssh/authorized_keys", "ssh-ed25519 AAAAsvc s@x\n")  # an account that is not in the users list still gets its keys looked at
     put(root, "/etc/crontab", "SHELL=/bin/sh\n")
     put(root, "/etc/cron.d/backup", cron)
     put(root, "/var/spool/cron/crontabs/alice", "@daily true\n")
+    put(root, "/var/spool/cron/bob", "@weekly true\n")
+    put(root, "/etc/anacrontab", "1 5 job true\n")
+    put(root, "/etc/cron.daily/logrotate", "#!/bin/sh\n")
     put(root, "/etc/systemd/system/app.service", unit)
-    put(root, "/etc/systemd/system/multi-user.target.wants/ssh.service", "")  # a name under *.wants
+    link = os.path.join(root, "etc/systemd/system/multi-user.target.wants/ssh.service")  # a name under *.wants: a link to the vendor's unit
+    os.makedirs(os.path.dirname(link), exist_ok=True)
+    if os.path.islink(link):
+        os.unlink(link)
+    os.symlink("/lib/systemd/system/ssh.service", link)
+    put(root, "/etc/systemd/system/app.service.d/override.conf", "[Service]\nEnvironment=A=1\n")
     return root
 
 
@@ -67,20 +77,59 @@ class Sections(unittest.TestCase):
         self.d = tempfile.TemporaryDirectory()
         self.root = build(self.d.name)
         self.addCleanup(self.d.cleanup)
+        me = os.getuid()  # the files of the test belong to whoever runs it, not to the uids of the fake passwd
+        old = self.real_owner = integrity._owner_ok
+        integrity._owner_ok = lambda file_uid, user_uid: file_uid in (0, user_uid, me)
+        self.addCleanup(setattr, integrity, "_owner_ok", old)
 
     def test_what_is_collected(self):
         s = snap(self.root)
-        self.assertEqual(s["users"], ["alice", "bob", "root", "svc"])  # uid 0, uid >= 1000, a member of docker; not daemon
+        self.assertEqual(s["users"], {  # uid 0, uid >= 1000, a login shell (ops, uid 500), a member of docker; not daemon, not sync
+            "alice": {"uid": 1000, "shell": "/bin/bash", "groups": ["sudo"]}, "bob": {"uid": 1001, "shell": "/bin/bash", "groups": []},
+            "ops": {"uid": 500, "shell": "/bin/bash", "groups": []}, "root": {"uid": 0, "shell": "/bin/bash", "groups": []},
+            "svc": {"uid": 998, "shell": "/bin/false", "groups": ["docker"]}})
         self.assertEqual(s["keys"]["alice"]["n"], 2)  # the comment and the blank line do not count
         self.assertEqual(len(s["keys"]["alice"]["sha256"]), 64)
-        self.assertEqual(set(s["cron"]), {"/etc/crontab", "/etc/cron.d/backup", "spool:alice"})
-        self.assertEqual(set(s["units"]), {"app.service", "ssh.service"})
-        self.assertEqual(s["units"]["ssh.service"], "")  # enabled by a link: no hash
+        self.assertEqual(set(s["keys"]), {"alice", "root", "svc"})
+        self.assertEqual(set(s["cron"]), {"/etc/crontab", "/etc/anacrontab", "/etc/cron.d/backup", "/etc/cron.daily/logrotate", "spool:alice",
+                                          "spool-cron:bob"})
+        self.assertEqual(set(s["units"]), {"app.service", "ssh.service", "app.service.d/override.conf"})
+        self.assertEqual(s["units"]["ssh.service"], "link:/lib/systemd/system/ssh.service")  # the target path, never its content
         self.assertEqual(len(s["units"]["app.service"]), 64)
+        self.assertEqual(len(s["units"]["app.service.d/override.conf"]), 64)
+
+    def test_users_precise_changes(self):
+        base = snap(self.root)
+        cur = json.loads(json.dumps(base))
+        cur["users"]["bob"]["uid"] = 0
+        cur["users"]["bob"]["groups"] = ["docker", "sudo"]
+        cur["users"]["alice"]["shell"] = "/bin/false"
+        cur["users"]["alice"]["groups"] = []
+        cur["users"]["carol"] = {"uid": 1002, "shell": "/bin/sh", "groups": []}
+        del cur["users"]["ops"]
+        pr = integrity.baseline_problems(net_with(cur), base, ACCEPT)
+        self.assertEqual([(s, i) for s, _, i in pr], [(2, "users-changed")])
+        t = pr[0][1]
+        for part in ("added carol", "removed ops", "alice shell /bin/bash->/bin/false", "alice left sudo"):
+            self.assertIn(part, t)
+        self.assertLessEqual(len(t), 400)
+        one = json.loads(json.dumps(base))
+        one["users"]["bob"]["uid"] = 0
+        self.assertIn("bob uid 1001->0", integrity.baseline_problems(net_with(one), base, ACCEPT)[0][1])
+        one["users"]["bob"]["groups"] = ["wheel"]
+        self.assertIn("bob joined wheel", integrity.baseline_problems(net_with(one), base, ACCEPT)[0][1])
+
+    def test_a_low_uid_login_shell_and_a_late_group_member_are_seen(self):
+        base = snap(self.root)
+        put(self.d.name, "/etc/passwd", open(os.path.join(self.d.name, "etc/passwd")).read() + "evil:x:33:33::/var/www:/bin/bash\n")
+        pr = integrity.baseline_problems(net_with(snap(self.root)), base, ACCEPT)
+        self.assertIn("added evil", pr[0][1])
+        put(self.d.name, "/etc/group", "sudo:x:27:alice,sync\ndocker:x:998:svc\n")  # sync (nologin-like shell) joins sudo
+        self.assertIn("sync", snap(self.root)["users"])
 
     def test_nothing_of_a_file_is_kept(self):
         blob = json.dumps(snap(self.root))
-        for secret in ("AAAA1", "a@x", "0 3 *", "ExecStart", "SHELL", "@daily"):
+        for secret in ("AAAA1", "a@x", "0 3 *", "ExecStart", "SHELL", "@daily", "AAAAroot", "Environment"):
             self.assertNotIn(secret, blob)
 
     def test_users_added_and_removed(self):
@@ -124,14 +173,21 @@ class Sections(unittest.TestCase):
         put(self.d.name, "/etc/systemd/system/app.service", "[Service]\nExecStart=/bin/false\n")
         put(self.d.name, "/etc/systemd/system/timers.target.wants/new.timer", "")
         os.unlink(os.path.join(self.d.name, "etc/systemd/system/multi-user.target.wants/ssh.service"))
+        os.symlink("/opt/evil.service", os.path.join(self.d.name, "etc/systemd/system/multi-user.target.wants/ssh.service"))  # relinked
+        put(self.d.name, "/etc/systemd/system/app.service.d/override.conf", "[Service]\nExecStartPre=/bin/x\n")
         pr = integrity.baseline_problems(net_with(snap(self.root)), base, ACCEPT)
         self.assertEqual([(s, i) for s, _, i in pr], [(1, "units-changed")])
-        for part in ("added new.timer", "removed ssh.service", "changed app.service"):
+        for part in ("added new.timer", "ssh.service", "app.service", "app.service.d/override.conf"):
             self.assertIn(part, pr[0][1])
 
     def test_no_change_no_problem(self):
         s = snap(self.root)
         self.assertEqual(integrity.baseline_problems(net_with(s), s, ACCEPT), [])
+
+    def test_the_owner_rule_is_the_user_or_root(self):
+        real = self.real_owner
+        self.assertTrue(real(0, 1000) and real(1000, 1000))
+        self.assertFalse(real(1001, 1000))
 
     def test_a_key_file_that_is_a_link_is_not_followed(self):
         os.unlink(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
@@ -167,10 +223,22 @@ class Compatibility(unittest.TestCase):
 
     def test_one_missing_section_is_not_tracked_and_the_others_are(self):
         base = dict({"ports": {}}, **{k: v for k, v in self.cur.items() if k != "cron"})
-        net = net_with(dict(self.cur, cron={"/etc/crontab": "0" * 64}, users=["alice", "root", "svc", "eve"]))
+        net = net_with(dict(self.cur, cron={"/etc/crontab": "0" * 64}, users=dict(self.cur["users"], eve={"uid": 1005, "shell": "/bin/sh", "groups": []})))
         pr = integrity.baseline_problems(net, base, ACCEPT)
         self.assertEqual(sorted(i for _, _, i in pr), ["baseline-incomplete", "users-changed"])
         self.assertIn("cron", [t for _, t, i in pr if i == "baseline-incomplete"][0])
+
+    def test_the_older_users_list_is_compared_by_name_and_asks_for_a_new_accept(self):
+        base = {"ports": {}, "users": ["alice", "bob", "ops", "root", "svc"], **{k: v for k, v in self.cur.items() if k != "users"}}
+        pr = integrity.baseline_problems(net_with(self.cur), base, ACCEPT)
+        self.assertEqual([(s, i) for s, _, i in pr], [(1, "baseline-incomplete")])
+        self.assertIn("uid, shell and groups", pr[0][1])
+        cur = json.loads(json.dumps(self.cur))
+        cur["users"]["eve"] = {"uid": 1005, "shell": "/bin/sh", "groups": []}
+        del cur["users"]["bob"]
+        pr = integrity.baseline_problems(net_with(cur), base, ACCEPT)
+        self.assertEqual(sorted(i for _, _, i in pr), ["baseline-incomplete", "users-changed"])
+        self.assertIn("added eve", [t for _, t, i in pr if i == "users-changed"][0])
 
     def test_wrong_shape_counts_as_missing_not_as_a_crash(self):
         base = {"ports": {}, "users": 5, "keys": [1], "cron": {"a": 1}, "units": None, "future": {"x": 1}}  # unknown keys are ignored
