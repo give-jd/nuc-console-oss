@@ -100,6 +100,21 @@ class Format(unittest.TestCase):
         self.assertIn('id="a\\"b\\\\c\\nd"', text)
         self.assertEqual(len([k for k in got if k[0] == "nuc_console_filesystem_used_bytes"]), 1)
 
+    def test_a_label_is_cut_and_names_that_end_alike_are_one_series(self):
+        long = "/m" + "x" * 100000
+        c = ctx(s={"fs": [{"mount": long + "a", "used": 1, "total": 2}, {"mount": long + "b", "used": 3, "total": 4}]})
+        body = webmetrics.render(c, "1")
+        self.assertLess(len(body), 4096)
+        got = parse(body.decode())
+        self.assertEqual(len([k for k in got if k[0] == "nuc_console_filesystem_used_bytes"]), 1)
+
+    def test_the_busiest_interfaces_stay_when_there_are_too_many(self):
+        nets = {"veth%03d" % i: {"rx_tot": 1, "tx_tot": 1} for i in range(100)}
+        nets["eth0"] = {"rx_tot": 10 ** 9, "tx_tot": 10 ** 9}  # alphabetically after every veth, still kept
+        text = webmetrics.render(ctx(s={"net": nets}), "1").decode()
+        self.assertIn('interface="eth0"', text)
+        self.assertEqual(len([k for k in parse(text) if k[0] == "nuc_console_network_receive_bytes_total"]), webmetrics.IFACES_MAX)
+
     def test_problem_ids_are_capped_and_not_repeated(self):
         c = ctx(problems=pbl([(1, "p%d" % i) for i in range(300)] + [(1, "p1")]))
         n = [k for k in parse(webmetrics.render(c, "1").decode()) if k[0] == "nuc_console_problem_active"]
@@ -150,6 +165,11 @@ class Route(unittest.TestCase):
         self.assertEqual(get(self.locked, "/metrics?token=" + TOKEN)[0], 200)
         self.assertEqual(get(self.open, "/metrics", headers={"Host": "evil.example"})[0], 421)
         self.assertEqual(get(self.open, "/api/v1", headers={"Host": "evil.example"})[0], 421)
+
+    def test_other_spellings_of_the_path_are_unknown_paths(self):
+        for path in ("/metrics/", "/Metrics", "/%6detrics", "/metrics;a", "/metrics%00"):
+            self.assertEqual(get(self.locked, path)[0], 404, path)
+        self.assertEqual(get(self.open, "/metrics", "HEAD", headers={"Host": "evil.example"})[0], 421)
 
     def test_switched_off_is_a_404_before_anything(self):
         self.assertEqual(get(self.off, "/metrics")[0], 404)

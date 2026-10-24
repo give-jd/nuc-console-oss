@@ -11,6 +11,7 @@ CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 PROBLEM_IDS_MAX = 200  # nuc_console_problem_active series
 MOUNTS_MAX = 64
 IFACES_MAX = 64
+LABEL_MAX = 64  # characters of a label value: a mount or interface name is cut here (the cards cut theirs shorter), so the answer stays small
 SEVERITY = {1: "warning", 2: "error", 3: "change"}  # problems.py: a port change (3) is as urgent as an error
 REACH = (("local", "LOCALE"), ("tailnet", "TAILNET"), ("lan", "LAN"), ("internet", "INTERNET"))
 
@@ -35,6 +36,7 @@ class Out(object):
         v = ui.num(value)
         if v is None:  # unknown: no series
             return
+        labels = {k: str(x)[:LABEL_MAX] for k, x in labels.items()}  # cut first: two names that end alike are one series, the first
         key = (name, tuple(sorted(labels.items())))
         if key in self.seen:
             return
@@ -105,7 +107,10 @@ def render(ctx, version):
     o.add(p + "uptime_seconds", "gauge", "Seconds since boot.", s.get("uptime"))
     nets = s.get("net")
     if isinstance(nets, dict):
-        for name in sorted(nets)[:IFACES_MAX]:
+        def traffic(n):  # the busiest interfaces stay when there are more than IFACES_MAX (veth* and br-* are many on a Docker host)
+            v = nets[n] if isinstance(nets[n], dict) else {}
+            return -((ui.num(v.get("rx_tot")) or 0) + (ui.num(v.get("tx_tot")) or 0))
+        for name in sorted(nets, key=lambda n: (traffic(n), str(n)))[:IFACES_MAX]:
             v = nets[name] if isinstance(nets[name], dict) else {}
             o.add(p + "network_receive_bytes_total", "counter", "Bytes received on an interface since boot.", v.get("rx_tot"), interface=ui.safe(name))
             o.add(p + "network_transmit_bytes_total", "counter", "Bytes sent on an interface since boot.", v.get("tx_tot"), interface=ui.safe(name))

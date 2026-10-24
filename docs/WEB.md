@@ -338,6 +338,8 @@ scrape_configs:
 On loopback with no token, drop the `authorization` block. Any scraper that can send the `Authorization: Bearer` header (or `?token=` in the
 URL, which logs and proxies may keep: prefer the header) reads it; nothing here depends on Prometheus or Grafana.
 
+A label value is cut at 64 characters (the cards cut theirs shorter), so two mounts that begin alike are one series; with more than 64 interfaces the busiest 64 are kept. `nuc_console_collector_age_seconds` is the only freshness signal: the figures of a collector that stopped keep their last values, exactly as in `/api/v1/*`, so alert on that age (and on a missing series) rather than on the value alone. The age itself is not in the JSON API.
+
 ## The live app
 
 `/app` is the web view as an app: one page that draws every screen in the browser from the [data API](#the-data-api)'s documents and keeps it
