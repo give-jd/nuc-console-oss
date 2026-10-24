@@ -47,6 +47,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 # collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
 # mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
+                  "reboot-required", "disk-inodes",
                   "container-no-restart", "containers-not-back",
                   "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
 
@@ -80,6 +81,7 @@ def load(path=None, warn=None, overlay=True):
                   "daily": False, "gpu": "auto", "web_actions": True},
            "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
+    cfg["backups"] = {}  # [backups]: name -> {"path": absolute path or glob, "max_age_days": int}; read by the root collector only
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
@@ -156,6 +158,18 @@ def load(path=None, warn=None, overlay=True):
                 cfg["webapps"][name] = ports
             else:
                 say(f"nuc-console: {path}: [webapps] {name}: invalid port list")
+    if cp.has_section("backups"):  # name = /absolute/path-or-glob[, max_age_days]: the newest match must be younger than that (default 2)
+        for name in [k for k in cp.options("backups") if k not in cp.defaults()]:
+            path_, comma, age = cp.get("backups", name).strip().rpartition(",")
+            if not comma or not age.strip().isdigit():
+                path_, age = cp.get("backups", name).strip(), ""  # no age: the comma, if any, belongs to the path
+            path_, age = path_.strip(), age.strip()
+            if not os.path.isabs(path_) or ".." in re.split(r"[\\/]", path_):
+                say(f"nuc-console: {path}: [backups] {name}: the path must be absolute, without '..' (the collector runs as root: '~' is not expanded)")
+            elif not 1 <= int(age or 2) <= 3650 or any(ord(ch) < 32 for ch in path_):
+                say(f"nuc-console: {path}: [backups] {name}: max_age_days is 1-3650, the path one line")
+            else:
+                cfg["backups"][name] = {"path": path_, "max_age_days": int(age or 2)}
     if cp.has_section("expose"):  # name or port = local|tailnet|lan|internet: the widest reach you intend (more is an ATTENTION problem)
         for key in [k for k in cp.options("expose") if k not in cp.defaults()]:  # a [DEFAULT] key belongs to every section: not a service
             word = cp.get("expose", key).strip().lower()

@@ -14,6 +14,8 @@ How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of pro
   collector-containers  stale-containers  unhealthy-container  container-exited      containers
   collector-boot  failed-units  journal-errors  display-stuck  disk-io-errors  memory-errors   boot
   nic-resets  oom-killed
+  backup-stale  backup-missing  reboot-required  updates-pending  clock-unsynced        boot
+  disk-inodes                                                                          disks
   thermal  throttling  memory-pressure                                                  system
   collector-net  stale-net  net-sections                                             exposure firewall webapps databases tailscale
   db-open-lan                                                                        databases exposure
@@ -113,6 +115,8 @@ PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
     "container-exited": ("containers",), "container-no-restart": ("containers",), "containers-not-back": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
+    "backup-stale": ("boot",), "backup-missing": ("boot",), "reboot-required": ("boot",), "updates-pending": ("boot",),
+    "clock-unsynced": ("boot",), "disk-inodes": ("disks",),
     "display-stuck": ("boot",), "disk-io-errors": ("boot",), "memory-errors": ("boot",), "nic-resets": ("boot",), "oom-killed": ("boot",),
     "thermal": ("system",), "throttling": ("system",), "memory-pressure": ("system",),
     "collector-net": _NET_CARDS, "stale-net": _NET_CARDS, "net-sections": _NET_CARDS,

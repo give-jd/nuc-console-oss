@@ -57,6 +57,8 @@ class Base(unittest.TestCase):
     def frame(self, os_name=None, tweak=None, **kw):
         """(ctx, net) of the demo machine; tweak(cont, net) changes the data before the problems are worked out."""
         cont, net, boot, base = (copy.deepcopy(x) for x in demo.snapshot(golden.NOW, os_name))
+        for k in ("backups", "reboot", "updates", "clock", "inodes"):
+            boot.pop(k, None)  # these tests count the older alarms; the host-hygiene ones are in test_host_hygiene.py
         if tweak:
             tweak(cont, net, base)
         pb = problems.safe_problems(net, cont, golden.NOW, boot=boot, baseline=base)

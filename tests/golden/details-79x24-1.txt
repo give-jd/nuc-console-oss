@@ -1,18 +1,18 @@
-[1;41;37m  demo-host │ [7m[1·Ov][27m │ Details 1/2 │ 14:13:20                   ✖ 8 PROBLEMS  [0m[0m[K
+[1;41;37m  demo-host │ [7m[1·Ov][27m │ Details 1/2 │ 14:13:20                  ✖ 12 PROBLEMS  [0m[0m[K
 [36m──[0m[1;36m [0m[31m✖[0m[1;36m ATTENTION [0m[36m─────────────────────────────────────────────────────────────[0m[0m[K
    [31m✖[0m 1 DB/broker open on LAN[0m[K
    [31m✖[0m 2 services reach beyond config.ini: n8n :8444 Internet > tailnet,[0m[K
      shop-db :5432 LAN > local[0m[K
    [33m![0m 1 container exited with an error[0m[K
    [33m![0m 2 errors in this boot's journal[0m[K
+   [33m![0m 1 backup older than allowed: photos (5 d)[0m[K
+   [33m![0m reboot required: the system asked for one (/run/reboot-required)[0m[K
+   [33m![0m 3 security updates pending (14 upgrades in all)[0m[K
+   [33m![0m inodes nearly used up: /data (92%)[0m[K
    [33m![0m 1 running container will not restart after a reboot: cache-1[0m[K
    [33m![0m kernel killed 2 processes for memory this boot (node)[0m[K
    [33m![0m 1 Docker port bypassing ufw (DOCKER-USER empty)[0m[K
    [33m![0m 1 service public on the Internet (Funnel :8444)[0m[K
-[K
-[K
-[K
-[K
 [K
 [K
 [K
