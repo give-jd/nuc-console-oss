@@ -256,7 +256,8 @@ class RegistryTests(unittest.TestCase):
         ctx = demo_ctx()
         caps = cards.Caps(100)
         self.assertEqual(ansi.card_lines(cards.build("firewall", ctx, 0, caps), 100)[0], cardlines.ov_firewall(ctx.net, 100, 0))
-        self.assertEqual(ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0], cardlines.ov_dischi(ctx.s, 100, 0))
+        self.assertEqual([x for x in ansi.card_lines(cards.build("disks", ctx, 0, caps), 100)[0] if "SMART" not in x],  # the demo's SMART line: test_integrity
+                         cardlines.ov_dischi(ctx.s, 100, 0))
         self.assertEqual(ansi.card_lines(cards.build("attention", ctx, 0, caps), 100)[0], cardlines.ov_attention(ctx.problems, 100, 0))
 
     def test_a_broken_section_becomes_a_message_not_an_exception(self):

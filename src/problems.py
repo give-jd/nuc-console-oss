@@ -11,13 +11,16 @@ import os
 import re
 import sys
 import time
+from fnmatch import fnmatchcase
 
 import cards  # same directory: the card registry (a problem belongs to a card)
+import history
 import hostdata
+import integrity
 import nuc_config
 import ui
-from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
-                      exposure_rows, os_of)
+from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over, expose_over_items, expose_unmatched, exposure_keys,
+                      exposure_partial, exposure_rows, group_of, os_of)
 from ui import fmt_ago, plural, safe
 
 WINDOWS, MACOS = nuc_config.WINDOWS, nuc_config.MACOS
@@ -72,15 +75,16 @@ def accept_baseline(if_missing=False, path=None, now=None):
     if cur is None:
         print("port list unavailable: baseline not created", file=sys.stderr)
         return 1
+    extra = integrity.baseline_sections(net)  # Linux: users, keys, cron, units (what could be read); elsewhere none: the file is as before
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump({"ts": now, "ports": cur}, f, indent=1)
+        json.dump(dict({"v": integrity.BASELINE_VERSION, "ts": now, "ports": cur}, **extra) if extra else {"ts": now, "ports": cur}, f, indent=1)
         f.flush()
         os.fsync(f.fileno())  # a power cut must not leave an empty file
     os.chmod(tmp, 0o644)
     os.replace(tmp, path)
-    print(f"baseline written: {len(cur)} exposed ports in {path}")
+    print(f"baseline written: {len(cur)} exposed ports" + (" and " + ", ".join(extra) if extra else "") + f" in {path}")
     return 0
 
 
@@ -119,6 +123,193 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+def ssh_exposed(net, cont):
+    """True when sshd listens where the exposure data says it is reachable from the Internet (a Funnel) or further than [expose] allows.
+    No exposure data (net missing, no port list) is False: the rule then stays at the lower severity."""
+    if not isinstance(net, dict) or net.get("listeners") is None:
+        return False
+    rows = exposure_rows(net, cont)
+    if CFG["expose"]:
+        rows = expose_apply(rows, net, cont)
+    return any(r["proto"] == "tcp" and (r["port"] == 22 or r["name"] == "sshd") and (group_of(r) == "INTERNET" or expose_over(r)) for r in rows)
+
+
+FP_NAMES = {}  # (problem id, text) -> every name behind a service-down / cert-* item (the text shows three): what accepting it is tied to
+
+
+def _names(pid, text, names, out, sev):
+    FP_NAMES[(pid, text)] = sorted(set(names))
+    out.append((sev, text, pid))
+
+
+def host_checks(boot, net, cont, now):
+    """What boot.json's services, sshd and certs sections say, as (severity, text, id): a unit that must run and does not, the sshd settings
+    that weaken a login, a certificate near its end. Names and counts only; a section the collector did not write (Windows/macOS, not
+    configured, sshd absent) says nothing, unless the config asks for it on a system that has it (then watch-config says it did not run).
+    A malformed value is skipped, never an error."""
+    out, more = [], []
+    FP_NAMES.clear()
+    rows = [x for x in boot.get("services") or () if isinstance(x, dict) and isinstance(x.get("unit"), str)] if isinstance(boot.get("services"), list) else []
+    skipped = [x for x in rows if x.get("state") == "not-checked"]
+    down = [x for x in rows if x.get("state") not in ("active", "activating", "reloading", "not-checked")]
+    if down:
+        text = ("service not running: " + ", ".join(f"{safe(x['unit'])[:40]} ({safe(str(x.get('state')))[:12]})" for x in down[:3])
+                + (f" … +{len(down) - 3}" if len(down) > 3 else ""))
+        _names("service-down", text, [x["unit"] for x in down], out, 2)
+    if skipped:
+        more.append(plural(len(skipped), "unit") + " not checked this pass (time limit): " + ", ".join(safe(x["unit"])[:40] for x in skipped[:3]))
+    local = boot.get("os") in (None, "linux")
+    if (CFG.get("services") or {}).get("must_run") and local:  # asked for, and nothing came back: not "all fine"
+        if "services" in (boot.get("errors") or {}):
+            more.append("[services] must_run is set but the check failed")
+        elif not isinstance(boot.get("services"), list):
+            more.append("[services] must_run is set but systemctl is not available / the check did not run")
+    ssh = boot.get("sshd") if isinstance(boot.get("sshd"), dict) else {}
+    if ssh.get("permitrootlogin") == "yes":
+        out.append((1, "sshd allows root login (PermitRootLogin yes)", "ssh-root-login"))
+    if ssh.get("passwordauthentication") == "yes" or ssh.get("kbdinteractiveauthentication") == "yes":
+        wide = ssh_exposed(net, cont)
+        what = ("sshd accepts passwords (PasswordAuthentication yes)" if ssh.get("passwordauthentication") == "yes"
+                else "sshd accepts keyboard-interactive/PAM password login (KbdInteractiveAuthentication yes)")
+        out.append((2 if wide else 1, what + (", and port 22 reaches the Internet or beyond config.ini" if wide else ""), "ssh-password-auth"))
+    if ssh.get("permitemptypasswords") == "yes":
+        out.append((2, "sshd accepts empty passwords (PermitEmptyPasswords yes)", "ssh-empty-passwords"))
+    warn = (CFG.get("tls") or {}).get("warn_days", 21)
+    soon, gone, lost, unchecked = [], [], [], []
+    certs = boot.get("certs")
+    for c in certs if isinstance(certs, list) else ():
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        exp, name = c.get("exp"), safe(c["name"])[:32]
+        if c.get("why") == "not-checked":
+            unchecked.append(name)
+        elif isinstance(exp, bool) or not isinstance(exp, (int, float)):
+            lost.append(name)
+        elif exp <= now:
+            gone.append((name, f"{name} ({int((now - exp) // 86400)} d ago)"))
+        elif int((exp - now) // 86400) < warn:
+            soon.append((name, f"{name} ({int((exp - now) // 86400)} d)"))
+    for pid, sev, head, items in (("cert-expired", 2, "TLS certificate expired: ", gone), ("cert-expiring", 1, "TLS certificate expires soon: ", soon),
+                                  ("cert-unreadable", 1, "TLS certificate not read: ", [(n, n) for n in lost])):
+        if items:
+            _names(pid, head + ", ".join(t for _, t in items[:3]) + (f" … +{len(items) - 3}" if len(items) > 3 else ""), [n for n, _ in items], out, sev)
+    if unchecked:
+        more.append(plural(len(unchecked), "certificate") + " not checked this pass (time limit): " + ", ".join(unchecked[:3]))
+    if (CFG.get("tls") or {}).get("watch"):
+        if "certs" in (boot.get("errors") or {}):
+            more.append("[tls] watch is set but the check failed")
+        elif not isinstance(certs, list):
+            more.append("[tls] watch is set but the check did not run")
+    for m in more:
+        out.append((1, m, "watch-config"))
+    return out
+
+
+INODE_WARN, INODE_ERR = 90.0, 97.0  # % of a filesystem's inodes used
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def hygiene_problems(boot, now):
+    """What boot.json's host-hygiene sections say (collector.collect_boot): [(severity, text, id)]. A section that is missing, broken or odd
+    (absent tool, unsupported OS, [backups] empty) says nothing: it is neither a problem nor a proof that all is well."""
+    out = []
+    bk = [b for b in boot.get("backups") or () if isinstance(b, dict) and isinstance(b.get("name"), str)] if isinstance(boot.get("backups"), list) else []
+    gone = [b for b in bk if not b.get("matches") or num(b.get("newest")) is None]
+    old = []
+    for b in bk:
+        if b in gone:
+            continue
+        age = (now - b["newest"]) / 86400
+        if age > (num(b.get("max_age_days")) or 2):
+            old.append((safe(b["name"])[:30], int(age)))
+    if gone:
+        out.append((2, plural(len(gone), "backup") + " found nothing: " + ", ".join(safe(b["name"])[:30] for b in gone[:3]), "backup-missing"))
+    if old:
+        out.append((1, plural(len(old), "backup") + " older than allowed: " + ", ".join(f"{n} ({d} d)" for n, d in old[:3]), "backup-stale"))
+    rb = boot.get("reboot")
+    if isinstance(rb, dict):
+        if rb.get("flag") is True:
+            out.append((1, "reboot required: the system asked for one (/run/reboot-required)", "reboot-required"))
+        elif rb.get("kernel_old") is True and isinstance(rb.get("running"), str) and isinstance(rb.get("newest"), str):
+            out.append((1, f"reboot required: running kernel {safe(rb['running'])[:40]}, {safe(rb['newest'])[:40]} installed", "reboot-required"))
+    up = boot.get("updates")
+    if isinstance(up, dict) and isinstance(num(up.get("security")), int) and up["security"] > 0:
+        out.append((1, plural(up["security"], "security update") + " pending" + (f" ({num(up.get('total'))} upgrades in all)" if num(up.get("total")) else ""), "updates-pending"))
+    ck = boot.get("clock")
+    if isinstance(ck, dict) and ck.get("synced") is False:
+        out.append((1, "clock not synchronised (NTP service " + ("on" if ck.get("ntp") else "off") + ")", "clock-unsynced"))
+    ino = [(num(r.get("pct")), safe(r.get("mount"))[:30]) for r in boot.get("inodes") or () if isinstance(r, dict) and isinstance(r.get("mount"), str)] \
+        if isinstance(boot.get("inodes"), list) else []
+    ino = sorted(((p, m) for p, m in ino if p is not None and p >= INODE_WARN), reverse=True)
+    if ino:
+        out.append((2 if ino[0][0] >= INODE_ERR else 1, "inodes nearly used up: " + ", ".join(f"{m} ({p:.0f}%)" for p, m in ino[:3]), "disk-inodes"))
+    return out
+
+
+NOT_BACK_WINDOW_S = 1200  # containers-not-back looks at the first 20 minutes after a boot, then it is just a stopped container
+
+
+def restart_problems(boot, now):
+    """The two restart-policy alarms, from the boot collector's `containers` (the RUNNING ones, with their policy) and `containers_before`
+    (the names that ran with a policy before the last reboot; collector.remember_running). Names only; an absent or unreadable
+    section gives nothing: unknown is not an alarm here, and not a green either."""
+    cs, out = boot.get("containers"), []
+    if not isinstance(cs, list) or not hostdata.on("containers"):
+        return out
+    ignore = (CFG.get("containers") or {}).get("restart_ignore") or []
+    cs = [c for c in cs if isinstance(c, dict) and isinstance(c.get("name"), str)]
+    no = [c["name"] for c in cs if (c.get("restart") or "no") == "no" and not any(fnmatchcase(c["name"].lower(), g) for g in ignore)]
+    if no:
+        out.append((1, plural(len(no), "running container") + " will not restart after a reboot: " + ", ".join(safe(n) for n in no[:3])
+                    + (" …" if len(no) > 3 else ""), "container-no-restart"))
+    btime = boot.get("btime")
+    if isinstance(btime, (int, float)) and not isinstance(btime, bool) and 0 <= now - btime < NOT_BACK_WINDOW_S:
+        up = {c["name"] for c in cs}
+        gone = [n for n in boot.get("containers_before") or () if isinstance(n, str) and n not in up]
+        if gone:
+            out.append((2, plural(len(gone), "container") + " running before the reboot did not come back: "
+                        + ", ".join(safe(n) for n in gone[:3]) + (" …" if len(gone) > 3 else ""), "containers-not-back"))
+    return out
+
+
+def kernel_problems(k, now):
+    """boot['kernlog'] (collector.parse_kernlog: {class: {n, last, ...}}; absent where the OS has no kernel log) -> problems. A class
+    leaves the list when its newest line is older than its window (history.KERNEL_WINDOW_S); the OOM killer stays for the boot."""
+    out = []
+    if not isinstance(k, dict):
+        return out
+
+    def get(cls):
+        e = k.get(cls)
+        if not isinstance(e, dict) or not isinstance(e.get("n"), int) or isinstance(e.get("n"), bool) or e["n"] < 1:
+            return None
+        last = e.get("last")
+        win = history.KERNEL_WINDOW_S.get(cls)
+        if not isinstance(last, (int, float)) or isinstance(last, bool) or (win is not None and now - last > win):
+            return None
+        return True
+    # no age in the texts ("3 min" -> "1 h" would be a new problem to the fingerprint) and, for the two that cannot be accepted, no count
+    # either (notify.py keys those by their text): the count and the age of the newest line are in boot.json's kernlog
+    g = k.get("display") if get("display") else None
+    if g:
+        out.append((2, f"{safe(g.get('driver') or 'gpu')[:16]} graphics driver stuck: {plural(g['n'], 'error')} in the kernel log", "display-stuck"))
+    if get("disk"):
+        out.append((2, "disk I/O errors in the kernel log (last 24 h)", "disk-io-errors"))
+    if get("memory"):
+        out.append((2, "memory (ECC/MCE) errors in the kernel log (last 24 h)", "memory-errors"))
+    g = k.get("nic") if get("nic") else None
+    if g and g["n"] >= history.NIC_MIN:
+        out.append((1, f"network adapter reset or link down {g['n']} times in 24 h", "nic-resets"))
+    g = k.get("oom") if get("oom") else None
+    if g:
+        names = ", ".join(safe(p)[:30] for p in (g.get("procs") or [])[:3] if isinstance(p, str))
+        out.append((1, f"kernel killed {g['n']} process{'' if g['n'] == 1 else 'es'} for memory this boot" + (f" ({names})" if names else ""), "oom-killed"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -131,6 +322,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     if bad:  # [alerts] mute named something that cannot be muted: said on the screen too, never accepted in silence
         out.append((1, "[alerts] mute: " + ", ".join(f"'{safe(x)[:40]}'" for x in bad[:3]) + (" … " if len(bad) > 3 else " ")
                     + "cannot be muted: ignored", "mute-ignored"))
+    bad = CFG.get("watch_warnings") or []
+    if bad:  # [services] / [tls] asked for something that is not done (a bad unit name, a public host): the collector skips it, and the screen says so
+        out.append((1, "config.ini [services]/[tls]: " + "; ".join(safe(x)[:60] for x in bad[:2]) + (f" … +{len(bad) - 2}" if len(bad) > 2 else ""), "watch-config"))
     if not hostdata.on("containers"):
         pass
     elif cont is None:
@@ -154,6 +348,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                     out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
             out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
+        psi, limit = thermal.get("psi"), (CFG.get("thresholds") or {}).get("memory_pressure_pct", 10)
+        if isinstance(psi, (int, float)) and not isinstance(psi, bool) and psi > limit:  # no PSI on this OS/kernel: None, no problem
+            out.append((1, f"memory pressure {psi:.1f} % (processes waited for memory; the limit is {limit} %)", "memory-pressure"))
     if not hostdata.on("boot"):
         pass
     elif boot is None:
@@ -164,6 +361,10 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out.extend(host_checks(boot, net, cont, now))
+        out.extend(hygiene_problems(boot, now))
+        out += restart_problems(boot, now)
+        out.extend(kernel_problems(boot.get("kernlog"), now))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -210,6 +411,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
                 out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
+    if isinstance(baseline, dict):  # users, keys, cron, units (Linux): a section the baseline lacks is one quiet note, never an alarm
+        out.extend(integrity.baseline_problems(net, baseline, ACCEPT_CMD))
+    out.extend(integrity.smart_problems(net.get("smart")))
     if net.get("listeners") is not None:
         rows = exposure_rows(net, cont)
         pub = [r for r in rows if r["net"] == 1]
@@ -254,10 +458,43 @@ CATALOG = {
     "stale-net": ("Network data is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
     "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete", "journalctl -u nuc-console-collector; the section name is in the message"),
     "unhealthy-container": ("Container unhealthy or restarting", "the service may be down or degraded", "docker ps; docker logs <name>; fix the healthcheck or the app. A wrong healthcheck path is the usual cause"),
+    "container-no-restart": ("Running container will not restart after a reboot", "its restart policy is no: after a reboot or a Docker restart it stays down and nothing says so",
+                             "docker update --restart unless-stopped <name> (compose: restart: unless-stopped); a one-shot or test container on purpose: list it in [containers] restart_ignore"),
+    "containers-not-back": ("Containers did not come back after the reboot", "they were running before it with a restart policy and are not running now: a service is down",
+                            "docker ps -a; docker logs <name>; docker start <name>; if you stopped one on purpose, it clears 20 minutes after the boot"),
     "container-exited": ("Container exited with an error", "a service that should run is down", "docker ps -a; docker logs <name>; docker start <name> or remove it if obsolete"),
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
     "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
+    "service-down": ("A service that must run is not running", "failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; "
+                     "[services] must_run names the ones you expect",
+                     "systemctl status <unit>; journalctl -u <unit>; sudo systemctl enable --now <unit>, or take it off [services] must_run if it is no longer expected"),
+    "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
+                       "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
+    "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
+                          "PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows the global values: a Match block overrides them for its users or addresses, so read those too; KbdInteractiveAuthentication no closes the PAM password route); or accept it with a reason if the LAN is trusted"),
+    "ssh-empty-passwords": ("sshd accepts empty passwords", "an account with no password can log in over SSH",
+                            "PermitEmptyPasswords no in /etc/ssh/sshd_config, then sudo systemctl reload ssh; passwd -l <user> for an account that should not log in"),
+    "cert-expiring": ("A TLS certificate is about to expire", "when it does, browsers and clients refuse the service",
+                      "renew it (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it; [tls] warn_days sets how early this speaks"),
+    "cert-expired": ("A TLS certificate has expired", "browsers and clients already refuse the service",
+                     "renew it now (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it"),
+    "cert-unreadable": ("A watched TLS certificate could not be read", "its expiry is unknown, so nothing is being watched there",
+                        "check the host:port answers TLS (or the file is a PEM certificate, at most 64 KB) from this machine; fix or remove the entry under [tls] watch"),
+    "watch-config": ("[services] or [tls] in config.ini asks for something that is not done", "a unit name that is not valid, a host that is not on a private network (nuc-console connects nowhere else) or a duplicate is skipped",
+                     "fix the line under [services] / [tls] in config.ini (the message says which); restart the services after fixing it"),
+    "backup-stale": ("A backup is older than allowed", "the newest copy is old: the job that makes it may have stopped, and a restore would lose that much",
+                     "look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini"),
+    "backup-missing": ("A backup was not found", "nothing matches the path under [backups]: the backup never ran, the disk is not mounted, or the path is wrong",
+                       "ls the path; mount the backup disk; fix the path in config.ini (absolute, no ~) and restart nuc-console-collector"),
+    "reboot-required": ("Reboot required", "a kernel or library update is installed but not running yet: the old, possibly vulnerable one still is",
+                        "reboot when it suits you (sudo reboot); cat /run/reboot-required.pkgs lists the packages"),
+    "updates-pending": ("Security updates pending", "known vulnerabilities are fixed in packages that are not installed yet",
+                        "sudo apt update && apt list --upgradable; sudo apt upgrade (or enable unattended-upgrades)"),
+    "clock-unsynced": ("Clock not synchronised", "logs, certificates, tokens and backups depend on the time being right",
+                       "timedatectl status; sudo timedatectl set-ntp true; check chrony or systemd-timesyncd and the network"),
+    "disk-inodes": ("Inodes nearly used up", "no new file can be created when they run out, though the disk shows free space",
+                    "df -i; find the folder with millions of small files (sessions, caches, mail queues, container layers) and clean it"),
     "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
     "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
     "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),
@@ -281,9 +518,39 @@ CATALOG = {
     "port-new": ("New exposed port", "something started listening where it did not before", "identify it (ss -ltnp); if intended: sudo nuc-console-accept; if not, stop it"),
     "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port", "check what changed; if intended: sudo nuc-console-accept"),
     "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: sudo nuc-console-accept"),
+    "baseline-incomplete": ("Baseline does not cover everything yet", "the baseline was written before accounts, SSH keys, cron and enabled units were tracked: changes there are not detected",
+                            "sudo nuc-console-accept (it rewrites the baseline with ports, users, keys, cron and units as they are now: check them first)"),
+    "users-changed": ("Login or sudo accounts changed", "an account that can log in or become root appeared or went since the baseline",
+                      "getent passwd; getent group sudo; if intended: sudo nuc-console-accept; if not, lock the account (usermod -L) and look for how it was made"),
+    "keys-changed": ("SSH authorized_keys changed", "a key that lets someone log in was added, removed or replaced since the baseline",
+                     "check ~/.ssh/authorized_keys of the account named; if intended: sudo nuc-console-accept; if not, remove the key and find out how it got there"),
+    "cron-changed": ("Cron jobs changed", "a scheduled job was added, removed or edited since the baseline",
+                     "read the file named (/etc/crontab, /etc/cron.d, crontab -l -u <user>); if intended: sudo nuc-console-accept; if not, remove it"),
+    "units-changed": ("Enabled systemd units changed", "a service or timer was enabled, disabled or edited by hand since the baseline",
+                      "systemctl list-unit-files --state=enabled; systemctl cat <unit>; if intended: sudo nuc-console-accept; if not, disable it"),
+    "disk-smart-failed": ("Disk reports a failing SMART state", "the drive says it is failing or has a critical warning: data may be lost",
+                          "back up now; sudo smartctl -a /dev/<disk> (or sudo nvme smart-log /dev/<disk>); replace the drive"),
+    "disk-wear": ("Disk worn out", "an SSD near its rated write endurance will start to fail", "plan its replacement; sudo smartctl -a /dev/<disk>; reduce writes (logs, swap, databases)"),
+    "disk-media-errors": ("Disk media errors", "the drive found data it could not read or sectors it had to remap: an early sign of failure",
+                          "back up; sudo smartctl -a /dev/<disk> and watch whether the count keeps growing; replace the drive if it does"),
 }
 
 
+CATALOG.update({  # the kernel's own log (Linux): graphics, disk, memory, network adapter, the OOM killer; memory pressure (PSI)
+    "display-stuck": ("Graphics driver stuck", "the kernel's graphics driver stopped answering: the monitor can stay black while every service looks fine",
+                      "do not replug the HDMI/DisplayPort cable and do not force a connector 'detect' (that can trigger the hang); press a key or switch "
+                      "console (Ctrl+Alt+F2, then back), else reboot (sudo systemctl reboot); if it comes back, see the driver's vendor bug tracker for a kernel parameter"),
+    "disk-io-errors": ("Disk I/O errors in the kernel log", "a failing disk, cable or filesystem: data may be unreadable or lost",
+                       "journalctl -k -p err | grep -iE 'nvme|ata|I/O error|EXT4-fs|XFS|BTRFS'; sudo smartctl -a /dev/<disk>; back up now; check the cable; replace the disk it names"),
+    "memory-errors": ("Memory (ECC/MCE) errors in the kernel log", "failing RAM or CPU: crashes and silent data corruption",
+                      "journalctl -k | grep -iE 'edac|mce|hardware error'; memtest86+ (a full pass, from boot); reseat or replace the module it names"),
+    "nic-resets": ("Network adapter resets or link drops", "an unstable cable, switch port, driver or power setting: connections drop",
+                   "journalctl -k | grep -iE 'reset adapter|link is down'; try another cable or port; check the switch; ethtool -S <interface>; a driver or firmware update"),
+    "oom-killed": ("The kernel killed a process for memory", "the machine ran out of memory this boot: a service died without a word",
+                   "journalctl -k | grep -i 'killed process'; free -h; find the app that grew (the HEALTH screen); give it a limit it respects or add RAM"),
+    "memory-pressure": ("Memory pressure", "processes are waiting for memory (PSI): the machine is slow and heading for the OOM killer",
+                        "cat /proc/pressure/memory; free -h; ps aux --sort=-rss | head; stop or limit the biggest app; add RAM or swap. The limit is [thresholds] memory_pressure_pct"),
+})
 CATALOG.update({  # macOS/Windows: the OS firewall in place of ufw (the advice is per OS, below)
     "firewall-off": ("Firewall off", "every listening service is reachable from the network", "turn the firewall on"),
     "firewall-unreadable": ("Firewall state unreadable", "LAN exposure cannot be judged: ports are shown as unknown", f"{CMD['logs']}"),
@@ -377,15 +644,28 @@ if nuc_config.PORTABLE:
 
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden", "users-changed", "keys-changed", "cron-changed", "units-changed", "disk-io-errors", "memory-errors"}  # port changes are handled by the baseline: sudo nuc-console-accept
+COUNT_MATTERS = {"container-no-restart", "containers-not-back", "db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units", "service-down"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
+
+
+def fp_matches(accepted, current):
+    """An accepted fingerprint still covers the current one: equal, or (service-down, cert-*) the same severity and every name now failing
+    was already in the accepted list, so one leaving does not bring the alarm back and a new one does."""
+    if accepted == current:
+        return True
+    if accepted.partition("|")[0] != current.partition("|")[0]:
+        return False
+    a, c = accepted.partition("|")[2], current.partition("|")[2]
+    return a.startswith("names:") and c.startswith("names:") and set(c[6:].split("\n")) <= set(a[6:].split("\n"))
 
 
 def fingerprint(sev, text, pid):
     """What was accepted: severity + text. For exposure/health items the exact text (one more is a new problem); for noisy
     counters (journal errors, temperatures) the digits are ignored, so 118 -> 120 stays accepted but a worse severity does not."""
+    if (pid, text) in FP_NAMES:  # the text shows three names: the tie is to all of them
+        return f"{sev}|names:" + "\n".join(FP_NAMES[(pid, text)])
     return f"{sev}|" + (text if pid in COUNT_MATTERS else re.sub(r"\d+", "#", text))
 
 
@@ -436,7 +716,7 @@ def problems(*a, **kw):
         if pid in mute:
             out.muted += 1
             out.muted_known.append({"id": pid, "text": text})
-        elif pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
+        elif pid in acc and fp_matches(acc[pid]["fp"], fingerprint(sev, text, pid)):
             out.accepted += 1
             out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
@@ -455,7 +735,7 @@ def problem_records(*a, **kw):
         title, why, fix = CATALOG.get(pid, (pid, "", ""))
         fp = fingerprint(sev, text, pid)
         out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
-                    "accepted": pid not in mute and pid in acc and acc[pid]["fp"] == fp, "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
+                    "accepted": pid not in mute and pid in acc and fp_matches(acc[pid]["fp"], fp), "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
                     "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
     return out
 

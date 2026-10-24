@@ -12,15 +12,20 @@ screen. A card made of ui.Raw lines (raw_card) is still drawn by both renderers.
 How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of problems.problems_raw, and the cards they belong to):
 
   collector-containers  stale-containers  unhealthy-container  container-exited      containers
-  collector-boot  failed-units  journal-errors                                       boot
-  thermal  throttling                                                                system
+  collector-boot  failed-units  journal-errors  display-stuck  disk-io-errors  memory-errors   boot
+  nic-resets  oom-killed
+  backup-stale  backup-missing  reboot-required  updates-pending  clock-unsynced        boot
+  disk-inodes                                                                          disks
+  thermal  throttling  memory-pressure                                                  system
   collector-net  stale-net  net-sections                                             exposure firewall webapps databases tailscale
   db-open-lan                                                                        databases exposure
   docker-bypass                                                                      firewall exposure
   funnel-public                                                                      tailscale exposure
   over-exposed  expose-unmatched                                                     exposure
   port-new  port-changed  port-gone  port-compare-suspended                          exposure
-  baseline-missing  baseline-unreadable                                              exposure
+  baseline-missing  baseline-unreadable  baseline-incomplete                                 exposure
+  users-changed  keys-changed  cron-changed  units-changed                                  exposure
+  disk-smart-failed  disk-wear  disk-media-errors                                          disks
   firewall-off  firewall-policy  firewall-unreadable  ufw-missing  ufw-off  ufw-unreadable      firewall
   config-unreadable                                                                  exposure webapps (and attention)
   feature-hidden                                                                     exposure firewall
@@ -110,14 +115,21 @@ class Ctx(object):
 _NET_CARDS = ("exposure", "firewall", "webapps", "databases", "tailscale")
 PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
-    "container-exited": ("containers",),
+    "container-exited": ("containers",), "container-no-restart": ("containers",), "containers-not-back": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
-    "thermal": ("system",), "throttling": ("system",),
+    "service-down": ("boot",), "cert-expiring": ("boot",), "cert-expired": ("boot",), "cert-unreadable": ("boot",), "watch-config": (),
+    "ssh-root-login": ("exposure",), "ssh-password-auth": ("exposure",), "ssh-empty-passwords": ("exposure",),
+    "backup-stale": ("boot",), "backup-missing": ("boot",), "reboot-required": ("boot",), "updates-pending": ("boot",),
+    "clock-unsynced": ("boot",), "disk-inodes": ("disks",),
+    "display-stuck": ("boot",), "disk-io-errors": ("boot",), "memory-errors": ("boot",), "nic-resets": ("boot",), "oom-killed": ("boot",),
+    "thermal": ("system",), "throttling": ("system",), "memory-pressure": ("system",),
     "collector-net": _NET_CARDS, "stale-net": _NET_CARDS, "net-sections": _NET_CARDS,
     "db-open-lan": ("databases", "exposure"), "docker-bypass": ("firewall", "exposure"), "funnel-public": ("tailscale", "exposure"),
     "over-exposed": ("exposure",), "expose-unmatched": ("exposure",),
     "port-new": ("exposure",), "port-changed": ("exposure",), "port-gone": ("exposure",), "port-compare-suspended": ("exposure",),
-    "baseline-missing": ("exposure",), "baseline-unreadable": ("exposure",),
+    "baseline-missing": ("exposure",), "baseline-unreadable": ("exposure",), "baseline-incomplete": ("exposure",),
+    "users-changed": ("exposure",), "keys-changed": ("exposure",), "cron-changed": ("exposure",), "units-changed": ("exposure",),
+    "disk-smart-failed": ("disks",), "disk-wear": ("disks",), "disk-media-errors": ("disks",),
     "firewall-off": ("firewall",), "firewall-policy": ("firewall",), "firewall-unreadable": ("firewall",),
     "ufw-missing": ("firewall",), "ufw-off": ("firewall",), "ufw-unreadable": ("firewall",),
     "config-unreadable": ("exposure", "webapps"),
@@ -325,7 +337,32 @@ def disks_card(ctx, k, caps):
             for f in shown]
     body = [Table([Col("mount", "Mount", w=14), Col("usage", "Used", num=True)], rows)]
     more = More(len(fs) - len(shown), "more") if len(fs) > len(shown) else None
-    return _native_card("disks", ctx, "", body + ([more] if more else []), more)
+    return _native_card("disks", ctx, "", body + smart_lines(ctx.net, caps) + ([more] if more else []), more)
+
+
+def smart_lines(net, caps):
+    """The SMART health of the physical disks as ONE line, ' SMART  nvme0n1 ok 7%  sda ok  nvme1n1 ?' (a device: its name, ok or FAILED or ?,
+    and the wear when it has one), as many devices as the card is wide: the card gains one row, not one per disk. Nothing when net.json has
+    no 'smart' (another OS, no tool installed, the feature off); a disk that could not be read is '?', never ok."""
+    rows = [r for r in (net or {}).get("smart") or [] if isinstance(r, dict) and isinstance(r.get("dev"), str)] if isinstance(net, dict) else []
+    bits, room = [], max(10, caps.width - 14)
+    for n, r in enumerate(rows):
+        crit, wear = ui.num(r.get("crit")), ui.num(r.get("wear"))
+        if r.get("health") == "FAILED" or crit:
+            tone, word = "err", "FAILED"
+        elif r.get("health") is None:
+            tone, word = "unknown", "?"
+        else:
+            tone, word = "ok", "ok"
+        name = ui.safe(r["dev"])[:9]
+        w_tone = "err" if wear is not None and wear >= 95 else "warn" if wear is not None and wear >= 80 else None
+        width = len(name) + 1 + len(word) + (len(f" {wear:.0f}%") if wear is not None else 0) + 2
+        if bits and width > room:
+            bits += [Span("  "), Span(f"+{len(rows) - n}", "muted")]
+            break
+        room -= width
+        bits += ([Span("  ")] if bits else []) + [Span(name + " "), Span(word, tone)] + ([Span(f" {wear:.0f}%", w_tone)] if wear is not None else [])
+    return [Line([Span(" SMART  ", "muted")] + bits)] if bits else []
 
 
 @native("docker_disk", "DOCKER · DISK", "docker_disk")

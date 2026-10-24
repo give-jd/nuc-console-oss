@@ -7,12 +7,16 @@ Linux sections run the tools below; macOS and Windows sections live in collect_d
 the same shapes, plus "os" so the renderer knows which firewall model the verdicts come from. On macOS and Windows it also
 writes the CPU temperature (sensors.json): only root/SYSTEM can read it there; on Linux the renderer reads sysfs itself.
 """
+import glob
 import ipaddress
 import json
 import os
 import platform
 import re
 import shutil
+import socket
+import ssl
+import stat
 import subprocess
 import sys
 import threading
@@ -20,7 +24,9 @@ import time
 from datetime import datetime, timezone
 
 import history  # noqa: E402  (same directory)
+import integrity  # noqa: E402
 import nuc_config  # noqa: E402
+import x509min  # noqa: E402
 
 CFG = nuc_config.load()
 OFF = {k for k, v in CFG["features"].items() if not v}
@@ -33,16 +39,20 @@ elif MACOS:
 # collected section -> feature that enables it (disabled = like a missing tool: no error, no alarm)
 NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailscale", "ufw": "firewall",
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
-               "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
+               "f2b": "fail2ban", "firewall": "firewall", "links": "map",
+               "users": "exposure", "keys": "exposure", "cron": "exposure", "units": "exposure", "smart": "disks"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
-                "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
+                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",),
+                "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
-LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps"), "windows": ("blame",)}.get(OS_NAME, ())
+LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b", "users", "keys", "cron", "units", "smart")
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
+                    "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}.get(OS_NAME, ())  # the host-hygiene sections are Linux (inodes: macOS too)
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
 OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
+RUNNING_RECORD = os.path.join(nuc_config.LIB_DIR, "running.json")  # names of the containers that ran with a restart policy (see remember_running)
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
@@ -455,6 +465,56 @@ def parse_failed(text):
     return [ln.replace("●", "").split()[0] for ln in text.splitlines() if ln.replace("●", "").strip()]
 
 
+SSHD_KEYS = ("permitrootlogin", "passwordauthentication", "kbdinteractiveauthentication", "permitemptypasswords", "pubkeyauthentication", "x11forwarding")
+SERVICE_STATES = ("active", "inactive", "failed", "activating", "deactivating", "reloading", "maintenance")
+
+
+CLOCK = time.monotonic  # the sections of [services] and [tls] read it for their time budget (a test injects its own)
+
+
+def parse_sshd_t(text):
+    """`sshd -T` -> {setting: value} for the five settings the audit reads (values only, in lower case); the rest of the output is dropped."""
+    out = {}
+    for ln in text.splitlines():
+        key, _, rest = ln.strip().partition(" ")
+        val = (rest.split() or [""])[0].lower()
+        if key.lower() in SSHD_KEYS and re.fullmatch(r"[a-z-]{1,24}", val):
+            out.setdefault(key.lower(), val)
+    return out
+
+
+def service_state(is_active_out, load_state_out=""):
+    """The state of a unit from `systemctl is-active` (first line) and, for one that is not active, `systemctl show -p LoadState`:
+    one of SERVICE_STATES, 'not-found' (no such unit) or 'unknown' (anything else: never taken for running)."""
+    if "LoadState=not-found" in load_state_out:
+        return "not-found"
+    word = (is_active_out.split() or [""])[0]
+    return word if word in SERVICE_STATES else "unknown"
+
+
+def tls_der(host, port, timeout=3):
+    """The DER certificate a TLS server presents, or None. Verification is OFF on purpose: the goal is the expiry of whatever certificate is
+    served (a self-signed LAN one included), nothing is sent and nothing is trusted. Callers pass only addresses nuc_config.watch_entry accepted."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # nosec - see above
+    with socket.create_connection((host, port), timeout) as sock:
+        with ctx.wrap_socket(sock) as tls:
+            return tls.getpeercert(binary_form=True)
+
+
+def cert_file_der(path):
+    """The first certificate of a PEM file (at most x509min.MAX bytes, a regular file only: a FIFO or a device would block), or None."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        data = os.read(fd, x509min.MAX + 1)
+    finally:
+        os.close(fd)
+    return x509min.pem_to_der(data.decode("ascii", "replace")) if len(data) <= x509min.MAX else None
+
+
 def parse_reverse_deps(text):
     """`systemctl show -p RequiredBy -p RequisiteOf -p BoundBy UNIT` -> the units that need it (first level only), sorted.
 
@@ -489,6 +549,38 @@ def parse_journal(text, cap=500):
         e["last"] = msg[:120] if isinstance(msg, str) else "<binary message>"  # journald: non-UTF8 = list of bytes
     top = sorted(({"id": k, **v} for k, v in idents.items()), key=lambda x: (x["pr"], -x["n"]))[:10]
     return {"err": err, "warn": warn, "capped": n >= cap, "top": top}
+
+
+KERN_LINE = re.compile(r"^(\d+)(?:\.\d+)? \S+ kernel: (.*)$")
+
+
+def parse_kernlog(text, now=None):
+    """`journalctl -k -o short-unix` text -> {class: {'n', 'last'}} for the classes with at least one line inside their window
+    (history.KERNEL_WINDOW_S; the OOM killer: all of this boot) - 'display' also {'driver'}, 'oom' {'procs'}: names only. Counts and
+    the time of the last line; no line is kept."""
+    now = time.time() if now is None else now
+    out = {}
+    for ln in text.splitlines():
+        m = KERN_LINE.match(ln)
+        if not m:
+            continue
+        ts = int(m.group(1))
+        for cls, detail in history.classify_kernel(m.group(2)):
+            win = history.KERNEL_WINDOW_S.get(cls)
+            if win is not None and now - ts > win:
+                continue
+            e = out.setdefault(cls, {"n": 0, "last": 0})
+            e["n"] += 1
+            e["last"] = max(e["last"], ts)
+            if cls == "display":
+                drivers = e.setdefault("drivers", {})
+                drivers[detail] = drivers.get(detail, 0) + 1
+            elif cls == "oom" and detail not in e.setdefault("procs", []) and len(e["procs"]) < 5:
+                e["procs"].append(detail)
+    if "display" in out:  # the driver that said it most
+        d = out["display"].pop("drivers")
+        out["display"]["driver"] = max(d, key=d.get)
+    return out
 
 
 def parse_iso(text):
@@ -527,6 +619,165 @@ def boot_time():
         return int(time.time() - winapi.uptime())
     with open("/proc/stat") as f:
         return next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
+
+
+# ---- host hygiene: backups, reboot, updates, clock, inodes (sections of boot.json; the judgement is problems.hygiene_problems) ----------
+
+DAY_S = 86400
+UPDATES_EVERY_S = 3600  # apt-get -s is a full dependency resolution: at most once an hour
+_UPDATES = {"at": 0.0, "value": None, "error": None}
+
+
+def newest_match(pattern):
+    """(newest mtime, size, matches) of the entries the glob `pattern` finds, or (None, None, 0). Only metadata: lstat, never a read, never
+    a link followed (a link counts as itself), and a match whose directory is not under the pattern's literal base is dropped."""
+    head = []
+    for part in re.split(r"([\\/])", pattern):
+        if glob.has_magic(part):
+            break
+        head.append(part)
+    base = os.path.realpath(os.path.dirname("".join(head)))  # the literal directory the pattern starts in
+    best, n = None, 0
+    for m in glob.glob(pattern):
+        parent = os.path.realpath(os.path.dirname(m))
+        if parent != base and not parent.startswith(base.rstrip(os.sep) + os.sep):
+            continue  # reached through a link that leads out of the base
+        try:
+            st = os.lstat(m)
+        except OSError:
+            continue
+        n += 1
+        if best is None or st.st_mtime > best.st_mtime:
+            best = st
+    return (int(best.st_mtime), best.st_size, n) if best else (None, None, 0)
+
+
+def collect_backups(cfg=None):
+    """[backups] of config.ini -> [{'name', 'newest', 'size', 'matches', 'max_age_days'}]; Absent when none is configured (no alarm)."""
+    items = (CFG if cfg is None else cfg).get("backups") or {}
+    if not items:
+        raise Absent("no [backups]")
+    out = []
+    for name, it in sorted(items.items()):
+        newest, size, n = newest_match(it["path"])
+        out.append({"name": name, "newest": newest, "size": size, "matches": n, "max_age_days": it["max_age_days"]})
+    return out
+
+
+def kernel_key(release):
+    """'7.0.0-38-generic' / 'vmlinuz-7.0.0-38-generic' -> ((7, 0, 0, 38), 'generic'): the version order and the flavour."""
+    rel = release[8:] if release.startswith("vmlinuz-") else release
+    return tuple(int(x) for x in re.findall(r"\d+", re.split(r"-[a-z]", rel, maxsplit=1)[0])), (re.split(r"-(?=[a-z])", rel, maxsplit=1) + [""])[1]
+
+
+def newest_kernel(names, running):
+    """The newest of the installed kernels ('vmlinuz-...' names) with the running one's flavour, or None."""
+    flavour = kernel_key(running)[1]
+    keyed = [(kernel_key(n)[0], n[8:]) for n in names if n.startswith("vmlinuz-") and kernel_key(n)[1] == flavour and kernel_key(n)[0]]
+    return max(keyed)[1] if keyed else None
+
+
+def collect_reboot():
+    """{'flag': /run/reboot-required exists, 'running': uname -r, 'newest': the newest /boot/vmlinuz-* of its flavour | None,
+    'kernel_old': that one is newer than the running one}."""
+    running = os.uname().release
+    try:
+        newest = newest_kernel(os.listdir("/boot"), running)
+    except OSError:
+        newest = None
+    old = bool(newest) and kernel_key(newest)[0] > kernel_key(running)[0]  # only when both are known; a kernel older than the running one is not a reason
+    return {"flag": os.path.exists("/run/reboot-required"), "running": running, "newest": newest, "kernel_old": old}
+
+
+INST = re.compile(r"^Inst \S+ .*\((.*)\)\s*$")
+
+
+def parse_apt_sim(text):
+    """`apt-get -s dist-upgrade` -> {'total': upgrades, 'security': those from a *security suite}. Package names are not kept."""
+    total = sec = 0
+    for ln in text.splitlines():
+        m = INST.match(ln)
+        if m:
+            total += 1
+            sec += "security" in m.group(1).lower()
+    return {"total": total, "security": sec}
+
+
+def collect_updates(now=None):
+    """Pending upgrades from the simulation, at most once an hour (the answer, or the failure, is kept until then). Absent without apt-get."""
+    now = time.time() if now is None else now
+    if now - _UPDATES["at"] >= UPDATES_EVERY_S:
+        _UPDATES["at"], _UPDATES["value"], _UPDATES["error"] = now, None, None
+        try:
+            rc, out, err = run("env", "LC_ALL=C", "apt-get", "-s", "dist-upgrade", timeout=60)
+            if rc == 127:  # env: no apt-get (not Debian or Ubuntu)
+                raise Absent("apt-get")
+            if rc != 0:
+                raise RuntimeError(err or "apt-get -s failed")
+            _UPDATES["value"] = dict(parse_apt_sim(out), at=int(now))
+        except Absent:
+            pass
+        except Exception as e:  # noqa: BLE001 - kept for the hour: the next pass says the same, it does not run apt-get again
+            _UPDATES["error"] = repr(e)[:120]
+    if _UPDATES["error"]:
+        raise RuntimeError(_UPDATES["error"])
+    if _UPDATES["value"] is None:
+        raise Absent("apt-get")
+    return _UPDATES["value"]
+
+
+def collect_clock():
+    """{'synced': NTPSynchronized, 'ntp': the NTP service is on} from timedatectl; Absent where it cannot say (no systemd, a container)."""
+    rc, out, err = run("timedatectl", "show", "-p", "NTPSynchronized", "-p", "NTP")
+    if rc != 0:
+        raise Absent("timedatectl")
+    kv = dict(ln.partition("=")[::2] for ln in out.splitlines())
+    if kv.get("NTPSynchronized") not in ("yes", "no"):
+        raise Absent("timedatectl")
+    return {"synced": kv["NTPSynchronized"] == "yes", "ntp": kv.get("NTP") == "yes"}
+
+
+def collect_inodes():
+    """[{'mount', 'pct'}]: the share of inodes used on the filesystems the DISKS card lists; those with no fixed count (btrfs, xfs: f_files 0) are left out."""
+    out = []
+    for r in disk_rows():
+        try:
+            st = os.statvfs(r["mount"])
+        except OSError:
+            continue
+        if st.f_files:
+            out.append({"mount": r["mount"], "pct": round(100.0 * (st.f_files - st.f_ffree) / st.f_files, 1)})
+    return out[:32]
+
+
+def remember_running(names, btime, path=None, now=None):
+    """The memory behind containers-not-back: the NAMES (nothing else) of the containers that were running with a restart policy at the last
+    look, in a small file of the collector's own (LIB_DIR/running.json). Returns the names that were running before the last reboot: on a new
+    boot (btime moved by more than a minute) the file's `running` becomes `before` and is kept for the whole boot, so containers that have
+    not come back yet are not forgotten when `running` is rewritten. The first look of a boot may find Docker down: nothing is written then
+    (the caller is not reached), so the old file still tells what ran before. A file that cannot be read or written costs the check, not
+    the section. Ceiling: the look is the boot collector's, every 5 minutes: a container stopped by hand in the 5 minutes before a reboot
+    is still counted as running."""
+    path = path or RUNNING_RECORD
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    old = rec.get("btime")
+    known = isinstance(old, (int, float)) and not isinstance(old, bool)
+    new_boot = known and abs(old - btime) > 60
+    clean = lambda v: [x for x in v if isinstance(x, str)][:200] if isinstance(v, list) else []  # noqa: E731
+    before = clean(rec.get("running")) if new_boot else clean(rec.get("before"))
+    out = {"btime": btime if new_boot or not known else old, "running": sorted(set(names))[:200], "before": before}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_atomic(out, path)
+    except OSError:
+        pass
+    return before
 
 
 def collect_boot():
@@ -615,19 +866,29 @@ def collect_boot():
         need(rc in (0, 1), err, "journalctl")
         return parse_journal(out)
 
+    def kernlog():
+        # this boot's kernel log, only the lines that may be a fault (a coarse -g; history.classify_kernel decides), at most 5000 of
+        # them, 20 s. rc 1 = nothing found: not an error
+        rc, out, err = run("journalctl", "-k", "-b", "-o", "short-unix", "-g",
+                           "timed out|timeout|GPU HANG|ERROR|error|Out of memory|Hardware Error|Machine check|EDAC|corruption|"
+                           "Reset adapter|Link is Down|read-only|failed command|exception Emask",
+                           "-n", "5000", "--no-pager", timeout=20)
+        need(rc in (0, 1), err, "journalctl -k")
+        return parse_kernlog(out)
+
     def containers():
         rc, out, err = run("docker", "ps", "-q")
         need(rc == 0, err, "docker ps")
         ids = out.split()
-        if not ids:
-            return []
-        rc, out, err = run("docker", "inspect", "--format",
-                           "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
-        need(rc == 0, err, "docker inspect")
         rows = []
-        for ln in out.splitlines():
-            name, started, policy = ln.split("|")
-            rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        if ids:
+            rc, out, err = run("docker", "inspect", "--format",
+                               "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
+            need(rc == 0, err, "docker inspect")
+            for ln in out.splitlines():
+                name, started, policy = ln.split("|")
+                rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        d["containers_before"] = remember_running([r["name"] for r in rows if r["restart"] != "no"], d["btime"])
         return rows
 
     def docker_df():
@@ -641,11 +902,57 @@ def collect_boot():
                 "volumes_unused_anonymous": sum(bool(ANON_VOLUME.match(v)) for v in unused) if unused is not None else None,
                 "dangling_images": {"count": len(dimg.split()), "bytes": sum(parse_size(x) for x in dimg.split())} if rc == 0 else None}
 
+    def services():
+        """The units [services] must_run names, each asked on its own (a failure costs only its own entry): [{unit, state}]."""
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
+        for unit in [u for u in CFG["services"]["must_run"] if nuc_config.UNIT_RE.fullmatch(u)][:nuc_config.WATCH_MAX]:
+            if CLOCK() > end:  # out of time: the rest is said to be unchecked, never ok
+                out.append({"unit": unit, "state": "not-checked"})
+                continue
+            rc, text, _ = run("systemctl", "is-active", "--", unit, timeout=5)
+            load = ""
+            if rc is None or not text.startswith("active"):  # is-active says 'inactive' for a unit that does not exist: LoadState tells
+                load = run("systemctl", "show", "--no-pager", "-p", "LoadState", "--", unit, timeout=5)[1]
+            out.append({"unit": unit, "state": "unknown" if rc is None else service_state(text, load)})
+        return out
+
+    def sshd():
+        """The effective settings the audit reads. sshd -T needs root; a missing sshd or an error is 'Absent', never a pass."""
+        rc, text, _ = run("sshd", "-T", timeout=10)
+        got = parse_sshd_t(text) if rc == 0 else {}
+        if not got:
+            raise Absent("sshd -T")
+        return got
+
+    def certs():
+        """[{name, exp}] for [tls] watch: exp = notAfter (epoch) or None with why = 'unreachable' | 'unreadable' | 'refused' | 'not-checked' (the time budget ran out). Nothing else of
+        the certificate is kept. A host that is not private is refused here too (nuc_config.watch_entry), whatever the file says."""
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
+        for spec in CFG["tls"]["watch"][:nuc_config.TLS_MAX]:
+            if CLOCK() > end:
+                out.append({"name": spec.partition("=")[0][:32], "exp": None, "why": "not-checked"})
+                continue
+            try:
+                name, kind, where, port = nuc_config.watch_entry(spec)
+            except ValueError:
+                out.append({"name": spec.partition("=")[0][:32], "exp": None, "why": "refused"})
+                continue
+            try:
+                der = tls_der(where, port) if kind == "net" else cert_file_der(where)
+            except (OSError, ssl.SSLError, ValueError):
+                out.append({"name": name, "exp": None, "why": "unreachable" if kind == "net" else "unreadable"})
+                continue
+            exp = x509min.not_after(der)
+            out.append({"name": name, "exp": exp, "why": "" if exp is not None else "unreadable"})
+        return out
+
     d["btime"] = boot_time()
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
-                    ("journal", journal), ("containers", containers), ("docker_df", docker_df)):
+                    ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
+                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
+                    ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
         section(key, fn)
     return d
 
@@ -1212,6 +1519,9 @@ def collect_net():
             raise RuntimeError(err or "tailscale failed")
         return parse_ts_peers(out)
 
+    def smart():
+        return collect_smart()
+
     if not LINUX:
         section("firewall", firewall)  # before the listeners: their verdicts depend on it
     section("listeners", listeners)
@@ -1224,7 +1534,61 @@ def collect_net():
     section("ts_peers", ts_peers)
     section("f2b", f2b_jails)
     section("drops", drops)
+    for key, fn in integrity.COLLECT.items():  # the baseline's other sections: plain reads as root, no command
+        section(key, fn)
+    section("smart", smart)
     return d
+
+
+SMART_TTL_S, SMART_TIMEOUT_S, SMART_PASS_S = 1800, 10, 25  # a pass starts no new disk after 25 s
+_SMART = {"t": None, "val": None, "media": {}}  # the last answer (a disk is asked at most every 30 minutes) and the error counts it showed
+
+
+def collect_smart(now=None, root="/", clock=time.monotonic):
+    """net.json 'smart': [{dev, model, health, wear, spare, media, crit, poh, realloc, grown}] of the physical disks, from smartctl, else nvme-cli
+    (fixed argv, the device name validated by integrity.DEVICE). Raises Absent when neither tool is installed; a disk that could not be read is
+    listed with health None (shown '?', never green), also when it timed out or the pass ran out of time (SMART_PASS_S): that answer is cached
+    like any other, so a dying disk is not asked again at every pass. 'grown': the error count is higher than at the previous look."""
+    now = time.monotonic() if now is None else now
+    deadline = clock() + SMART_PASS_S
+    if _SMART["t"] is not None and now - _SMART["t"] < SMART_TTL_S and _SMART["val"] is not None:
+        return _SMART["val"]
+    tools, rows = 0, []
+    for dev in integrity.block_devices(root):
+        model, row, timed_out = integrity.sysfs_model(dev, root), None, False
+        if rows and clock() >= deadline:  # out of time: this disk is asked at the next pass (30 minutes), shown '?'
+            rows.append(dict(integrity._entry(dev, model, None, None, None, None, None, None, None), grown=False))
+            continue
+        try:
+            rc, out, _ = run("smartctl", "-j", "-H", "-A", "/dev/" + dev, timeout=SMART_TIMEOUT_S)  # its exit status is a bit mask: the JSON decides
+            tools += 1
+            timed_out = rc is None
+            row = integrity.parse_smartctl(dev, out, model) if rc is not None else None
+        except Absent:
+            pass
+        except Exception:  # noqa: BLE001 - one disk must not end the pass
+            tools += 1
+        if row is None and dev.startswith("nvme") and not timed_out and clock() < deadline:
+            try:
+                rc, out, _ = run("nvme", "smart-log", "-o", "json", "/dev/" + dev, timeout=SMART_TIMEOUT_S)
+                tools += 1
+                row = integrity.parse_nvme(dev, out, model) if rc == 0 else None
+            except Absent:
+                pass
+            except Exception:  # noqa: BLE001
+                tools += 1
+        if row is None:
+            row = integrity._entry(dev, model, None, None, None, None, None, None, None)
+        errs = (row["media"] or 0) + (row["realloc"] or 0)
+        row["grown"] = dev in _SMART["media"] and errs > _SMART["media"][dev]
+        _SMART["media"][dev] = errs
+        rows.append(row)
+    if not tools:
+        if integrity.block_devices(root):
+            raise Absent("smartctl")  # disks, but neither tool: not an error
+        return []
+    _SMART["t"], _SMART["val"] = now, rows
+    return rows
 
 
 def sane_c(value):

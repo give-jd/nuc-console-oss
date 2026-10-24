@@ -30,6 +30,7 @@ import tgweb
 import webapi
 import webcss
 import webjs
+import webmetrics
 from weburl import APP_PATH, NUM, app_url, view_params, view_url
 from wizard import SETUP_PATH, link as setup_link
 
@@ -38,6 +39,7 @@ TOKEN_OK = re.compile(r"[A-Za-z0-9._~-]{16,}")   # cookie- and URL-safe
 
 
 DEADLINE_S = 15      # total time a single request may take (slowloris)
+METRICS_PATH = "/metrics"  # Prometheus text, the figures of /api/v1/overview ([web] metrics = no: 404)
 API_PATH = "/api/v1"  # the data API: /api/v1 (what there is), /api/v1/<view> (JSON), /api/v1/stream?view=<view> (Server-Sent Events)
 
 
@@ -270,7 +272,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if act in POST_AREAS.get(area, ()):
             return self._send(405, b"post only\n", extra=(("Allow", "POST"),))
         api = u.path == API_PATH or u.path.startswith(API_PATH + "/")
-        if u.path not in ("/", APP_PATH, SETUP_PATH) and not u.path.startswith("/s/") and not api:
+        if u.path not in ("/", APP_PATH, SETUP_PATH) and not u.path.startswith("/s/") and not api and not (
+                u.path == METRICS_PATH and srv.cfg.get("metrics", True)):
             return self._send(404, b"not found\n")
         if not srv.token and not host_ok(self.headers.get("Host"), srv.allowed):
             return self._send(421, b"misdirected request: add this name to [web] allowed_hosts\n")
@@ -285,6 +288,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                   f"nuc_token={given}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000" + self._secure())))
         if api:
             return self._api(u.path[len(API_PATH):].strip("/"), q)
+        if u.path == METRICS_PATH:
+            return self._metrics()
         if u.path == APP_PATH:
             page = srv.app_page(self._cookie(prefs.COOKIE_NAME), q)
             return self._send(200, page.encode(), "text/html; charset=utf-8", csp=page.csp, referrer="same-origin", extra=(("Vary", "Cookie"),))
@@ -367,6 +372,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if tag in [t.strip() for t in self.headers.get("If-None-Match", "").split(",")]:
             return self._send(304, extra=(("ETag", tag),))
         self._send(200, doc, webapi.JSON_TYPE, extra=(("ETag", tag),))
+
+    def _metrics(self):
+        """/metrics, after the checks every request has (Host or token): the overview's figures as Prometheus text. As the API, a request a
+        browser marks as coming from another site is refused."""
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None and site not in ("same-origin", "none"):
+            return self._send(403, b"a page of another site cannot read this server's data\n")
+        try:
+            body = self.server.metrics()
+        except Exception as e:  # noqa: BLE001 - a broken state must not take the server down
+            print("nuc-console web: metrics error: %r" % (e,), file=sys.stderr)
+            return self._send(500, b"the data could not be read (see the service log)\n")
+        self._send(200, body, webmetrics.CONTENT_TYPE)
 
     def _stream(self, q):
         """/api/v1/stream?view=<view> (and that view's parameters): Server-Sent Events. Each event is the view's document, sent when its rev changes

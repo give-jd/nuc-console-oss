@@ -59,6 +59,23 @@ def ev(ts, kind="crash", subject="nginx", detail="segmentation fault", n=1):
 class Recording(unittest.TestCase):
     """history.problem_events: opened, cleared, the baseline, the de-bounce and the little it keeps."""
 
+    def test_every_catalog_id_can_be_recorded(self):
+        # a check whose id fails the slug rule (or is too long) would open and clear without a trace in the timeline
+        import problems
+        for pid in problems.CATALOG:
+            self.assertTrue(history.PROBLEM_ID.match(pid) and len(pid) <= history.SUBJECT_MAX, pid)
+            got = history.problem_events({}, {pid: "error"}, NOW)
+            self.assertEqual([(e["kind"], e["subject"]) for e in got], [("problem", pid)], pid)
+
+    def test_the_demo_only_raises_catalog_ids(self):
+        import copy
+        import golden
+        import problems
+        cont, net, boot, base = (copy.deepcopy(x) for x in demo.snapshot(golden.NOW, None))
+        raw = problems.problems_raw(net, cont, golden.NOW, boot=boot, baseline=base)
+        self.assertTrue(raw)
+        self.assertEqual([pid for _sev, _text, pid in raw if pid not in problems.CATALOG], [])
+
     def test_the_first_look_is_only_the_baseline(self):
         self.assertEqual(history.problem_events(None, {"thermal": "warning"}, NOW), [])
 

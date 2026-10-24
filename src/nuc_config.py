@@ -6,6 +6,7 @@ A missing file means defaults (everything on).
 A broken file never stops the dashboard: the problem goes to stderr and defaults apply for the bad keys.
 """
 import configparser
+import ipaddress
 import json
 import os
 import re
@@ -46,7 +47,45 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 # heats up wrong. Nothing about exposure, ports, the firewall, authentication or the data those judgements read (the network and container
 # collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
 # mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
-MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot")
+MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
+                  "reboot-required", "disk-inodes",
+                  "container-no-restart", "containers-not-back",
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
+
+# [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
+# validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
+UNIT_RE = re.compile(r"[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}")  # a systemd unit name; never starts with '-' (an option)
+WATCH_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,32}")
+WATCH_MAX = 20  # units under [services] must_run
+TLS_MAX = 10  # entries under [tls] watch (each can cost a connect and a handshake)
+WATCH_BUDGET_S = 30  # the collector stops starting new checks of a section after this many seconds
+# a certificate is fetched only from this machine or a private network: nuc-console makes no other outbound connection than Telegram's.
+# (the same list as exposure.PRIVATE_NETS; tests/test_watch_checks.py keeps them equal)
+WATCH_NETS = tuple(ipaddress.ip_network(n) for n in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                                                     "100.64.0.0/10", "::1/128", "fe80::/10", "fc00::/7"))
+
+
+def watch_entry(spec):
+    """'name = host:port' or 'name = /abs/cert.pem' -> (name, "net", host, port) or (name, "file", path, 0). ValueError(reason) otherwise.
+    A host is an IP literal (or localhost) in WATCH_NETS: a name would need a DNS lookup, and anything else is not ours to connect to."""
+    name, eq, target = (x.strip() for x in spec.partition("="))
+    if not eq or not WATCH_NAME_RE.fullmatch(name):
+        raise ValueError("write name = host:port or name = /path/cert.pem (name: letters, digits, . _ -)")
+    if os.path.isabs(target) or (os.name == "nt" and re.match(r"[A-Za-z]:[\\/]", target)):  # a drive path is a file only on Windows
+        return name, "file", target, 0
+    host, _, port = target.rpartition(":")
+    host = "127.0.0.1" if host.lower() == "localhost" else host[1:-1] if host[:1] == "[" and host[-1:] == "]" else host
+    if not (port.isascii() and port.isdigit() and 0 < int(port) < 65536):
+        raise ValueError("'%s': write host:port (port 1-65535) or an absolute path" % target[:60])
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError("'%s': only IP addresses (or localhost): no DNS lookup is made" % host[:60])
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    if not any(ip in n for n in WATCH_NETS):
+        raise ValueError("'%s' is not a private, loopback or Tailscale address: nuc-console does not connect elsewhere" % host[:60])
+    return name, "net", str(ip), int(port)
+
 
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
@@ -72,17 +111,23 @@ def load(path=None, warn=None, overlay=True):
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "",
-                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False},
+                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True},
-           "console": {"font": "", "blank_minutes": 0}}
+           "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
+    cfg["backups"] = {}  # [backups]: name -> {"path": absolute path or glob, "max_age_days": int}; read by the root collector only
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
+    cfg["containers"] = {"restart_ignore": []}  # [containers] restart_ignore: names or globs (lower case) that container-no-restart skips
+    cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
+    cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
+    cfg["tls"] = {"watch": [], "warn_days": 21}  # [tls] watch: ["name=host:port" | "name=/path"] as watch_entry reads them
+    cfg["watch_warnings"] = []  # what [services] and [tls] asked that cannot be done: shown as an ATTENTION warning (watch-config)
     cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -152,6 +197,18 @@ def load(path=None, warn=None, overlay=True):
                 cfg["webapps"][name] = ports
             else:
                 say(f"nuc-console: {path}: [webapps] {name}: invalid port list")
+    if cp.has_section("backups"):  # name = /absolute/path-or-glob[, max_age_days]: the newest match must be younger than that (default 2)
+        for name in [k for k in cp.options("backups") if k not in cp.defaults()]:
+            path_, comma, age = cp.get("backups", name).strip().rpartition(",")
+            if not comma or not age.strip().isdigit():
+                path_, age = cp.get("backups", name).strip(), ""  # no age: the comma, if any, belongs to the path
+            path_, age = path_.strip(), age.strip()
+            if not os.path.isabs(path_) or ".." in re.split(r"[\\/]", path_):
+                say(f"nuc-console: {path}: [backups] {name}: the path must be absolute, without '..' (the collector runs as root: '~' is not expanded)")
+            elif not 1 <= int(age or 2) <= 3650 or any(ord(ch) < 32 for ch in path_):
+                say(f"nuc-console: {path}: [backups] {name}: max_age_days is 1-3650, the path one line")
+            else:
+                cfg["backups"][name] = {"path": path_, "max_age_days": int(age or 2)}
     if cp.has_section("expose"):  # name or port = local|tailnet|lan|internet: the widest reach you intend (more is an ATTENTION problem)
         for key in [k for k in cp.options("expose") if k not in cp.defaults()]:  # a [DEFAULT] key belongs to every section: not a service
             word = cp.get("expose", key).strip().lower()
@@ -176,6 +233,54 @@ def load(path=None, warn=None, overlay=True):
                 cfg["alerts"]["ignored"].append(x[:40])
                 say(f"nuc-console: {path}: [alerts] mute: '{x[:40]}' cannot be muted: ignored (it may be a security alarm or unknown; "
                     f"mutable: {', '.join(MUTABLE_ALERTS)})")
+    if cp.has_section("services") or cp.has_section("tls"):
+        def skip(why):
+            say(f"nuc-console: {path}: {why}")
+            cfg["watch_warnings"].append(why[:120])
+        for key in [k for k in cp.options("services") if k not in cp.defaults() and k != "must_run"] if cp.has_section("services") else ():
+            skip(f"[services] unknown key '{key[:40]}' ignored (known: must_run)")
+        units = [x for x in re.split(r"[,;\s]+", cp.get("services", "must_run", fallback="")) if x]
+        for u in units:
+            if not UNIT_RE.fullmatch(u):
+                skip(f"[services] must_run: '{u[:40]}' is not a unit name: skipped")
+            elif u in cfg["services"]["must_run"]:
+                pass
+            elif len(cfg["services"]["must_run"]) >= WATCH_MAX:
+                skip(f"[services] must_run: more than {WATCH_MAX} units: '{u[:40]}' skipped")
+            else:
+                cfg["services"]["must_run"].append(u)
+        for key in [k for k in cp.options("tls") if k not in cp.defaults() and k not in ("watch", "warn_days")] if cp.has_section("tls") else ():
+            skip(f"[tls] unknown key '{key[:40]}' ignored (known: watch, warn_days)")
+        try:
+            cfg["tls"]["warn_days"] = max(1, min(365, cp.getint("tls", "warn_days", fallback=21)))
+        except ValueError:
+            skip("[tls] warn_days must be an integer (1-365): kept 21")
+        seen = set()
+        for part in [x.strip() for x in cp.get("tls", "watch", fallback="").split(",") if x.strip()] if cp.has_section("tls") else ():
+            try:
+                name, kind, host, port = watch_entry(part)
+            except ValueError as e:
+                skip(f"[tls] watch: {e}")
+                continue
+            if name in seen:
+                skip(f"[tls] watch: '{name}' is there twice: the second is skipped")
+            elif len(seen) >= TLS_MAX:
+                skip(f"[tls] watch: more than {TLS_MAX} entries: '{name}' skipped")
+            else:
+                seen.add(name)
+                cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")
+    if cp.has_section("containers"):  # restart_ignore = name, *-glob-*: containers that are meant to stay down after a reboot
+        for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
+            say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")
+        cfg["containers"]["restart_ignore"] = [x for x in re.split(r"[,;\s]+", cp.get("containers", "restart_ignore", fallback="").lower()) if x][:100]
+    if cp.has_section("thresholds"):
+        try:
+            pct = cp.getint("thresholds", "memory_pressure_pct", fallback=10)
+            if not 1 <= pct <= 100:
+                raise ValueError
+            cfg["thresholds"]["memory_pressure_pct"] = pct
+        except ValueError:
+            say(f"nuc-console: {path}: [thresholds] memory_pressure_pct must be an integer (1-100): kept at 10")
     if cp.has_section("web"):
         w = cfg["web"]
         try:
@@ -186,6 +291,10 @@ def load(path=None, warn=None, overlay=True):
             w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=False)  # yes = an installation's settings page may use the overlay
         except ValueError:
             say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept no (locked)")
+        try:
+            w["metrics"] = cp.getboolean("web", "metrics", fallback=True)  # /metrics: the API's figures as Prometheus text, under the API's checks
+        except ValueError:
+            say(f"nuc-console: {path}: [web] metrics is not a boolean: kept yes")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
@@ -262,6 +371,10 @@ def load(path=None, warn=None, overlay=True):
             cfg["console"]["blank_minutes"] = minutes
         except ValueError:
             say(f"nuc-console: {path}: [console] blank_minutes must be an integer (0-60): kept off")
+        try:
+            cfg["console"]["wake_on_problem"] = cp.getboolean("console", "wake_on_problem", fallback=True)
+        except ValueError:
+            say(f"nuc-console: {path}: [console] wake_on_problem must be yes or no: kept yes")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours

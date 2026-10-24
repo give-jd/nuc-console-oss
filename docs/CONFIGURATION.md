@@ -143,6 +143,7 @@ Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root ea
 |---|---|---|
 | `font` | empty | A font for `setfont`, e.g. `Lat15-TerminusBold32x16` (Terminus 16x32: readable on a full-HD monitor; Debian/Ubuntu: `sudo apt install console-terminus`). Empty: the font stays as it is. Letters, digits and `_ . + -` only |
 | `blank_minutes` | `0` | Minutes without a key before the screen goes black and the monitor sleeps (`setterm --blank` and `--powerdown`), 0–60; `0` = never: after a number, the next start of the service takes the timer back and wakes a black screen. The header already moves every 10 minutes against burn-in; this is what lets the monitor rest |
+| `wake_on_problem` | `yes` | With `blank_minutes` above 0: a problem that was not on the previous frame (not accepted, not muted), or one whose severity rose, wakes the blanked screen (`TIOCL_UNBLANKSCREEN` on the console the dashboard owns, no root needed), at most once per 30 s; the first frame after a start never wakes it. `no`: only a key does. Linux console only; read when the dashboard starts, so apply a change with `sudo systemctl restart nuc-console`. The Telegram notifier is separate |
 
 Why not the kernel parameter `consoleblank=` (and `dpkg-reconfigure console-setup`)? Both need a bootloader or system-wide change and a reboot, apply to every console and not only the dashboard's, and one wrong edit of the kernel command line can stop the machine booting: the installer never does it. The cost of this way: it is set when the service starts (a reboot or restart re-applies it) and only on the dashboard's terminal. If you want the kernel way anyway, add `consoleblank=600` to `GRUB_CMDLINE_LINUX_DEFAULT` yourself. **Check once** that the monitor really sleeps with the dashboard redrawing every couple of seconds: output to the console can wake a blanked screen on some kernels; if it does, use the monitor's own sleep timer.
 
@@ -187,6 +188,34 @@ n8n     = tailnet
 
 `[expose]` only adds alarms: `db-open-lan`, `docker-bypass` and the port baseline are never silenced by it. `over-exposed` can be accepted like any ATTENTION item (`nuc-console-accept --problem over-exposed --reason "…"`); a new service going beyond makes it reappear. A bad value or a port that cannot exist is reported on stderr and only that line is skipped. Never write a port as `:8080`: configparser refuses a key that starts with `:` and the **whole file** falls back to the defaults. Containers with `network_mode: host` listen as plain host processes, so declare them by process, unit or port; a broken `config.ini` (such a key, or any file that cannot be read) now raises the **config-unreadable** error in ATTENTION instead of silently dropping `[expose]`.
 
+## `[backups]` — backups that must stay fresh (none by default)
+
+```ini
+[backups]
+nightly-db = /srv/backups/db-*.sql.gz, 2
+photos     = /srv/backups/photos, 7
+```
+
+`name = /absolute/path-or-glob[, max_age_days]`. In `config.ini` the section ships commented out (remove the `#` before `[backups]` and the lines you want); with no line there is no check and no alarm. The path is **absolute** (`~` is not expanded: the collector runs as root, so there is no home to expand it to) and has no `..`; a glob (`*`, `?`, `[…]`) is expanded by the collector. The collector looks at the **newest** match, file or folder, and keeps only its name, modification time and size: it never reads a file. A match is looked at as itself (a symbolic link is not followed), and a match reached through a link that leads out of the folder the pattern starts in is ignored. A folder's date is the folder's own: it changes when something is added to it, so point at the files inside (`/srv/backups/photos/*`) when you want the newest file's date.
+
+- **backup-stale** (warning): the newest match is older than `max_age_days` (1-3650, default 2).
+- **backup-missing** (error): nothing matches (the backup never ran, the disk is not mounted, or the path is wrong).
+
+Neither can be muted (a mute would turn a guard you configured into a silent failure; remove the line to stop the check); both can be accepted with a reason. Only the administrator edits the section: the settings page does not (a path is read as root). The collector reads it at start: `sudo systemctl restart nuc-console-collector` after a change. A line the reader refuses (relative path, `~`, `..`, a bad age) is said on stderr (`journalctl -u nuc-console-collector`) and skipped.
+
+### Host hygiene: reboot, updates, clock, inodes
+
+Four more alarms come from the collector's boot data (every 5 minutes) and need `[features] boot = yes` (inodes: `disks = yes` too); there is nothing to configure:
+
+| Alarm | Level | When | Mute |
+|---|---|---|---|
+| `reboot-required` | warning | `/run/reboot-required` exists, or the running kernel (`uname -r`) is older than the newest `/boot/vmlinuz-*` of the same flavour (`7.0.0-34-generic` against `7.0.0-38-generic`); the kernel test needs both to be readable | yes |
+| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent | no |
+| `clock-unsynced` | warning | `timedatectl show` says `NTPSynchronized=no`. Without `timedatectl` (no systemd, a container) nothing is said | no |
+| `disk-inodes` | warning at 90 % of a filesystem's inodes used, error at 97 % | the filesystems of the DISKS card; those that report no fixed count (btrfs, xfs: `f_files` 0) are left out. Linux and macOS | yes |
+
+`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too); Windows has none of them, and macOS has no `reboot-required`, `updates-pending` or `clock-unsynced` (the tools that would answer, `softwareupdate`, `sntp`, `systemsetup`, are not run).
+
 ## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
 | Key | Default | Meaning |
@@ -196,6 +225,7 @@ n8n     = tailnet
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
+| `metrics` | `yes` | `/metrics`: the figures of `/api/v1/overview` as Prometheus text, under the same token, `Host` and bind rules as `/api/v1/*` (it adds no data); `no` makes the route a 404. Applies at the next start. [WEB.md](WEB.md#metrics) |
 | `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
@@ -210,7 +240,7 @@ Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Suppor
 | `[features]` | **off only.** `no` switches a section off; `yes` is ignored: a section that `config.ini` switches off stays off and only the administrator switches it on, so the overlay can make root's collector run less, never more |
 | `[dashboard]`, `[ui]`, `[display] zoom` | any value the dashboard takes; it wins over `config.ini` |
 
-Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
+Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
 overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
 or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
 notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.
@@ -223,11 +253,72 @@ mute = journal-errors, thermal
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `reboot-required`, `disk-inodes`, `container-no-restart`, `containers-not-back`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
-Security alarms can never be muted: ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
+Security and integrity alarms can never be muted: `updates-pending`, `clock-unsynced`, `backup-stale`, `backup-missing`; ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) the alerting itself (`telegram-*`) and the posture and availability checks (`service-down`, `ssh-*`, `cert-*`, `watch-config`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
+
+## `[containers]` — containers that stay down after a reboot
+
+```ini
+[containers]
+restart_ignore = job-runner, *-test-*
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `restart_ignore` | empty | Containers the `container-no-restart` alarm skips: names or shell-style globs (`*-test-*`), comma-separated, matched without regard to case. For one-shot jobs and test stacks that are meant to stay down after a reboot. Applies at once |
+
+Two operational alarms (both can be muted with `[alerts] mute`) come from the boot collector's look at Docker, every 5 minutes, and need `[features] boot` and `containers`:
+
+- `container-no-restart` (warning): a **running** container whose restart policy is `no` (or empty) will not come back after a reboot or a Docker restart. One alarm, with up to three names and the count. Fix: `docker update --restart unless-stopped <name>` (compose: `restart: unless-stopped`), or list it in `restart_ignore`.
+- `containers-not-back` (error): in the first 20 minutes after a boot, containers that were running with a restart policy (`always`, `unless-stopped`, `on-failure`) before the reboot and are not running now. The collector keeps their **names only** (no image, environment or command line) in `running.json` in its own state folder (`/var/lib/nuc-console` on Linux), rewritten at every look; at a new boot that list becomes the "before" list for the whole boot. A container stopped by hand earlier was not in the list and is not flagged (one stopped in the 5 minutes before the reboot still is: that is the look's resolution). It clears when they run again, and in any case 20 minutes after the boot. If Docker is not installed, or the file cannot be written, there is no alarm and no error.
+
+## `[thresholds]` — where a reading becomes a problem
+
+```ini
+[thresholds]
+memory_pressure_pct = 10
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
+
+**Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors.
+
+## `[services]` — units that must be running (Linux)
+
+```ini
+[services]
+must_run = docker, ssh, tailscaled, fail2ban
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `must_run` | empty (off) | Systemd unit names, comma-separated, up to 20 (letters, digits and `@ . _ : -`, not starting with `-`; `docker` means `docker.service`). The root collector asks `systemctl is-active -- <unit>` for each, every 5 minutes (with the BOOT section: `[features] boot = no` stops it). One that is not running is the ATTENTION error `service-down`, naming the unit and its state (`inactive`, `failed`, `not-found`, `unknown`). The same 30 s budget applies. A name that is not a valid unit name is skipped and said (`watch-config`); so is `must_run` set while `systemctl` is missing or the check failed. Not on Windows or macOS: there is no such check there and the key does nothing |
+
+Why it exists: `failed-units` only sees units that *failed*. A service that was stopped by hand, never started or removed (fail2ban or sshd after an upgrade) is not failed, so it is invisible there. Like `failed-units`, `service-down` cannot be muted (it is the sign that a protection is missing); accept it with a reason if the unit is down on purpose.
+
+## `[tls]` — certificates about to expire
+
+```ini
+[tls]
+watch = nas = 192.168.1.20:443, router = 10.0.0.1:8443, internal = /etc/ssl/certs/internal.pem
+warn_days = 21
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `watch` | empty (nothing watched) | Comma-separated `name = host:port` or `name = /absolute/path/cert.pem` (on Windows also `C:\path`), up to 10; the collector stops starting new checks after 30 s of a pass and the rest is `watch-config` ("not checked this pass"), never fine. `host` must be an **IP address** (or `localhost`) on loopback, a private network (10/8, 172.16/12, 192.168/16, fc00::/7), Tailscale (100.64/10) or link-local; a name or a public address is refused and said (`watch-config`): nuc-console makes no other outbound connection than Telegram's. The collector connects with a 3 s limit, **without verifying the certificate** (the point is the end date of whatever is served, self-signed LAN certificates included), and keeps only the entry's name and the end date. A file is the first certificate of a PEM file of at most 64 KB. A name is letters, digits and `. _ -`; a path cannot contain a comma. Works on Linux, macOS and Windows |
+| `warn_days` | `21` | 1-365. A certificate with fewer days left is the ATTENTION warning `cert-expiring`; one that has ended is the error `cert-expired`; one that could not be read is `cert-unreadable` (expiry unknown, never shown as fine) |
+
+Both lists are read from `config.ini` only: the settings overlay of an installation cannot set them (root runs what they say).
+
+## `sshd` audit (no key)
+
+On Linux the root collector runs `sshd -T` (every 5 minutes, with the BOOT section) and keeps six effective settings (the five plus `KbdInteractiveAuthentication`), values only; `sshd -T` shows the global values, a `Match` block can override them. Nothing to configure; a machine without `sshd`, or where `sshd -T` fails, simply has no result (never a pass). `ssh-root-login` (warning: `PermitRootLogin yes`), `ssh-password-auth` (warning: `PasswordAuthentication yes`, or `KbdInteractiveAuthentication yes`, the PAM password route; an **error** when the exposure data says port 22 or the `sshd` process is reachable from the Internet, or beyond what you declared under `[expose]`) and `ssh-empty-passwords` (error: `PermitEmptyPasswords yes`). Many LANs choose passwords: accept the alarm with a reason (`sudo nuc-console-accept --problem ssh-password-auth --reason "..."`); it is tied to its severity, so it comes back if port 22 becomes reachable from further away. They cannot be muted.
 
 ## `[telegram]` — alerts on your phone (off by default)
 
@@ -279,7 +370,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
-| `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
+| `sudo nuc-console-accept` | accept the current set of exposed ports, and on Linux the accounts, SSH keys, cron files and enabled units, as the baseline (their alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
 | `sudo nuc-console-telegram --setup` | pair the Telegram notifier: asks the bot token (from @BotFather) and your @username, prints a `t.me/…` link to open on the phone (Windows: `nuc-console-telegram.cmd`, administrator prompt) |

@@ -135,7 +135,7 @@ def _wrap(mod, name):
 # the commands the collector and the renderer run to ask the machine (listeners, sessions, containers, journal, firewall): an answer from
 # the host, not from the fixture. The test that wants one fakes subprocess itself (that is above this wrapper and never reaches it).
 HOST_COMMANDS = () if not nuc_config.LINUX else {"ss", "netstat", "loginctl", "who", "docker", "journalctl", "systemctl", "ufw", "iptables", "nft", "tailscale",
-                 "fail2ban-client", "lsof", "last", "sensors", "smartctl"}
+                 "fail2ban-client", "sshd", "lsof", "last", "sensors", "smartctl"}
 _Popen_init = subprocess.Popen.__init__
 
 

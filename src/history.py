@@ -464,6 +464,43 @@ RESULTS = ("exit-code", "signal", "core-dump", "timeout", "watchdog", "resources
            "success")
 SSH_FAIL = ("Failed password", "Invalid user")
 
+# Kernel messages by class (the collector's `kernlog` section and classify_journal use the same rules). Precise on purpose: boot-time
+# lines such as "EDAC MC0: Giving out device", "nvme nvme0: using unchecked data buffer" or "EXT4-fs ...: mounted filesystem" are not faults.
+GPU_DRIVERS = ("i915", "xe", "amdgpu", "nouveau", "nvidia", "NVRM")
+_GPU_DRIVER = re.compile(r"\b(%s)\b" % "|".join(GPU_DRIVERS))
+_GPU_SYMPTOM = re.compile(r"flip_done timed out|vblank wait timed out|pipe_off wait timed out|GPU HANG|\*ERROR\* Timeout waiting", re.I)
+_GPU_RING = re.compile(r"\bring \S+ timeout", re.I)  # too generic without a driver name on the line
+KERNEL_RULES = (  # (class, regex): disk, memory and nic; the graphics driver and the OOM killer have their own readers below
+    ("disk", re.compile(r"blk_update_request: (?:critical )?I/O error|\bI/O error, dev |Buffer I/O error|EXT4-fs (?:\(\S+\) )?error|"
+                        r"EXT4-fs warning.*(?:checksum|corrupt)|XFS \(\S+\): .*(?:corruption|I/O error|metadata I/O)|BTRFS (?:error|critical)|"
+                        r"Remounting filesystem read-only|\bata\d+(?:\.\d+)?: (?:exception Emask|failed command)|"
+                        r"\bnvme\d*:.*(?:\btimeout\b|controller is down|Device not ready|I/O error)")),
+    ("memory", re.compile(r"\bEDAC\b.*\b(?:CE|UE)\b|\[Hardware Error\]|Machine check (?:events|exception)|\bmce: .*(?:error|Machine check)|"
+                          r"memory corruption", re.I)),
+    ("nic", re.compile(r"\b(?:igc|igb|e1000e?|r8169|r8125|ixgbe|tg3|bnx2x?)\b.*(?:Reset adapter|Link is Down)")),
+)
+
+# how long a kernel finding stays on the list: the problem clears when no such line is newer than this (seconds); the OOM killer is
+# "this boot" (no window); a NIC needs NIC_MIN resets or link-downs inside its window so that one flap does not alarm
+KERNEL_WINDOW_S = {"display": 30 * 60, "disk": 86400, "memory": 86400, "nic": 86400}
+NIC_MIN = 3
+
+
+def classify_kernel(msg):
+    """One kernel message -> [(class, detail)]: 'display' (detail = the driver), 'disk', 'memory', 'nic' (detail ''), 'oom' (detail =
+    the killed process's name, never its command line). Pure and cheap: it only matches, nothing of the line is returned."""
+    out = []
+    drv = _GPU_DRIVER.search(msg)
+    if _GPU_SYMPTOM.search(msg) or (drv and _GPU_RING.search(msg)):
+        out.append(("display", drv.group(1) if drv else "gpu"))
+    for cls, rx in KERNEL_RULES:
+        if rx.search(msg):
+            out.append((cls, ""))
+    m = OOM.search(msg)  # one event = one "Killed process" line; the "oom-kill:" line before it describes the same kill
+    if m:
+        out.append(("oom", clean(m.group(1)) or "(unknown)"))
+    return out
+
 
 def _text(v):
     """A journal field: a string, or (non UTF-8 data) a list of byte values."""
@@ -495,6 +532,9 @@ def classify_journal(d, source="journal"):
         m = OOM.search(msg)
         if m:
             out.append(("oom", clean(m.group(1)) or "(unknown)", "kernel OOM killer"))
+        for cls, _ in classify_kernel(msg):  # Health's "hardware errors" (as WHEA on Windows): the machine, no text from the line
+            if cls in ("disk", "memory"):
+                out.append(("hw_error", cls, "kernel reported " + ("disk I/O errors" if cls == "disk" else "memory errors")))
         m = SEGV.match(msg)
         if m:
             out.append(("crash", clean(m.group(1)) or "(unknown)",

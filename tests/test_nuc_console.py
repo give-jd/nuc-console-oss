@@ -1202,7 +1202,7 @@ class Config(unittest.TestCase):
             collector.run, collector.OFF = orig_run, orig_off
         for tool in ("ufw", "iptables", "tailscale", "ss", "docker", "journalctl", "powershell", "socketfilterfw", "lsof"):
             self.assertNotIn(tool, calls)
-        expected = {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b", "links"}
+        expected = {"listeners", "serve", "ts_peers", "ufw", "docker_user", "iptables", "drops", "dbs", "f2b", "links", "users", "keys", "cron", "units"}
         self.assertEqual(set(d["disabled"]), expected if nuc_config.LINUX else expected | {"firewall"})
         self.assertEqual(d["errors"], {})
 

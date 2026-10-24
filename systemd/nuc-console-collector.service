@@ -13,7 +13,8 @@ RestartSec=5
 NoNewPrivileges=yes
 # full, not strict: ufw/iptables must be able to take their own locks
 ProtectSystem=full
-ProtectHome=yes
+# read-only, not yes: root must READ ~/.ssh/authorized_keys and /root for the keys baseline (integrity.py); yes hides /home and /root, and read-only still keeps them unwritable
+ProtectHome=read-only
 PrivateTmp=yes
 # Added conservative: none of these touches what the collector does (docker, ss, ufw/iptables, fail2ban-client, tailscale,
 # systemd-analyze, journalctl, nsenter -n into the containers' network namespaces, writing /run/nuc-console).

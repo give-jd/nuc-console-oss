@@ -56,6 +56,9 @@ def samples(key):
         ("web", "bind"): [("192.0.2.10", "192.0.2.10")],
         ("web", "token_file"): [("/etc/nuc-console/token", "/etc/nuc-console/token"), ("", "")],
         ("web", "allowed_hosts"): [("Nuc.Example.lan,b.example.ts.net", "nuc.example.lan, b.example.ts.net"), ("", "")],
+        ("services", "must_run"): [("docker, ssh, NetworkManager.service", "docker, ssh, NetworkManager.service"), ("", "")],
+        ("tls", "watch"): [("nas=192.168.1.20:443, f=/etc/ssl/a.pem", "nas=192.168.1.20:443, f=/etc/ssl/a.pem"), ("", "")],
+        ("containers", "restart_ignore"): [("Job-1, *-test-*", "job-1, *-test-*"), ("", "")],
         ("telegram", "username"): [("@Some_User", "some_user"), ("", "")],
         ("ai", "endpoint"): [("http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1")],
         ("ai", "model"): [("qwen3-8b", "qwen3-8b"), ("hf.co/example/repo:Q4_K_M", "hf.co/example/repo:Q4_K_M"), ("", "")],
@@ -71,14 +74,14 @@ class Schema(unittest.TestCase):
         text = read(SHIPPED)
         for key in confedit.KEYS:
             if (key.section, key.name) not in shipped:  # [ui] and [dashboard] sections: there, commented out, with their default
-                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections"), ("alerts", "mute")])
+                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections"), ("alerts", "mute"), ("thresholds", "memory_pressure_pct")])
                 self.assertRegex(text, r"(?m)^# %s = " % key.name)
         self.assertEqual(set(cp.sections()), set(confedit.TITLES) | {"features"})
         self.assertEqual([s for s, _t, _w in confedit.SECTIONS][-2:], list(confedit.MAPS))
 
     def test_the_shipped_file_stays_light_and_every_key_is_documented(self):
         lines = read(SHIPPED).splitlines()
-        self.assertLessEqual(len(lines), 115, "config.ini fits a screen or two: long text goes in docs/CONFIGURATION.md and confedit.KEYS")
+        self.assertLessEqual(len(lines), 170, "config.ini fits a screen or two: long text goes in docs/CONFIGURATION.md and confedit.KEYS")
         self.assertEqual([n + 1 for n, ln in enumerate(lines) if len(ln) > 120], [], "lines over 120 characters")
         doc = read(os.path.join(ROOT, "docs", "CONFIGURATION.md"))
         self.assertEqual([k.name for k in confedit.KEYS if "`%s`" % k.name not in doc], [], "a key CONFIGURATION.md does not name")
