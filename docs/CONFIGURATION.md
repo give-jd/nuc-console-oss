@@ -255,7 +255,7 @@ mute = journal-errors, thermal
 |---|---|---|
 | `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `reboot-required`, `disk-inodes`, `container-no-restart`, `containers-not-back`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
-Security and integrity alarms can never be muted: `updates-pending`, `clock-unsynced`, `backup-stale`, `backup-missing`; ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
+Security and integrity alarms can never be muted: `updates-pending`, `clock-unsynced`, `backup-stale`, `backup-missing`; ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) the alerting itself (`telegram-*`) and the posture and availability checks (`service-down`, `ssh-*`, `cert-*`, `watch-config`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
 
@@ -287,6 +287,38 @@ memory_pressure_pct = 10
 | `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
 
 **Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors.
+
+## `[services]` — units that must be running (Linux)
+
+```ini
+[services]
+must_run = docker, ssh, tailscaled, fail2ban
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `must_run` | empty (off) | Systemd unit names, comma-separated, up to 20 (letters, digits and `@ . _ : -`, not starting with `-`; `docker` means `docker.service`). The root collector asks `systemctl is-active -- <unit>` for each, every 5 minutes (with the BOOT section: `[features] boot = no` stops it). One that is not running is the ATTENTION error `service-down`, naming the unit and its state (`inactive`, `failed`, `not-found`, `unknown`). The same 30 s budget applies. A name that is not a valid unit name is skipped and said (`watch-config`); so is `must_run` set while `systemctl` is missing or the check failed. Not on Windows or macOS: there is no such check there and the key does nothing |
+
+Why it exists: `failed-units` only sees units that *failed*. A service that was stopped by hand, never started or removed (fail2ban or sshd after an upgrade) is not failed, so it is invisible there. Like `failed-units`, `service-down` cannot be muted (it is the sign that a protection is missing); accept it with a reason if the unit is down on purpose.
+
+## `[tls]` — certificates about to expire
+
+```ini
+[tls]
+watch = nas = 192.168.1.20:443, router = 10.0.0.1:8443, internal = /etc/ssl/certs/internal.pem
+warn_days = 21
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `watch` | empty (nothing watched) | Comma-separated `name = host:port` or `name = /absolute/path/cert.pem` (on Windows also `C:\path`), up to 10; the collector stops starting new checks after 30 s of a pass and the rest is `watch-config` ("not checked this pass"), never fine. `host` must be an **IP address** (or `localhost`) on loopback, a private network (10/8, 172.16/12, 192.168/16, fc00::/7), Tailscale (100.64/10) or link-local; a name or a public address is refused and said (`watch-config`): nuc-console makes no other outbound connection than Telegram's. The collector connects with a 3 s limit, **without verifying the certificate** (the point is the end date of whatever is served, self-signed LAN certificates included), and keeps only the entry's name and the end date. A file is the first certificate of a PEM file of at most 64 KB. A name is letters, digits and `. _ -`; a path cannot contain a comma. Works on Linux, macOS and Windows |
+| `warn_days` | `21` | 1-365. A certificate with fewer days left is the ATTENTION warning `cert-expiring`; one that has ended is the error `cert-expired`; one that could not be read is `cert-unreadable` (expiry unknown, never shown as fine) |
+
+Both lists are read from `config.ini` only: the settings overlay of an installation cannot set them (root runs what they say).
+
+## `sshd` audit (no key)
+
+On Linux the root collector runs `sshd -T` (every 5 minutes, with the BOOT section) and keeps six effective settings (the five plus `KbdInteractiveAuthentication`), values only; `sshd -T` shows the global values, a `Match` block can override them. Nothing to configure; a machine without `sshd`, or where `sshd -T` fails, simply has no result (never a pass). `ssh-root-login` (warning: `PermitRootLogin yes`), `ssh-password-auth` (warning: `PasswordAuthentication yes`, or `KbdInteractiveAuthentication yes`, the PAM password route; an **error** when the exposure data says port 22 or the `sshd` process is reachable from the Internet, or beyond what you declared under `[expose]`) and `ssh-empty-passwords` (error: `PermitEmptyPasswords yes`). Many LANs choose passwords: accept the alarm with a reason (`sudo nuc-console-accept --problem ssh-password-auth --reason "..."`); it is tied to its severity, so it comes back if port 22 becomes reachable from further away. They cannot be muted.
 
 ## `[telegram]` — alerts on your phone (off by default)
 

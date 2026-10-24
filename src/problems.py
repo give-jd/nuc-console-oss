@@ -18,8 +18,8 @@ import history
 import hostdata
 import nuc_config
 import ui
-from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
-                      exposure_rows, os_of)
+from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over, expose_over_items, expose_unmatched, exposure_keys,
+                      exposure_partial, exposure_rows, group_of, os_of)
 from ui import fmt_ago, plural, safe
 
 WINDOWS, MACOS = nuc_config.WINDOWS, nuc_config.MACOS
@@ -119,6 +119,88 @@ def telegram_state(now, path=None):
         err = TELEGRAM_TOKEN.sub("<token>", safe(tg.get("last_error") or ""))[:60].strip()
         return "failing", fmt_ago(now - since) + (": " + err if err else "")
     return "ok", ""
+
+
+def ssh_exposed(net, cont):
+    """True when sshd listens where the exposure data says it is reachable from the Internet (a Funnel) or further than [expose] allows.
+    No exposure data (net missing, no port list) is False: the rule then stays at the lower severity."""
+    if not isinstance(net, dict) or net.get("listeners") is None:
+        return False
+    rows = exposure_rows(net, cont)
+    if CFG["expose"]:
+        rows = expose_apply(rows, net, cont)
+    return any(r["proto"] == "tcp" and (r["port"] == 22 or r["name"] == "sshd") and (group_of(r) == "INTERNET" or expose_over(r)) for r in rows)
+
+
+FP_NAMES = {}  # (problem id, text) -> every name behind a service-down / cert-* item (the text shows three): what accepting it is tied to
+
+
+def _names(pid, text, names, out, sev):
+    FP_NAMES[(pid, text)] = sorted(set(names))
+    out.append((sev, text, pid))
+
+
+def host_checks(boot, net, cont, now):
+    """What boot.json's services, sshd and certs sections say, as (severity, text, id): a unit that must run and does not, the sshd settings
+    that weaken a login, a certificate near its end. Names and counts only; a section the collector did not write (Windows/macOS, not
+    configured, sshd absent) says nothing, unless the config asks for it on a system that has it (then watch-config says it did not run).
+    A malformed value is skipped, never an error."""
+    out, more = [], []
+    FP_NAMES.clear()
+    rows = [x for x in boot.get("services") or () if isinstance(x, dict) and isinstance(x.get("unit"), str)] if isinstance(boot.get("services"), list) else []
+    skipped = [x for x in rows if x.get("state") == "not-checked"]
+    down = [x for x in rows if x.get("state") not in ("active", "activating", "reloading", "not-checked")]
+    if down:
+        text = ("service not running: " + ", ".join(f"{safe(x['unit'])[:40]} ({safe(str(x.get('state')))[:12]})" for x in down[:3])
+                + (f" … +{len(down) - 3}" if len(down) > 3 else ""))
+        _names("service-down", text, [x["unit"] for x in down], out, 2)
+    if skipped:
+        more.append(plural(len(skipped), "unit") + " not checked this pass (time limit): " + ", ".join(safe(x["unit"])[:40] for x in skipped[:3]))
+    local = boot.get("os") in (None, "linux")
+    if (CFG.get("services") or {}).get("must_run") and local:  # asked for, and nothing came back: not "all fine"
+        if "services" in (boot.get("errors") or {}):
+            more.append("[services] must_run is set but the check failed")
+        elif not isinstance(boot.get("services"), list):
+            more.append("[services] must_run is set but systemctl is not available / the check did not run")
+    ssh = boot.get("sshd") if isinstance(boot.get("sshd"), dict) else {}
+    if ssh.get("permitrootlogin") == "yes":
+        out.append((1, "sshd allows root login (PermitRootLogin yes)", "ssh-root-login"))
+    if ssh.get("passwordauthentication") == "yes" or ssh.get("kbdinteractiveauthentication") == "yes":
+        wide = ssh_exposed(net, cont)
+        what = ("sshd accepts passwords (PasswordAuthentication yes)" if ssh.get("passwordauthentication") == "yes"
+                else "sshd accepts keyboard-interactive/PAM password login (KbdInteractiveAuthentication yes)")
+        out.append((2 if wide else 1, what + (", and port 22 reaches the Internet or beyond config.ini" if wide else ""), "ssh-password-auth"))
+    if ssh.get("permitemptypasswords") == "yes":
+        out.append((2, "sshd accepts empty passwords (PermitEmptyPasswords yes)", "ssh-empty-passwords"))
+    warn = (CFG.get("tls") or {}).get("warn_days", 21)
+    soon, gone, lost, unchecked = [], [], [], []
+    certs = boot.get("certs")
+    for c in certs if isinstance(certs, list) else ():
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        exp, name = c.get("exp"), safe(c["name"])[:32]
+        if c.get("why") == "not-checked":
+            unchecked.append(name)
+        elif isinstance(exp, bool) or not isinstance(exp, (int, float)):
+            lost.append(name)
+        elif exp <= now:
+            gone.append((name, f"{name} ({int((now - exp) // 86400)} d ago)"))
+        elif int((exp - now) // 86400) < warn:
+            soon.append((name, f"{name} ({int((exp - now) // 86400)} d)"))
+    for pid, sev, head, items in (("cert-expired", 2, "TLS certificate expired: ", gone), ("cert-expiring", 1, "TLS certificate expires soon: ", soon),
+                                  ("cert-unreadable", 1, "TLS certificate not read: ", [(n, n) for n in lost])):
+        if items:
+            _names(pid, head + ", ".join(t for _, t in items[:3]) + (f" … +{len(items) - 3}" if len(items) > 3 else ""), [n for n, _ in items], out, sev)
+    if unchecked:
+        more.append(plural(len(unchecked), "certificate") + " not checked this pass (time limit): " + ", ".join(unchecked[:3]))
+    if (CFG.get("tls") or {}).get("watch"):
+        if "certs" in (boot.get("errors") or {}):
+            more.append("[tls] watch is set but the check failed")
+        elif not isinstance(certs, list):
+            more.append("[tls] watch is set but the check did not run")
+    for m in more:
+        out.append((1, m, "watch-config"))
+    return out
 
 
 INODE_WARN, INODE_ERR = 90.0, 97.0  # % of a filesystem's inodes used
@@ -238,6 +320,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     if bad:  # [alerts] mute named something that cannot be muted: said on the screen too, never accepted in silence
         out.append((1, "[alerts] mute: " + ", ".join(f"'{safe(x)[:40]}'" for x in bad[:3]) + (" … " if len(bad) > 3 else " ")
                     + "cannot be muted: ignored", "mute-ignored"))
+    bad = CFG.get("watch_warnings") or []
+    if bad:  # [services] / [tls] asked for something that is not done (a bad unit name, a public host): the collector skips it, and the screen says so
+        out.append((1, "config.ini [services]/[tls]: " + "; ".join(safe(x)[:60] for x in bad[:2]) + (f" … +{len(bad) - 2}" if len(bad) > 2 else ""), "watch-config"))
     if not hostdata.on("containers"):
         pass
     elif cont is None:
@@ -274,6 +359,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out.extend(host_checks(boot, net, cont, now))
         out.extend(hygiene_problems(boot, now))
         out += restart_problems(boot, now)
         out.extend(kernel_problems(boot.get("kernlog"), now))
@@ -375,6 +461,23 @@ CATALOG = {
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
     "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
+    "service-down": ("A service that must run is not running", "failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; "
+                     "[services] must_run names the ones you expect",
+                     "systemctl status <unit>; journalctl -u <unit>; sudo systemctl enable --now <unit>, or take it off [services] must_run if it is no longer expected"),
+    "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
+                       "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
+    "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
+                          "PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows the global values: a Match block overrides them for its users or addresses, so read those too; KbdInteractiveAuthentication no closes the PAM password route); or accept it with a reason if the LAN is trusted"),
+    "ssh-empty-passwords": ("sshd accepts empty passwords", "an account with no password can log in over SSH",
+                            "PermitEmptyPasswords no in /etc/ssh/sshd_config, then sudo systemctl reload ssh; passwd -l <user> for an account that should not log in"),
+    "cert-expiring": ("A TLS certificate is about to expire", "when it does, browsers and clients refuse the service",
+                      "renew it (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it; [tls] warn_days sets how early this speaks"),
+    "cert-expired": ("A TLS certificate has expired", "browsers and clients already refuse the service",
+                     "renew it now (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it"),
+    "cert-unreadable": ("A watched TLS certificate could not be read", "its expiry is unknown, so nothing is being watched there",
+                        "check the host:port answers TLS (or the file is a PEM certificate, at most 64 KB) from this machine; fix or remove the entry under [tls] watch"),
+    "watch-config": ("[services] or [tls] in config.ini asks for something that is not done", "a unit name that is not valid, a host that is not on a private network (nuc-console connects nowhere else) or a duplicate is skipped",
+                     "fix the line under [services] / [tls] in config.ini (the message says which); restart the services after fixing it"),
     "backup-stale": ("A backup is older than allowed", "the newest copy is old: the job that makes it may have stopped, and a restore would lose that much",
                      "look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini"),
     "backup-missing": ("A backup was not found", "nothing matches the path under [backups]: the backup never ran, the disk is not mounted, or the path is wrong",
@@ -522,14 +625,27 @@ if nuc_config.PORTABLE:
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden", "disk-io-errors", "memory-errors"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"container-no-restart", "containers-not-back", "db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+COUNT_MATTERS = {"container-no-restart", "containers-not-back", "db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units", "service-down"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
+
+
+def fp_matches(accepted, current):
+    """An accepted fingerprint still covers the current one: equal, or (service-down, cert-*) the same severity and every name now failing
+    was already in the accepted list, so one leaving does not bring the alarm back and a new one does."""
+    if accepted == current:
+        return True
+    if accepted.partition("|")[0] != current.partition("|")[0]:
+        return False
+    a, c = accepted.partition("|")[2], current.partition("|")[2]
+    return a.startswith("names:") and c.startswith("names:") and set(c[6:].split("\n")) <= set(a[6:].split("\n"))
 
 
 def fingerprint(sev, text, pid):
     """What was accepted: severity + text. For exposure/health items the exact text (one more is a new problem); for noisy
     counters (journal errors, temperatures) the digits are ignored, so 118 -> 120 stays accepted but a worse severity does not."""
+    if (pid, text) in FP_NAMES:  # the text shows three names: the tie is to all of them
+        return f"{sev}|names:" + "\n".join(FP_NAMES[(pid, text)])
     return f"{sev}|" + (text if pid in COUNT_MATTERS else re.sub(r"\d+", "#", text))
 
 
@@ -580,7 +696,7 @@ def problems(*a, **kw):
         if pid in mute:
             out.muted += 1
             out.muted_known.append({"id": pid, "text": text})
-        elif pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
+        elif pid in acc and fp_matches(acc[pid]["fp"], fingerprint(sev, text, pid)):
             out.accepted += 1
             out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
@@ -599,7 +715,7 @@ def problem_records(*a, **kw):
         title, why, fix = CATALOG.get(pid, (pid, "", ""))
         fp = fingerprint(sev, text, pid)
         out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
-                    "accepted": pid not in mute and pid in acc and acc[pid]["fp"] == fp, "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
+                    "accepted": pid not in mute and pid in acc and fp_matches(acc[pid]["fp"], fp), "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
                     "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
     return out
 

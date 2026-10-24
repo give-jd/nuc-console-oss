@@ -100,23 +100,26 @@ class ConsoleTests(Base):
     def test_attention_at_the_levels(self):
         ctx = self.frame()
         full = [rule("ATTENTION"),
+                "   ✖ service not running: unattended-upgrades (inactive)",
                 "   ✖ 1 DB/broker open on LAN",
                 "   ! 1 container exited with an error",
                 "   ! 2 errors in this boot's journal",
+                "   ! sshd accepts passwords (PasswordAuthentication yes)",
+                "   ! TLS certificate expires soon: router (12 d)",
                 "   ! 1 running container will not restart after a reboot: cache-1",
                 "   ! kernel killed 2 processes for memory this boot (node)",
                 "   ! 2 Docker ports bypassing ufw (DOCKER-USER empty)",
                 "   ! 1 service public on the Internet (Funnel :8444)"]
-        self.assertEqual(self.lines("attention", ctx, -2), full)  # seven at the roomiest level
-        self.assertEqual(self.lines("attention", ctx, 0), full[:7] + ["   … +1 more"])  # level 0 caps at six (the combined demo has seven)
-        self.assertEqual(self.lines("attention", ctx, 0, expand=("attention",)), full)
-        self.assertEqual(self.lines("attention", ctx, 1), full[:6] + ["   … +2 more"])
-        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +3 more"])
-        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +4 more"])
+        self.assertEqual(self.lines("attention", ctx, -2), full[:9] + ["   … +2 more"])  # ten problems: the roomiest level caps at eight
+        self.assertEqual(self.lines("attention", ctx, -2, expand=("attention",)), full)
+        self.assertEqual(self.lines("attention", ctx, 0), full[:7] + ["   … +4 more"])
+        self.assertEqual(self.lines("attention", ctx, 1), full[:6] + ["   … +5 more"])
+        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +6 more"])
+        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +7 more"])
         self.assertEqual(self.lines("attention", ctx, 3, expand=("attention",)), full)  # the caps lifted
         self.assertTrue(self.card("attention", ctx, 3).truncated)
-        self.assertFalse(self.card("attention", ctx, -2).truncated)
-        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(4, "more", indent=3))
+        self.assertTrue(self.card("attention", ctx, -2).truncated)
+        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(7, "more", indent=3))
 
     def test_attention_nothing_wrong_and_the_accepted_line(self):
         ctx = self.frame(problems=problems.ProblemList())
@@ -339,7 +342,8 @@ class AttentionExtrasTests(Base):
     def test_every_problem_has_its_id_why_fix_and_accept_command(self):
         ctx = self.frame()
         probs = nodes(self.card("attention", ctx, -2), ui.Problem)
-        self.assertEqual([p.id for p in probs], ["db-open-lan", "container-exited", "journal-errors", "container-no-restart", "oom-killed", "funnel-public"])
+        self.assertEqual([p.id for p in probs], ["service-down", "db-open-lan", "container-exited", "journal-errors", "ssh-password-auth",
+                                                "cert-expiring", "container-no-restart", "oom-killed"])  # the roomiest level caps at eight problems
         by = {p.id: p for p in probs}
         db = by["db-open-lan"]
         self.assertEqual(db.level, "err")
@@ -385,7 +389,7 @@ class AttentionExtrasTests(Base):
             hints = {h.label: h.cmd for h in nodes(card, ui.Hint)}
             self.assertEqual(hints["list with why and fix"], "./run.sh --problems")
             self.assertEqual(hints["accept a known one"], './run.sh --accept --problem <id> --reason "..."')
-            self.assertEqual(nodes(card, ui.Problem)[0].accept, './run.sh --accept --problem db-open-lan --reason "..."')
+            self.assertEqual([p.accept for p in nodes(card, ui.Problem) if p.id == "db-open-lan"], ['./run.sh --accept --problem db-open-lan --reason "..."'])
             self.assertEqual(nodes(card, ui.Accepted)[0].undo, "./run.sh --accept --forget docker-bypass")
             self.assertEqual(self.lines("attention", ctx, -2)[-1], "   · 1 accepted as known (./run.sh --problems)")
             out = htmlview.html(card)
@@ -418,7 +422,7 @@ class AttentionExtrasTests(Base):
 
     def test_the_problems_html(self):
         out = htmlview.html(self.card("attention", self.frame(), -2))
-        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 6)
+        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 8)
         self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code></span><span class="d why">data services should not be reachable from the network</span>', out)
         self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)

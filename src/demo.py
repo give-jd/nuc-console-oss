@@ -183,7 +183,11 @@ def snapshot(now=None, os_name=None):
             "analyze": {"parts": parts, "total": total},
             "blame": [{"unit": u, "s": s} for u, s in (("systemd-networkd-wait-online.service", 33.5), ("docker.service", 6.2),
                                                        ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
-            "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
+            "failed": [], "deps": {}, "services": [{"unit": u, "state": st} for u, st in (("docker", "active"), ("ssh", "active"), ("unattended-upgrades", "inactive"))],
+            "sshd": {"permitrootlogin": "prohibit-password", "passwordauthentication": "yes", "permitemptypasswords": "no", "pubkeyauthentication": "yes",
+                     "x11forwarding": "no"},
+            "certs": [{"name": "nas", "exp": int(now) + 240 * 86400, "why": ""}, {"name": "router", "exp": int(now) + 12 * 86400 + 3600, "why": ""}],
+            "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
             "kernlog": {"oom": {"n": 2, "last": int(now) - 5400, "procs": ["node"]}},
             "containers": [{"name": "shop-web-1", "started": int(now) - up + 40, "restart": "unless-stopped"},
@@ -260,6 +264,8 @@ def _native(net, boot, os_name, now):
     links["containers"] = [dict(x, listen_src="image") for x in links["containers"]]
     links["conns"] = [e for e in links["conns"] if not e["from"].startswith("ct:")]  # what containers open is NATed by the VM
     net["links"] = links
+    boot = {k: v for k, v in boot.items() if k not in ("services", "sshd")}  # systemctl and sshd -T: Linux only (the certificates are read everywhere)
+    boot["absent"], boot["unsupported"] = boot["absent"] + ["services", "sshd"], boot["unsupported"] + ["services", "sshd"]
     return net, dict(boot, os=os_name, ts=now)
 
 
