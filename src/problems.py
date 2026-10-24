@@ -13,6 +13,7 @@ import sys
 import time
 
 import cards  # same directory: the card registry (a problem belongs to a card)
+import history
 import hostdata
 import nuc_config
 import ui
@@ -119,6 +120,41 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+def kernel_problems(k, now):
+    """boot['kernlog'] (collector.parse_kernlog: {class: {n, last, ...}}; absent where the OS has no kernel log) -> problems. A class
+    leaves the list when its newest line is older than its window (history.KERNEL_WINDOW_S); the OOM killer stays for the boot."""
+    out = []
+    if not isinstance(k, dict):
+        return out
+
+    def get(cls):
+        e = k.get(cls)
+        if not isinstance(e, dict) or not isinstance(e.get("n"), int) or isinstance(e.get("n"), bool) or e["n"] < 1:
+            return None
+        last = e.get("last")
+        win = history.KERNEL_WINDOW_S.get(cls)
+        if not isinstance(last, (int, float)) or isinstance(last, bool) or (win is not None and now - last > win):
+            return None
+        return True
+    # no age in the texts ("3 min" -> "1 h" would be a new problem to the fingerprint) and, for the two that cannot be accepted, no count
+    # either (notify.py keys those by their text): the count and the age of the newest line are in boot.json's kernlog
+    g = k.get("display") if get("display") else None
+    if g:
+        out.append((2, f"{safe(g.get('driver') or 'gpu')[:16]} graphics driver stuck: {plural(g['n'], 'error')} in the kernel log", "display-stuck"))
+    if get("disk"):
+        out.append((2, "disk I/O errors in the kernel log (last 24 h)", "disk-io-errors"))
+    if get("memory"):
+        out.append((2, "memory (ECC/MCE) errors in the kernel log (last 24 h)", "memory-errors"))
+    g = k.get("nic") if get("nic") else None
+    if g and g["n"] >= history.NIC_MIN:
+        out.append((1, f"network adapter reset or link down {g['n']} times in 24 h", "nic-resets"))
+    g = k.get("oom") if get("oom") else None
+    if g:
+        names = ", ".join(safe(p)[:30] for p in (g.get("procs") or [])[:3] if isinstance(p, str))
+        out.append((1, f"kernel killed {g['n']} process{'' if g['n'] == 1 else 'es'} for memory this boot" + (f" ({names})" if names else ""), "oom-killed"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -154,6 +190,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                     out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
             out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
+        psi, limit = thermal.get("psi"), (CFG.get("thresholds") or {}).get("memory_pressure_pct", 10)
+        if isinstance(psi, (int, float)) and not isinstance(psi, bool) and psi > limit:  # no PSI on this OS/kernel: None, no problem
+            out.append((1, f"memory pressure {psi:.1f} % (processes waited for memory; the limit is {limit} %)", "memory-pressure"))
     if not hostdata.on("boot"):
         pass
     elif boot is None:
@@ -164,6 +203,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out.extend(kernel_problems(boot.get("kernlog"), now))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -284,6 +324,21 @@ CATALOG = {
 }
 
 
+CATALOG.update({  # the kernel's own log (Linux): graphics, disk, memory, network adapter, the OOM killer; memory pressure (PSI)
+    "display-stuck": ("Graphics driver stuck", "the kernel's graphics driver stopped answering: the monitor can stay black while every service looks fine",
+                      "do not replug the HDMI/DisplayPort cable and do not force a connector 'detect' (that can trigger the hang); press a key or switch "
+                      "console (Ctrl+Alt+F2, then back), else reboot (sudo systemctl reboot); if it comes back, see the driver's vendor bug tracker for a kernel parameter"),
+    "disk-io-errors": ("Disk I/O errors in the kernel log", "a failing disk, cable or filesystem: data may be unreadable or lost",
+                       "journalctl -k -p err | grep -iE 'nvme|ata|I/O error|EXT4-fs|XFS|BTRFS'; sudo smartctl -a /dev/<disk>; back up now; check the cable; replace the disk it names"),
+    "memory-errors": ("Memory (ECC/MCE) errors in the kernel log", "failing RAM or CPU: crashes and silent data corruption",
+                      "journalctl -k | grep -iE 'edac|mce|hardware error'; memtest86+ (a full pass, from boot); reseat or replace the module it names"),
+    "nic-resets": ("Network adapter resets or link drops", "an unstable cable, switch port, driver or power setting: connections drop",
+                   "journalctl -k | grep -iE 'reset adapter|link is down'; try another cable or port; check the switch; ethtool -S <interface>; a driver or firmware update"),
+    "oom-killed": ("The kernel killed a process for memory", "the machine ran out of memory this boot: a service died without a word",
+                   "journalctl -k | grep -i 'killed process'; free -h; find the app that grew (the HEALTH screen); give it a limit it respects or add RAM"),
+    "memory-pressure": ("Memory pressure", "processes are waiting for memory (PSI): the machine is slow and heading for the OOM killer",
+                        "cat /proc/pressure/memory; free -h; ps aux --sort=-rss | head; stop or limit the biggest app; add RAM or swap. The limit is [thresholds] memory_pressure_pct"),
+})
 CATALOG.update({  # macOS/Windows: the OS firewall in place of ufw (the advice is per OS, below)
     "firewall-off": ("Firewall off", "every listening service is reachable from the network", "turn the firewall on"),
     "firewall-unreadable": ("Firewall state unreadable", "LAN exposure cannot be judged: ports are shown as unknown", f"{CMD['logs']}"),
@@ -377,7 +432,7 @@ if nuc_config.PORTABLE:
 
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden", "disk-io-errors", "memory-errors"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it

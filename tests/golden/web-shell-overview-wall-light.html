@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="778be7448b">
+<header class="topbar" data-card="__top" data-rev="62d9a4329e">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 7 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?ui=1.tl.dw" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -39,12 +39,12 @@
 <a class="ib" href="/?ui=1.tl.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="439277b829">
+<div class="kpiblock" data-card="__kpis" data-rev="ca7247e244">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+<span class="sym s-err" aria-hidden="true">✖</span>7</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?ui=1.tl.dw&amp;frag=1">
-<article class="card s2 st-err r32" data-card="attention" data-rev="9388ac6096" id="c-attention" data-state="err">
+<article class="card s2 st-err r32" data-card="attention" data-rev="504dacc29c" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -155,21 +155,21 @@
 </span>
 </details>
 </div>
-<div class="msg prob lv-warn" data-problem="docker-bypass">
+<div class="msg prob lv-warn" data-problem="oom-killed">
 <span class="sym">!</span>
-<span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
+<span class="pr">kernel killed 2 processes for memory this boot (node) <code class="pid" title="The kernel killed a process for memory">oom-killed</code>
 </span>
-<span class="d why">a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
-<details class="fix" data-k="fix-docker-bypass">
+<span class="d why">the machine ran out of memory this boot: a service died without a word</span>
+<details class="fix" data-k="fix-oom-killed">
 <summary>fix</summary>
-<span class="d how">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+<span class="d how">fix: <code class="cmd">journalctl -k | grep -i &#x27;killed process&#x27;; free -h; find the app that grew (the HEALTH screen); give it a limit it respects or add RAM</code>
 </span>
-<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem oom-killed --reason &quot;...&quot;</code>
 </span>
 </details>
 </div>
 <details class="more">
-<summary>… +1 more</summary>
+<summary>… +2 more</summary>
 </details>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>

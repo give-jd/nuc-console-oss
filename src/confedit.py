@@ -80,6 +80,8 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
      "ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems "
      "figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as "
      "nuc-console-accept: that one is a root command with a reason."),
+    ("thresholds", "Thresholds",
+     "Where a reading becomes an ATTENTION problem. Only memory pressure for now; the kernel-log alarms use fixed windows (docs/CONFIGURATION.md)."),
     ("telegram", "Telegram alerts",
      "New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram "
      "page: the token is never in config.ini."),
@@ -217,6 +219,11 @@ KEYS = (
          "ATTENTION alarms to silence, comma-separated, of: %s. A muted alarm is still collected: it only leaves the list, the problems "
          "figure and Telegram, and is counted as muted. Anything else is ignored and reported." % ", ".join(nuc_config.MUTABLE_ALERTS),
          {"choices": nuc_config.MUTABLE_ALERTS, "unset": True}),
+    ))
+    + _k("thresholds", (
+        ("memory_pressure_pct", INT, "10", NOW,
+         "Memory pressure (the kernel's PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises "
+         "memory-pressure. 10 is already a machine that waits for memory.", {"lo": 1, "hi": 100}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,
