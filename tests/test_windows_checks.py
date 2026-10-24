@@ -203,6 +203,18 @@ class EventIds(unittest.TestCase):
 
 
 class WindowsDemo(unittest.TestCase):
+    GLOBALS = ("DEMO", "DEMO_OS", "DEMO_HEALTH")  # render.once() sets them for the rest of the process
+
+    def setUp(self):
+        self.before = {k: getattr(render, k) for k in self.GLOBALS}
+        for k, v in self.before.items():
+            self.addCleanup(setattr, render, k, v)
+
+    def test_zz_the_render_globals_are_restored_by_cleanup(self):
+        render.DEMO_OS = "windows"
+        self.doCleanups()
+        self.assertEqual({k: getattr(render, k) for k in self.GLOBALS}, self.before)
+
     def test_the_demo_shows_the_restart_and_still_has_no_linux_only_sections(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
