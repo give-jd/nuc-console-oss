@@ -6,6 +6,9 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 ## [Unreleased]
 
 ### Added
+- Kernel-log checks (Linux, shown in ATTENTION on the console and the web, from the BOOT card's section of the root collector, one bounded `journalctl -k` read of this boot): `display-stuck` (the graphics driver, i915/xe/amdgpu/nouveau/nvidia, timing out: `flip_done`, `vblank wait`, `pipe_off wait`, GPU hang; clears 30 min after the last line), `disk-io-errors` (nvme/ata/block/EXT4/XFS/BTRFS errors, last 24 h), `memory-errors` (EDAC/MCE/hardware errors, last 24 h), `nic-resets` (adapter reset or link down, only from 3 in 24 h) and `oom-killed` (the kernel killed a process for memory this boot; the process name only). The disk and memory ones cannot be muted or accepted. The same disk and memory lines now also feed the HEALTH screen's "hardware errors".
+- `memory-pressure`: the kernel's memory pressure (PSI, `some avg60`) above `[thresholds] memory_pressure_pct` (default 10). No PSI (old kernel, macOS, Windows) is no problem.
+- `[alerts] mute` takes `display-stuck`, `oom-killed`, `memory-pressure` and `nic-resets`.
 - `[console] wake_on_problem` (default `yes`): a new or worse problem wakes a console screen blanked by `blank_minutes`, once per 30 s at most. `no` keeps the old behaviour (only a key wakes it).
 - `GET /metrics` in the web view: the overview's figures as Prometheus text (`nuc_console_*`), under the very access rules of `/api/v1/*`. `[web] metrics = no` makes it a 404. See docs/WEB.md, "Metrics".
 

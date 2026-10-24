@@ -101,16 +101,18 @@ class ConsoleTests(Base):
                 "   ✖ 1 DB/broker open on LAN",
                 "   ! 1 container exited with an error",
                 "   ! 2 errors in this boot's journal",
+                "   ! kernel killed 2 processes for memory this boot (node)",
                 "   ! 2 Docker ports bypassing ufw (DOCKER-USER empty)",
                 "   ! 1 service public on the Internet (Funnel :8444)"]
-        for k in (-2, 0, 1):
-            self.assertEqual(self.lines("attention", ctx, k), full, k)  # six at the roomy levels
-        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +1 more"])
-        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +2 more"])
+        for k in (-2, 0):
+            self.assertEqual(self.lines("attention", ctx, k), full, k)  # seven at the roomy levels
+        self.assertEqual(self.lines("attention", ctx, 1), full[:6] + ["   … +1 more"])
+        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +2 more"])
+        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +3 more"])
         self.assertEqual(self.lines("attention", ctx, 3, expand=("attention",)), full)  # the caps lifted
         self.assertTrue(self.card("attention", ctx, 3).truncated)
         self.assertFalse(self.card("attention", ctx, 0).truncated)
-        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(2, "more", indent=3))
+        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(3, "more", indent=3))
 
     def test_attention_nothing_wrong_and_the_accepted_line(self):
         ctx = self.frame(problems=problems.ProblemList())
@@ -333,7 +335,7 @@ class AttentionExtrasTests(Base):
     def test_every_problem_has_its_id_why_fix_and_accept_command(self):
         ctx = self.frame()
         probs = nodes(self.card("attention", ctx, -2), ui.Problem)
-        self.assertEqual([p.id for p in probs], ["db-open-lan", "container-exited", "journal-errors", "funnel-public"])
+        self.assertEqual([p.id for p in probs], ["db-open-lan", "container-exited", "journal-errors", "oom-killed", "funnel-public"])
         by = {p.id: p for p in probs}
         db = by["db-open-lan"]
         self.assertEqual(db.level, "err")
@@ -412,7 +414,7 @@ class AttentionExtrasTests(Base):
 
     def test_the_problems_html(self):
         out = htmlview.html(self.card("attention", self.frame(), -2))
-        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 4)
+        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 5)
         self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code></span><span class="d why">data services should not be reachable from the network</span>', out)
         self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)
