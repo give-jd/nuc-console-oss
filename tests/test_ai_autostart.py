@@ -53,7 +53,7 @@ class Base(unittest.TestCase):
         mock.patch.object(sys, "stderr", self.err).start()
         self.addCleanup(mock.patch.stopall)
 
-    def fake_start(self, model_id=None):
+    def fake_start(self, model_id=None, auto=False):
         self.starts.append(model_id)
         self.eng.job = {"kind": "start", "model": model_id or "", "state": self.job_outcome, "phase": "", "step": "", "done": 0, "total": 0, "rate": 0.0,
                         "error": "boom" if self.job_outcome == "failed" else "", "note": "", "started": T0, "ended": None, "mark": (T0, 0), "phase_at": T0}
@@ -63,7 +63,7 @@ class Base(unittest.TestCase):
         advisor.write_web_state(lambda st: st.update(kw), self.eng.web_path())
 
     def tick(self, dt):
-        self.eng.service_tick(T0 + dt)
+        self.eng.service_tick(T0 + dt, T0 + dt)
 
 
 class AutostartTest(Base):
@@ -95,8 +95,8 @@ class AutostartTest(Base):
                 self.answering = False
                 self.web(enabled=True, model="tiny")
                 setup()
-                self.eng.service_tick(T0)
-                self.eng.service_tick(T0 + 10)
+                self.eng.service_tick(T0, T0)
+                self.eng.service_tick(T0 + 10, T0 + 10)
                 self.assertEqual(self.starts, [], name)
 
     def test_the_default_is_yes_and_the_web_json_of_another_state_is_not_needed(self):
@@ -134,7 +134,7 @@ class AutostartTest(Base):
 
     def test_a_refused_start_is_a_failure_too_and_nothing_raises(self):
         self.web(enabled=True, model="tiny")
-        self.eng.start_server = lambda model_id=None: (self.starts.append(model_id) or (False, "busy: downloading"))
+        self.eng.start_server = lambda model_id=None, auto=False: (self.starts.append(model_id) or (False, "busy: downloading"))
         self.tick(0)
         self.tick(5)
         self.tick(66)
@@ -201,30 +201,31 @@ class StatusFileTest(Base):
         self.cfg["ai"].update(model="tiny", enabled=True)
         self.tick(0)  # the service starts: since = now
         got = advisor.read_ai_status(self.path())
-        self.assertEqual(got, {"ts": int(T0), "since": int(T0), "enabled": True, "answering": False, "model": "tiny"})
+        self.assertEqual(got, {"ts": int(T0), "since": int(T0), "down_for": 0, "enabled": True, "answering": False, "model": "tiny", "reason": "starting"})
         self.tick(40)
-        self.assertEqual(advisor.read_ai_status(self.path())["since"], int(T0), "still not answering: the same since")
+        got = advisor.read_ai_status(self.path())
+        self.assertEqual((got["down_for"], got["since"]), (40, int(T0)), "still not answering: the same state, 40 s long")
         self.answering = True
         self.tick(80)
         got = advisor.read_ai_status(self.path())
-        self.assertEqual((got["answering"], got["since"], got["ts"]), (True, int(T0 + 80), int(T0 + 80)))
+        self.assertEqual((got["answering"], got["down_for"], got["ts"]), (True, 0, int(T0 + 80)))
         self.tick(85)
         self.assertEqual(advisor.read_ai_status(self.path())["ts"], int(T0 + 80), "refreshed every 30 s, not at every tick")
 
     def test_off_or_no_model_is_not_enabled(self):
-        self.eng.write_status(T0)
+        self.eng.write_status(100.0, T0)
         self.assertFalse(advisor.read_ai_status(self.path())["enabled"])
 
     def test_a_folder_that_cannot_be_written_is_logged_once_and_never_raises(self):
         self.eng._dir = os.path.join(self.d, "nope", "deeper")
         with mock.patch.object(advisor, "write_ai_status", side_effect=PermissionError(13, "denied")):
-            self.assertIsNone(self.eng.write_status(T0))
-            self.assertIsNone(self.eng.write_status(T0 + 30))
+            self.assertIsNone(self.eng.write_status(100.0, T0))
+            self.assertIsNone(self.eng.write_status(130.0, T0 + 30))
         self.assertEqual(self.err.getvalue().count("cannot write ai-status.json"), 1)
 
     @unittest.skipIf(os.name != "posix", "POSIX file modes")
     def test_the_file_is_world_readable(self):
-        self.eng.write_status(T0)
+        self.eng.write_status(100.0, T0)
         self.assertEqual(os.stat(self.path()).st_mode & 0o777, 0o644)
         self.assertEqual([n for n in os.listdir(self.d) if n.endswith(".tmp")], [])
 
@@ -233,10 +234,10 @@ class StatusFileTest(Base):
             f.write(text if raw else text.encode())
 
     def test_hostile_content_is_nothing(self):
-        good = {"v": 1, "ts": 5, "since": 4, "enabled": True, "answering": False, "model": "tiny"}
+        good = {"v": 1, "ts": 5, "since": 4, "down_for": 3, "enabled": True, "answering": False, "model": "tiny", "reason": "unknown"}
         self.put(json.dumps(good))
         self.assertEqual(advisor.read_ai_status(self.path())["model"], "tiny")
-        bad = [dict(good, v=2), dict(good, v=True), dict(good, ts=5.5), dict(good, ts=True), dict(good, ts="5"), dict(good, since=-1), dict(good, enabled=1),
+        bad = [dict(good, v=2), dict(good, v=True), dict(good, ts=5.5), dict(good, ts=True), dict(good, ts="5"), dict(good, since=-1), dict(good, down_for=-1), dict(good, down_for=10 ** 9), dict(good, down_for=1.5), dict(good, reason="because"), dict(good, reason=None), dict(good, enabled=1),
                dict(good, answering="no"), [good], "x"]
         for b in bad:
             with self.subTest(b):
@@ -251,13 +252,13 @@ class StatusFileTest(Base):
         self.assertEqual(advisor.read_ai_status(self.path())["model"], "", "a name that is not a model name is dropped")
 
     def test_too_big_is_refused(self):
-        self.put(json.dumps({"v": 1, "ts": 5, "since": 4, "enabled": True, "answering": False, "model": "x", "pad": "p" * 5000}))
+        self.put(json.dumps({"v": 1, "ts": 5, "since": 4, "down_for": 3, "reason": "unknown", "enabled": True, "answering": False, "model": "x", "pad": "p" * 5000}))
         self.assertIsNone(advisor.read_ai_status(self.path()))
 
     def test_a_link_is_not_followed(self):
         target = os.path.join(self.tmp, "target.json")
         with open(target, "w") as f:
-            json.dump({"v": 1, "ts": 5, "since": 4, "enabled": True, "answering": False}, f)
+            json.dump({"v": 1, "ts": 5, "since": 4, "down_for": 3, "enabled": True, "answering": False, "reason": "unknown"}, f)
         try:
             os.symlink(target, self.path())
         except (OSError, NotImplementedError, AttributeError):
@@ -271,18 +272,18 @@ class StatusFileTest(Base):
 
 class AlarmTest(Base):
     def status(self, **kw):
-        st = dict(ts=T0, since=T0 - 1000, enabled=True, answering=False, model="qwen3-8b")
+        st = dict(ts=T0, down_for=1000, enabled=True, answering=False, model="qwen3-8b", reason="unknown")
         st.update(kw)
-        advisor.write_ai_status(st["enabled"], st["answering"], st["since"], st["model"], st["ts"], os.path.join(self.d, advisor.AI_STATUS_FILE))
+        advisor.write_ai_status(st["enabled"], st["answering"], st["down_for"], st["model"], st["ts"], os.path.join(self.d, advisor.AI_STATUS_FILE), st["reason"])
 
     def state(self, now=T0):
         return problems.ai_state(now, os.path.join(self.d, advisor.AI_STATUS_FILE))
 
     def test_down_only_after_two_minutes_of_not_answering(self):
-        self.status(since=T0 - 120)
-        self.assertEqual(self.state(), ("ok", "qwen3-8b"), "120 s is still the grace")
-        self.status(since=T0 - 121)
-        self.assertEqual(self.state(), ("down", "qwen3-8b"))
+        self.status(down_for=120)
+        self.assertEqual(self.state()[:2], ("ok", "qwen3-8b"), "120 s is still the grace")
+        self.status(down_for=121)
+        self.assertEqual(self.state()[:2], ("down", "qwen3-8b"))
 
     def test_answering_clears_it(self):
         self.status(answering=True)
@@ -292,7 +293,7 @@ class AlarmTest(Base):
         self.status(enabled=False)
         self.assertEqual(self.state()[0], "unknown")
         os.unlink(os.path.join(self.d, advisor.AI_STATUS_FILE))
-        self.assertEqual(self.state(), ("unknown", ""), "no file: no alarm, no crash")
+        self.assertEqual(self.state()[:2], ("unknown", ""), "no file: no alarm, no crash")
         self.status()
         self.assertEqual(self.state(T0 + 180)[0], "down")
         self.assertEqual(self.state(T0 + 181)[0], "unknown", "the web view is not running: stale after 3 minutes")
@@ -306,7 +307,7 @@ class AlarmTest(Base):
     def test_the_problem_is_raised_and_cleared_in_problems_raw(self):
         self.status()
         got = self.raw()
-        self.assertEqual(got, [(1, "AI is on (qwen3-8b), but its model server is not running", "ai-down")])
+        self.assertEqual(got, [(1, "AI is on (qwen3-8b) but its model server is not running: turn AI off and on again on the AI page", "ai-down")])
         self.status(answering=True)
         self.assertEqual(self.raw(), [])
         self.status()
@@ -315,8 +316,8 @@ class AlarmTest(Base):
 
     def test_a_hostile_model_name_never_reaches_the_text(self):
         with open(os.path.join(self.d, advisor.AI_STATUS_FILE), "w") as f:
-            json.dump({"v": 1, "ts": int(T0), "since": 1, "enabled": True, "answering": False, "model": "\x1b[31m<b>"}, f)
-        self.assertEqual(self.raw()[0][1], "AI is on, but its model server is not running")
+            json.dump({"v": 1, "ts": int(T0), "since": 1, "down_for": 999, "enabled": True, "answering": False, "model": "\x1b[31m<b>", "reason": "unknown"}, f)
+        self.assertEqual(self.raw()[0][1], "AI is on but its model server is not running: turn AI off and on again on the AI page")
 
     def test_the_catalog_and_the_rules(self):
         title, why, fix = problems.CATALOG["ai-down"]
@@ -324,6 +325,149 @@ class AlarmTest(Base):
         self.assertIn("ai-down", nuc_config.MUTABLE_ALERTS, "operational: a muted AI hides no attack surface")
         self.assertNotIn("ai-down", problems.NOT_ACCEPTABLE)
         self.assertIn("ai-down", problems.OS_CATALOG["windows"])
+
+
+class ReviewTest(Base):
+    def test_a_turn_off_during_the_probe_wins(self):  # race: the plan said start, the user said stop while it probed
+        self.web(enabled=True, model="tiny")
+
+        def probe(endpoint):
+            self.eng.turn_off()
+            return False
+        self.eng.answers_fn = probe
+        self.tick(0)
+        self.tick(5)
+        self.assertEqual(self.starts, [])
+
+    def test_an_automatic_job_that_meets_the_stop_before_it_spawns_is_cancelled(self):
+        job = {"auto": True}
+        self.eng._user_stopped = True
+        with self.assertRaises(aisetup.Cancelled):
+            self.eng._work_start(job, None)
+
+    def test_the_end_of_the_service_starts_nothing_and_ends_what_is_under_way(self):
+        self.web(enabled=True, model="tiny")
+        self.tick(0)
+        self.eng.shutdown()
+        self.tick(5)
+        self.tick(100)
+        self.assertEqual(self.starts, [], "once stopping, no child is spawned")
+        self.eng._svc_stop.clear()
+        self.eng._svc = None
+        self.answering = False
+        self.eng.answers_fn = lambda e: self.eng._svc_stop.set() or False  # the service ends during the probe
+        self.tick(0)
+        self.tick(5)
+        self.assertEqual(self.starts, [])
+
+    def test_a_skip_does_not_spend_an_attempt(self):
+        self.web(enabled=True, model="tiny")
+        self.answering = True
+        self.tick(0)
+        self.tick(5)
+        self.assertEqual(self.eng._svc["tries"], 0)
+        self.answering = False
+        self.job_outcome = "failed"
+        self.eng._svc["next"] = T0 + 6
+        self.tick(6)
+        self.tick(7)
+        self.tick(70)
+        self.assertEqual(len(self.starts), 2, "the first real attempt, and the one retry")
+
+    def test_the_ai_feature_off_stops_the_start_and_the_status(self):
+        self.web(enabled=True, model="tiny")
+        self.cfg["features"]["ai"] = False
+        self.assertFalse(self.eng.service_begin())
+        self.assertEqual(self.eng.autostart_plan()[0], "skip")
+        self.assertIsNone(self.eng.write_status(100.0, T0))
+        self.tick(0)
+        self.tick(10)
+        self.assertEqual(self.starts, [])
+        self.assertFalse(os.path.exists(os.path.join(self.d, advisor.AI_STATUS_FILE)))
+
+    def test_any_http_answer_is_an_answer_even_a_401(self):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        self.assertTrue(aisetup.answers("http://127.0.0.1:%d/v1" % srv.server_address[1], 2))
+        self.assertFalse(aisetup.probe("http://127.0.0.1:%d/v1" % srv.server_address[1], 2)[0], "the advisor's own probe is stricter: that is why")
+        dead = srv.server_address[1]
+        srv.shutdown()
+        srv.server_close()
+        self.assertFalse(aisetup.answers("http://127.0.0.1:%d/v1" % dead, 1))
+        self.assertFalse(aisetup.answers("file:///etc/passwd", 1))
+
+    def test_an_endpoint_on_another_machine_is_not_an_ai_down(self):
+        self.cfg["ai"].update(enabled=True, model="tiny", endpoint="http://192.0.2.7:11434/v1")
+        got = self.eng.write_status(100.0, T0)
+        self.assertFalse(got["enabled"], "autostart cannot fix it, and the AI KPI already says down")
+
+    def test_each_reason_has_its_own_words(self):
+        for reason, word in (("no-runtime", "server is not installed: download a model"), ("no-model", "model is not installed: download it"),
+                             ("refused", "will not work on this machine"), ("failed", "could not be started"),
+                             ("starting", "turn AI off and on again"), ("unknown", "turn AI off and on again")):
+            with self.subTest(reason):
+                d = os.path.join(self.tmp, reason)
+                os.makedirs(d)
+                path = os.path.join(d, advisor.AI_STATUS_FILE)
+                advisor.write_ai_status(True, False, 500, "tiny", T0, path, reason)
+                with mock.patch.object(advisor, "ai_status_path", return_value=path):
+                    net = {"ts": T0, "errors": {}, "listeners": [], "serve": []}
+                    got = [x for x in problems.problems_raw(net, {"ts": T0, "containers": []}, now=T0) if x[2] == "ai-down"]
+                self.assertEqual(len(got), 1)
+                self.assertIn(word, got[0][1])
+                self.assertEqual(got[0][0], 1)
+
+    def test_the_engine_names_why_it_did_not_start(self):
+        self.web(enabled=True, model="tiny")
+        for patch, reason in (({"runtime_ready": lambda d, rt=None, **kw: False}, "no-runtime"), ({"model_ready": lambda d, m, **kw: False}, "no-model"),
+                              ({"assess_model": lambda m, hw, *a: {"verdict": "no", "why": "x"}}, "refused")):
+            with self.subTest(reason), mock.patch.multiple(aisetup, **patch):
+                self.eng._svc, self.eng._reason = None, ""
+                self.tick(0)
+                self.tick(5)
+                self.assertEqual(self.eng.write_status(100.0, T0)["reason"], reason)
+        self.eng._svc, self.eng._reason = None, ""
+        self.job_outcome = "failed"
+        self.tick(0)
+        self.tick(5)
+        self.tick(6)
+        self.assertEqual(self.eng.write_status(100.0, T0)["reason"], "starting", "a retry is pending")
+        self.tick(67)
+        self.tick(68)
+        self.assertEqual(self.eng.write_status(100.0, T0)["reason"], "failed")
+
+    def test_a_clock_that_steps_fires_nothing(self):
+        self.web(enabled=True, model="tiny")
+        self.cfg["ai"].update(enabled=True, model="tiny")
+        self.eng.autostart_delay = 10 ** 6
+        self.eng.service_tick(1000.0, T0)
+        self.eng.service_tick(1040.0, T0 + 10 ** 5)  # the wall clock jumped a day; 40 s went by
+        got = advisor.read_ai_status(os.path.join(self.d, advisor.AI_STATUS_FILE))
+        self.assertEqual(got["down_for"], 40, "counted by the monotonic clock, not by the day that passed")
+        self.eng.status_every = 1
+        self.eng.service_tick(1041.0, T0 + 10 ** 5 + 1)
+        self.assertEqual(advisor.read_ai_status(os.path.join(self.d, advisor.AI_STATUS_FILE))["down_for"], 41)
+        self.assertEqual(problems.ai_state(T0 + 10 ** 5 + 1, os.path.join(self.d, advisor.AI_STATUS_FILE))[0], "ok", "41 s is within the grace")
+
+    def test_a_fifo_and_a_link_are_not_read(self):
+        path = os.path.join(self.d, advisor.AI_STATUS_FILE)
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFOs on this system")
+        os.mkfifo(path)
+        self.assertIsNone(advisor.read_ai_status(path), "returns at once, does not wait for a writer")
 
 
 class ConfigTest(unittest.TestCase):

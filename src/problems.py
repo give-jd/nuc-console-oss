@@ -128,16 +128,23 @@ AI_DOWN_S, AI_STATUS_STALE_S = 120, 180  # the AI on and nothing answering this 
 
 def ai_state(now, path=None):
     """The AI as the web view's engine last saw it (ai-status.json, advisor.read_ai_status: the file is untrusted, and the unprivileged side never
-    probes the model server itself) -> ("unknown" | "ok" | "down", model). unknown: no file, not a trusted one, older than AI_STATUS_STALE_S
-    (the web view is not running: it has nothing to say), a time in the future, or the AI is off. down: on, not answering for more than AI_DOWN_S
-    (counted from the start of the web view, or from the last change: the grace for the automatic start and the model's load)."""
+    probes the model server itself) -> ("unknown" | "ok" | "down", model, reason). unknown: no file, not a trusted one, older than AI_STATUS_STALE_S
+    by the wall clock (the web view is not running: it has nothing to say), a time in the future, or the AI is off. down: on, not answering, and
+    for more than AI_DOWN_S (`down_for`, the writer's own monotonic count: the grace for the automatic start and the model's load; a clock
+    that steps at boot cannot fire it). reason: advisor.AI_REASONS."""
     import advisor
     st = advisor.read_ai_status(path)
     if st is None or not -60 <= now - st["ts"] <= AI_STATUS_STALE_S or not st["enabled"]:
-        return "unknown", ""
+        return "unknown", "", "unknown"
     if st["answering"]:
-        return "ok", st["model"]
-    return ("down" if now - st["since"] > AI_DOWN_S else "ok"), st["model"]
+        return "ok", st["model"], st["reason"]
+    return ("down" if st["down_for"] > AI_DOWN_S else "ok"), st["model"], st["reason"]
+
+
+AI_DOWN_TEXT = {"no-runtime": "the model server is not installed: download a model on the AI page",
+                "no-model": "the model is not installed: download it on the AI page",
+                "refused": "the model will not work on this machine: choose another on the AI page",
+                "failed": "its model server could not be started: the AI page's note and the web view's log say why"}
 
 
 def ssh_exposed(net, cont):
@@ -462,9 +469,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         elif state == "failing":
             out.append((1, f"Telegram notifications failing for {why}", "telegram-failing"))
     if CFG["features"].get("ai", True):  # the AI page's server is gone after a restart of the web view: the page says ON and nothing answers
-        state, model = ai_state(now)
+        state, model, reason = ai_state(now)
         if state == "down":
-            out.append((1, f"AI is on{f' ({safe(model)[:40]})' if model else ''}, but its model server is not running", "ai-down"))
+            out.append((1, f"AI is on{f' ({safe(model)[:40]})' if model else ''} but " + AI_DOWN_TEXT.get(reason, "its model server is not running: turn AI off and on again on the AI page"), "ai-down"))
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -647,13 +654,13 @@ OS_CATALOG["darwin"].update({
                          "restart: sudo launchctl kickstart -k system/com.nuc-console.notify"),
 })
 CATALOG.update({  # the AI page's model server (docs/AI.md): a child of the web view, so a restart of the web view ends it
-    "ai-down": ("AI is on, but its model server is not running", "the advisor and the AI page's questions get no answer",
-                "turn AI off and on again on the AI page, or: sudo nuc-console-ai serve --install-service (a service that survives restarts); "
+    "ai-down": ("AI is on, but its model server is not running", "the advisor and the AI page's questions get no answer (shown here only: not recorded in Events, not sent to Telegram)",
+                "as the alarm says; if the model server is just not running: turn AI off and on again on the AI page, or: sudo nuc-console-ai serve --install-service (a service that survives restarts); "
                 "check: nuc-console-ai status"),
 })
 OS_CATALOG["windows"].update({
-    "ai-down": ("AI is on, but its model server is not running", "the advisor and the AI page's questions get no answer",
-                "turn AI off and on again on the AI page, or: nuc-console-ai.cmd serve --install-service (administrator prompt: a service that "
+    "ai-down": ("AI is on, but its model server is not running", "the advisor and the AI page's questions get no answer (shown here only: not recorded in Events, not sent to Telegram)",
+                "as the alarm says; if the model server is just not running: turn AI off and on again on the AI page, or: nuc-console-ai.cmd serve --install-service (administrator prompt: a service that "
                 "survives restarts); check: nuc-console-ai.cmd status"),
 })
 BASE_CATALOG = dict(CATALOG)  # the advice in the words of an installed Linux, before this OS's and the portable run's (tests/golden.py renders with it)

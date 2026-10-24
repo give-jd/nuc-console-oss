@@ -240,10 +240,14 @@ but the model server is not running** (*starting it* during the first seconds), 
 
 **The `ai-down` alarm** (ATTENTION, warning) is raised when the AI is on with a model and nothing has answered at its endpoint for more than 2 minutes (the grace for the
 automatic start and the model's load, counted from the start of the web view or from the last change). The web view, which owns the server, probes it every 30 s and writes
-`ai-status.json` next to `web.json` (`{"v":1,"ts":..,"enabled":..,"answering":..,"since":..,"model":".."}`, atomic, 0644); the console and the web pages only read that file and never
+`ai-status.json` next to `web.json` (`{"v":1,"ts":..,"enabled":..,"answering":..,"since":..,"down_for":..,"model":"..","reason":".."}`, atomic, 0644; `down_for` is how many
+seconds that state has lasted by the web view's monotonic clock, so a clock that steps at boot cannot fire the alarm; `reason` is one of `starting`, `no-runtime`, `no-model`,
+`refused`, `failed`, `unknown`, and the alarm's text says what to do about it: download the model, choose another one, read the log...). *Any* HTTP answer counts as answering (a
+server that wants a key answers 401), and an endpoint on another machine (`allow_remote`) raises nothing: starting a server here cannot fix it. With `[features] ai = no` nothing
+is started and nothing is written; the console and the web pages only read that file and never
 probe on a frame. They treat it as untrusted: a regular file (a link is not followed) of at most 1 KB, owned by root or the reader, nobody else may write it, types checked; a
-file older than 3 minutes (the web view is not running) or from the future says nothing, and a missing one raises nothing. The root collector does not read what the web account
-wrote, so the history does not record it. It can be muted (`[alerts] mute = ai-down`: it is operational) and accepted. Fix: turn AI off and on again on the page, or
+file older than 3 minutes (the web view is not running) or from the future says nothing, and a missing one raises nothing. **`ai-down` is shown on the console and the web; it is not recorded in Events and not sent to Telegram.** The root collector deliberately does not read what the web account
+wrote (a file owned by another account is not trusted by root), so the history and the notifier never see it. It can be muted (`[alerts] mute = ai-down`: it is operational) and accepted. Fix: turn AI off and on again on the page, or
 `sudo nuc-console-ai serve --install-service`, a service that does not depend on the web view.
 
 ### Security of the buttons

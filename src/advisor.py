@@ -890,36 +890,67 @@ def write_web_state(change, path=None):
 
 AI_STATUS_FILE = "ai-status.json"   # next to web.json: whether the model server answers, as the web view's engine saw it (see write_ai_status)
 AI_STATUS_MAX_BYTES = 1024
+AI_REASONS = ("starting", "no-runtime", "no-model", "refused", "failed", "unknown")   # why nothing answers, as far as the engine knows (a closed list)
 
 
 def ai_status_path():
     return os.path.join(os.path.dirname(web_state_path()), AI_STATUS_FILE)
 
 
-def read_ai_status(path=None):
-    """ai-status.json, written every 30 s by the web view's engine, which owns the model server: {"ts", "enabled", "answering", "since", "model"}
-    (ints and bools, "model" a clean name or ""), or None when there is no file or it is not trustworthy: a link (never followed), not a regular
-    file, over AI_STATUS_MAX_BYTES, another owner, writable by others, a wrong type. The reader decides what a stale `ts` means. Never raises."""
-    path = path or ai_status_path()
+def _read_small(path, cap):
+    """The JSON object of a regular file of at most `cap` bytes, checked on the OPEN descriptor (a link is not followed, a FIFO is not waited on,
+    the owner is trusted: _owner_ok), else None. Where the OS has no O_NOFOLLOW (Windows) a link is refused by lstat first."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        if not stat.S_ISREG(os.lstat(path).st_mode):  # a link is not followed: whoever can plant one must not choose what is read
+        if not hasattr(os, "O_NOFOLLOW") and stat.S_ISLNK(os.lstat(path).st_mode):
             return None
-        d = _read_json(path, AI_STATUS_MAX_BYTES)
+        fd = os.open(path, flags)
+    except (OSError, ValueError):
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap or not _owner_ok(st):
+            return None
+        raw = b""
+        while len(raw) <= cap:
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+        if len(raw) > cap:
+            return None
+        return json.loads(raw.decode("utf-8"), parse_int=_small_int, parse_float=_no, parse_constant=_no)
+    except (OSError, ValueError, RecursionError):
+        return None
+    finally:
+        os.close(fd)
+
+
+def read_ai_status(path=None):
+    """ai-status.json, written every 30 s by the web view's engine, which owns the model server: {"ts", "since", "down_for", "enabled", "answering",
+    "model", "reason"}, or None when there is no file or it is not trustworthy: a link, a FIFO or another kind of file, over AI_STATUS_MAX_BYTES,
+    another owner, writable by others, a wrong type or a reason outside AI_REASONS. `down_for` (seconds the state has lasted, measured by the
+    writer's monotonic clock) is what the alarm counts; `ts` (wall clock) only says how fresh the file is. Never raises."""
+    try:
+        d = _read_small(path or ai_status_path(), AI_STATUS_MAX_BYTES)
     except Exception:  # noqa: BLE001
         return None
     if not isinstance(d, dict) or d.get("v") != 1 or isinstance(d.get("v"), bool):
         return None
-    if not (_is_int(d.get("ts"), 1) and _is_int(d.get("since"), 1) and isinstance(d.get("enabled"), bool) and isinstance(d.get("answering"), bool)):
+    if not (_is_int(d.get("ts"), 1) and _is_int(d.get("since"), 0) and _is_int(d.get("down_for"), 0) and d["down_for"] < 10 ** 9
+            and isinstance(d.get("enabled"), bool) and isinstance(d.get("answering"), bool) and d.get("reason") in AI_REASONS):
         return None
     model = d.get("model")
-    return {"ts": d["ts"], "since": d["since"], "enabled": d["enabled"], "answering": d["answering"],
-            "model": model if isinstance(model, str) and WEB_MODEL.fullmatch(model) else ""}
+    return {"ts": d["ts"], "since": d["since"], "down_for": d["down_for"], "enabled": d["enabled"], "answering": d["answering"],
+            "model": model if isinstance(model, str) and WEB_MODEL.fullmatch(model) else "", "reason": d["reason"]}
 
 
-def write_ai_status(enabled, answering, since, model="", now=None, path=None):
-    """The file read_ai_status() reads: tmp file in the same folder and os.replace, mode 0644. Raises OSError when the folder cannot be written."""
+def write_ai_status(enabled, answering, down_for, model="", now=None, path=None, reason="unknown"):
+    """The file read_ai_status() reads (down_for: seconds this state has lasted): tmp file in the same folder and os.replace, mode 0644. Raises OSError when the folder cannot be written."""
     path = path or ai_status_path()
-    out = {"v": 1, "ts": int(time.time() if now is None else now), "enabled": bool(enabled), "answering": bool(answering), "since": int(since),
+    now = time.time() if now is None else now
+    out = {"v": 1, "ts": int(now), "enabled": bool(enabled), "answering": bool(answering), "since": max(0, int(now - down_for)),
+           "down_for": max(0, int(down_for)), "reason": reason if reason in AI_REASONS else "unknown",
            "model": model if isinstance(model, str) and WEB_MODEL.fullmatch(model) else ""}
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o755, exist_ok=True)
