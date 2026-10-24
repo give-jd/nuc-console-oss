@@ -119,6 +119,50 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+INODE_WARN, INODE_ERR = 90.0, 97.0  # % of a filesystem's inodes used
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def hygiene_problems(boot, now):
+    """What boot.json's host-hygiene sections say (collector.collect_boot): [(severity, text, id)]. A section that is missing, broken or odd
+    (absent tool, unsupported OS, [backups] empty) says nothing: it is neither a problem nor a proof that all is well."""
+    out = []
+    bk = [b for b in boot.get("backups") or () if isinstance(b, dict) and isinstance(b.get("name"), str)] if isinstance(boot.get("backups"), list) else []
+    gone = [b for b in bk if not b.get("matches") or num(b.get("newest")) is None]
+    old = []
+    for b in bk:
+        if b in gone:
+            continue
+        age = (now - b["newest"]) / 86400
+        if age > (num(b.get("max_age_days")) or 2):
+            old.append((safe(b["name"])[:30], int(age)))
+    if gone:
+        out.append((2, plural(len(gone), "backup") + " found nothing: " + ", ".join(safe(b["name"])[:30] for b in gone[:3]), "backup-missing"))
+    if old:
+        out.append((1, plural(len(old), "backup") + " older than allowed: " + ", ".join(f"{n} ({d} d)" for n, d in old[:3]), "backup-stale"))
+    rb = boot.get("reboot")
+    if isinstance(rb, dict):
+        if rb.get("flag") is True:
+            out.append((1, "reboot required: the system asked for one (/run/reboot-required)", "reboot-required"))
+        elif rb.get("kernel_old") is True and isinstance(rb.get("running"), str) and isinstance(rb.get("newest"), str):
+            out.append((1, f"reboot required: running kernel {safe(rb['running'])[:40]}, {safe(rb['newest'])[:40]} installed", "reboot-required"))
+    up = boot.get("updates")
+    if isinstance(up, dict) and isinstance(num(up.get("security")), int) and up["security"] > 0:
+        out.append((1, plural(up["security"], "security update") + " pending" + (f" ({num(up.get('total'))} upgrades in all)" if num(up.get("total")) else ""), "updates-pending"))
+    ck = boot.get("clock")
+    if isinstance(ck, dict) and ck.get("synced") is False:
+        out.append((1, "clock not synchronised (NTP service " + ("on" if ck.get("ntp") else "off") + ")", "clock-unsynced"))
+    ino = [(num(r.get("pct")), safe(r.get("mount"))[:30]) for r in boot.get("inodes") or () if isinstance(r, dict) and isinstance(r.get("mount"), str)] \
+        if isinstance(boot.get("inodes"), list) else []
+    ino = sorted(((p, m) for p, m in ino if p is not None and p >= INODE_WARN), reverse=True)
+    if ino:
+        out.append((2 if ino[0][0] >= INODE_ERR else 1, "inodes nearly used up: " + ", ".join(f"{m} ({p:.0f}%)" for p, m in ino[:3]), "disk-inodes"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -164,6 +208,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out.extend(hygiene_problems(boot, now))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -258,6 +303,18 @@ CATALOG = {
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
     "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
+    "backup-stale": ("A backup is older than allowed", "the newest copy is old: the job that makes it may have stopped, and a restore would lose that much",
+                     "look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini"),
+    "backup-missing": ("A backup was not found", "nothing matches the path under [backups]: the backup never ran, the disk is not mounted, or the path is wrong",
+                       "ls the path; mount the backup disk; fix the path in config.ini (absolute, no ~) and restart nuc-console-collector"),
+    "reboot-required": ("Reboot required", "a kernel or library update is installed but not running yet: the old, possibly vulnerable one still is",
+                        "reboot when it suits you (sudo reboot); cat /run/reboot-required.pkgs lists the packages"),
+    "updates-pending": ("Security updates pending", "known vulnerabilities are fixed in packages that are not installed yet",
+                        "sudo apt update && apt list --upgradable; sudo apt upgrade (or enable unattended-upgrades)"),
+    "clock-unsynced": ("Clock not synchronised", "logs, certificates, tokens and backups depend on the time being right",
+                       "timedatectl status; sudo timedatectl set-ntp true; check chrony or systemd-timesyncd and the network"),
+    "disk-inodes": ("Inodes nearly used up", "no new file can be created when they run out, though the disk shows free space",
+                    "df -i; find the folder with millions of small files (sessions, caches, mail queues, container layers) and clean it"),
     "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
     "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
     "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),

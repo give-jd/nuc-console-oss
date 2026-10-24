@@ -3,6 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- Host hygiene alarms from the collector's boot data: `reboot-required` (`/run/reboot-required`, or a newer kernel installed than the running one), `updates-pending` (security upgrades, from `apt-get -s dist-upgrade` at most once an hour; counts only), `clock-unsynced` (`timedatectl`) and `disk-inodes` (90 % warning, 97 % error, on the DISKS card's filesystems). `reboot-required` and `disk-inodes` can be muted; `updates-pending` and `clock-unsynced` cannot.
+- `[backups]` in `config.ini` (`name = /absolute/path-or-glob[, max_age_days]`, none by default): `backup-stale` when the newest match is older than allowed (default 2 days) and `backup-missing` when nothing matches. Only the newest match's date and size are read. The settings page does not edit it. The shipped `config.ini` carries it commented out. See docs/CONFIGURATION.md.
+
 ## [2.5.2] - 2026-10-23
 
 A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).

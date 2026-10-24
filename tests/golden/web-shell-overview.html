@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="5f3ce19aa3">
+<header class="topbar" data-card="__top" data-rev="5903f7042a">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 10 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -39,12 +39,12 @@
 <a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="439277b829">
+<div class="kpiblock" data-card="__kpis" data-rev="7435bb111f">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+<span class="sym s-err" aria-hidden="true">✖</span>10</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?frag=1">
-<article class="card s2 st-err r94" data-card="attention" data-rev="c48c4d59b1" id="c-attention" data-state="err">
+<article class="card s2 st-err r129" data-card="attention" data-rev="ac1bf83de7" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -155,35 +155,67 @@
 </span>
 </details>
 </div>
-<div class="msg prob lv-warn" data-problem="docker-bypass">
+<div class="msg prob lv-warn" data-problem="backup-stale">
 <span class="sym">!</span>
-<span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
+<span class="pr">1 backup older than allowed: photos (5 d) <code class="pid" title="A backup is older than allowed">backup-stale</code>
 </span>
-<span class="d why">a port published on 0.0.0.0 is reachable from the LAN whatever ufw says</span>
-<details class="fix" data-k="fix-docker-bypass">
+<span class="d why">the newest copy is old: the job that makes it may have stopped, and a restore would lose that much</span>
+<details class="fix" data-k="fix-backup-stale">
 <summary>fix</summary>
-<span class="d how">fix: <code class="cmd">publish on 127.0.0.1 (compose: &quot;127.0.0.1:PORT:PORT&quot;) or declare the app under [webapps] in config.ini if the exposure is intended; or add a DOCKER-USER rule</code>
+<span class="d how">fix: <code class="cmd">look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini</code>
 </span>
-<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem docker-bypass --reason &quot;...&quot;</code>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem backup-stale --reason &quot;...&quot;</code>
 </span>
 </details>
 </div>
-<div class="msg prob lv-warn" data-problem="funnel-public">
+<div class="msg prob lv-warn" data-problem="reboot-required">
 <span class="sym">!</span>
-<span class="pr">1 service public on the Internet (Funnel :8444) <code class="pid" title="Service public on the Internet (Tailscale Funnel)">funnel-public</code>
+<span class="pr">reboot required: the system asked for one (/run/reboot-required) <code class="pid" title="Reboot required">reboot-required</code>
 </span>
-<span class="d why">anyone on the Internet can reach it</span>
-<details class="fix" data-k="fix-funnel-public">
+<span class="d why">a kernel or library update is installed but not running yet: the old, possibly vulnerable one still is</span>
+<details class="fix" data-k="fix-reboot-required">
 <summary>fix</summary>
-<span class="d how">fix: <code class="cmd">tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off</code>
+<span class="d how">fix: <code class="cmd">reboot when it suits you (sudo reboot); cat /run/reboot-required.pkgs lists the packages</code>
 </span>
-<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem funnel-public --reason &quot;...&quot;</code>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem reboot-required --reason &quot;...&quot;</code>
 </span>
 </details>
 </div>
+<div class="msg prob lv-warn" data-problem="updates-pending">
+<span class="sym">!</span>
+<span class="pr">3 security updates pending (14 upgrades in all) <code class="pid" title="Security updates pending">updates-pending</code>
+</span>
+<span class="d why">known vulnerabilities are fixed in packages that are not installed yet</span>
+<details class="fix" data-k="fix-updates-pending">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">sudo apt update &amp;&amp; apt list --upgradable; sudo apt upgrade (or enable unattended-upgrades)</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem updates-pending --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="disk-inodes">
+<span class="sym">!</span>
+<span class="pr">inodes nearly used up: /data (92%) <code class="pid" title="Inodes nearly used up">disk-inodes</code>
+</span>
+<span class="d why">no new file can be created when they run out, though the disk shows free space</span>
+<details class="fix" data-k="fix-disk-inodes">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">df -i; find the folder with millions of small files (sessions, caches, mail queues, container layers) and clean it</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem disk-inodes --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<details class="more">
+<summary>… +2 more</summary>
+</details>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>
 <p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
+</p>
+<p class="more">
+<a href="/?card=attention">… the whole card</a>
 </p>
 </div>
 </article>
@@ -737,6 +769,48 @@
 </table>
 </div>
 </article>
+<article class="card s1 st-warn r20" data-card="disks" data-rev="dba21b9269" id="c-disks" data-state="warn">
+<div class="ch">
+<h3>DISKS</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-mount">
+<col class="c-usage">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Mount</th>
+<th class="n" scope="col">Used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/</td>
+<td class="n">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</td>
+</tr>
+<tr>
+<td>/data</td>
+<td class="n">
+<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="83" height="8"/>
+</svg>
+<span class="n">249.0G/300.0G</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
 <article class="card s1 st-ok r34" data-card="webapps" data-rev="a13cb1fc22" id="c-webapps" data-state="ok">
 <div class="ch">
 <h3>WEB APPS</h3>
@@ -1212,48 +1286,6 @@
 <p class="ln">
 <span class="t-muted"> unused = no container uses it; tagged images can be re-pulled</span>
 </p>
-</div>
-</article>
-<article class="card s1 st-ok r20" data-card="disks" data-rev="42227fe595" id="c-disks" data-state="ok">
-<div class="ch">
-<h3>DISKS</h3>
-<span class="chip st-ok">✔ ok</span>
-</div>
-<div class="cb">
-<table class="tbl">
-<colgroup>
-<col class="c-mount">
-<col class="c-usage">
-</colgroup>
-<thead>
-<tr>
-<th scope="col">Mount</th>
-<th class="n" scope="col">Used</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>/</td>
-<td class="n">
-<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
-<rect class="bg" x="0" y="0" width="100" height="8"/>
-<rect class="fg" x="0" y="0" width="37.5" height="8"/>
-</svg>
-<span class="n">180.0G/480.0G</span>
-</td>
-</tr>
-<tr>
-<td>/data</td>
-<td class="n">
-<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
-<rect class="bg" x="0" y="0" width="100" height="8"/>
-<rect class="fg" x="0" y="0" width="83" height="8"/>
-</svg>
-<span class="n">249.0G/300.0G</span>
-</td>
-</tr>
-</tbody>
-</table>
 </div>
 </article>
 </main>

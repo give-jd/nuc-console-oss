@@ -190,7 +190,14 @@ def snapshot(now=None, os_name=None):
             "docker_df": {"rows": [{"type": "Images", "count": "14", "active": "6", "size": "5.2GB", "reclaimable": "2.1GB (40%)"},
                                    {"type": "Containers", "count": "7", "active": "6", "size": "180MB", "reclaimable": "0B (0%)"},
                                    {"type": "Local Volumes", "count": "5", "active": "5", "size": "1.4GB", "reclaimable": "0B (0%)"}],
-                          "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}}}
+                          "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}},
+            # host hygiene (collector.collect_boot): a fresh backup, a stale one, a reboot asked for, three security updates, a synchronised clock, one full disk
+            "backups": [{"name": "nightly-db", "newest": int(now) - 3 * 3600, "size": 412 * MiB, "matches": 7, "max_age_days": 2},
+                        {"name": "photos", "newest": int(now) - 5 * 86400, "size": 96 * MiB, "matches": 1, "max_age_days": 2}],
+            "reboot": {"flag": True, "running": "6.8.0-demo", "newest": "6.8.0-demo", "kernel_old": False},
+            "updates": {"security": 3, "total": 14, "at": int(now) - 1200},
+            "clock": {"synced": True, "ntp": True},
+            "inodes": [{"mount": d[0], "pct": pct} for d, pct in zip(machine(os_name)["disks"], (4.2, 92.0))]}
     if os_name in ("windows", "darwin"):
         net, boot = _native(net, boot, os_name, now)
     import exposure
@@ -242,6 +249,8 @@ def _native(net, boot, os_name, now):
     net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
     if not win:
         boot.pop("deps", None)  # macOS: launchd has no dependency graph to read
+    for k in ("reboot", "updates", "clock") + (("inodes",) if win else ()):  # collector.UNSUPPORTED_BOOT: the hygiene sections these collectors do not write
+        boot.pop(k, None)
     for it in net["dbs"]["items"]:
         it["ext_source"] = "n/d"  # Docker Desktop: the containers' namespaces are inside a VM
         it["external"], it["active"] = [], []  # nor who connects from the other containers (collector.db_items without conn_fn)
