@@ -81,8 +81,8 @@ class Recording(unittest.TestCase):
     def test_the_debounce_does_not_grow(self):
         recent = {}
         history.problem_events({}, {"a-b": "error"}, NOW, recent)
-        history.problem_events({}, {}, NOW + 10 * history.PROBLEM_DEBOUNCE_S + 1, recent)
-        self.assertEqual(recent, {})
+        history.problem_events({}, {}, NOW + 3601, recent)
+        self.assertEqual(recent, {"book": {"ids": {}, "all": [], "flag": {}}})
 
     def test_only_an_id_and_a_severity_are_kept(self):
         got = history.problem_events({}, {"ok-id": "error", "has space": "error", "192.0.2.1:22": "error", "x" * 80: "error"}, NOW)
@@ -154,6 +154,67 @@ class Job(unittest.TestCase):
         blob = json.dumps(self.rows())
         self.assertNotRegex(blob, r"\d+\.\d+\.\d+\.\d+")
         self.assertEqual(set(r[4] for r in self.rows()), {"problems"})
+
+
+class Flapping(unittest.TestCase):
+    """The caps over a rolling hour, with the real HistoryJob stepped at exactly its own cadence (60 s): the de-bounce window alone never fires there."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "history.db")
+        self.now, self.cur = NOW, {}
+        self.store = history.Store(self.path, now=lambda: self.now)
+        self.job = collector.HistoryJob(self.store, wall=lambda: self.now, mono=lambda: 1000.0, read_problems=lambda: self.cur)
+        self.job.t_start = 0.0
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def rows(self):
+        c = history.open_ro(self.path)
+        try:
+            return c.execute("SELECT ts, subject, detail FROM events WHERE kind = 'problem' ORDER BY id").fetchall()
+        finally:
+            c.close()
+
+    def run_minutes(self, minutes, state):
+        for i in range(minutes):
+            self.now += 60
+            self.cur = state(i)
+            self.job.problems()
+
+    def test_one_id_flipping_every_minute_for_two_hours_is_bounded(self):
+        self.run_minutes(120, lambda i: {"thermal": "warning"} if i % 2 else {})
+        rows = self.rows()
+        flaps = [r for r in rows if r[2] == "flapping"]
+        self.assertLessEqual(len(rows) - len(flaps), 2 * history.PROBLEM_ID_HOUR + 2)           # 6 an hour (the window slides by a step or two)
+        self.assertGreaterEqual(len(rows) - len(flaps), history.PROBLEM_ID_HOUR)
+        self.assertTrue(1 <= len(flaps) <= 3)                                                    # one marker an hour
+        self.assertLessEqual(len(rows), 20)                                                      # not ~120
+
+    def test_the_global_cap_holds_with_many_ids(self):
+        ids = ["alarm-%d" % n for n in range(34)]
+        self.run_minutes(120, lambda i: {x: "error" for x in ids} if i % 2 else {})
+        plain = [r for r in self.rows() if r[2] != "flapping"]
+        self.assertLessEqual(len(plain), 2 * history.PROBLEM_ALL_HOUR + 34)
+
+    def test_the_open_set_stays_true_and_the_next_recorded_change_says_so(self):
+        self.run_minutes(30, lambda i: {"thermal": "warning"} if i % 2 else {})                  # flaps until the cap bites
+        self.run_minutes(1, lambda i: {"thermal": "warning"})
+        self.assertEqual(history.json_meta(self.store, "problems_open"), {"thermal": "warning"})  # true, whatever was dropped
+        self.run_minutes(90, lambda i: {"thermal": "warning"})                                   # steady: the hour slides
+        self.run_minutes(1, lambda i: {})
+        self.assertEqual(self.rows()[-1][1:], ("thermal", "cleared (warning)"))
+
+    def test_a_long_lived_problem_is_opened_and_cleared(self):
+        self.run_minutes(1, lambda i: {})
+        self.run_minutes(180, lambda i: {"port-new": "port-change"})
+        self.run_minutes(5, lambda i: {})
+        self.assertEqual([r[1:] for r in self.rows()], [("port-new", "opened (port-change)"), ("port-new", "cleared (port-change)")])
+
+    def test_the_flapping_marker_is_a_warning_in_the_timeline(self):
+        self.assertEqual(events.row_tone({"kind": "problem", "detail": "flapping"}), "warn")
 
 
 class Query(unittest.TestCase):
@@ -497,6 +558,18 @@ class Web(unittest.TestCase):
             doc = json.loads(get(self.srv, "/api/v1/events")[2])
             self.assertEqual((doc["state"], doc["events"]), ("off", []))
             self.assertIn("history is off", get(self.srv, "/?view=events&kind=hang")[2])
+
+    def test_an_exception_text_never_reaches_a_body(self):
+        secret = "/home/secret-user/.hidden/history.db"
+        with mock.patch.object(history, "open_ro", side_effect=RuntimeError("boom " + secret)), \
+                mock.patch.object(render, "events_data", lambda params: events.load(params, NOW)), mock.patch("sys.stderr", io.StringIO()) as err:
+            bodies = [get(self.srv, "/api/v1/events?limit=7")[2], get(self.srv, "/?view=events&kind=disk_low")[2], get(self.srv, "/?view=events&format=csv")[2]]
+            self.assertEqual(json.loads(bodies[0])["msg"], events.UNREADABLE)
+            for b in bodies:
+                self.assertNotIn("secret-user", b)
+                self.assertNotIn("boom", b)
+            self.assertIn(events.UNREADABLE, bodies[2])
+            self.assertIn("secret-user", err.getvalue())                                         # the journal has it
 
     def test_a_phone_gets_stacked_rows(self):
         self.assertIn("@media (max-width:600px){", webcss.EVENTS_VIEW)

@@ -103,7 +103,10 @@ records when one **opens** and when it **clears** (`thermal`, `unhealthy-contain
 history: the same alarm opening (or clearing) again within 60 seconds is one event. The first look after the history is created is only a
 baseline (what was already wrong then is not an event); an alarm you muted or accepted is recorded too, because the timeline says what was
 wrong with the machine, not what you chose to hear about. Not recorded: the `throttling` alarm (it needs the rate of the last minute, which the
-collector does not keep; the `throttle` events above cover it) and the Telegram ones.
+collector does not keep; the `throttle` events above cover it) and the Telegram ones. An alarm that flips back and forth is capped: at most 6
+events per alarm and 120 in all per rolling hour, and one event with the detail `flapping` says that an alarm was cut; the next change that is
+recorded says the true state. Problem events are recorded by the collector from its own view of the configuration (settings changes made from
+the web settings page may need a collector restart to show up here).
 
 | Console | Web | |
 |---|---|---|

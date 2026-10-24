@@ -13,6 +13,7 @@ Everything shown is a name or a fixed word the collector chose (never a log line
 import csv
 import io
 import re
+import sys
 import textwrap
 import time
 
@@ -34,6 +35,7 @@ LABEL = {"oom": "out of memory", "crash": "crash", "hang": "hang", "unexpected_s
 TONE = {"oom": "err", "unexpected_shutdown": "err", "hw_error": "err", "crash": "warn", "hang": "warn", "service_failed": "warn", "restart": "warn",
         "exit_error": "warn"}                                # the others are muted; a problem's tone is its own (row_tone)
 GLYPH = {"err": "✖", "warn": "!", "ok": "✔", "muted": "·"}  # a symbol besides the colour
+UNREADABLE = "the history could not be read (see the service log)"
 NO_HISTORY = "no history yet: the collector starts recording when [features] health is on; events appear as they happen"
 OFF = "the history is off ([features] health = no in config.ini): events are recorded only while the Health feature is on"
 EMPTY = "no events in this period (the history keeps %d days)" % history.RETENTION_DAYS["events"]
@@ -131,7 +133,8 @@ def load(params, now=None, enabled=True, path=None):
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001 - say so, and keep the dashboard
-        return answer("error", params, now, msg="the history could not be read: " + ui.safe(repr(e))[:100])
+        print("nuc-console events: the history could not be read:", repr(e)[:200], file=sys.stderr)  # the reason goes to the journal, not to a page
+        return answer("error", params, now, msg=UNREADABLE)
     return answer("ok", params, now, rows, total)
 
 
@@ -179,7 +182,7 @@ def row_tone(r):
     """The tone of an event: a problem is as bad as its severity while it is open and fine once it cleared; the other kinds have theirs."""
     if r["kind"] == "problem":
         d = r["detail"]
-        return "ok" if d.startswith("cleared") else "warn" if "(warning)" in d else "err"
+        return "ok" if d.startswith("cleared") else "warn" if "(warning)" in d or d == "flapping" else "err"
     return TONE.get(r["kind"], "muted")
 
 

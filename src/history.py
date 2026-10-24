@@ -33,6 +33,7 @@ VACUUM_EVERY_S = 7 * 86400
 KINDS = ("crash", "hang", "oom", "restart", "exit_error", "service_failed", "unexpected_shutdown", "hw_error", "throttle",
          "disk_low", "login_fail", "problem")
 PROBLEM_DEBOUNCE_S = 60         # the same problem opening (or clearing) again within this long is one event, not two
+PROBLEM_ID_HOUR, PROBLEM_ALL_HOUR = 6, 120  # the most problem events one id, and all ids together, write in a rolling hour (the real bound on flapping)
 APP_TOP = 200                   # apps kept per hour by CPU time ...
 APP_BIG_RSS = 100 * 1024 * 1024  # ... plus every app that holds at least this much memory; the rest is summed into OTHER
 OTHER = "(other)"
@@ -670,11 +671,14 @@ def problem_events(prev, cur, now, recent=None):
     """Two looks at the open problems ({problem id: severity word}; prev None: the first look ever, only the baseline) -> events of kind
     'problem': subject = the id, detail 'opened (error)' or 'cleared (error)' (the severity it had). Nothing else about a problem is
     kept: its text can name addresses or hosts. recent {(id, 'opened'|'cleared'): ts} is the de-bounce: the same id and state again within
-    PROBLEM_DEBOUNCE_S is not recorded (and does not extend the window), so a problem that flaps does not flood the history; it is
-    updated in place."""
+    PROBLEM_DEBOUNCE_S is not recorded (and does not extend the window); that alone does not bound a problem that flips every minute, so
+    there are two caps over a rolling hour: PROBLEM_ID_HOUR events per id (the rest of its transitions are dropped, and one event with the
+    detail 'flapping' says so, once an hour) and PROBLEM_ALL_HOUR in all. A dropped transition loses only its row: the caller keeps the true
+    open set, so the next change that is recorded says the true state. recent is the state of all this, updated in place."""
     if prev is None:
         return []
     recent = recent if recent is not None else {}
+    book = recent.setdefault("book", {"ids": {}, "all": [], "flag": {}})
     ev = []
     for state, ids, src in (("opened", sorted(set(cur) - set(prev)), cur), ("cleared", sorted(set(prev) - set(cur)), prev)):
         for pid in ids:
@@ -682,9 +686,22 @@ def problem_events(prev, cur, now, recent=None):
             if len(str(pid)) > SUBJECT_MAX or not PROBLEM_ID.match(str(pid)) or now - recent.get((pid, state), -1e18) < PROBLEM_DEBOUNCE_S:
                 continue
             recent[(pid, state)] = now
+            mine = book["ids"][pid] = [t for t in book["ids"].get(pid, ()) if now - t < 3600]
+            book["all"] = [t for t in book["all"] if now - t < 3600]
+            if len(mine) >= PROBLEM_ID_HOUR or len(book["all"]) >= PROBLEM_ALL_HOUR:
+                if len(mine) >= PROBLEM_ID_HOUR and now - book["flag"].get(pid, -1e18) >= 3600:
+                    book["flag"][pid] = now
+                    ev.append({"ts": int(now), "kind": "problem", "subject": pid, "detail": "flapping", "source": "problems", "n": 1})
+                continue
+            mine.append(now)
+            book["all"].append(now)
             ev.append({"ts": int(now), "kind": "problem", "subject": pid, "detail": "%s (%s)" % (state, sev), "source": "problems", "n": 1})
-    for k in [k for k, t in recent.items() if now - t > 10 * PROBLEM_DEBOUNCE_S]:
+    for k in [k for k, t in recent.items() if k != "book" and now - t > 10 * PROBLEM_DEBOUNCE_S]:
         del recent[k]
+    book["all"] = [t for t in book["all"] if now - t < 3600]
+    for d in (book["ids"], book["flag"]):
+        for k in [k for k, v in d.items() if not v or now - (v[-1] if isinstance(v, list) else v) >= 3600]:
+            del d[k]
     return ev
 
 
