@@ -173,7 +173,14 @@ def snapshot(now=None, os_name=None):
                 "ips": [TS + ".2"]},
                {"name": "phone", "os": "android", "online": False, "last_seen": now - 7200, "direct": False, "relay": "fra", "exit": False, "exit_option": False,
                 "ips": [TS + ".3"]}]},
-           "links": _links(now)}
+           "links": _links(now),
+           "users": {"admin": {"uid": 1000, "shell": "/bin/bash", "groups": ["sudo"]}, "deploy": {"uid": 1001, "shell": "/bin/bash", "groups": []},
+                     "root": {"uid": 0, "shell": "/bin/bash", "groups": []}}, "keys": {"admin": {"sha256": "0" * 64, "n": 2}, "deploy": {"sha256": "1" * 64, "n": 1}},
+           "cron": {"/etc/crontab": "2" * 64, "/etc/cron.d/backup": "3" * 64}, "units": {"n8n.service": "4" * 64, "backup.timer": ""},
+           "smart": [{"dev": "nvme0n1", "model": "Demo NVMe 1TB", "health": "PASSED", "wear": 7, "spare": 100, "media": 0, "crit": 0, "poh": 8200,
+                      "realloc": None, "grown": False},
+                     {"dev": "sda", "model": "Demo SATA SSD", "health": "PASSED", "wear": None, "spare": None, "media": None, "crit": None,
+                      "poh": 21000, "realloc": 0, "grown": False}]}
     mach = machine(os_name)
     total = mach["boot"]["total"] if mach["boot"] else 0.0
     parts = {"firmware": 5.1, "loader": 2.0, "kernel": 1.2, "initrd": 1.1}
@@ -206,7 +213,8 @@ def snapshot(now=None, os_name=None):
     if os_name in ("windows", "darwin"):
         net, boot = _native(net, boot, os_name, now)
     import exposure
-    base = {"ts": now, "ports": exposure.exposure_keys(net, cont)}  # baseline = current exposure: no "new port" alarm
+    import integrity
+    base = dict({"ts": now, "ports": exposure.exposure_keys(net, cont)}, **integrity.baseline_sections(net))  # baseline = current exposure: no "new port" alarm
     return cont, net, boot, base
 
 
@@ -251,7 +259,7 @@ def _native(net, boot, os_name, now):
         for k in ("analyze", "blame", "journal", "kernlog"):
             boot.pop(k, None)
     gone = ("ufw", "docker_user", "iptables", "f2b", "drops")
-    net = {k: v for k, v in net.items() if k not in gone}
+    net = {k: v for k, v in net.items() if k not in gone and k not in ("users", "keys", "cron", "units", "smart")}  # Linux only
     net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
     if not win:
         boot.pop("deps", None)  # macOS: launchd has no dependency graph to read

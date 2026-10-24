@@ -1,0 +1,17 @@
+{
+  "critical_warning": 4,
+  "temperature": 311,
+  "avail_spare": 100,
+  "spare_thresh": 10,
+  "percent_used": 96,
+  "data_units_read": 1000,
+  "data_units_written": 2000,
+  "host_read_commands": 5,
+  "host_write_commands": 6,
+  "controller_busy_time": 7,
+  "power_cycles": 8,
+  "power_on_hours": 30000,
+  "unsafe_shutdowns": 3,
+  "media_errors": 5,
+  "num_err_log_entries": 9
+}

@@ -370,7 +370,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
-| `sudo nuc-console-accept` | accept the current set of exposed ports as the baseline (port alarms) |
+| `sudo nuc-console-accept` | accept the current set of exposed ports, and on Linux the accounts, SSH keys, cron files and enabled units, as the baseline (their alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
 | `sudo nuc-console-accept --forget <id>` | undo it |
 | `sudo nuc-console-telegram --setup` | pair the Telegram notifier: asks the bot token (from @BotFather) and your @username, prints a `t.me/…` link to open on the phone (Windows: `nuc-console-telegram.cmd`, administrator prompt) |

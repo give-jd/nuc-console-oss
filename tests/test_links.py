@@ -381,7 +381,8 @@ class CollectNet(unittest.TestCase):
         collector.OFF = set()
         # the Linux-only readings of the boot pass belong to the machine running the tests (no os.uname on Windows, no /proc/mounts on macOS)
         for p in (mock.patch.object(collector, "collect_reboot", return_value={"flag": False, "running": "7.0.0-1-generic", "newest": None, "kernel_old": False}),
-                  mock.patch.object(collector, "disk_rows", return_value=[])):
+                  mock.patch.object(collector, "disk_rows", return_value=[]),
+                  mock.patch.dict(collector.integrity.COLLECT, {k: (lambda: {}) for k in collector.integrity.COLLECT})):  # /etc/passwd, /home... are the machine's
             p.start()
             self.addCleanup(p.stop)
         collector.run = self.fake_run
