@@ -29,9 +29,9 @@ SECTION_ID = {s: s + "-changed" for s in SECTIONS}
 BASELINE_VERSION = 2  # 1 = ports only (no "v" in the file)
 ADMIN_GROUPS = ("sudo", "wheel", "admin", "docker")
 MAX_FILE = 4 * 2 ** 20  # a bigger file is not hashed: its value is "oversize:<bytes>" (a change of size shows, a same-size edit does not)
-MAX_ITEMS = 5000  # per section; what is over it is counted in "_truncated", so the overflow is itself a change
+MAX_ITEMS = 5000  # per section; what is over it is counted under TRUNCATED, so the overflow is itself a change
 UNREADABLE = "unreadable"
-TRUNCATED = "_truncated"
+TRUNCATED = "::truncated"  # the overflow count lives under a key no data key can have: a passwd name has no ':', a unit name needs a suffix, a cron label starts with / or spool
 
 
 def _p(root, path):
@@ -54,7 +54,8 @@ def _slurp(fd, owner_uid=None):
         if st.st_size > MAX_FILE:
             return f"oversize:{st.st_size}"
         with os.fdopen(fd, "rb", closefd=False) as f:
-            return f.read()
+            data = f.read(MAX_FILE + 1)  # bounded whatever the size said: the owner may grow the file between the fstat and the read
+        return f"oversize:{max(st.st_size, len(data))}" if len(data) > MAX_FILE else data
     except OSError:
         return UNREADABLE
 
@@ -125,10 +126,10 @@ def _listdir(path):
 
 
 def _cap(items, over=0):
-    """dict(sorted items up to MAX_ITEMS) with '_truncated': how many were left out (over = already left out before), when any."""
+    """dict(sorted items up to MAX_ITEMS) with TRUNCATED: how many were left out (over = already left out before), when any."""
     items = sorted(items)
     over += max(0, len(items) - MAX_ITEMS)
-    out = dict(items[:MAX_ITEMS])
+    out = {("escaped" + k if k == TRUNCATED else k): v for k, v in items[:MAX_ITEMS]}  # never a data key in the count's place
     if over:
         out[TRUNCATED] = over
     return out
@@ -302,7 +303,7 @@ COLLECT = {"users": users, "keys": keys, "cron": cron, "units": units}
 # ---- the baseline ----------------------------------------------------------------------------------------------------------
 
 def _trunc(v):
-    """(the section without its '_truncated' count, that count) of a dict section; (v, 0) for anything else."""
+    """(the section without its TRUNCATED count, that count) of a dict section; (v, 0) for anything else."""
     if isinstance(v, dict) and TRUNCATED in v:
         t = v[TRUNCATED]
         return {k: x for k, x in v.items() if k != TRUNCATED}, (t if isinstance(t, int) and not isinstance(t, bool) else -1)
@@ -385,8 +386,11 @@ def baseline_problems(net, base, accept_cmd):
         return out
     for sec in SECTIONS:
         cur = net.get(sec)
-        if cur is None or not _valid(sec, cur):
+        if cur is None:
             continue  # not collected (another OS, off, an error that net-sections already says): nothing to compare
+        if not _valid(sec, cur):  # collected but unusable: that is not "nothing to compare", it is something to look at
+            out.append((SECTION_SEV[sec], f"{LABEL[sec]} could not be read this time (unexpected data in the collector's file)", SECTION_ID[sec]))
+            continue
         old = base.get(sec) if isinstance(base, dict) else None
         if old is None or not _valid(sec, old):
             missing.append(sec)

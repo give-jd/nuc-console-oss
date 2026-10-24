@@ -13,6 +13,7 @@ import hermetic  # noqa: E402,F401  (first: the host's state stays out of the te
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 import cards  # noqa: E402
 import collector  # noqa: E402
@@ -268,14 +269,78 @@ class Sections(unittest.TestCase):
         for i in range(6):
             put(self.d.name, f"/etc/cron.d/j{i}", "x\n")
         a = integrity.cron(self.d.name)
-        self.assertGreater(a["_truncated"], 0)
+        self.assertGreater(a[integrity.TRUNCATED], 0)
         self.assertTrue(integrity._valid("cron", a))
         base = dict(snap(self.root), cron=a)
         put(self.d.name, "/etc/cron.d/j9", "x\n")  # one more file beyond the cap: the overflow count moves
         pr = integrity.baseline_problems(net_with(dict(snap(self.root))), base, ACCEPT)
         self.assertIn("list truncated", [t for _, t, i in pr if i == "cron-changed"][0])
         integrity.MAX_ITEMS = 5000
-        self.assertNotIn("_truncated", integrity.cron(self.d.name))
+        self.assertNotIn(integrity.TRUNCATED, integrity.cron(self.d.name))
+
+    def test_names_like_the_marker_are_ordinary_entries(self):  # finding 9
+        passwd = open(os.path.join(self.d.name, "etc/passwd")).read()
+        put(self.d.name, "/etc/passwd", passwd + "_truncated:x:1010:1010::/home/_truncated:/bin/bash\n")
+        put(self.d.name, "/home/_truncated/.ssh/authorized_keys", "k1\n")
+        put(self.d.name, "/etc/systemd/system/_truncated.service", "[Service]\n")
+        put(self.d.name, "/etc/cron.d/_truncated", "x\n")
+        base = snap(self.root)
+        self.assertEqual(base["users"]["_truncated"]["uid"], 1010)
+        self.assertEqual(base["keys"]["_truncated"]["n"], 1)
+        self.assertIn("_truncated.service", base["units"])
+        self.assertIn("/etc/cron.d/_truncated", base["cron"])
+        for sec in integrity.SECTIONS:
+            self.assertTrue(integrity._valid(sec, base[sec]), sec)
+            self.assertNotIn(integrity.TRUNCATED, base[sec])
+        self.assertEqual(integrity.baseline_problems(net_with(base), base, ACCEPT), [])  # round trip: tracked, nothing to say
+        cur = json.loads(json.dumps(base))
+        cur["users"]["_truncated"]["uid"] = 0
+        cur["keys"]["_truncated"]["sha256"] = "f" * 64
+        pr = integrity.baseline_problems(net_with(cur), json.loads(json.dumps(base)), ACCEPT)
+        self.assertEqual(sorted(i for _, _, i in pr), ["keys-changed", "users-changed"])  # diffed like any other entry
+        self.assertIn("_truncated uid 1010->0", [t for _, t, i in pr if i == "users-changed"][0])
+
+    def test_a_data_key_equal_to_the_marker_is_escaped_never_read_as_a_count(self):  # finding 9
+        d = integrity._cap([(integrity.TRUNCATED, {"uid": 1, "shell": "", "groups": []}), ("a", {"uid": 2, "shell": "", "groups": []})])
+        self.assertNotIn(integrity.TRUNCATED, d)
+        self.assertTrue(integrity._valid("users", d))
+
+    def test_an_unusable_current_section_is_a_problem_not_a_silent_skip(self):  # finding 9
+        base = snap(self.root)
+        for sec, bad in (("users", 5), ("keys", {"a": 1}), ("cron", {"a": 1}), ("units", ["x"]), ("users", {integrity.TRUNCATED: "x"})):
+            pr = integrity.baseline_problems(net_with(dict(base, **{sec: bad})), base, ACCEPT)
+            self.assertIn(sec + "-changed", [i for _, _, i in pr], sec)
+            self.assertIn("could not be read this time", [t for _, t, i in pr if i == sec + "-changed"][0])
+        self.assertEqual(integrity.baseline_problems(net_with({}), base, ACCEPT), [])  # a section that was not collected at all stays quiet
+
+    def test_the_read_is_bounded_even_if_the_file_grows_after_the_fstat(self):  # finding 10
+        old, real = integrity.MAX_FILE, os.fstat
+        integrity.MAX_FILE = 100
+        self.addCleanup(setattr, integrity, "MAX_FILE", old)
+        put(self.d.name, "/etc/cron.d/grow", "x" * 5000)
+
+        class Lying(object):  # fstat says 10 bytes; the file is 5000
+            def __init__(self, st):
+                self.st_mode, self.st_uid, self.st_size = st.st_mode, st.st_uid, 10
+        reads = []
+
+        def fstat(fd):
+            return Lying(real(fd))
+        orig_open = open
+
+        def spy(*a, **k):
+            f = orig_open(*a, **k)
+            r = f.read
+            f.read = lambda n=-1: (reads.append(n), r(n))[1]
+            return f
+        integrity.os.fstat = fstat
+        try:
+            with unittest.mock.patch("builtins.open", spy), unittest.mock.patch("os.fdopen", lambda fd, mode, closefd=True: spy(fd, mode, closefd=closefd)):
+                v = integrity.cron(self.d.name)["/etc/cron.d/grow"]
+        finally:
+            integrity.os.fstat = real
+        self.assertTrue(v.startswith("oversize:"), v)
+        self.assertTrue(reads and set(reads) == {101}, reads)  # every read is bounded by MAX_FILE + 1: never read() to the end
 
     def test_oversize_file_is_a_marker_with_its_size(self):  # finding 4
         old = integrity.MAX_FILE
