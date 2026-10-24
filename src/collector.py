@@ -43,6 +43,7 @@ OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
 OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
+RUNNING_RECORD = os.path.join(nuc_config.LIB_DIR, "running.json")  # names of the containers that ran with a restart policy (see remember_running)
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
@@ -529,6 +530,36 @@ def boot_time():
         return next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
 
 
+def remember_running(names, btime, path=None, now=None):
+    """The memory behind containers-not-back: the NAMES (nothing else) of the containers that were running with a restart policy at the last
+    look, in a small file of the collector's own (LIB_DIR/running.json). Returns the names that were running before the last reboot: on a new
+    boot (btime moved by more than a minute) the file's `running` becomes `before` and is kept for the whole boot, so containers that have
+    not come back yet are not forgotten when `running` is rewritten. The first look of a boot may find Docker down: nothing is written then
+    (the caller is not reached), so the old file still tells what ran before. A file that cannot be read or written costs the check, not
+    the section. Ceiling: the look is the boot collector's, every 5 minutes: a container stopped by hand in the 5 minutes before a reboot
+    is still counted as running."""
+    path = path or RUNNING_RECORD
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    old = rec.get("btime")
+    known = isinstance(old, (int, float)) and not isinstance(old, bool)
+    new_boot = known and abs(old - btime) > 60
+    clean = lambda v: [x for x in v if isinstance(x, str)][:200] if isinstance(v, list) else []  # noqa: E731
+    before = clean(rec.get("running")) if new_boot else clean(rec.get("before"))
+    out = {"btime": btime if new_boot or not known else old, "running": sorted(set(names))[:200], "before": before}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_atomic(out, path)
+    except OSError:
+        pass
+    return before
+
+
 def collect_boot():
     d = {"ts": time.time(), "errors": {}, "absent": [], "kernel": os_release(), "os": OS_NAME}
 
@@ -619,15 +650,15 @@ def collect_boot():
         rc, out, err = run("docker", "ps", "-q")
         need(rc == 0, err, "docker ps")
         ids = out.split()
-        if not ids:
-            return []
-        rc, out, err = run("docker", "inspect", "--format",
-                           "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
-        need(rc == 0, err, "docker inspect")
         rows = []
-        for ln in out.splitlines():
-            name, started, policy = ln.split("|")
-            rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        if ids:
+            rc, out, err = run("docker", "inspect", "--format",
+                               "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
+            need(rc == 0, err, "docker inspect")
+            for ln in out.splitlines():
+                name, started, policy = ln.split("|")
+                rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        d["containers_before"] = remember_running([r["name"] for r in rows if r["restart"] != "no"], d["btime"])
         return rows
 
     def docker_df():

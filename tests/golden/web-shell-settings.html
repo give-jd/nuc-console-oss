@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="291b7ac47a">
+<header class="topbar" data-card="__top" data-rev="e18c51f29a">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 7 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1">
 <kbd>1</kbd>Overview</a>
@@ -612,8 +612,20 @@ hidden =
 <code>mute</code>
 </span>
 <span class="sm">not set</span>
-<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot</span>
+<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, container-no-restart, containers-not-back. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, container-no-restart, containers-not-back</span>
 </p>
+</div>
+</details>
+<details class="cfgs" id="cfg-containers">
+<summary>
+<code>[containers]</code> Containers and reboots</summary>
+<p class="hintl">Containers that are meant to stay down after a reboot or a Docker restart (one-shot jobs, test stacks) are named here so that the container-no-restart alarm skips them.</p>
+<div class="ck cko" id="k-containers-restart_ignore">
+<span class="cn">
+<code>restart_ignore</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Containers the container-no-restart alarm skips (restart policy no, on purpose), comma-separated: names or shell-style globs such as *-test-*, matched without regard to case. Empty: none.</p>
 </div>
 </details>
 <details class="cfgs" id="cfg-telegram">

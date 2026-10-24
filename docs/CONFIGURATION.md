@@ -223,11 +223,27 @@ mute = journal-errors, thermal
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `container-no-restart`, `containers-not-back`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
 Security alarms can never be muted: ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
+
+## `[containers]` — containers that stay down after a reboot
+
+```ini
+[containers]
+restart_ignore = job-runner, *-test-*
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `restart_ignore` | empty | Containers the `container-no-restart` alarm skips: names or shell-style globs (`*-test-*`), comma-separated, matched without regard to case. For one-shot jobs and test stacks that are meant to stay down after a reboot. Applies at once |
+
+Two operational alarms (both can be muted with `[alerts] mute`) come from the boot collector's look at Docker, every 5 minutes, and need `[features] boot` and `containers`:
+
+- `container-no-restart` (warning): a **running** container whose restart policy is `no` (or empty) will not come back after a reboot or a Docker restart. One alarm, with up to three names and the count. Fix: `docker update --restart unless-stopped <name>` (compose: `restart: unless-stopped`), or list it in `restart_ignore`.
+- `containers-not-back` (error): in the first 20 minutes after a boot, containers that were running with a restart policy (`always`, `unless-stopped`, `on-failure`) before the reboot and are not running now. The collector keeps their **names only** (no image, environment or command line) in `running.json` in its own state folder (`/var/lib/nuc-console` on Linux), rewritten at every look; at a new boot that list becomes the "before" list for the whole boot. A container stopped by hand earlier was not in the list and is not flagged (one stopped in the 5 minutes before the reboot still is: that is the look's resolution). It clears when they run again, and in any case 20 minutes after the boot. If Docker is not installed, or the file cannot be written, there is no alarm and no error.
 
 ## `[telegram]` — alerts on your phone (off by default)
 

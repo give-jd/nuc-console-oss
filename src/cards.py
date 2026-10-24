@@ -110,7 +110,7 @@ class Ctx(object):
 _NET_CARDS = ("exposure", "firewall", "webapps", "databases", "tailscale")
 PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
-    "container-exited": ("containers",),
+    "container-exited": ("containers",), "container-no-restart": ("containers",), "containers-not-back": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
     "thermal": ("system",), "throttling": ("system",),
     "collector-net": _NET_CARDS, "stale-net": _NET_CARDS, "net-sections": _NET_CARDS,

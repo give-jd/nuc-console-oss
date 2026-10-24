@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from fnmatch import fnmatchcase
 
 import cards  # same directory: the card registry (a problem belongs to a card)
 import hostdata
@@ -119,6 +120,32 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+NOT_BACK_WINDOW_S = 1200  # containers-not-back looks at the first 20 minutes after a boot, then it is just a stopped container
+
+
+def restart_problems(boot, now):
+    """The two restart-policy alarms, from the boot collector's `containers` (the RUNNING ones, with their policy) and `containers_before`
+    (the names that ran with a policy before the last reboot; collector.remember_running). Names only; an absent or unreadable
+    section gives nothing: unknown is not an alarm here, and not a green either."""
+    cs, out = boot.get("containers"), []
+    if not isinstance(cs, list) or not hostdata.on("containers"):
+        return out
+    ignore = (CFG.get("containers") or {}).get("restart_ignore") or []
+    cs = [c for c in cs if isinstance(c, dict) and isinstance(c.get("name"), str)]
+    no = [c["name"] for c in cs if (c.get("restart") or "no") == "no" and not any(fnmatchcase(c["name"].lower(), g) for g in ignore)]
+    if no:
+        out.append((1, plural(len(no), "running container") + " will not restart after a reboot: " + ", ".join(safe(n) for n in no[:3])
+                    + (" …" if len(no) > 3 else ""), "container-no-restart"))
+    btime = boot.get("btime")
+    if isinstance(btime, (int, float)) and not isinstance(btime, bool) and 0 <= now - btime < NOT_BACK_WINDOW_S:
+        up = {c["name"] for c in cs}
+        gone = [n for n in boot.get("containers_before") or () if isinstance(n, str) and n not in up]
+        if gone:
+            out.append((2, plural(len(gone), "container") + " running before the reboot did not come back: "
+                        + ", ".join(safe(n) for n in gone[:3]) + (" …" if len(gone) > 3 else ""), "containers-not-back"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -164,6 +191,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out += restart_problems(boot, now)
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -254,6 +282,10 @@ CATALOG = {
     "stale-net": ("Network data is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
     "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete", "journalctl -u nuc-console-collector; the section name is in the message"),
     "unhealthy-container": ("Container unhealthy or restarting", "the service may be down or degraded", "docker ps; docker logs <name>; fix the healthcheck or the app. A wrong healthcheck path is the usual cause"),
+    "container-no-restart": ("Running container will not restart after a reboot", "its restart policy is no: after a reboot or a Docker restart it stays down and nothing says so",
+                             "docker update --restart unless-stopped <name> (compose: restart: unless-stopped); a one-shot or test container on purpose: list it in [containers] restart_ignore"),
+    "containers-not-back": ("Containers did not come back after the reboot", "they were running before it with a restart policy and are not running now: a service is down",
+                            "docker ps -a; docker logs <name>; docker start <name>; if you stopped one on purpose, it clears 20 minutes after the boot"),
     "container-exited": ("Container exited with an error", "a service that should run is down", "docker ps -a; docker logs <name>; docker start <name> or remove it if obsolete"),
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
@@ -378,7 +410,7 @@ if nuc_config.PORTABLE:
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+COUNT_MATTERS = {"container-no-restart", "containers-not-back", "db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 

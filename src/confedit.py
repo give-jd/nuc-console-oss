@@ -80,6 +80,9 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
      "ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems "
      "figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as "
      "nuc-console-accept: that one is a root command with a reason."),
+    ("containers", "Containers and reboots",
+     "Containers that are meant to stay down after a reboot or a Docker restart (one-shot jobs, test stacks) are named here so that the "
+     "container-no-restart alarm skips them."),
     ("telegram", "Telegram alerts",
      "New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram "
      "page: the token is never in config.ini."),
@@ -217,6 +220,12 @@ KEYS = (
          "ATTENTION alarms to silence, comma-separated, of: %s. A muted alarm is still collected: it only leaves the list, the problems "
          "figure and Telegram, and is counted as muted. Anything else is ignored and reported." % ", ".join(nuc_config.MUTABLE_ALERTS),
          {"choices": nuc_config.MUTABLE_ALERTS, "unset": True}),
+    ))
+    + _k("containers", (
+        ("restart_ignore", LIST, "", NOW,
+         "Containers the container-no-restart alarm skips (restart policy no, on purpose), comma-separated: names or shell-style globs "
+         "such as *-test-*, matched without regard to case. Empty: none.",
+         {"pattern": re.compile(r"[a-z0-9_.*?\[\]-]{1,80}"), "unset": True}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,
