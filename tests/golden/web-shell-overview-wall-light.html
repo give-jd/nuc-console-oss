@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="3d0c1998d5">
+<header class="topbar" data-card="__top" data-rev="882c88b0f0">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 9 PROBLEMS</span>
+<span class="status err" role="status">✖ 15 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?ui=1.tl.dw" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -39,12 +39,12 @@
 <a class="ib" href="/?ui=1.tl.dw&amp;view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="79120a9be6">
+<div class="kpiblock" data-card="__kpis" data-rev="5da5ae406a">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>9</span>
+<span class="sym s-err" aria-hidden="true">✖</span>15</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?ui=1.tl.dw&amp;frag=1">
-<article class="card s2 st-err r32" data-card="attention" data-rev="bde692fabb" id="c-attention" data-state="err">
+<article class="card s2 st-err r32" data-card="attention" data-rev="8159d66428" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -169,7 +169,7 @@
 </details>
 </div>
 <details class="more">
-<summary>… +4 more</summary>
+<summary>… +10 more</summary>
 </details>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>
@@ -423,6 +423,48 @@
 <td class="p2">android</td>
 <td>
 <span class="t-muted">offline · seen 2 h ago</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-warn r20" data-card="disks" data-rev="dba21b9269" id="c-disks" data-state="warn">
+<div class="ch">
+<h3>DISKS</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<table class="tbl">
+<colgroup>
+<col class="c-mount">
+<col class="c-usage">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">Mount</th>
+<th class="n" scope="col">Used</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/</td>
+<td class="n">
+<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="37.5" height="8"/>
+</svg>
+<span class="n">180.0G/480.0G</span>
+</td>
+</tr>
+<tr>
+<td>/data</td>
+<td class="n">
+<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
+<rect class="bg" x="0" y="0" width="100" height="8"/>
+<rect class="fg" x="0" y="0" width="83" height="8"/>
+</svg>
+<span class="n">249.0G/300.0G</span>
 </td>
 </tr>
 </tbody>
@@ -808,48 +850,6 @@
 <p class="ln">
 <span class="t-muted"> unused = no container uses it; tagged images can be re-pulled</span>
 </p>
-</div>
-</article>
-<article class="card s1 st-ok r20" data-card="disks" data-rev="42227fe595" id="c-disks" data-state="ok">
-<div class="ch">
-<h3>DISKS</h3>
-<span class="chip st-ok">✔ ok</span>
-</div>
-<div class="cb">
-<table class="tbl">
-<colgroup>
-<col class="c-mount">
-<col class="c-usage">
-</colgroup>
-<thead>
-<tr>
-<th scope="col">Mount</th>
-<th class="n" scope="col">Used</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>/</td>
-<td class="n">
-<svg class="bar st-ok" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="38%" preserveAspectRatio="none">
-<rect class="bg" x="0" y="0" width="100" height="8"/>
-<rect class="fg" x="0" y="0" width="37.5" height="8"/>
-</svg>
-<span class="n">180.0G/480.0G</span>
-</td>
-</tr>
-<tr>
-<td>/data</td>
-<td class="n">
-<svg class="bar st-warn" viewBox="0 0 100 8" width="100" height="8" role="img" aria-label="83%" preserveAspectRatio="none">
-<rect class="bg" x="0" y="0" width="100" height="8"/>
-<rect class="fg" x="0" y="0" width="83" height="8"/>
-</svg>
-<span class="n">249.0G/300.0G</span>
-</td>
-</tr>
-</tbody>
-</table>
 </div>
 </article>
 </main>

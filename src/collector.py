@@ -7,6 +7,7 @@ Linux sections run the tools below; macOS and Windows sections live in collect_d
 the same shapes, plus "os" so the renderer knows which firewall model the verdicts come from. On macOS and Windows it also
 writes the CPU temperature (sensors.json): only root/SYSTEM can read it there; on Linux the renderer reads sysfs itself.
 """
+import glob
 import ipaddress
 import json
 import os
@@ -39,14 +40,17 @@ NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailsc
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
                "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
-                "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
+                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",),
+                "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "services", "sshd"), "windows": ("blame", "services", "sshd")}.get(OS_NAME, ())
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
+                    "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}.get(OS_NAME, ())  # the host-hygiene sections are Linux (inodes: macOS too)
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
 OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
+RUNNING_RECORD = os.path.join(nuc_config.LIB_DIR, "running.json")  # names of the containers that ran with a restart policy (see remember_running)
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
@@ -542,6 +546,38 @@ def parse_journal(text, cap=500):
     return {"err": err, "warn": warn, "capped": n >= cap, "top": top}
 
 
+KERN_LINE = re.compile(r"^(\d+)(?:\.\d+)? \S+ kernel: (.*)$")
+
+
+def parse_kernlog(text, now=None):
+    """`journalctl -k -o short-unix` text -> {class: {'n', 'last'}} for the classes with at least one line inside their window
+    (history.KERNEL_WINDOW_S; the OOM killer: all of this boot) - 'display' also {'driver'}, 'oom' {'procs'}: names only. Counts and
+    the time of the last line; no line is kept."""
+    now = time.time() if now is None else now
+    out = {}
+    for ln in text.splitlines():
+        m = KERN_LINE.match(ln)
+        if not m:
+            continue
+        ts = int(m.group(1))
+        for cls, detail in history.classify_kernel(m.group(2)):
+            win = history.KERNEL_WINDOW_S.get(cls)
+            if win is not None and now - ts > win:
+                continue
+            e = out.setdefault(cls, {"n": 0, "last": 0})
+            e["n"] += 1
+            e["last"] = max(e["last"], ts)
+            if cls == "display":
+                drivers = e.setdefault("drivers", {})
+                drivers[detail] = drivers.get(detail, 0) + 1
+            elif cls == "oom" and detail not in e.setdefault("procs", []) and len(e["procs"]) < 5:
+                e["procs"].append(detail)
+    if "display" in out:  # the driver that said it most
+        d = out["display"].pop("drivers")
+        out["display"]["driver"] = max(d, key=d.get)
+    return out
+
+
 def parse_iso(text):
     """Docker StartedAt '2026-09-29T10:00:00.123456789Z' -> epoch."""
     base, _, frac = text.rstrip("Z").partition(".")
@@ -578,6 +614,165 @@ def boot_time():
         return int(time.time() - winapi.uptime())
     with open("/proc/stat") as f:
         return next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
+
+
+# ---- host hygiene: backups, reboot, updates, clock, inodes (sections of boot.json; the judgement is problems.hygiene_problems) ----------
+
+DAY_S = 86400
+UPDATES_EVERY_S = 3600  # apt-get -s is a full dependency resolution: at most once an hour
+_UPDATES = {"at": 0.0, "value": None, "error": None}
+
+
+def newest_match(pattern):
+    """(newest mtime, size, matches) of the entries the glob `pattern` finds, or (None, None, 0). Only metadata: lstat, never a read, never
+    a link followed (a link counts as itself), and a match whose directory is not under the pattern's literal base is dropped."""
+    head = []
+    for part in re.split(r"([\\/])", pattern):
+        if glob.has_magic(part):
+            break
+        head.append(part)
+    base = os.path.realpath(os.path.dirname("".join(head)))  # the literal directory the pattern starts in
+    best, n = None, 0
+    for m in glob.glob(pattern):
+        parent = os.path.realpath(os.path.dirname(m))
+        if parent != base and not parent.startswith(base.rstrip(os.sep) + os.sep):
+            continue  # reached through a link that leads out of the base
+        try:
+            st = os.lstat(m)
+        except OSError:
+            continue
+        n += 1
+        if best is None or st.st_mtime > best.st_mtime:
+            best = st
+    return (int(best.st_mtime), best.st_size, n) if best else (None, None, 0)
+
+
+def collect_backups(cfg=None):
+    """[backups] of config.ini -> [{'name', 'newest', 'size', 'matches', 'max_age_days'}]; Absent when none is configured (no alarm)."""
+    items = (CFG if cfg is None else cfg).get("backups") or {}
+    if not items:
+        raise Absent("no [backups]")
+    out = []
+    for name, it in sorted(items.items()):
+        newest, size, n = newest_match(it["path"])
+        out.append({"name": name, "newest": newest, "size": size, "matches": n, "max_age_days": it["max_age_days"]})
+    return out
+
+
+def kernel_key(release):
+    """'7.0.0-38-generic' / 'vmlinuz-7.0.0-38-generic' -> ((7, 0, 0, 38), 'generic'): the version order and the flavour."""
+    rel = release[8:] if release.startswith("vmlinuz-") else release
+    return tuple(int(x) for x in re.findall(r"\d+", re.split(r"-[a-z]", rel, maxsplit=1)[0])), (re.split(r"-(?=[a-z])", rel, maxsplit=1) + [""])[1]
+
+
+def newest_kernel(names, running):
+    """The newest of the installed kernels ('vmlinuz-...' names) with the running one's flavour, or None."""
+    flavour = kernel_key(running)[1]
+    keyed = [(kernel_key(n)[0], n[8:]) for n in names if n.startswith("vmlinuz-") and kernel_key(n)[1] == flavour and kernel_key(n)[0]]
+    return max(keyed)[1] if keyed else None
+
+
+def collect_reboot():
+    """{'flag': /run/reboot-required exists, 'running': uname -r, 'newest': the newest /boot/vmlinuz-* of its flavour | None,
+    'kernel_old': that one is newer than the running one}."""
+    running = os.uname().release
+    try:
+        newest = newest_kernel(os.listdir("/boot"), running)
+    except OSError:
+        newest = None
+    old = bool(newest) and kernel_key(newest)[0] > kernel_key(running)[0]  # only when both are known; a kernel older than the running one is not a reason
+    return {"flag": os.path.exists("/run/reboot-required"), "running": running, "newest": newest, "kernel_old": old}
+
+
+INST = re.compile(r"^Inst \S+ .*\((.*)\)\s*$")
+
+
+def parse_apt_sim(text):
+    """`apt-get -s dist-upgrade` -> {'total': upgrades, 'security': those from a *security suite}. Package names are not kept."""
+    total = sec = 0
+    for ln in text.splitlines():
+        m = INST.match(ln)
+        if m:
+            total += 1
+            sec += "security" in m.group(1).lower()
+    return {"total": total, "security": sec}
+
+
+def collect_updates(now=None):
+    """Pending upgrades from the simulation, at most once an hour (the answer, or the failure, is kept until then). Absent without apt-get."""
+    now = time.time() if now is None else now
+    if now - _UPDATES["at"] >= UPDATES_EVERY_S:
+        _UPDATES["at"], _UPDATES["value"], _UPDATES["error"] = now, None, None
+        try:
+            rc, out, err = run("env", "LC_ALL=C", "apt-get", "-s", "dist-upgrade", timeout=60)
+            if rc == 127:  # env: no apt-get (not Debian or Ubuntu)
+                raise Absent("apt-get")
+            if rc != 0:
+                raise RuntimeError(err or "apt-get -s failed")
+            _UPDATES["value"] = dict(parse_apt_sim(out), at=int(now))
+        except Absent:
+            pass
+        except Exception as e:  # noqa: BLE001 - kept for the hour: the next pass says the same, it does not run apt-get again
+            _UPDATES["error"] = repr(e)[:120]
+    if _UPDATES["error"]:
+        raise RuntimeError(_UPDATES["error"])
+    if _UPDATES["value"] is None:
+        raise Absent("apt-get")
+    return _UPDATES["value"]
+
+
+def collect_clock():
+    """{'synced': NTPSynchronized, 'ntp': the NTP service is on} from timedatectl; Absent where it cannot say (no systemd, a container)."""
+    rc, out, err = run("timedatectl", "show", "-p", "NTPSynchronized", "-p", "NTP")
+    if rc != 0:
+        raise Absent("timedatectl")
+    kv = dict(ln.partition("=")[::2] for ln in out.splitlines())
+    if kv.get("NTPSynchronized") not in ("yes", "no"):
+        raise Absent("timedatectl")
+    return {"synced": kv["NTPSynchronized"] == "yes", "ntp": kv.get("NTP") == "yes"}
+
+
+def collect_inodes():
+    """[{'mount', 'pct'}]: the share of inodes used on the filesystems the DISKS card lists; those with no fixed count (btrfs, xfs: f_files 0) are left out."""
+    out = []
+    for r in disk_rows():
+        try:
+            st = os.statvfs(r["mount"])
+        except OSError:
+            continue
+        if st.f_files:
+            out.append({"mount": r["mount"], "pct": round(100.0 * (st.f_files - st.f_ffree) / st.f_files, 1)})
+    return out[:32]
+
+
+def remember_running(names, btime, path=None, now=None):
+    """The memory behind containers-not-back: the NAMES (nothing else) of the containers that were running with a restart policy at the last
+    look, in a small file of the collector's own (LIB_DIR/running.json). Returns the names that were running before the last reboot: on a new
+    boot (btime moved by more than a minute) the file's `running` becomes `before` and is kept for the whole boot, so containers that have
+    not come back yet are not forgotten when `running` is rewritten. The first look of a boot may find Docker down: nothing is written then
+    (the caller is not reached), so the old file still tells what ran before. A file that cannot be read or written costs the check, not
+    the section. Ceiling: the look is the boot collector's, every 5 minutes: a container stopped by hand in the 5 minutes before a reboot
+    is still counted as running."""
+    path = path or RUNNING_RECORD
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    old = rec.get("btime")
+    known = isinstance(old, (int, float)) and not isinstance(old, bool)
+    new_boot = known and abs(old - btime) > 60
+    clean = lambda v: [x for x in v if isinstance(x, str)][:200] if isinstance(v, list) else []  # noqa: E731
+    before = clean(rec.get("running")) if new_boot else clean(rec.get("before"))
+    out = {"btime": btime if new_boot or not known else old, "running": sorted(set(names))[:200], "before": before}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_atomic(out, path)
+    except OSError:
+        pass
+    return before
 
 
 def collect_boot():
@@ -666,19 +861,29 @@ def collect_boot():
         need(rc in (0, 1), err, "journalctl")
         return parse_journal(out)
 
+    def kernlog():
+        # this boot's kernel log, only the lines that may be a fault (a coarse -g; history.classify_kernel decides), at most 5000 of
+        # them, 20 s. rc 1 = nothing found: not an error
+        rc, out, err = run("journalctl", "-k", "-b", "-o", "short-unix", "-g",
+                           "timed out|timeout|GPU HANG|ERROR|error|Out of memory|Hardware Error|Machine check|EDAC|corruption|"
+                           "Reset adapter|Link is Down|read-only|failed command|exception Emask",
+                           "-n", "5000", "--no-pager", timeout=20)
+        need(rc in (0, 1), err, "journalctl -k")
+        return parse_kernlog(out)
+
     def containers():
         rc, out, err = run("docker", "ps", "-q")
         need(rc == 0, err, "docker ps")
         ids = out.split()
-        if not ids:
-            return []
-        rc, out, err = run("docker", "inspect", "--format",
-                           "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
-        need(rc == 0, err, "docker inspect")
         rows = []
-        for ln in out.splitlines():
-            name, started, policy = ln.split("|")
-            rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        if ids:
+            rc, out, err = run("docker", "inspect", "--format",
+                               "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
+            need(rc == 0, err, "docker inspect")
+            for ln in out.splitlines():
+                name, started, policy = ln.split("|")
+                rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        d["containers_before"] = remember_running([r["name"] for r in rows if r["restart"] != "no"], d["btime"])
         return rows
 
     def docker_df():
@@ -734,8 +939,9 @@ def collect_boot():
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
-                    ("journal", journal), ("containers", containers), ("docker_df", docker_df), ("sshd", sshd),
-                    *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
+                    ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
+                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
+                    ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
         section(key, fn)
     return d
 

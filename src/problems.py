@@ -11,8 +11,10 @@ import os
 import re
 import sys
 import time
+from fnmatch import fnmatchcase
 
 import cards  # same directory: the card registry (a problem belongs to a card)
+import history
 import hostdata
 import nuc_config
 import ui
@@ -173,6 +175,111 @@ def host_checks(boot, net, cont, now):
     return out
 
 
+INODE_WARN, INODE_ERR = 90.0, 97.0  # % of a filesystem's inodes used
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def hygiene_problems(boot, now):
+    """What boot.json's host-hygiene sections say (collector.collect_boot): [(severity, text, id)]. A section that is missing, broken or odd
+    (absent tool, unsupported OS, [backups] empty) says nothing: it is neither a problem nor a proof that all is well."""
+    out = []
+    bk = [b for b in boot.get("backups") or () if isinstance(b, dict) and isinstance(b.get("name"), str)] if isinstance(boot.get("backups"), list) else []
+    gone = [b for b in bk if not b.get("matches") or num(b.get("newest")) is None]
+    old = []
+    for b in bk:
+        if b in gone:
+            continue
+        age = (now - b["newest"]) / 86400
+        if age > (num(b.get("max_age_days")) or 2):
+            old.append((safe(b["name"])[:30], int(age)))
+    if gone:
+        out.append((2, plural(len(gone), "backup") + " found nothing: " + ", ".join(safe(b["name"])[:30] for b in gone[:3]), "backup-missing"))
+    if old:
+        out.append((1, plural(len(old), "backup") + " older than allowed: " + ", ".join(f"{n} ({d} d)" for n, d in old[:3]), "backup-stale"))
+    rb = boot.get("reboot")
+    if isinstance(rb, dict):
+        if rb.get("flag") is True:
+            out.append((1, "reboot required: the system asked for one (/run/reboot-required)", "reboot-required"))
+        elif rb.get("kernel_old") is True and isinstance(rb.get("running"), str) and isinstance(rb.get("newest"), str):
+            out.append((1, f"reboot required: running kernel {safe(rb['running'])[:40]}, {safe(rb['newest'])[:40]} installed", "reboot-required"))
+    up = boot.get("updates")
+    if isinstance(up, dict) and isinstance(num(up.get("security")), int) and up["security"] > 0:
+        out.append((1, plural(up["security"], "security update") + " pending" + (f" ({num(up.get('total'))} upgrades in all)" if num(up.get("total")) else ""), "updates-pending"))
+    ck = boot.get("clock")
+    if isinstance(ck, dict) and ck.get("synced") is False:
+        out.append((1, "clock not synchronised (NTP service " + ("on" if ck.get("ntp") else "off") + ")", "clock-unsynced"))
+    ino = [(num(r.get("pct")), safe(r.get("mount"))[:30]) for r in boot.get("inodes") or () if isinstance(r, dict) and isinstance(r.get("mount"), str)] \
+        if isinstance(boot.get("inodes"), list) else []
+    ino = sorted(((p, m) for p, m in ino if p is not None and p >= INODE_WARN), reverse=True)
+    if ino:
+        out.append((2 if ino[0][0] >= INODE_ERR else 1, "inodes nearly used up: " + ", ".join(f"{m} ({p:.0f}%)" for p, m in ino[:3]), "disk-inodes"))
+    return out
+
+
+NOT_BACK_WINDOW_S = 1200  # containers-not-back looks at the first 20 minutes after a boot, then it is just a stopped container
+
+
+def restart_problems(boot, now):
+    """The two restart-policy alarms, from the boot collector's `containers` (the RUNNING ones, with their policy) and `containers_before`
+    (the names that ran with a policy before the last reboot; collector.remember_running). Names only; an absent or unreadable
+    section gives nothing: unknown is not an alarm here, and not a green either."""
+    cs, out = boot.get("containers"), []
+    if not isinstance(cs, list) or not hostdata.on("containers"):
+        return out
+    ignore = (CFG.get("containers") or {}).get("restart_ignore") or []
+    cs = [c for c in cs if isinstance(c, dict) and isinstance(c.get("name"), str)]
+    no = [c["name"] for c in cs if (c.get("restart") or "no") == "no" and not any(fnmatchcase(c["name"].lower(), g) for g in ignore)]
+    if no:
+        out.append((1, plural(len(no), "running container") + " will not restart after a reboot: " + ", ".join(safe(n) for n in no[:3])
+                    + (" …" if len(no) > 3 else ""), "container-no-restart"))
+    btime = boot.get("btime")
+    if isinstance(btime, (int, float)) and not isinstance(btime, bool) and 0 <= now - btime < NOT_BACK_WINDOW_S:
+        up = {c["name"] for c in cs}
+        gone = [n for n in boot.get("containers_before") or () if isinstance(n, str) and n not in up]
+        if gone:
+            out.append((2, plural(len(gone), "container") + " running before the reboot did not come back: "
+                        + ", ".join(safe(n) for n in gone[:3]) + (" …" if len(gone) > 3 else ""), "containers-not-back"))
+    return out
+
+
+def kernel_problems(k, now):
+    """boot['kernlog'] (collector.parse_kernlog: {class: {n, last, ...}}; absent where the OS has no kernel log) -> problems. A class
+    leaves the list when its newest line is older than its window (history.KERNEL_WINDOW_S); the OOM killer stays for the boot."""
+    out = []
+    if not isinstance(k, dict):
+        return out
+
+    def get(cls):
+        e = k.get(cls)
+        if not isinstance(e, dict) or not isinstance(e.get("n"), int) or isinstance(e.get("n"), bool) or e["n"] < 1:
+            return None
+        last = e.get("last")
+        win = history.KERNEL_WINDOW_S.get(cls)
+        if not isinstance(last, (int, float)) or isinstance(last, bool) or (win is not None and now - last > win):
+            return None
+        return True
+    # no age in the texts ("3 min" -> "1 h" would be a new problem to the fingerprint) and, for the two that cannot be accepted, no count
+    # either (notify.py keys those by their text): the count and the age of the newest line are in boot.json's kernlog
+    g = k.get("display") if get("display") else None
+    if g:
+        out.append((2, f"{safe(g.get('driver') or 'gpu')[:16]} graphics driver stuck: {plural(g['n'], 'error')} in the kernel log", "display-stuck"))
+    if get("disk"):
+        out.append((2, "disk I/O errors in the kernel log (last 24 h)", "disk-io-errors"))
+    if get("memory"):
+        out.append((2, "memory (ECC/MCE) errors in the kernel log (last 24 h)", "memory-errors"))
+    g = k.get("nic") if get("nic") else None
+    if g and g["n"] >= history.NIC_MIN:
+        out.append((1, f"network adapter reset or link down {g['n']} times in 24 h", "nic-resets"))
+    g = k.get("oom") if get("oom") else None
+    if g:
+        names = ", ".join(safe(p)[:30] for p in (g.get("procs") or [])[:3] if isinstance(p, str))
+        out.append((1, f"kernel killed {g['n']} process{'' if g['n'] == 1 else 'es'} for memory this boot" + (f" ({names})" if names else ""), "oom-killed"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -211,6 +318,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                     out.append((1, f"{label} at {t:.0f}°C: above the {ui.THERMAL_WARN * mx:.0f}°C threshold", "thermal"))
         if thermal.get("recent"):
             out.append((1, f"CPU thermal throttling: {thermal['recent']} events in the last minute", "throttling"))
+        psi, limit = thermal.get("psi"), (CFG.get("thresholds") or {}).get("memory_pressure_pct", 10)
+        if isinstance(psi, (int, float)) and not isinstance(psi, bool) and psi > limit:  # no PSI on this OS/kernel: None, no problem
+            out.append((1, f"memory pressure {psi:.1f} % (processes waited for memory; the limit is {limit} %)", "memory-pressure"))
     if not hostdata.on("boot"):
         pass
     elif boot is None:
@@ -222,6 +332,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
         out.extend(host_checks(boot, net, cont, now))
+        out.extend(hygiene_problems(boot, now))
+        out += restart_problems(boot, now)
+        out.extend(kernel_problems(boot.get("kernlog"), now))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -312,6 +425,10 @@ CATALOG = {
     "stale-net": ("Network data is old", "the collector stopped updating", "sudo systemctl restart nuc-console-collector"),
     "net-sections": ("Some network sections could not be collected", "the exposure picture may be incomplete", "journalctl -u nuc-console-collector; the section name is in the message"),
     "unhealthy-container": ("Container unhealthy or restarting", "the service may be down or degraded", "docker ps; docker logs <name>; fix the healthcheck or the app. A wrong healthcheck path is the usual cause"),
+    "container-no-restart": ("Running container will not restart after a reboot", "its restart policy is no: after a reboot or a Docker restart it stays down and nothing says so",
+                             "docker update --restart unless-stopped <name> (compose: restart: unless-stopped); a one-shot or test container on purpose: list it in [containers] restart_ignore"),
+    "containers-not-back": ("Containers did not come back after the reboot", "they were running before it with a restart policy and are not running now: a service is down",
+                            "docker ps -a; docker logs <name>; docker start <name>; if you stopped one on purpose, it clears 20 minutes after the boot"),
     "container-exited": ("Container exited with an error", "a service that should run is down", "docker ps -a; docker logs <name>; docker start <name> or remove it if obsolete"),
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
@@ -333,6 +450,18 @@ CATALOG = {
                         "check the host:port answers TLS (or the file is a PEM certificate, at most 64 KB) from this machine; fix or remove the entry under [tls] watch"),
     "watch-config": ("[services] or [tls] in config.ini asks for something that is not done", "a unit name that is not valid, a host that is not on a private network (nuc-console connects nowhere else) or a duplicate is skipped",
                      "fix the line under [services] / [tls] in config.ini (the message says which); restart the services after fixing it"),
+    "backup-stale": ("A backup is older than allowed", "the newest copy is old: the job that makes it may have stopped, and a restore would lose that much",
+                     "look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini"),
+    "backup-missing": ("A backup was not found", "nothing matches the path under [backups]: the backup never ran, the disk is not mounted, or the path is wrong",
+                       "ls the path; mount the backup disk; fix the path in config.ini (absolute, no ~) and restart nuc-console-collector"),
+    "reboot-required": ("Reboot required", "a kernel or library update is installed but not running yet: the old, possibly vulnerable one still is",
+                        "reboot when it suits you (sudo reboot); cat /run/reboot-required.pkgs lists the packages"),
+    "updates-pending": ("Security updates pending", "known vulnerabilities are fixed in packages that are not installed yet",
+                        "sudo apt update && apt list --upgradable; sudo apt upgrade (or enable unattended-upgrades)"),
+    "clock-unsynced": ("Clock not synchronised", "logs, certificates, tokens and backups depend on the time being right",
+                       "timedatectl status; sudo timedatectl set-ntp true; check chrony or systemd-timesyncd and the network"),
+    "disk-inodes": ("Inodes nearly used up", "no new file can be created when they run out, though the disk shows free space",
+                    "df -i; find the folder with millions of small files (sessions, caches, mail queues, container layers) and clean it"),
     "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
     "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
     "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),
@@ -359,6 +488,21 @@ CATALOG = {
 }
 
 
+CATALOG.update({  # the kernel's own log (Linux): graphics, disk, memory, network adapter, the OOM killer; memory pressure (PSI)
+    "display-stuck": ("Graphics driver stuck", "the kernel's graphics driver stopped answering: the monitor can stay black while every service looks fine",
+                      "do not replug the HDMI/DisplayPort cable and do not force a connector 'detect' (that can trigger the hang); press a key or switch "
+                      "console (Ctrl+Alt+F2, then back), else reboot (sudo systemctl reboot); if it comes back, see the driver's vendor bug tracker for a kernel parameter"),
+    "disk-io-errors": ("Disk I/O errors in the kernel log", "a failing disk, cable or filesystem: data may be unreadable or lost",
+                       "journalctl -k -p err | grep -iE 'nvme|ata|I/O error|EXT4-fs|XFS|BTRFS'; sudo smartctl -a /dev/<disk>; back up now; check the cable; replace the disk it names"),
+    "memory-errors": ("Memory (ECC/MCE) errors in the kernel log", "failing RAM or CPU: crashes and silent data corruption",
+                      "journalctl -k | grep -iE 'edac|mce|hardware error'; memtest86+ (a full pass, from boot); reseat or replace the module it names"),
+    "nic-resets": ("Network adapter resets or link drops", "an unstable cable, switch port, driver or power setting: connections drop",
+                   "journalctl -k | grep -iE 'reset adapter|link is down'; try another cable or port; check the switch; ethtool -S <interface>; a driver or firmware update"),
+    "oom-killed": ("The kernel killed a process for memory", "the machine ran out of memory this boot: a service died without a word",
+                   "journalctl -k | grep -i 'killed process'; free -h; find the app that grew (the HEALTH screen); give it a limit it respects or add RAM"),
+    "memory-pressure": ("Memory pressure", "processes are waiting for memory (PSI): the machine is slow and heading for the OOM killer",
+                        "cat /proc/pressure/memory; free -h; ps aux --sort=-rss | head; stop or limit the biggest app; add RAM or swap. The limit is [thresholds] memory_pressure_pct"),
+})
 CATALOG.update({  # macOS/Windows: the OS firewall in place of ufw (the advice is per OS, below)
     "firewall-off": ("Firewall off", "every listening service is reachable from the network", "turn the firewall on"),
     "firewall-unreadable": ("Firewall state unreadable", "LAN exposure cannot be judged: ports are shown as unknown", f"{CMD['logs']}"),
@@ -452,8 +596,8 @@ if nuc_config.PORTABLE:
 
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units", "service-down"}
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden", "disk-io-errors", "memory-errors"}  # port changes are handled by the baseline: sudo nuc-console-accept
+COUNT_MATTERS = {"container-no-restart", "containers-not-back", "db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units", "service-down"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 

@@ -57,6 +57,8 @@ class Base(unittest.TestCase):
     def frame(self, os_name=None, tweak=None, **kw):
         """(ctx, net) of the demo machine; tweak(cont, net) changes the data before the problems are worked out."""
         cont, net, boot, base = (copy.deepcopy(x) for x in demo.snapshot(golden.NOW, os_name))
+        for k in ("backups", "reboot", "updates", "clock", "inodes"):
+            boot.pop(k, None)  # these tests count the older alarms; the host-hygiene ones are in test_host_hygiene.py
         if tweak:
             tweak(cont, net, base)
         pb = problems.safe_problems(net, cont, golden.NOW, boot=boot, baseline=base)
@@ -104,17 +106,20 @@ class ConsoleTests(Base):
                 "   ! 2 errors in this boot's journal",
                 "   ! sshd accepts passwords (PasswordAuthentication yes)",
                 "   ! TLS certificate expires soon: router (12 d)",
+                "   ! 1 running container will not restart after a reboot: cache-1",
+                "   ! kernel killed 2 processes for memory this boot (node)",
                 "   ! 2 Docker ports bypassing ufw (DOCKER-USER empty)",
                 "   ! 1 service public on the Internet (Funnel :8444)"]
-        self.assertEqual(self.lines("attention", ctx, -2), full)  # nine at the roomiest level
-        self.assertEqual(self.lines("attention", ctx, 0), full[:7] + ["   … +2 more"])
-        self.assertEqual(self.lines("attention", ctx, 1), full[:6] + ["   … +3 more"])
-        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +4 more"])
-        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +5 more"])
+        self.assertEqual(self.lines("attention", ctx, -2), full[:9] + ["   … +2 more"])  # ten problems: the roomiest level caps at eight
+        self.assertEqual(self.lines("attention", ctx, -2, expand=("attention",)), full)
+        self.assertEqual(self.lines("attention", ctx, 0), full[:7] + ["   … +4 more"])
+        self.assertEqual(self.lines("attention", ctx, 1), full[:6] + ["   … +5 more"])
+        self.assertEqual(self.lines("attention", ctx, 2), full[:5] + ["   … +6 more"])
+        self.assertEqual(self.lines("attention", ctx, 3), full[:4] + ["   … +7 more"])
         self.assertEqual(self.lines("attention", ctx, 3, expand=("attention",)), full)  # the caps lifted
         self.assertTrue(self.card("attention", ctx, 3).truncated)
-        self.assertFalse(self.card("attention", ctx, -2).truncated)
-        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(5, "more", indent=3))
+        self.assertTrue(self.card("attention", ctx, -2).truncated)
+        self.assertEqual(self.card("attention", ctx, 3).more, ui.More(7, "more", indent=3))
 
     def test_attention_nothing_wrong_and_the_accepted_line(self):
         ctx = self.frame(problems=problems.ProblemList())
@@ -338,7 +343,7 @@ class AttentionExtrasTests(Base):
         ctx = self.frame()
         probs = nodes(self.card("attention", ctx, -2), ui.Problem)
         self.assertEqual([p.id for p in probs], ["service-down", "db-open-lan", "container-exited", "journal-errors", "ssh-password-auth",
-                                                "cert-expiring", "funnel-public"])
+                                                "cert-expiring", "container-no-restart", "oom-killed"])  # the roomiest level caps at eight problems
         by = {p.id: p for p in probs}
         db = by["db-open-lan"]
         self.assertEqual(db.level, "err")
@@ -417,7 +422,7 @@ class AttentionExtrasTests(Base):
 
     def test_the_problems_html(self):
         out = htmlview.html(self.card("attention", self.frame(), -2))
-        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 7)
+        self.assertEqual(len(re.findall(r'<div class="msg prob lv-(?:err|warn)" data-problem="[a-z-]+">', out)), 8)
         self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code></span><span class="d why">data services should not be reachable from the network</span>', out)
         self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)

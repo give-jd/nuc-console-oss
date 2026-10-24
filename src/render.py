@@ -25,6 +25,7 @@ import hostdata  # same directory: what is read from the machine and the collect
 import display  # same directory: the browser behind --kiosk and --open
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
+import wake  # same directory: wakes a blanked console on a new problem
 import problems  # same directory: the problem list, its advice and what was accepted
 import procs
 import ui
@@ -1965,6 +1966,7 @@ def main(argv):
         av, ad, al = None, None, []  # the AI screen while it is shown, its catalog data and model rows
         avail = {"map": map_ok, "cpu": cpu_ok, "health": health_ok, "ai": ai_ok}  # the screens the digits (and Tab) can open
         enabled = lambda f: avail.get(f, True)  # noqa: E731
+        waker = wake.Waker(CFG["console"]["wake_on_problem"] and not DEMO, fd)  # a new problem wakes a blanked Linux console (wake.py)
         sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
         paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
         dirty, help_open = True, False  # a frame is due even when paused; the `?` overlay is shown
@@ -2083,6 +2085,7 @@ def main(argv):
                 screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,
                                aikey=ai_ok, ctx=kctx)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
+            waker.feed(pb if (mv is not None or hv is not None or av is not None) else last_pb)
             scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
             if help_open:
                 screen = help_overlay(screen, scope, w, h, enabled, paused)
