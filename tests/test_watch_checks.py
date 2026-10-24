@@ -26,6 +26,13 @@ import nuc_config  # noqa: E402
 import problems  # noqa: E402
 import x509min  # noqa: E402
 
+ROOT = os.path.abspath(os.sep)  # "/" on POSIX, "C:\\" on Windows (where "/etc/x" is not absolute since Python 3.13)
+
+
+def at(*parts):
+    return os.path.join(ROOT, *parts)
+
+
 EXPIRED_B64 = "MIIBVTCB/aADAgECAhR9OSxWpdEQkgULaOQq5eySxNwEHDAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9maXh0dXJlLmludmFsaWQwHhcNMjAwMTAxMDAwMDAwWhcNMjAwMTAyMDAwMDAwWjAaMRgwFgYDVQQDDA9maXh0dXJlLmludmFsaWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQCJ9KF+/TpIVJy04sEcJ4sUilasgowbbF9zFSxc3IgC34A8T9ywy+Vn57E3VmUoEB8Gi6dDK0GYSiUz6Q5eScRoyEwHzAdBgNVHQ4EFgQUYJPoP2G9i0+xMeN2LnXiSkefNpIwCgYIKoZIzj0EAwIDRwAwRAIgcFO4o82lLEt+ij7PZ46eFIIvrYkylQkJDYttM7DAgowCIC8Wm0pOxyDpGtWy7b1NUexBbOJyYf43TpUFcPFSDl+s"
 VALID_B64 = "MIIBjDCCATGgAwIBAgIUE3kC6bzazj3ZttxUlxrAXpFy8fIwCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPZml4dHVyZS5pbnZhbGlkMCAXDTI2MTAyNDE3MjcyNVoYDzIxMjYwOTMwMTcyNzI1WjAaMRgwFgYDVQQDDA9maXh0dXJlLmludmFsaWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQCJ9KF+/TpIVJy04sEcJ4sUilasgowbbF9zFSxc3IgC34A8T9ywy+Vn57E3VmUoEB8Gi6dDK0GYSiUz6Q5eScRo1MwUTAdBgNVHQ4EFgQUYJPoP2G9i0+xMeN2LnXiSkefNpIwHwYDVR0jBBgwFoAUYJPoP2G9i0+xMeN2LnXiSkefNpIwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNJADBGAiEAkEvN8OQylOHE4YyZCbDFjtRNH0acfW5aUk5Y0EC1MmICIQDJrp+BQsklYz+zTQ/Yiecynpo2bSNkZJeXNMdW1CSBBg=="
 EXPIRED, VALID = base64.b64decode(EXPIRED_B64), base64.b64decode(VALID_B64)
@@ -104,12 +111,13 @@ class WatchConfig(unittest.TestCase):
         self.assertEqual(e("a=[::1]:443"), ("a", "net", "::1", 443))
         self.assertEqual(e("ts=100.64.0.7:443")[2], "100.64.0.7")
         self.assertEqual(e("ll=169.254.1.1:443")[2], "169.254.1.1")
-        self.assertEqual(e("f = /etc/ssl/a.pem"), ("f", "file", "/etc/ssl/a.pem", 0))
+        self.assertEqual(e("f = " + at("etc", "ssl", "a.pem")), ("f", "file", at("etc", "ssl", "a.pem"), 0))
         with mock.patch.object(nuc_config.os, "name", "nt"):
             self.assertEqual(e("f=C:\\certs\\a.pem"), ("f", "file", "C:\\certs\\a.pem", 0))
-        with mock.patch.object(nuc_config.os, "name", "posix"):
-            with self.assertRaises(ValueError):   # not a file on Linux or macOS: said, not read as a path
-                e("f=C:\\certs\\a.pem")
+        if os.name != "nt":  # on Windows a drive path IS absolute (ntpath is what os.path is there): the rule below is about the other systems
+            with mock.patch.object(nuc_config.os, "name", "posix"):
+                with self.assertRaises(ValueError):   # not a file on Linux or macOS: said, not read as a path
+                    e("f=C:\\certs\\a.pem")
         for bad in ("203.0.113.9:443", "web=203.0.113.9:443", "web=8.8.8.8:443", "web=example.com:443", "web=server.example.ts.net:443", "web=10.0.0.1",
                     "web=10.0.0.1:0", "web=10.0.0.1:70000", "web=10.0.0.1:x", "=10.0.0.1:443", "we b=10.0.0.1:443", "web=relative/cert.pem",
                     "web=[2001:db8::1]:443", "web=::ffff:8.8.8.8:443", "web=0.0.0.0:443", "web=172.32.0.1:443", "web=100.128.0.1:443"):
@@ -143,10 +151,10 @@ class WatchConfig(unittest.TestCase):
 
     def test_what_the_file_says_and_what_is_said_about_the_rest(self):
         cfg, said = self.load("[services]\nmust_run = docker, ssh;fail2ban  ,-rf, a b, docker, NetworkManager.service, bad/name, getty@tty1\n"
-                              "[tls]\nwatch = nas = 10.0.0.5:443, ext = 8.8.8.8:443, dns = example.com:443, nas = 10.0.0.6:443, f = /etc/x.pem, [::1]:1\n"
+                              "[tls]\nwatch = nas = 10.0.0.5:443, ext = 8.8.8.8:443, dns = example.com:443, nas = 10.0.0.6:443, f = " + at("etc", "x.pem") + ", [::1]:1\n"
                               "warn_days = 400\nfoo = 1\n")
         self.assertEqual(cfg["services"]["must_run"], ["docker", "ssh", "fail2ban", "a", "b", "NetworkManager.service", "getty@tty1"])
-        self.assertEqual(cfg["tls"], {"watch": ["nas=10.0.0.5:443", "f=/etc/x.pem"], "warn_days": 365})
+        self.assertEqual(cfg["tls"], {"watch": ["nas=10.0.0.5:443", "f=" + at("etc", "x.pem")], "warn_days": 365})
         text = "\n".join(said)
         for needle in ("'-rf' is not a unit name", "'bad/name'", "8.8.8.8", "only IP addresses", "'nas' is there twice", "write name =", "unknown key 'foo'"):
             self.assertIn(needle, text)
@@ -197,6 +205,8 @@ class Sections(unittest.TestCase):
         patches = [mock.patch.object(collector, "CFG", cfg), mock.patch.object(collector, "run", fake_run), mock.patch.object(collector, "LINUX", True),
                    mock.patch.object(collector, "OFF", set()), mock.patch.object(collector, "UNSUPPORTED_BOOT", unsupported),
                    mock.patch.object(collector, "boot_time", lambda: 1700000000),
+                   mock.patch.object(collector, "collect_reboot", return_value={"flag": False, "running": "7.0.0-1-generic", "newest": None, "kernel_old": False}),
+                   mock.patch.object(collector, "disk_rows", return_value=[]),  # the machine's readings (uname, /proc/mounts, `mount`) stay out
                    mock.patch.object(collector, "tls_der", der or (lambda h, p, timeout=3: (_ for _ in ()).throw(OSError("no")))),
                    mock.patch.object(collector, "cert_file_der", files or (lambda p: (_ for _ in ()).throw(OSError("no"))))]
         for p in patches:
@@ -233,7 +243,7 @@ class Sections(unittest.TestCase):
         self.assertEqual([x["state"] for x in b["services"]], ["active", "not-checked", "not-checked", "not-checked"])
         ticks = iter(range(0, 1000, 20))
         with mock.patch.object(collector, "CLOCK", lambda: next(ticks)):
-            b = self.boot(watch=["a=10.0.0.5:443", "b=10.0.0.5:444", "c=/etc/x.pem"], der=lambda h, p, timeout=3: VALID)
+            b = self.boot(watch=["a=10.0.0.5:443", "b=10.0.0.5:444", "c=" + at("etc", "x.pem")], der=lambda h, p, timeout=3: VALID)
         self.assertEqual([(c["name"], c["why"]) for c in b["certs"]], [("a", ""), ("b", "not-checked"), ("c", "not-checked")])
 
     def test_systemctl_missing_or_timing_out_is_absent_or_unknown(self):
@@ -261,8 +271,8 @@ class Sections(unittest.TestCase):
             if p == 9:
                 raise ssl.SSLError("handshake")
             return VALID if p == 443 else b"not a certificate"
-        files = lambda path: {"/etc/a.pem": EXPIRED}.get(path) or (_ for _ in ()).throw(FileNotFoundError(path))   # noqa: E731
-        b = self.boot(watch=["nas=10.0.0.5:443", "down=10.0.0.5:9", "junk=10.0.0.5:444", "file=/etc/a.pem", "gone=/etc/none.pem", "ext=8.8.8.8:443",
+        files = lambda path: {at("etc", "a.pem"): EXPIRED}.get(path) or (_ for _ in ()).throw(FileNotFoundError(path))   # noqa: E731
+        b = self.boot(watch=["nas=10.0.0.5:443", "down=10.0.0.5:9", "junk=10.0.0.5:444", "file=" + at("etc", "a.pem"), "gone=" + at("etc", "none.pem"), "ext=8.8.8.8:443",
                              "dns=example.com:443"], der=der, files=files)
         self.assertEqual(b["certs"], [{"name": "nas", "exp": VALID_AT, "why": ""}, {"name": "down", "exp": None, "why": "unreachable"},
                                       {"name": "junk", "exp": None, "why": "unreadable"}, {"name": "file", "exp": EXPIRED_AT, "why": ""},
