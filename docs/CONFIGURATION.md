@@ -197,6 +197,7 @@ n8n     = tailnet
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
+| `metrics` | `yes` | `/metrics`: the figures of `/api/v1/overview` as Prometheus text, under the same token, `Host` and bind rules as `/api/v1/*` (it adds no data); `no` makes the route a 404. Applies at the next start. [WEB.md](WEB.md#metrics) |
 | `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 

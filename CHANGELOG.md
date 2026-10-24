@@ -7,6 +7,7 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Added
 - `[console] wake_on_problem` (default `yes`): a new or worse problem wakes a console screen blanked by `blank_minutes`, once per 30 s at most. `no` keeps the old behaviour (only a key wakes it).
+- `GET /metrics` in the web view: the overview's figures as Prometheus text (`nuc_console_*`), under the very access rules of `/api/v1/*`. `[web] metrics = no` makes it a 404. See docs/WEB.md, "Metrics".
 
 ## [2.5.2] - 2026-10-23
 
