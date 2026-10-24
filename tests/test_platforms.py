@@ -346,7 +346,7 @@ class NativeCollector(unittest.TestCase):
 
     def as_windows(self, fake_cwin, off=()):
         collector.LINUX, collector.MACOS, collector.WINDOWS, collector.OS_NAME = False, False, True, "windows"
-        collector.UNSUPPORTED_BOOT = ("blame",)
+        collector.UNSUPPORTED_BOOT = collector.UNSUPPORTED_BOOT_BY_OS["windows"]
         collector.cwin = fake_cwin
         collector.OFF = set(off)
         collector.run = lambda name, *a, **k: (_ for _ in ()).throw(collector.Absent(name))  # no docker, no tailscale

@@ -16,6 +16,11 @@ import problems  # noqa: E402
 
 NOW = 1_800_000_000
 DAY = 86400
+ROOT = os.path.abspath(os.sep)  # "/" on POSIX, "C:\\" on Windows (where "/srv" is not absolute since Python 3.13)
+
+
+def at(*parts):
+    return os.path.join(ROOT, *parts)
 
 
 def load(text):
@@ -29,15 +34,17 @@ def load(text):
 
 class Config(unittest.TestCase):
     def test_a_line_and_its_age(self):
-        got, said = load("[backups]\nnightly = /srv/b/db-*.gz, 3\nphotos = /srv/photos\nweird = /srv/a,b/dump\nwith-age = /srv/a,b/dump, 5\n")
+        nightly, photos, comma = at("srv", "b", "db-*.gz"), at("srv", "photos"), at("srv", "a,b", "dump")
+        got, said = load(f"[backups]\nnightly = {nightly}, 3\nphotos = {photos}\nweird = {comma}\nwith-age = {comma}, 5\n")
         self.assertEqual(said, [])
-        self.assertEqual(got["nightly"], {"path": "/srv/b/db-*.gz", "max_age_days": 3})
-        self.assertEqual(got["photos"], {"path": "/srv/photos", "max_age_days": 2}, "the default age")
-        self.assertEqual(got["weird"]["path"], "/srv/a,b/dump", "a comma that is not followed by a number belongs to the path")
-        self.assertEqual(got["with-age"], {"path": "/srv/a,b/dump", "max_age_days": 5})
+        self.assertEqual(got["nightly"], {"path": nightly, "max_age_days": 3})
+        self.assertEqual(got["photos"], {"path": photos, "max_age_days": 2}, "the default age")
+        self.assertEqual(got["weird"]["path"], comma, "a comma that is not followed by a number belongs to the path")
+        self.assertEqual(got["with-age"], {"path": comma, "max_age_days": 5})
 
     def test_what_is_refused_is_said_and_skipped(self):
-        got, said = load("[backups]\nrel = backups/db\ntilde = ~/db\nup = /srv/../etc/x\nold = /srv/x, 0\nok = /srv/ok\n")
+        up, old, ok = at("srv", "..", "etc", "x"), at("srv", "x"), at("srv", "ok")
+        got, said = load(f"[backups]\nrel = backups/db\ntilde = ~/db\nup = {up}\nold = {old}, 0\nok = {ok}\n")
         self.assertEqual(list(got), ["ok"])
         self.assertEqual(len(said), 4)
         self.assertTrue(all("[backups]" in s for s in said))
@@ -59,9 +66,10 @@ class Config(unittest.TestCase):
         root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
         with open(os.path.join(root, "config", "config.ini")) as f:
             dist = f.read()
-        new = confmigrate.build("[features]\nboot = no\n[backups]\ndb = /srv/b/db-*.gz, 3\n", dist)
+        path = at("srv", "b", "db-*.gz")
+        new = confmigrate.build(f"[features]\nboot = no\n[backups]\ndb = {path}, 3\n", dist)
         new = new[0] if isinstance(new, tuple) else new
-        self.assertEqual(load(new)[0], {"db": {"path": "/srv/b/db-*.gz", "max_age_days": 3}})
+        self.assertEqual(load(new)[0], {"db": {"path": path, "max_age_days": 3}})
 
 
 class Newest(unittest.TestCase):
@@ -111,8 +119,12 @@ class Newest(unittest.TestCase):
         target = self.touch("target.dat", NOW - 10 * DAY)
         link = os.path.join(self.d, "latest.gz")
         os.symlink(target, link)
-        os.utime(link, (NOW - DAY, NOW - DAY), follow_symlinks=False)
-        self.assertEqual(collector.newest_match(link)[0], NOW - DAY, "the link's own date, not its target's")
+        if os.utime in os.supports_follow_symlinks:
+            os.utime(link, (NOW - DAY, NOW - DAY), follow_symlinks=False)
+        else:  # Windows: a link's own date cannot be set, only read
+            self.assertNotEqual(int(os.lstat(link).st_mtime), NOW - 10 * DAY)
+        self.assertEqual(collector.newest_match(link)[0], int(os.lstat(link).st_mtime), "the link's own date, not its target's")
+        self.assertNotEqual(collector.newest_match(link)[0], NOW - 10 * DAY)
 
     def test_collect_backups(self):
         self.touch("db-1.gz", NOW - DAY, 5)
@@ -133,7 +145,7 @@ class Reboot(unittest.TestCase):
         self.assertGreater(k("6.8.0-100-generic")[0], k("6.8.0-9-generic")[0], "100 is after 9, not before")
 
     def run_reboot(self, running, boot, flag=False):
-        with mock.patch("os.uname", return_value=mock.Mock(release=running)), mock.patch("os.listdir", return_value=boot), \
+        with mock.patch("os.uname", create=True, return_value=mock.Mock(release=running)), mock.patch("os.listdir", return_value=boot), \
                 mock.patch("os.path.exists", return_value=flag):
             return collector.collect_reboot()
 
@@ -152,7 +164,7 @@ class Reboot(unittest.TestCase):
         self.assertFalse(self.run_reboot("7.0.0-34-generic", ["vmlinuz-7.0.0-34-generic", "vmlinuz-7.0.0-99-lowlatency"])["kernel_old"])
 
     def test_boot_unreadable_says_nothing_but_the_flag_counts(self):
-        with mock.patch("os.uname", return_value=mock.Mock(release="7.0.0-34-generic")), mock.patch("os.listdir", side_effect=OSError), \
+        with mock.patch("os.uname", create=True, return_value=mock.Mock(release="7.0.0-34-generic")), mock.patch("os.listdir", side_effect=OSError), \
                 mock.patch("os.path.exists", return_value=True):
             got = collector.collect_reboot()
         self.assertEqual((got["newest"], got["kernel_old"], got["flag"]), (None, False, True))
@@ -244,7 +256,7 @@ class Inodes(unittest.TestCase):
         def statvfs(mount):
             files, free = table[mount]
             return mock.Mock(f_files=files, f_ffree=free)
-        with mock.patch.object(collector, "disk_rows", return_value=[{"mount": m} for m in table]), mock.patch("os.statvfs", side_effect=statvfs):
+        with mock.patch.object(collector, "disk_rows", return_value=[{"mount": m} for m in table]), mock.patch("os.statvfs", create=True, side_effect=statvfs):
             return collector.collect_inodes()
 
     def test_percent_and_the_filesystems_without_a_count(self):
