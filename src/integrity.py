@@ -7,6 +7,11 @@ Two things live here, both pure functions over plain reads (a `root` argument st
     command line) or a comment. `baseline_sections` is what `nuc-console-accept` stores, `baseline_problems` what is compared with it.
   - the SMART health of the physical disks: the parsers of `smartctl -j` and `nvme smart-log -o json`, and `smart_problems`.
 
+Nothing is skipped in silence: a file or folder that cannot be read safely (a link where a user's own file should be, another owner, not a regular
+file, too big, unreadable) is a marker value in place of a hash, so that it differs from the baseline; a section whose files cannot be reached at
+all (the service sandbox hiding /home) raises, and net.json records it as an error. Not watched: see docs/INSTALL.md (sudoers, PAM, shell start-up
+files, authorized_keys2, in-memory persistence).
+
 The sections are written in net.json by collector.collect_net (each fails alone); the baseline file stays tolerant: a section that is not in
 it is "not tracked yet" (one quiet note, `baseline-incomplete`), never an alarm. Unknown keys of the file are ignored."""
 import errno
@@ -23,9 +28,10 @@ SECTION_SEV = {"users": 2, "keys": 2, "cron": 1, "units": 1}
 SECTION_ID = {s: s + "-changed" for s in SECTIONS}
 BASELINE_VERSION = 2  # 1 = ports only (no "v" in the file)
 ADMIN_GROUPS = ("sudo", "wheel", "admin", "docker")
-MAX_FILE = 4 * 2 ** 20  # a file bigger than that is hashed by its first 4 MiB (and says so nowhere: it is a fingerprint)
-MAX_ITEMS = 500
+MAX_FILE = 4 * 2 ** 20  # a bigger file is not hashed: its value is "oversize:<bytes>" (a change of size shows, a same-size edit does not)
+MAX_ITEMS = 5000  # per section; what is over it is counted in "_truncated", so the overflow is itself a change
 UNREADABLE = "unreadable"
+TRUNCATED = "_truncated"
 
 
 def _p(root, path):
@@ -36,29 +42,40 @@ def _owner_ok(file_uid, user_uid):
     return file_uid in (0, user_uid)
 
 
+def _slurp(fd, owner_uid=None):
+    """Bytes of the open regular file `fd`; else a marker: 'not-regular', 'foreign-owner' (owner_uid given: not that user or root),
+    'oversize:<bytes>', 'unreadable'."""
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return "not-regular"
+        if owner_uid is not None and not _owner_ok(st.st_uid, owner_uid):
+            return "foreign-owner"
+        if st.st_size > MAX_FILE:
+            return f"oversize:{st.st_size}"
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            return f.read()
+    except OSError:
+        return UNREADABLE
+
+
 def _read(path, nofollow_uid=None):
-    """Bytes of a regular file; None if it is missing or not a regular file; UNREADABLE if it cannot be read. nofollow_uid (a user's own file,
-    which that user could point anywhere with a symlink): never follows a link and only accepts a file owned by that user or root."""
+    """Bytes of a file; None if it is missing; else a marker string (see _slurp, plus 'symlink' for a link where nofollow_uid, a user's own
+    file, is given: never followed and only accepted when owned by that user or root)."""
     try:
         fd = os.open(path, os.O_RDONLY | (getattr(os, "O_NOFOLLOW", 0) if nofollow_uid is not None else 0) | getattr(os, "O_NONBLOCK", 0))
     except FileNotFoundError:
         return None
     except OSError as e:
-        return None if e.errno == errno.ELOOP else UNREADABLE  # a link where a user's own file should be: not followed, not hashed
+        return "symlink" if e.errno == errno.ELOOP else UNREADABLE
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or (nofollow_uid is not None and not _owner_ok(st.st_uid, nofollow_uid)):
-            return None
-        with os.fdopen(fd, "rb", closefd=False) as f:
-            return f.read(MAX_FILE)
-    except OSError:
-        return UNREADABLE
+        return _slurp(fd, nofollow_uid)
     finally:
         os.close(fd)
 
 
 def _sha(data):
-    return data if data == UNREADABLE else hashlib.sha256(data).hexdigest()
+    return data if isinstance(data, str) else hashlib.sha256(data).hexdigest()  # a marker stays what it is
 
 
 def parse_passwd(text):
@@ -92,10 +109,39 @@ def real_shell(shell):
 def passwd(root="/"):
     """(all rows of /etc/passwd as (name, uid, home, shell), {group: members} of /etc/group); OSError when /etc/passwd cannot be read."""
     pw = _read(_p(root, "/etc/passwd"))
-    if pw is None or pw == UNREADABLE:
+    if not isinstance(pw, bytes):
         raise OSError("/etc/passwd unreadable")
     grp = _read(_p(root, "/etc/group"))
     return parse_passwd(pw.decode("utf-8", "replace")), parse_group(grp.decode("utf-8", "replace") if isinstance(grp, bytes) else "")
+
+
+def _listdir(path):
+    """(sorted names up to MAX_ITEMS, how many more there were); ([], 0) when the folder is not there."""
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        return [], 0
+    return names[:MAX_ITEMS], max(0, len(names) - MAX_ITEMS)
+
+
+def _cap(items, over=0):
+    """dict(sorted items up to MAX_ITEMS) with '_truncated': how many were left out (over = already left out before), when any."""
+    items = sorted(items)
+    over += max(0, len(items) - MAX_ITEMS)
+    out = dict(items[:MAX_ITEMS])
+    if over:
+        out[TRUNCATED] = over
+    return out
+
+
+def _tracked(rows, groups):
+    """[(name, uid, shell, admin groups)] of the accounts that matter."""
+    out = []
+    for n, uid, _, shell in rows:
+        mine = sorted(g for g in ADMIN_GROUPS if n in groups.get(g, ()))
+        if uid == 0 or uid >= 1000 or mine or real_shell(shell):
+            out.append((n, uid, shell, mine))
+    return out
 
 
 def users(root="/"):
@@ -103,52 +149,109 @@ def users(root="/"):
     sudo, wheel, admin or docker; groups = the ones of those four it is in (sorted)."""
     rows, groups = passwd(root)
     out = {}
-    for n, uid, _, shell in rows:
-        mine = sorted(g for g in ADMIN_GROUPS if n in groups.get(g, ()))
-        if uid == 0 or uid >= 1000 or mine or real_shell(shell):
-            out.setdefault(n, {"uid": uid, "shell": shell, "groups": mine})
-    return dict(sorted(out.items())[:MAX_ITEMS])
+    for n, uid, shell, mine in _tracked(rows, groups):
+        out.setdefault(n, {"uid": uid, "shell": shell, "groups": mine})
+    return _cap(out.items())
+
+
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _dir_marker(path, dir_fd=None):
+    """Why a folder could not be opened as a plain folder: 'symlink-dir', 'not-directory', 'unreadable'."""
+    try:
+        st = os.lstat(path, dir_fd=dir_fd)
+    except OSError:
+        return UNREADABLE
+    return "symlink-dir" if stat.S_ISLNK(st.st_mode) else "not-directory" if not stat.S_ISDIR(st.st_mode) else UNREADABLE
+
+
+def _account_keys(root, home, uid):
+    """(entry, reached): entry = {"sha256", "n"} or None when the account has no authorized_keys; reached = its home was opened and has
+    something in it. Each component (home, .ssh, authorized_keys) is opened without following a link, from the folder before it."""
+    mark = lambda m: {"sha256": m, "n": 0}  # noqa: E731
+    hp = _p(root, home)
+    try:
+        hfd = os.open(hp, DIR_FLAGS)
+    except FileNotFoundError:
+        return "no-home", False
+    except OSError:
+        return mark(_dir_marker(hp)), False
+    sfd = None
+    try:
+        try:
+            reached = bool(os.listdir(hfd))
+        except OSError:
+            return mark(UNREADABLE), False
+        try:
+            sfd = os.open(".ssh", DIR_FLAGS, dir_fd=hfd)
+        except FileNotFoundError:
+            return None, reached
+        except OSError:
+            return mark(_dir_marker(".ssh", hfd)), reached
+        try:
+            fd = os.open("authorized_keys", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), dir_fd=sfd)
+        except FileNotFoundError:
+            return None, reached
+        except OSError as e:
+            return mark("symlink" if e.errno == errno.ELOOP else UNREADABLE), reached
+        try:
+            data = _slurp(fd, uid)
+        finally:
+            os.close(fd)
+        n = 0 if isinstance(data, str) else sum(1 for ln in data.splitlines() if ln.strip() and not ln.lstrip().startswith(b"#"))
+        return {"sha256": _sha(data), "n": n}, reached
+    finally:
+        if sfd is not None:
+            os.close(sfd)
+        os.close(hfd)
 
 
 def keys(root="/"):
-    """{account: {"sha256", "n"}} of ~/.ssh/authorized_keys of EVERY account of /etc/passwd whose home has one (root included); n = lines
-    that hold a key, not blank or comment."""
-    out = {}
-    for name, uid, home, _ in passwd(root)[0]:
+    """{account: {"sha256", "n"}} of ~/.ssh/authorized_keys of EVERY account of /etc/passwd that has one (root included); n = lines that hold a
+    key. sha256 is a marker, never a hash, when the file cannot be trusted: 'symlink', 'not-regular', 'foreign-owner', 'oversize:<bytes>',
+    'unreadable'; or when the folder cannot be: 'symlink-dir', 'not-directory'. A tracked account (see users) whose home is gone is 'no-home'.
+    Raises OSError when no account's home can be reached at all (the sandbox hides /home and /root): the section is then an error, not {}."""
+    rows, groups = passwd(root)
+    track = {n for n, _, _, _ in _tracked(rows, groups)}
+    out, reached, seen = {}, False, 0
+    for name, uid, home, _ in rows:
         if not home.startswith("/") or name in out:
             continue
-        data = _read(_p(root, home + "/.ssh/authorized_keys"), nofollow_uid=uid)
-        if data is None:
-            continue
-        n = 0 if data == UNREADABLE else sum(1 for ln in data.splitlines() if ln.strip() and not ln.lstrip().startswith(b"#"))
-        out[name] = {"sha256": _sha(data), "n": n}
-    return dict(sorted(out.items())[:MAX_ITEMS])
-
-
-def _listdir(path):
-    try:
-        return sorted(os.listdir(path))[:MAX_ITEMS]
-    except OSError:
-        return []
+        seen += 1
+        entry, ok = _account_keys(root, home, uid)
+        reached = reached or ok
+        if entry == "no-home":
+            entry = {"sha256": "no-home", "n": 0} if name in track else None
+        if entry is not None:
+            out[name] = entry
+    if seen and not reached:
+        raise OSError("no home directory could be read (is /home hidden from the collector?)")
+    return _cap(out.items())
 
 
 def cron(root="/"):
-    """{file: sha256}: /etc/crontab, /etc/anacrontab, each file of /etc/cron.d and of cron.hourly/daily/weekly/monthly, and 'spool:<user>' /
-    'spool-cron:<user>' for each per-user crontab (/var/spool/cron/crontabs, /var/spool/cron)."""
-    todo = [("/etc/crontab", "/etc/crontab"), ("/etc/anacrontab", "/etc/anacrontab")]
-    for d in ("/etc/cron.d", "/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"):
-        todo += [(d + "/" + n, d + "/" + n) for n in _listdir(_p(root, d))]
-    for tag, d in (("spool:", "/var/spool/cron/crontabs"), ("spool-cron:", "/var/spool/cron")):
-        todo += [(tag + n, d + "/" + n) for n in _listdir(_p(root, d))]
+    """{file: sha256 or marker}: /etc/crontab, /etc/anacrontab, each file of /etc/cron.d and of cron.hourly/daily/weekly/monthly, and
+    'spool:<user>' / 'spool-cron:<user>' for each per-user crontab (/var/spool/cron/crontabs, /var/spool/cron)."""
+    todo, over = [("/etc/crontab", "/etc/crontab"), ("/etc/anacrontab", "/etc/anacrontab")], 0
+    for tag, d in (("/etc/cron.d/", "/etc/cron.d"), ("/etc/cron.hourly/", "/etc/cron.hourly"), ("/etc/cron.daily/", "/etc/cron.daily"),
+                   ("/etc/cron.weekly/", "/etc/cron.weekly"), ("/etc/cron.monthly/", "/etc/cron.monthly"),
+                   ("spool:", "/var/spool/cron/crontabs"), ("spool-cron:", "/var/spool/cron")):
+        names, more = _listdir(_p(root, d))
+        over += more
+        todo += [(tag + n, d + "/" + n) for n in names]
     out = {}
     for label, path in todo:
-        data = _read(_p(root, path))  # a folder (crontabs inside /var/spool/cron) is not a regular file: skipped
+        full = _p(root, path)
+        if os.path.isdir(full) and not os.path.islink(full):
+            continue  # a folder (crontabs inside /var/spool/cron) is not a job file
+        data = _read(full)
         if data is not None:
             out[safe(label)[:80]] = _sha(data)
-    return out
+    return _cap(out.items(), over)
 
 
-UNIT = re.compile(r"^[A-Za-z0-9:_.@\\-]+\.(service|timer|socket|path|mount|target)$")
+UNIT = re.compile(r"^[A-Za-z0-9:_.@\\-]+\.(service|timer|socket|path|mount|automount|swap|target)$")
 
 
 def _link(path):
@@ -157,34 +260,40 @@ def _link(path):
 
 def units(root="/"):
     """{label: value} under /etc/systemd/system: the units enabled by hand (entries of *.wants / *.requires), the unit files that live there and
-    the drop-ins (`name.service.d/override.conf`). A regular file is its sha256; a link is 'link:<target path>' (the target is never read or
-    followed: a relink shows, the vendor's file is not hashed)."""
-    base, out = _p(root, "/etc/systemd/system"), {}
+    the drop-ins (`name.service.d/override.conf`). A regular file is its sha256 (or a marker, see keys); a link is 'link:<target path>' (the
+    target is never read or followed: a relink shows, the vendor's file is not hashed)."""
+    base, out, over = _p(root, "/etc/systemd/system"), {}, 0
 
     def add(label, full):
         try:
             if os.path.islink(full):
                 out.setdefault(label, _link(full))
-            elif os.path.isfile(full):
+            elif not os.path.isdir(full):
                 data = _read(full)
                 if data is not None:
                     out.setdefault(label, _sha(data))
         except OSError:
             out.setdefault(label, UNREADABLE)
 
-    for n in _listdir(base):
+    names, more = _listdir(base)
+    over += more
+    for n in names:
         full = os.path.join(base, n)
         if n.endswith((".wants", ".requires")) and os.path.isdir(full) and not os.path.islink(full):
-            for u in _listdir(full):
+            sub, more = _listdir(full)
+            over += more
+            for u in sub:
                 if UNIT.match(u):
                     add(u, os.path.join(full, u))
         elif n.endswith(".d") and UNIT.match(n[:-2]) and os.path.isdir(full) and not os.path.islink(full):
-            for f in _listdir(full):
+            sub, more = _listdir(full)
+            over += more
+            for f in sub:
                 if f.endswith(".conf") and UNIT.match("x" + f[:-5] + ".service"):
                     add(n + "/" + f, os.path.join(full, f))
         elif UNIT.match(n):
             add(n, full)
-    return out
+    return _cap(out.items(), over)
 
 
 COLLECT = {"users": users, "keys": keys, "cron": cron, "units": units}
@@ -192,8 +301,19 @@ COLLECT = {"users": users, "keys": keys, "cron": cron, "units": units}
 
 # ---- the baseline ----------------------------------------------------------------------------------------------------------
 
+def _trunc(v):
+    """(the section without its '_truncated' count, that count) of a dict section; (v, 0) for anything else."""
+    if isinstance(v, dict) and TRUNCATED in v:
+        t = v[TRUNCATED]
+        return {k: x for k, x in v.items() if k != TRUNCATED}, (t if isinstance(t, int) and not isinstance(t, bool) else -1)
+    return v, 0
+
+
 def _valid(sec, v):
     """A section of baseline.json is usable only in its own shape; anything else counts as not there."""
+    v, t = _trunc(v)
+    if t < 0:
+        return False
     if sec == "users":  # a list of names is the older shape (names only)
         return (isinstance(v, list) and all(isinstance(x, str) for x in v)) or (isinstance(v, dict) and all(
             isinstance(x, dict) and isinstance(x.get("uid"), int) and isinstance(x.get("shell"), str) and isinstance(x.get("groups"), list)
@@ -235,6 +355,12 @@ def _users_diff(cur, base):
 
 def diff(sec, cur, base):
     """What changed in a section, in words, without any content; "" when nothing."""
+    (cur, tc), (base, tb) = _trunc(cur), _trunc(base)
+    cut = "; list truncated (%d over the cap)" % tc if tc != tb else ""
+    return (_diff(sec, cur, base) + cut).lstrip("; ")
+
+
+def _diff(sec, cur, base):
     if sec == "users":
         return _users_diff(cur, base)
     else:
@@ -284,10 +410,10 @@ DEVICE = re.compile(r"^(nvme[0-9]+n[0-9]+|sd[a-z]+)$")  # never loop, ram, dm-, 
 def block_devices(root="/"):
     """The physical block devices of /sys/block, sorted; removable media (a USB stick) is left out."""
     out = []
-    for n in _listdir(_p(root, "/sys/block")):
-        if DEVICE.match(n):
+    for n in _listdir(_p(root, "/sys/block"))[0]:
+        if DEVICE.fullmatch(n):
             rem = _read(_p(root, f"/sys/block/{n}/removable"))
-            if rem is None or rem == UNREADABLE or rem.strip() != b"1":
+            if not isinstance(rem, bytes) or rem.strip() != b"1":
                 out.append(n)
     return out
 

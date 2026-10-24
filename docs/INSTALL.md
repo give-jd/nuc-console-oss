@@ -207,7 +207,8 @@ SHA-256 digests, never the content of a file: the **accounts** that can log in o
 (`keys-changed`, error); a hash of `/etc/crontab`, `/etc/anacrontab`, each file of `/etc/cron.d` and of `cron.hourly/daily/weekly/monthly`, and each
 user's crontab under `/var/spool/cron/crontabs` and `/var/spool/cron` (`cron-changed`, warning); and the **units enabled by hand** under
 `/etc/systemd/system` (a hash for a unit file and for each drop-in `name.service.d/*.conf`, the target path for a link, so a relink shows; `units-changed`, warning).
-**Not watched**: anything outside those files (sudoers and `sudoers.d`, PAM, shell start-up files, `authorized_keys2` or an `AuthorizedKeysFile` override in
+An account or file the collector cannot read safely (a link in place of `authorized_keys`, `~` or `~/.ssh`, another owner, too big, unreadable) is recorded
+as a marker, not skipped; the collector service reads homes with `ProtectHome=read-only`. **Not watched**: anything outside those files (sudoers and `sudoers.d`, PAM, shell start-up files, `authorized_keys2` or an `AuthorizedKeysFile` override in
 `sshd_config`, `/etc/rc.local`, at jobs, timers made by a user session, a unit under `/lib` or `/usr/lib` replaced in place), a change made and undone
 between two collections, and anything that lives only in memory. The alarm names what changed (added or removed names, which
 file); it is cleared only by `sudo nuc-console-accept`, never by `--problem`. **After an update from a version that did not track them**, the baseline

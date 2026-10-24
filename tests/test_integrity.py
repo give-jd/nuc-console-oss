@@ -3,6 +3,7 @@
 A small file system is built in a temporary folder and passed as `root`; the commands are a fake `run`. Fixtures in tests/fixtures are shaped like
 the real output of smartctl -j and nvme-cli; the values are made up."""
 import contextlib
+import shutil
 import io
 import json
 import os
@@ -46,6 +47,8 @@ def build(root, extra_user=None, keys="ssh-ed25519 AAAA1 a@x\n# c\n\nssh-ed25519
     put(root, "/etc/passwd", "\n".join(users) + "\n")
     put(root, "/etc/group", "sudo:x:27:alice\ndocker:x:998:svc\nusers:x:100:bob\n")
     put(root, "/home/alice/.ssh/authorized_keys", keys)
+    for h in ("bob", "ops"):
+        put(root, f"/home/{h}/.profile", "x\n")  # a home with something in it and no keys
     put(root, "/root/.ssh/authorized_keys", "ssh-ed25519 AAAAroot r@x\n")
     put(root, "/srv/.ssh/authorized_keys", "ssh-ed25519 AAAAsvc s@x\n")  # an account that is not in the users list still gets its keys looked at
     put(root, "/etc/crontab", "SHELL=/bin/sh\n")
@@ -62,6 +65,16 @@ def build(root, extra_user=None, keys="ssh-ed25519 AAAA1 a@x\n# c\n\nssh-ed25519
     os.symlink("/lib/systemd/system/ssh.service", link)
     put(root, "/etc/systemd/system/app.service.d/override.conf", "[Service]\nEnvironment=A=1\n")
     return root
+
+
+def collector_section_error(root):
+    """What collect_net does with a section that raises: the error is recorded and the key is absent (so the baseline note shows it)."""
+    d = {"errors": {}}
+    try:
+        d["keys"] = integrity.keys(root)
+    except Exception as e:  # noqa: BLE001 - the very thing collector.section() does
+        d["errors"]["keys"] = repr(e)[:120]
+    return d
 
 
 def snap(root):
@@ -137,10 +150,10 @@ class Sections(unittest.TestCase):
         build(self.d.name, extra_user="mallory:x:0:0::/root:/bin/sh")
         build(self.d.name, extra_user="carol:x:1002:1002::/home/carol:/bin/bash")
         cur = snap(self.root)
-        pr = integrity.baseline_problems(net_with(cur), base, ACCEPT)
+        pr = [x for x in integrity.baseline_problems(net_with(cur), base, ACCEPT) if x[2] == "users-changed"]
         self.assertEqual([(s, i) for s, _, i in pr], [(2, "users-changed")])
         self.assertIn("added carol", pr[0][1])
-        pr = integrity.baseline_problems(net_with(base), cur, ACCEPT)
+        pr = [x for x in integrity.baseline_problems(net_with(base), cur, ACCEPT) if x[2] == "users-changed"]
         self.assertIn("removed carol", pr[0][1])
 
     def test_keys_changed_added_removed(self):
@@ -189,17 +202,110 @@ class Sections(unittest.TestCase):
         self.assertTrue(real(0, 1000) and real(1000, 1000))
         self.assertFalse(real(1001, 1000))
 
-    def test_a_key_file_that_is_a_link_is_not_followed(self):
+    def test_a_key_file_that_is_a_link_is_a_marker_not_followed(self):  # finding 2
+        base = snap(self.root)
         os.unlink(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
         put(self.d.name, "/elsewhere", "secret\n")
         os.symlink(os.path.join(self.d.name, "elsewhere"), os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
-        self.assertNotIn("alice", integrity.keys(self.d.name))
+        self.assertEqual(integrity.keys(self.d.name)["alice"], {"sha256": "symlink", "n": 0})
+        pr = integrity.baseline_problems(net_with(snap(self.root)), base, ACCEPT)
+        self.assertEqual([i for _, _, i in pr], ["keys-changed"])  # versus the baseline it alarms
+
+    def test_other_key_file_problems_are_markers(self):  # finding 2
+        os.unlink(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
+        os.mkdir(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
+        self.assertEqual(integrity.keys(self.d.name)["alice"]["sha256"], "not-regular")
+        os.rmdir(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"))
+        put(self.d.name, "/home/alice/.ssh/authorized_keys", "k\n")
+        integrity._owner_ok = lambda file_uid, user_uid: file_uid == 0  # the file belongs to someone else
+        self.assertEqual(integrity.keys(self.d.name)["alice"]["sha256"], "foreign-owner")
+        os.chmod(os.path.join(self.d.name, "home/alice/.ssh/authorized_keys"), 0)
+        if os.getuid() != 0:
+            integrity._owner_ok = lambda file_uid, user_uid: True
+            self.assertEqual(integrity.keys(self.d.name)["alice"]["sha256"], "unreadable")
+
+    def test_a_ssh_folder_that_is_a_link_is_a_marker(self):  # finding 5: eve/.ssh -> a root-owned folder with a key file
+        put(self.d.name, "/etc/passwd", open(os.path.join(self.d.name, "etc/passwd")).read() + "eve:x:1005:1005::/home/eve:/bin/bash\n")
+        put(self.d.name, "/rootowned/authorized_keys", "ssh-ed25519 AAAAtarget t@x\n")
+        put(self.d.name, "/home/eve/.profile", "x\n")
+        os.symlink(os.path.join(self.d.name, "rootowned"), os.path.join(self.d.name, "home/eve/.ssh"))
+        k = integrity.keys(self.d.name)
+        self.assertEqual(k["eve"], {"sha256": "symlink-dir", "n": 0})  # not the target's hash
+        os.unlink(os.path.join(self.d.name, "home/eve/.ssh"))
+        put(self.d.name, "/home/eve/.ssh", "a file\n")
+        self.assertEqual(integrity.keys(self.d.name)["eve"]["sha256"], "not-directory")
+
+    def test_a_home_that_is_a_link_is_a_marker(self):  # finding 5
+        put(self.d.name, "/etc/passwd", open(os.path.join(self.d.name, "etc/passwd")).read() + "eve:x:1005:1005::/home/eve:/bin/bash\n")
+        os.symlink(os.path.join(self.d.name, "home/alice"), os.path.join(self.d.name, "home/eve"))
+        self.assertEqual(integrity.keys(self.d.name)["eve"]["sha256"], "symlink-dir")
+
+    def test_a_missing_home_of_a_tracked_account_is_a_marker(self):  # finding 1
+        k = integrity.keys(self.d.name)
+        self.assertEqual(k["svc"]["n"], 1)
+        put(self.d.name, "/etc/passwd", open(os.path.join(self.d.name, "etc/passwd")).read() + "dave:x:1007:1007::/home/dave:/bin/bash\n"
+            + "www-data:x:33:33::/nonexistent:/usr/sbin/nologin\n")
+        k = integrity.keys(self.d.name)
+        self.assertEqual(k["dave"], {"sha256": "no-home", "n": 0})
+        self.assertNotIn("www-data", k)  # an untracked system account without a home is normal
+
+    def test_no_reachable_home_raises_instead_of_an_empty_section(self):  # finding 1: the sandbox hides /home and shows /root empty
+        for h in ("alice", "bob", "ops"):
+            shutil.rmtree(os.path.join(self.d.name, "home", h))
+        shutil.rmtree(os.path.join(self.d.name, "srv"))
+        shutil.rmtree(os.path.join(self.d.name, "root"))
+        os.makedirs(os.path.join(self.d.name, "root"))  # exists, empty
+        with self.assertRaises(OSError):
+            integrity.keys(self.d.name)
+        net = collector_section_error(self.d.name)
+        self.assertIn("keys", net["errors"])
+        self.assertNotIn("keys", net)
+
+    def test_truncation_is_a_change(self):  # finding 3
+        old = integrity.MAX_ITEMS
+        integrity.MAX_ITEMS = 3
+        self.addCleanup(setattr, integrity, "MAX_ITEMS", old)
+        for i in range(6):
+            put(self.d.name, f"/etc/cron.d/j{i}", "x\n")
+        a = integrity.cron(self.d.name)
+        self.assertGreater(a["_truncated"], 0)
+        self.assertTrue(integrity._valid("cron", a))
+        base = dict(snap(self.root), cron=a)
+        put(self.d.name, "/etc/cron.d/j9", "x\n")  # one more file beyond the cap: the overflow count moves
+        pr = integrity.baseline_problems(net_with(dict(snap(self.root))), base, ACCEPT)
+        self.assertIn("list truncated", [t for _, t, i in pr if i == "cron-changed"][0])
+        integrity.MAX_ITEMS = 5000
+        self.assertNotIn("_truncated", integrity.cron(self.d.name))
+
+    def test_oversize_file_is_a_marker_with_its_size(self):  # finding 4
+        old = integrity.MAX_FILE
+        integrity.MAX_FILE = 10
+        self.addCleanup(setattr, integrity, "MAX_FILE", old)
+        put(self.d.name, "/etc/cron.d/big", "x" * 11)
+        self.assertEqual(integrity.cron(self.d.name)["/etc/cron.d/big"], "oversize:11")
+
+    def test_unit_regex_has_automount_and_swap_but_not_slice_or_scope(self):  # finding 8
+        for u, ok in (("a.automount", True), ("b.swap", True), ("c.slice", False), ("d.scope", False), ("e.service", True)):
+            self.assertEqual(bool(integrity.UNIT.match(u)), ok, u)
+        put(self.d.name, "/etc/systemd/system/mnt-data.automount", "x\n")
+        self.assertIn("mnt-data.automount", integrity.units(self.d.name))
 
     def test_unreadable_passwd_is_an_error_of_the_section(self):
         with tempfile.TemporaryDirectory() as empty:
             with self.assertRaises(OSError):
                 integrity.users(empty)
             self.assertEqual(integrity.cron(empty), {})  # nothing there: an empty section, not a failure
+
+
+class Unit(unittest.TestCase):
+    def test_the_collector_can_read_homes_but_not_write_them(self):  # finding 1
+        with open(os.path.join(os.path.dirname(FIX), "..", "systemd", "nuc-console-collector.service")) as f:
+            lines = [ln.strip() for ln in f]
+        self.assertIn("ProtectHome=read-only", lines)
+        self.assertNotIn("ProtectHome=yes", lines)
+        self.assertIn("ProtectSystem=full", lines)
+        with open(os.path.join(os.path.dirname(FIX), "..", "SECURITY.md")) as f:
+            self.assertIn("ProtectHome=read-only", f.read())
 
 
 class Compatibility(unittest.TestCase):
@@ -348,8 +454,8 @@ class Smart(unittest.TestCase):
 
     def test_only_physical_non_removable_devices(self):
         self.assertEqual(integrity.block_devices(self.d.name), ["nvme0n1", "sda"])  # no loop, zram, dm-, partitions, USB stick
-        self.assertEqual([bool(integrity.DEVICE.match(x)) for x in ("nvme0n1", "sdab", "sda1", "../sda", "sda;x", "nvme0", "loop0")],
-                         [True, True, False, False, False, False, False])
+        self.assertEqual([bool(integrity.DEVICE.fullmatch(x)) for x in ("nvme0n1", "sdab", "sda1", "../sda", "sda;x", "nvme0", "loop0", "sda\n")],
+                         [True, True, False, False, False, False, False, False])  # finding 6
 
     def test_parsers_on_real_shapes(self):
         a = integrity.parse_smartctl("nvme0n1", fixture("smartctl_nvme.json"))
@@ -387,6 +493,26 @@ class Smart(unittest.TestCase):
         self.assertEqual([c for c in self.calls if c[0] == "nvme"][0], ("nvme", "smart-log", "-o", "json", "/dev/nvme0n1"))
         self.assertEqual(rows[0]["health"], "FAILED")
         self.assertEqual(rows[1]["health"], None)  # the SATA disk: nothing can read it
+
+    def test_a_pass_has_a_deadline_and_a_timeout_is_cached(self):  # finding 7
+        put(self.d.name, "/sys/block/sdc/removable", "0\n")
+        t = [0.0]
+        calls = []
+
+        def run(name, *args, timeout=15):
+            calls.append(args[-1])
+            t[0] += 13.0  # each disk takes 13 s: the third would start after the 25 s deadline
+            return None, "", "TimeoutExpired()"  # a disk that does not answer
+        old = collector.run
+        collector.run = run
+        try:
+            rows = collector.collect_smart(0.0, self.d.name, clock=lambda: t[0])
+            self.assertEqual(calls, ["/dev/nvme0n1", "/dev/sda"])  # nvme-cli is not tried after a timeout, sdc is not started
+            self.assertEqual([(r["dev"], r["health"]) for r in rows], [("nvme0n1", None), ("sda", None), ("sdc", None)])
+            collector.collect_smart(60.0, self.d.name, clock=lambda: t[0])
+            self.assertEqual(len(calls), 2)  # the failed answer is kept for the 30 minutes too
+        finally:
+            collector.run = old
 
     def test_no_tool_is_absent_not_an_error(self):
         with self.assertRaises(collector.Absent):

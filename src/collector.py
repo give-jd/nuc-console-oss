@@ -1235,33 +1235,43 @@ def collect_net():
     return d
 
 
-SMART_TTL_S, SMART_TIMEOUT_S = 1800, 10
+SMART_TTL_S, SMART_TIMEOUT_S, SMART_PASS_S = 1800, 10, 25  # a pass starts no new disk after 25 s
 _SMART = {"t": None, "val": None, "media": {}}  # the last answer (a disk is asked at most every 30 minutes) and the error counts it showed
 
 
-def collect_smart(now=None, root="/"):
+def collect_smart(now=None, root="/", clock=time.monotonic):
     """net.json 'smart': [{dev, model, health, wear, spare, media, crit, poh, realloc, grown}] of the physical disks, from smartctl, else nvme-cli
     (fixed argv, the device name validated by integrity.DEVICE). Raises Absent when neither tool is installed; a disk that could not be read is
-    listed with health None (shown '?', never green). 'grown': the error count is higher than at the previous look."""
+    listed with health None (shown '?', never green), also when it timed out or the pass ran out of time (SMART_PASS_S): that answer is cached
+    like any other, so a dying disk is not asked again at every pass. 'grown': the error count is higher than at the previous look."""
     now = time.monotonic() if now is None else now
+    deadline = clock() + SMART_PASS_S
     if _SMART["t"] is not None and now - _SMART["t"] < SMART_TTL_S and _SMART["val"] is not None:
         return _SMART["val"]
     tools, rows = 0, []
     for dev in integrity.block_devices(root):
-        model, row = integrity.sysfs_model(dev, root), None
+        model, row, timed_out = integrity.sysfs_model(dev, root), None, False
+        if rows and clock() >= deadline:  # out of time: this disk is asked at the next pass (30 minutes), shown '?'
+            rows.append(dict(integrity._entry(dev, model, None, None, None, None, None, None, None), grown=False))
+            continue
         try:
             rc, out, _ = run("smartctl", "-j", "-H", "-A", "/dev/" + dev, timeout=SMART_TIMEOUT_S)  # its exit status is a bit mask: the JSON decides
             tools += 1
+            timed_out = rc is None
             row = integrity.parse_smartctl(dev, out, model) if rc is not None else None
         except Absent:
             pass
-        if row is None and dev.startswith("nvme"):
+        except Exception:  # noqa: BLE001 - one disk must not end the pass
+            tools += 1
+        if row is None and dev.startswith("nvme") and not timed_out and clock() < deadline:
             try:
                 rc, out, _ = run("nvme", "smart-log", "-o", "json", "/dev/" + dev, timeout=SMART_TIMEOUT_S)
                 tools += 1
                 row = integrity.parse_nvme(dev, out, model) if rc == 0 else None
             except Absent:
                 pass
+            except Exception:  # noqa: BLE001
+                tools += 1
         if row is None:
             row = integrity._entry(dev, model, None, None, None, None, None, None, None)
         errs = (row["media"] or 0) + (row["realloc"] or 0)
