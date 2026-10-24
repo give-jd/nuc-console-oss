@@ -707,12 +707,13 @@ def parse_apt_sim(text):
 SOFTWAREUPDATE_PLIST = "/Library/Preferences/com.apple.SoftwareUpdate.plist"
 
 
-def collect_updates_darwin(path=SOFTWAREUPDATE_PLIST, now=None):
+def collect_updates_darwin(path=None, now=None):
     """macOS, no network and no command: the recommended-update count and the last check date macOS itself keeps in its plist
     (LastRecommendedUpdatesAvailable, LastSuccessfulDate; key names from memory, a real Mac must confirm them). A missing file or key is Absent
     or None (no problem, no green); an unreadable one (TCC, bad plist) is an error shown as unknown. {'os','pending','checked'}."""
     import calendar
     import plistlib
+    path = path or SOFTWAREUPDATE_PLIST  # looked up now: tests point the module's constant at a folder of their own
     try:
         with open(path, "rb") as f:
             raw = f.read(1 << 20)

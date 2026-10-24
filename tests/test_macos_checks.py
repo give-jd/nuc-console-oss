@@ -125,6 +125,9 @@ class Updates(unittest.TestCase):
         with mock.patch.object(collector, "OS_NAME", "darwin"), \
                 mock.patch.object(collector, "collect_updates_darwin", return_value={"os": "darwin", "pending": 1, "checked": None}):
             self.assertEqual(collector.collect_updates()["pending"], 1)
+        with mock.patch.object(collector, "OS_NAME", "darwin"):  # the harness points the plist at a file that is not there
+            with self.assertRaises(collector.Absent):
+                collector.collect_updates()
         self.assertIn("Software updates", problems.OS_CATALOG["darwin"]["updates-pending"][0])
 
 
