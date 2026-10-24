@@ -112,6 +112,8 @@ PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
     "container-exited": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
+    "service-down": ("boot",), "cert-expiring": ("boot",), "cert-expired": ("boot",), "cert-unreadable": ("boot",), "watch-config": (),
+    "ssh-root-login": ("exposure",), "ssh-password-auth": ("exposure",), "ssh-empty-passwords": ("exposure",),
     "thermal": ("system",), "throttling": ("system",),
     "collector-net": _NET_CARDS, "stale-net": _NET_CARDS, "net-sections": _NET_CARDS,
     "db-open-lan": ("databases", "exposure"), "docker-bypass": ("firewall", "exposure"), "funnel-public": ("tailscale", "exposure"),

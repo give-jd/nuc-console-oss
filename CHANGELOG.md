@@ -3,6 +3,13 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- `[services] must_run = docker, ssh, ...`: systemd units that must be active. A stopped, never started or missing one is the ATTENTION error `service-down` (`failed-units` only sees units that failed). Linux; off until you list units.
+- sshd audit: the collector reads `sshd -T` and raises `ssh-root-login`, `ssh-password-auth` (an error when port 22 is reachable from the Internet or beyond `[expose]`) and `ssh-empty-passwords`. Security alarms: they cannot be muted, but can be accepted with a reason.
+- `[tls] watch = name = host:port | /path/cert.pem` and `warn_days`: the end date of the certificates you list (private, loopback or Tailscale addresses and files only; no verification, nothing but the name and the date is kept) raises `cert-expiring`, `cert-expired` and `cert-unreadable`. `watch-config` says when an entry or unit name was skipped.
+
 ## [2.5.2] - 2026-10-23
 
 A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).

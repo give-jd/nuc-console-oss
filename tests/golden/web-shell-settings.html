@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="291b7ac47a">
+<header class="topbar" data-card="__top" data-rev="f9147cd1a3">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 9 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1">
 <kbd>1</kbd>Overview</a>
@@ -726,6 +726,38 @@ hidden =
 </span>
 <code class="cv">no</code>
 <p class="hintl">yes: the collector asks for one digest of the last 7 days a day (at low priority), shown on the HEALTH screen. It needs enabled = yes and the Health screen. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-services">
+<summary>
+<code>[services]</code> Services that must run</summary>
+<p class="hintl">Systemd units (Linux) that must be active: one that is stopped, never started or missing is an ATTENTION error. failed-units only sees units that FAILED. An administrator&#x27;s setting: only config.ini changes it.</p>
+<div class="ck cko" id="k-services-must_run">
+<span class="cn">
+<code>must_run</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Unit names, comma-separated (up to 20, letters, digits and @ . _ : -): docker, ssh, tailscaled, fail2ban. Empty: the check is off. Each is asked with systemctl is-active by the collector; Windows and macOS have no such check.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-tls">
+<summary>
+<code>[tls]</code> TLS certificates to watch</summary>
+<p class="hintl">Certificates whose expiry is checked: a host:port on this machine or a private network (an IP address, never a name; no outbound connection is made anywhere else), or the path of a PEM file. An administrator&#x27;s setting: only config.ini changes it.</p>
+<div class="ck cko" id="k-tls-watch">
+<span class="cn">
+<code>watch</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Comma-separated name = host:port or name = /absolute/path.pem (up to 20). host: an IP address on this machine, a private network or the tailnet (or localhost); a certificate is read without being trusted, only its end date is kept. Empty: nothing is watched.</p>
+</div>
+<div class="ck cko" id="k-tls-warn_days">
+<span class="cn">
+<code>warn_days</code>
+</span>
+<code class="cv">21</code>
+<p class="hintl">Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error. <span class="sm">1-365 · default 21</span>
 </p>
 </div>
 </details>

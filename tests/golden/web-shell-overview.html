@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="5f3ce19aa3">
+<header class="topbar" data-card="__top" data-rev="2be68f8888">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 9 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -39,12 +39,12 @@
 <a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="439277b829">
+<div class="kpiblock" data-card="__kpis" data-rev="79120a9be6">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+<span class="sym s-err" aria-hidden="true">✖</span>9</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -97,12 +97,25 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?frag=1">
-<article class="card s2 st-err r94" data-card="attention" data-rev="c48c4d59b1" id="c-attention" data-state="err">
+<article class="card s2 st-err r139" data-card="attention" data-rev="238ace9dbf" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
+<div class="msg prob lv-err" data-problem="service-down">
+<span class="sym">✖</span>
+<span class="pr">service not running: unattended-upgrades (inactive) <code class="pid" title="A service that must run is not running">service-down</code>
+</span>
+<span class="d why">failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; [services] must_run names the ones you expect</span>
+<details class="fix" data-k="fix-service-down">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">systemctl status &lt;unit&gt;; journalctl -u &lt;unit&gt;; sudo systemctl enable --now &lt;unit&gt;, or take it off [services] must_run if it is no longer expected</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem service-down --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
 <div class="msg prob lv-err" data-problem="db-open-lan">
 <span class="sym">✖</span>
 <span class="pr">1 DB/broker open on LAN <code class="pid" title="Database/broker open on the LAN">db-open-lan</code>
@@ -155,6 +168,32 @@
 </span>
 </details>
 </div>
+<div class="msg prob lv-warn" data-problem="ssh-password-auth">
+<span class="sym">!</span>
+<span class="pr">sshd accepts passwords (PasswordAuthentication yes) <code class="pid" title="sshd accepts passwords">ssh-password-auth</code>
+</span>
+<span class="d why">passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error</span>
+<details class="fix" data-k="fix-ssh-password-auth">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows what is in force); or accept it with a reason if the LAN is trusted</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem ssh-password-auth --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="cert-expiring">
+<span class="sym">!</span>
+<span class="pr">TLS certificate expires soon: router (12 d) <code class="pid" title="A TLS certificate is about to expire">cert-expiring</code>
+</span>
+<span class="d why">when it does, browsers and clients refuse the service</span>
+<details class="fix" data-k="fix-cert-expiring">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">renew it (your ACME client, your CA, or the device&#x27;s own page), then restart or reload the service that serves it; [tls] warn_days sets how early this speaks</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem cert-expiring --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
 <div class="msg prob lv-warn" data-problem="docker-bypass">
 <span class="sym">!</span>
 <span class="pr">1 Docker port bypassing ufw (DOCKER-USER empty) <code class="pid" title="Docker ports bypass ufw">docker-bypass</code>
@@ -168,22 +207,15 @@
 </span>
 </details>
 </div>
-<div class="msg prob lv-warn" data-problem="funnel-public">
-<span class="sym">!</span>
-<span class="pr">1 service public on the Internet (Funnel :8444) <code class="pid" title="Service public on the Internet (Tailscale Funnel)">funnel-public</code>
-</span>
-<span class="d why">anyone on the Internet can reach it</span>
-<details class="fix" data-k="fix-funnel-public">
-<summary>fix</summary>
-<span class="d how">fix: <code class="cmd">tailscale funnel status; turn it off if not needed: tailscale funnel --https=PORT off</code>
-</span>
-<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem funnel-public --reason &quot;...&quot;</code>
-</span>
+<details class="more">
+<summary>… +1 more</summary>
 </details>
-</div>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>
 <p class="hint d">accept a known one: <code class="cmd">sudo nuc-console-accept --problem &lt;id&gt; --reason &quot;...&quot;</code>
+</p>
+<p class="more">
+<a href="/?card=attention">… the whole card</a>
 </p>
 </div>
 </article>
@@ -445,114 +477,10 @@
 </table>
 </div>
 </article>
-<article class="card s1 st-warn r79" data-card="firewall" data-rev="43a07e5d04" id="c-firewall" data-state="warn">
-<div class="ch">
-<h3>FIREWALL</h3>
-<span class="chip st-warn">! warn</span>
-</div>
-<div class="cb">
-<p class="msg lv-ok">
-<span class="sym">✔</span> ufw active</p>
-<p class="msg lv-warn">
-<span class="sym">!</span> DOCKER-USER empty: ports published by containers bypass ufw</p>
-<dl class="kv">
-<dt>ufw</dt>
-<dd>in deny  ·  out allow  ·  fwd deny   log: on (low)</dd>
-<dt>iptables</dt>
-<dd>INPUT DROP (5 rules)   FORWARD DROP (0 rules)</dd>
-<dt>tailscale</dt>
-<dd>
-<span class="t-ok">ts-input accepts tailscale0</span>
-</dd>
-<dt>fail2ban</dt>
-<dd>sshd: 2 ban  198.51.100.7 198.51.100.9</dd>
-<dt>drop 1h</dt>
-<dd>41</dd>
-<dt>  ports</dt>
-<dd>23×25  445×16</dd>
-<dt>  sources</dt>
-<dd>198.51.100.9×30  198.51.100.44×11</dd>
-</dl>
-<p class="ln">
-<span class="b">   UFW INBOUND RULES (3)</span>
-</p>
-<table class="tbl">
-<colgroup>
-<col class="c-to">
-<col class="c-action">
-<col class="c-from">
-</colgroup>
-<thead>
-<tr>
-<th scope="col">To</th>
-<th class="n" scope="col">Action</th>
-<th class="p1" scope="col">From</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>22/tcp</td>
-<td class="n">ALLOW IN</td>
-<td class="p1">192.168.0.0/24</td>
-</tr>
-<tr>
-<td>Anywhere on tailscale0</td>
-<td class="n">ALLOW IN</td>
-<td class="p1">Anywhere</td>
-</tr>
-<tr class="t-warn">
-<td>41641/udp</td>
-<td class="n">ALLOW IN</td>
-<td class="p1">Anywhere</td>
-</tr>
-</tbody>
-</table>
-</div>
-</article>
-<article class="card s1 st-warn r40" data-card="containers" data-rev="d1f682f4e0" id="c-containers" data-state="warn">
-<div class="ch">
-<h3>CONTAINER</h3>
-<span class="chip st-warn">! warn</span>
-</div>
-<div class="cb">
-<p class="ln"> 7 containers   RAM 1.6G   <span class="t-ok">●</span> 6 ok   <span class="t-err">✖ 1 stopped</span>
-</p>
-<section class="grp">
-<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">blog                       </span>2/2 running   RAM 410M</p>
-<ul class="wrap" data-max-lines="4">
-<li>
-<span class="t-ok">●</span> app</li>
-<li>
-<span class="t-ok">●</span> db</li>
-</ul>
-</section>
-<section class="grp">
-<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">shop                       </span>3/4 running   RAM 1.2G<span class="t-err">   ✖ 1</span>
-</p>
-<ul class="wrap" data-max-lines="4">
-<li>
-<span class="t-ok">●</span> api</li>
-<li>
-<span class="t-ok">●</span> db</li>
-<li>
-<span class="t-ok">●</span> web</li>
-<li>
-<span class="t-err">✖</span> worker</li>
-</ul>
-</section>
-<section class="grp">
-<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">(no stack)                 </span>1/1 running   RAM 30M</p>
-<ul class="wrap" data-max-lines="4">
-<li>
-<span class="t-ok">●</span> cache</li>
-</ul>
-</section>
-</div>
-</article>
-<article class="card s1 st-warn r68" data-card="boot" data-rev="070447e210" id="c-boot" data-state="warn">
+<article class="card s1 st-err r68" data-card="boot" data-rev="3fcb7fc6a3" id="c-boot" data-state="err">
 <div class="ch">
 <h3>BOOT</h3>
-<span class="chip st-warn">! warn</span>
+<span class="chip st-err">✖ err</span>
 </div>
 <div class="cb">
 <p class="ln">   boot finished in <span class="t-strong">58.4s</span>   kernel 6.8.0-demo   up 5d 0h</p>
@@ -686,6 +614,110 @@
 </tbody>
 </table>
 </div>
+</div>
+</article>
+<article class="card s1 st-warn r79" data-card="firewall" data-rev="43a07e5d04" id="c-firewall" data-state="warn">
+<div class="ch">
+<h3>FIREWALL</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<p class="msg lv-ok">
+<span class="sym">✔</span> ufw active</p>
+<p class="msg lv-warn">
+<span class="sym">!</span> DOCKER-USER empty: ports published by containers bypass ufw</p>
+<dl class="kv">
+<dt>ufw</dt>
+<dd>in deny  ·  out allow  ·  fwd deny   log: on (low)</dd>
+<dt>iptables</dt>
+<dd>INPUT DROP (5 rules)   FORWARD DROP (0 rules)</dd>
+<dt>tailscale</dt>
+<dd>
+<span class="t-ok">ts-input accepts tailscale0</span>
+</dd>
+<dt>fail2ban</dt>
+<dd>sshd: 2 ban  198.51.100.7 198.51.100.9</dd>
+<dt>drop 1h</dt>
+<dd>41</dd>
+<dt>  ports</dt>
+<dd>23×25  445×16</dd>
+<dt>  sources</dt>
+<dd>198.51.100.9×30  198.51.100.44×11</dd>
+</dl>
+<p class="ln">
+<span class="b">   UFW INBOUND RULES (3)</span>
+</p>
+<table class="tbl">
+<colgroup>
+<col class="c-to">
+<col class="c-action">
+<col class="c-from">
+</colgroup>
+<thead>
+<tr>
+<th scope="col">To</th>
+<th class="n" scope="col">Action</th>
+<th class="p1" scope="col">From</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>22/tcp</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">192.168.0.0/24</td>
+</tr>
+<tr>
+<td>Anywhere on tailscale0</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
+</tr>
+<tr class="t-warn">
+<td>41641/udp</td>
+<td class="n">ALLOW IN</td>
+<td class="p1">Anywhere</td>
+</tr>
+</tbody>
+</table>
+</div>
+</article>
+<article class="card s1 st-warn r40" data-card="containers" data-rev="d1f682f4e0" id="c-containers" data-state="warn">
+<div class="ch">
+<h3>CONTAINER</h3>
+<span class="chip st-warn">! warn</span>
+</div>
+<div class="cb">
+<p class="ln"> 7 containers   RAM 1.6G   <span class="t-ok">●</span> 6 ok   <span class="t-err">✖ 1 stopped</span>
+</p>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">blog                       </span>2/2 running   RAM 410M</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> app</li>
+<li>
+<span class="t-ok">●</span> db</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">shop                       </span>3/4 running   RAM 1.2G<span class="t-err">   ✖ 1</span>
+</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> api</li>
+<li>
+<span class="t-ok">●</span> db</li>
+<li>
+<span class="t-ok">●</span> web</li>
+<li>
+<span class="t-err">✖</span> worker</li>
+</ul>
+</section>
+<section class="grp">
+<p class="ln"> <span class="t-accent-strong">▸</span> <span class="t-strong">(no stack)                 </span>1/1 running   RAM 30M</p>
+<ul class="wrap" data-max-lines="4">
+<li>
+<span class="t-ok">●</span> cache</li>
+</ul>
+</section>
 </div>
 </article>
 <article class="card s1 st-warn r20" data-card="tailscale" data-rev="31611bcae8" id="c-tailscale" data-state="warn">

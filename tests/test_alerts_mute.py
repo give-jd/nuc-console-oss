@@ -46,6 +46,8 @@ SECURITY = {
     "failed-units",                                                                                                          # a stopped fail2ban or sshd hides in it
     "feature-hidden",                                                                                                        # a section the settings page switched off
     "mute-ignored",                                                                                                          # this very setting
+    "service-down", "ssh-root-login", "ssh-password-auth", "ssh-empty-passwords",                                           # a missing or weak protection
+    "cert-expiring", "cert-expired", "cert-unreadable", "watch-config",                                                     # an expiry nobody sees; the config that watches it
 }
 SM = {"cpu": {"cpu0": 0.1}, "thermal": {"cpu": (101.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "recent": 0, "clk": (2.6, 4.9)}}
 

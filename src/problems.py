@@ -16,8 +16,8 @@ import cards  # same directory: the card registry (a problem belongs to a card)
 import hostdata
 import nuc_config
 import ui
-from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
-                      exposure_rows, os_of)
+from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over, expose_over_items, expose_unmatched, exposure_keys,
+                      exposure_partial, exposure_rows, group_of, os_of)
 from ui import fmt_ago, plural, safe
 
 WINDOWS, MACOS = nuc_config.WINDOWS, nuc_config.MACOS
@@ -119,6 +119,60 @@ def telegram_state(now, path=None):
     return "ok", ""
 
 
+def ssh_exposed(net, cont):
+    """True when sshd listens where the exposure data says it is reachable from the Internet (a Funnel) or further than [expose] allows.
+    No exposure data (net missing, no port list) is False: the rule then stays at the lower severity."""
+    if not isinstance(net, dict) or net.get("listeners") is None:
+        return False
+    rows = exposure_rows(net, cont)
+    if CFG["expose"]:
+        rows = expose_apply(rows, net, cont)
+    return any(r["proto"] == "tcp" and (r["port"] == 22 or r["name"] == "sshd") and (group_of(r) == "INTERNET" or expose_over(r)) for r in rows)
+
+
+def host_checks(boot, net, cont, now):
+    """What boot.json's services, sshd and certs sections say, as (severity, text, id): a unit that must run and does not, the sshd settings
+    that weaken a login, a certificate near its end. Names and counts only; a section the collector did not write (Windows/macOS, not
+    configured, sshd absent) says nothing. A malformed value is skipped, never an error."""
+    out = []
+    down = [x for x in boot.get("services") or () if isinstance(x, dict) and isinstance(x.get("unit"), str)
+            and x.get("state") not in ("active", "activating", "reloading")]
+    if down:
+        out.append((2, "service not running: " + ", ".join(f"{safe(x['unit'])[:40]} ({safe(str(x.get('state')))[:12]})" for x in down[:3])
+                    + (f" … +{len(down) - 3}" if len(down) > 3 else ""), "service-down"))
+    ssh = boot.get("sshd") if isinstance(boot.get("sshd"), dict) else {}
+    if ssh.get("permitrootlogin") == "yes":
+        out.append((1, "sshd allows root login (PermitRootLogin yes)", "ssh-root-login"))
+    if ssh.get("passwordauthentication") == "yes":
+        wide = ssh_exposed(net, cont)
+        out.append((2 if wide else 1, "sshd accepts passwords (PasswordAuthentication yes)" + (", and port 22 reaches the Internet or beyond config.ini" if wide else ""),
+                    "ssh-password-auth"))
+    if ssh.get("permitemptypasswords") == "yes":
+        out.append((2, "sshd accepts empty passwords (PermitEmptyPasswords yes)", "ssh-empty-passwords"))
+    warn = (CFG.get("tls") or {}).get("warn_days", 21)
+    soon, gone, lost = [], [], []
+    for c in boot.get("certs") or ():
+        if not isinstance(c, dict) or not isinstance(c.get("name"), str):
+            continue
+        exp = c.get("exp")
+        if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+            lost.append(safe(c["name"])[:32])
+            continue
+        days = int((exp - now) // 86400)
+        name = safe(c["name"])[:32]
+        if exp <= now:
+            gone.append(f"{name} ({int((now - exp) // 86400)} d ago)")
+        elif days < warn:
+            soon.append(f"{name} ({days} d)")
+    if gone:
+        out.append((2, "TLS certificate expired: " + ", ".join(gone[:3]) + (f" … +{len(gone) - 3}" if len(gone) > 3 else ""), "cert-expired"))
+    if soon:
+        out.append((1, "TLS certificate expires soon: " + ", ".join(soon[:3]) + (f" … +{len(soon) - 3}" if len(soon) > 3 else ""), "cert-expiring"))
+    if lost:
+        out.append((1, "TLS certificate not read: " + ", ".join(lost[:3]) + (f" … +{len(lost) - 3}" if len(lost) > 3 else ""), "cert-unreadable"))
+    return out
+
+
 def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
     now, out = now or time.time(), []
@@ -131,6 +185,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
     if bad:  # [alerts] mute named something that cannot be muted: said on the screen too, never accepted in silence
         out.append((1, "[alerts] mute: " + ", ".join(f"'{safe(x)[:40]}'" for x in bad[:3]) + (" … " if len(bad) > 3 else " ")
                     + "cannot be muted: ignored", "mute-ignored"))
+    bad = CFG.get("watch_warnings") or []
+    if bad:  # [services] / [tls] asked for something that is not done (a bad unit name, a public host): the collector skips it, and the screen says so
+        out.append((1, "config.ini [services]/[tls]: " + "; ".join(safe(x)[:60] for x in bad[:2]) + (f" … +{len(bad) - 2}" if len(bad) > 2 else ""), "watch-config"))
     if not hostdata.on("containers"):
         pass
     elif cont is None:
@@ -164,6 +221,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
             out.append((2, plural(len(boot["failed"]), lbl["failed_one"]) + ": " + ", ".join(safe(u) for u in boot["failed"][:3]), "failed-units"))
         if boot.get("journal") and boot["journal"]["err"]:
             out.append((1, plural(boot["journal"]["err"], "error") + lbl["journal_in"], "journal-errors"))
+        out.extend(host_checks(boot, net, cont, now))
     if net is None:
         out.append((2, "network collector not running", "collector-net"))
         return sorted(out, key=lambda x: -x[0])
@@ -258,6 +316,23 @@ CATALOG = {
     "thermal": ("Temperature above the threshold", "throttling and hardware wear", "check airflow/dust; sensors; reduce load"),
     "throttling": ("CPU thermal throttling", "the CPU is slowing itself down", "check cooling; look at the thermal bars"),
     "failed-units": ("Failed systemd units", "a service that should run is down", "systemctl --failed; journalctl -u <unit>; systemctl reset-failed once handled"),
+    "service-down": ("A service that must run is not running", "failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; "
+                     "[services] must_run names the ones you expect",
+                     "systemctl status <unit>; journalctl -u <unit>; sudo systemctl enable --now <unit>, or take it off [services] must_run if it is no longer expected"),
+    "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
+                       "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
+    "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
+                          "PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows what is in force); or accept it with a reason if the LAN is trusted"),
+    "ssh-empty-passwords": ("sshd accepts empty passwords", "an account with no password can log in over SSH",
+                            "PermitEmptyPasswords no in /etc/ssh/sshd_config, then sudo systemctl reload ssh; passwd -l <user> for an account that should not log in"),
+    "cert-expiring": ("A TLS certificate is about to expire", "when it does, browsers and clients refuse the service",
+                      "renew it (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it; [tls] warn_days sets how early this speaks"),
+    "cert-expired": ("A TLS certificate has expired", "browsers and clients already refuse the service",
+                     "renew it now (your ACME client, your CA, or the device's own page), then restart or reload the service that serves it"),
+    "cert-unreadable": ("A watched TLS certificate could not be read", "its expiry is unknown, so nothing is being watched there",
+                        "check the host:port answers TLS (or the file is a PEM certificate, at most 64 KB) from this machine; fix or remove the entry under [tls] watch"),
+    "watch-config": ("[services] or [tls] in config.ini asks for something that is not done", "a unit name that is not valid, a host that is not on a private network (nuc-console connects nowhere else) or a duplicate is skipped",
+                     "fix the line under [services] / [tls] in config.ini (the message says which); restart the services after fixing it"),
     "journal-errors": ("Errors in this boot's journal", "usually noise (docker veth races, firmware ACPI), sometimes a real fault", "journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise"),
     "ufw-off": ("ufw is off", "no filtering for non-Docker services on the LAN", "sudo scripts/enable-ufw.sh (LAN=<your subnet>) - keeps a rollback timer"),
     "ufw-missing": ("ufw not installed", "LAN filtering cannot be verified", "install ufw, or accept this if you use nftables/firewalld"),
@@ -378,7 +453,7 @@ if nuc_config.PORTABLE:
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
 NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
-COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
+COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units", "service-down"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 

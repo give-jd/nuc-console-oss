@@ -86,6 +86,12 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
     ("ai", "Local AI",
      "A small model on this machine that turns the HEALTH findings into advice and answers questions about the machine. It only reads and "
      "suggests: it never runs anything."),
+    ("services", "Services that must run",
+     "Systemd units (Linux) that must be active: one that is stopped, never started or missing is an ATTENTION error. failed-units only sees "
+     "units that FAILED. An administrator's setting: only config.ini changes it."),
+    ("tls", "TLS certificates to watch",
+     "Certificates whose expiry is checked: a host:port on this machine or a private network (an IP address, never a name; no outbound "
+     "connection is made anywhere else), or the path of a PEM file. An administrator's setting: only config.ini changes it."),
     ("webapps", "Web apps you expect",
      "One per line, name = port[, port...]: shown in WEB APPS as active, or DOWN when nothing listens there. A port listed here is an "
      "intended exposure: it no longer counts as a Docker port bypassing ufw."),
@@ -217,6 +223,20 @@ KEYS = (
          "ATTENTION alarms to silence, comma-separated, of: %s. A muted alarm is still collected: it only leaves the list, the problems "
          "figure and Telegram, and is counted as muted. Anything else is ignored and reported." % ", ".join(nuc_config.MUTABLE_ALERTS),
          {"choices": nuc_config.MUTABLE_ALERTS, "unset": True}),
+    ))
+    + _k("services", (
+        ("must_run", TEXT, "", START,
+         "Unit names, comma-separated (up to %d, letters, digits and @ . _ : -): docker, ssh, tailscaled, fail2ban. Empty: the check is off. "
+         "Each is asked with systemctl is-active by the collector; Windows and macOS have no such check." % nuc_config.WATCH_MAX,
+         {"pattern": re.compile(r"([A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}(, *[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63})*)?")}),
+    ))
+    + _k("tls", (
+        ("watch", TEXT, "", START,
+         "Comma-separated name = host:port or name = /absolute/path.pem (up to %d). host: an IP address on this machine, a private network "
+         "or the tailnet (or localhost); a certificate is read without being trusted, only its end date is kept. Empty: nothing is watched."
+         % nuc_config.WATCH_MAX, {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
+        ("warn_days", INT, "21", START, "Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error.",
+         {"lo": 1, "hi": 365}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,
