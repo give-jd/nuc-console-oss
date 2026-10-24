@@ -263,8 +263,10 @@ def _native(net, boot, os_name, now):
     net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
     if not win:
         boot.pop("deps", None)  # macOS: launchd has no dependency graph to read
-    for k in ("reboot", "updates", "clock") + (("inodes",) if win else ()):  # collector.UNSUPPORTED_BOOT: the hygiene sections these collectors do not write
+    for k in ("reboot", "clock") + (("updates", "inodes") if win else ()):  # collector.UNSUPPORTED_BOOT: the hygiene sections these collectors do not write
         boot.pop(k, None)
+    if not win:  # macOS keeps one: the recommended-update count of com.apple.SoftwareUpdate.plist
+        boot["updates"] = {"os": "darwin", "pending": 2, "checked": int(now) - 3 * 86400}
     for it in net["dbs"]["items"]:
         it["ext_source"] = "n/d"  # Docker Desktop: the containers' namespaces are inside a VM
         it["external"], it["active"] = [], []  # nor who connects from the other containers (collector.db_items without conn_fn)

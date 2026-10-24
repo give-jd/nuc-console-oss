@@ -210,11 +210,11 @@ Four more alarms come from the collector's boot data (every 5 minutes) and need 
 | Alarm | Level | When | Mute |
 |---|---|---|---|
 | `reboot-required` | warning | `/run/reboot-required` exists, or the running kernel (`uname -r`) is older than the newest `/boot/vmlinuz-*` of the same flavour (`7.0.0-34-generic` against `7.0.0-38-generic`); the kernel test needs both to be readable | yes |
-| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent | no |
+| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent. **macOS**: no command and no network, the collector reads `/Library/Preferences/com.apple.SoftwareUpdate.plist` (`LastRecommendedUpdatesAvailable`, the count of updates macOS already knows about; `LastSuccessfulDate`): any count above 0 raises it ("N software updates pending"), and the text adds "the update check has not run for N days" when the last successful check is over 14 days old. A missing file or key, a wrong type or a bad plist is no problem (an unreadable file shows as unknown) | no |
 | `clock-unsynced` | warning | `timedatectl show` says `NTPSynchronized=no`. Without `timedatectl` (no systemd, a container) nothing is said | no |
 | `disk-inodes` | warning at 90 % of a filesystem's inodes used, error at 97 % | the filesystems of the DISKS card; those that report no fixed count (btrfs, xfs: `f_files` 0) are left out. Linux and macOS | yes |
 
-`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too); Windows has none of them, and macOS has no `reboot-required`, `updates-pending` or `clock-unsynced` (the tools that would answer, `softwareupdate`, `sntp`, `systemsetup`, are not run).
+`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too); Windows has none of them, and macOS has no `reboot-required` or `clock-unsynced` (and its `updates-pending` is the plist read above) (the tools that would answer, `softwareupdate`, `sntp`, `systemsetup`, are not run).
 
 ## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
@@ -284,7 +284,7 @@ memory_pressure_pct = 10
 
 | Key | Default | Meaning |
 |---|---|---|
-| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
+| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, Windows) there is no problem and no error. On **macOS** the level `sysctl kern.memorystatus_vm_pressure_level` (read without root) is used instead of the percentage: *warning* (2) raises a warning, *critical* (4) an error; this threshold does not apply |
 
 **Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors.
 

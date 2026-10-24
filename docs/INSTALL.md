@@ -374,6 +374,7 @@ It also removes the AI model service, if you installed it. `/etc/nuc-console`, `
 | Docker | Docker Desktop / OrbStack: published ports belong to the Docker backend program, judged like any other; "who connects" inside the containers is not visible (they live in a VM) |
 | Boot | failed launch daemons and the third-party ones; no boot time, slowest units or system log |
 | CPU temperature | read by the collector (root) with Apple's `powermetrics`: the CPU die temperature on Intel Macs, the thermal pressure level (Nominal…) and the per-cluster frequencies on Apple Silicon. Apple Silicon has no temperature without a helper: install [smctemp](https://github.com/narugit/smctemp) or osx-cpu-temp and the collector uses it (run as the user who owns it, never as root) |
+| Checks | kernel panics (`.panic`, `Kernel*.ips`) appear in the EVENTS timeline as an unexpected shutdown (date only, the report is not read past its first 4 KB and nothing of it is kept); `memory-pressure` follows macOS's own level (`sysctl kern.memorystatus_vm_pressure_level`: warning, critical); `updates-pending` reads `/Library/Preferences/com.apple.SoftwareUpdate.plist`, no network (the same plist says when the last check ran). No `reboot-required`, no NTP check |
 | Not available | throttling counters, load-based CPU frequency on Apple Silicon, fail2ban, ufw/iptables |
 
 ## Troubleshooting (macOS)
