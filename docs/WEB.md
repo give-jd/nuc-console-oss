@@ -76,6 +76,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/healthz` | `ok` (no data) |
 | `/api/v1/...` | the **data API**, with either interface: every screen as JSON, and as a stream of Server-Sent Events ([below](#the-data-api)) |
+| `/metrics` | **Prometheus text** of the overview's figures, same access as the API ([below](#metrics)); `[web] metrics = no` makes it a `404` |
 | `/app` | the **live app**: every screen drawn in the browser from the data API and kept up to date by its stream ([below](#the-live-app)) |
 
 Everything else is 404; any method but GET and HEAD is 405 (`Allow: GET, HEAD`), except the `POST` of the AI page's and the Telegram page's forms (below).
@@ -291,6 +292,53 @@ curl -s http://127.0.0.1:8787/api/v1/overview | python3 -m json.tool | head
 curl -sN http://127.0.0.1:8787/api/v1/stream?view=cpu         # one document per refresh, until you stop it
 curl -s -H "Authorization: Bearer $(sudo cat /etc/nuc-console/web.token)" http://box.example.ts.net:8787/api/v1/health
 ```
+
+## Metrics
+
+`GET /metrics` (and `HEAD`) gives the figures of `/api/v1/overview` as Prometheus text exposition, version 0.0.4
+(`Content-Type: text/plain; version=0.0.4; charset=utf-8`). It is built from the same frame as the overview (at most once per half refresh
+interval), adds no data the API does not give, opens no listener and starts no thread. **Access is the API's, line for line**: without a token the
+`Host` guard (`421`); with one `Authorization: Bearer <token>`, the `nuc_token` cookie or `?token=` else `401`; `403` for a request another site
+makes; `405` for anything but GET and HEAD; a bind other than loopback needs the token at start. `[web] metrics = no` turns the route into a `404`.
+
+A figure that could not be read is left out, never 0. Label values are escaped as the format asks (`\\`, `\"`, `\n`).
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `nuc_console_build_info` | `version` | always 1 |
+| `nuc_console_up` | | 1 while the view answers |
+| `nuc_console_collector_age_seconds` | `collector` (`network`, `containers`, `boot`) | seconds since that collector wrote its state |
+| `nuc_console_problems` | `severity` (`warning`, `error`, `change`) | problems in the list |
+| `nuc_console_problem_active` | `id` | 1 per active, unmuted problem id (at most 200) |
+| `nuc_console_problems_muted`, `nuc_console_problems_accepted` | | counts |
+| `nuc_console_cpu_usage_ratio` | | mean of the threads, 0 to 1 |
+| `nuc_console_load1`, `_load5`, `_load15` | | load average |
+| `nuc_console_memory_used_bytes`, `_memory_total_bytes` | | RAM (used = total less available) |
+| `nuc_console_filesystem_used_bytes`, `_filesystem_total_bytes` | `mount` | the filesystems the DISKS card lists (at most 64) |
+| `nuc_console_temperature_celsius` | | hottest of the CPU and NVMe sensors |
+| `nuc_console_uptime_seconds` | | |
+| `nuc_console_network_receive_bytes_total`, `_network_transmit_bytes_total` | `interface` | counters since boot, as the traffic card shows |
+| `nuc_console_containers` | `state` (`running`, `unhealthy`, `exited`) | counts, never names |
+| `nuc_console_exposed_ports` | `reach` (`local`, `tailnet`, `lan`, `internet`) | listening ports by widest reach |
+| `nuc_console_firewall_active` | | 1 on, 0 off; unknown: no series |
+
+Prometheus, with the token in a file (mode 0600) next to the scraper:
+
+```yaml
+scrape_configs:
+  - job_name: nuc-console
+    metrics_path: /metrics
+    authorization:            # sends "Authorization: Bearer <file content>"
+      type: Bearer
+      credentials_file: /etc/prometheus/nuc-console.token
+    static_configs:
+      - targets: ["box.example.ts.net:8787"]
+```
+
+On loopback with no token, drop the `authorization` block. Any scraper that can send the `Authorization: Bearer` header (or `?token=` in the
+URL, which logs and proxies may keep: prefer the header) reads it; nothing here depends on Prometheus or Grafana.
+
+A label value is cut at 64 characters (the cards cut theirs shorter), so two mounts that begin alike are one series; with more than 64 interfaces the busiest 64 are kept. `nuc_console_collector_age_seconds` is the only freshness signal: the figures of a collector that stopped keep their last values, exactly as in `/api/v1/*`, so alert on that age (and on a missing series) rather than on the value alone. The age itself is not in the JSON API.
 
 ## The live app
 

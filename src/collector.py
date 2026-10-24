@@ -35,10 +35,10 @@ NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailsc
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
                "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
-                "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
+                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps"), "windows": ("blame",)}.get(OS_NAME, ())
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog"), "windows": ("blame", "kernlog")}.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
@@ -492,6 +492,38 @@ def parse_journal(text, cap=500):
     return {"err": err, "warn": warn, "capped": n >= cap, "top": top}
 
 
+KERN_LINE = re.compile(r"^(\d+)(?:\.\d+)? \S+ kernel: (.*)$")
+
+
+def parse_kernlog(text, now=None):
+    """`journalctl -k -o short-unix` text -> {class: {'n', 'last'}} for the classes with at least one line inside their window
+    (history.KERNEL_WINDOW_S; the OOM killer: all of this boot) - 'display' also {'driver'}, 'oom' {'procs'}: names only. Counts and
+    the time of the last line; no line is kept."""
+    now = time.time() if now is None else now
+    out = {}
+    for ln in text.splitlines():
+        m = KERN_LINE.match(ln)
+        if not m:
+            continue
+        ts = int(m.group(1))
+        for cls, detail in history.classify_kernel(m.group(2)):
+            win = history.KERNEL_WINDOW_S.get(cls)
+            if win is not None and now - ts > win:
+                continue
+            e = out.setdefault(cls, {"n": 0, "last": 0})
+            e["n"] += 1
+            e["last"] = max(e["last"], ts)
+            if cls == "display":
+                drivers = e.setdefault("drivers", {})
+                drivers[detail] = drivers.get(detail, 0) + 1
+            elif cls == "oom" and detail not in e.setdefault("procs", []) and len(e["procs"]) < 5:
+                e["procs"].append(detail)
+    if "display" in out:  # the driver that said it most
+        d = out["display"].pop("drivers")
+        out["display"]["driver"] = max(d, key=d.get)
+    return out
+
+
 def parse_iso(text):
     """Docker StartedAt '2026-09-29T10:00:00.123456789Z' -> epoch."""
     base, _, frac = text.rstrip("Z").partition(".")
@@ -646,6 +678,16 @@ def collect_boot():
         need(rc in (0, 1), err, "journalctl")
         return parse_journal(out)
 
+    def kernlog():
+        # this boot's kernel log, only the lines that may be a fault (a coarse -g; history.classify_kernel decides), at most 5000 of
+        # them, 20 s. rc 1 = nothing found: not an error
+        rc, out, err = run("journalctl", "-k", "-b", "-o", "short-unix", "-g",
+                           "timed out|timeout|GPU HANG|ERROR|error|Out of memory|Hardware Error|Machine check|EDAC|corruption|"
+                           "Reset adapter|Link is Down|read-only|failed command|exception Emask",
+                           "-n", "5000", "--no-pager", timeout=20)
+        need(rc in (0, 1), err, "journalctl -k")
+        return parse_kernlog(out)
+
     def containers():
         rc, out, err = run("docker", "ps", "-q")
         need(rc == 0, err, "docker ps")
@@ -676,7 +718,7 @@ def collect_boot():
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
-                    ("journal", journal), ("containers", containers), ("docker_df", docker_df)):
+                    ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df)):
         section(key, fn)
     return d
 

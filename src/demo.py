@@ -185,6 +185,7 @@ def snapshot(now=None, os_name=None):
                                                        ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
             "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
+            "kernlog": {"oom": {"n": 2, "last": int(now) - 5400, "procs": ["node"]}},
             "containers": [{"name": "shop-web-1", "started": int(now) - up + 40, "restart": "unless-stopped"},
                            {"name": "cache-1", "started": int(now) - 3600, "restart": "no"}],
             "docker_df": {"rows": [{"type": "Images", "count": "14", "active": "6", "size": "5.2GB", "reclaimable": "2.1GB (40%)"},
@@ -225,8 +226,9 @@ def _native(net, boot, os_name, now):
                     journal={"err": 3, "warn": 12, "capped": False, "top": [
                         {"id": "Microsoft-Windows-DistributedCOM", "n": 9, "pr": 4, "last": "example DCOM warning"},
                         {"id": "Service Control Manager", "n": 3, "pr": 3, "last": "example service error"}]},
-                    unsupported=["blame"], absent=["blame"])
+                    unsupported=["blame", "kernlog"], absent=["blame", "kernlog"])
         boot.pop("blame", None)
+        boot.pop("kernlog", None)
     else:
         own = [lst("*", 22, "launchd", ["open", "built-in, allowed"]), lst("*", 5000, "ControlCenter", ["open", "built-in, allowed"]),
                lst("*", 7000, "ControlCenter", ["open", "built-in, allowed"]),
@@ -234,8 +236,8 @@ def _native(net, boot, os_name, now):
         fw = {"kind": "darwin", "name": "macOS firewall", "state": 1, "off": [], "block_all": False, "stealth": True, "builtin": True,
               "downloaded": True, "apps_allowed": 3, "apps_blocked": 1, "pf": {"enabled": False, "rules": 0}}
         boot = dict(boot, kernel="macOS 15.6", enabled=[{"unit": f"com.example.daemon{i}", "state": "active"} for i in range(6)],
-                    unsupported=["analyze", "blame", "journal"], absent=["analyze", "blame", "journal"])
-        for k in ("analyze", "blame", "journal"):
+                    unsupported=["analyze", "blame", "journal", "kernlog"], absent=["analyze", "blame", "journal", "kernlog"])
+        for k in ("analyze", "blame", "journal", "kernlog"):
             boot.pop(k, None)
     gone = ("ufw", "docker_user", "iptables", "f2b", "drops")
     net = {k: v for k, v in net.items() if k not in gone}

@@ -47,7 +47,8 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 # collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
 # mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
-                 "container-no-restart", "containers-not-back")
+                  "container-no-restart", "containers-not-back",
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
 
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
@@ -73,16 +74,17 @@ def load(path=None, warn=None, overlay=True):
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "",
-                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False},
+                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True},
-           "console": {"font": "", "blank_minutes": 0}}
+           "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
     cfg["containers"] = {"restart_ignore": []}  # [containers] restart_ignore: names or globs (lower case) that container-no-restart skips
+    cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
@@ -182,6 +184,14 @@ def load(path=None, warn=None, overlay=True):
         for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")
         cfg["containers"]["restart_ignore"] = [x for x in re.split(r"[,;\s]+", cp.get("containers", "restart_ignore", fallback="").lower()) if x][:100]
+    if cp.has_section("thresholds"):
+        try:
+            pct = cp.getint("thresholds", "memory_pressure_pct", fallback=10)
+            if not 1 <= pct <= 100:
+                raise ValueError
+            cfg["thresholds"]["memory_pressure_pct"] = pct
+        except ValueError:
+            say(f"nuc-console: {path}: [thresholds] memory_pressure_pct must be an integer (1-100): kept at 10")
     if cp.has_section("web"):
         w = cfg["web"]
         try:
@@ -192,6 +202,10 @@ def load(path=None, warn=None, overlay=True):
             w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=False)  # yes = an installation's settings page may use the overlay
         except ValueError:
             say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept no (locked)")
+        try:
+            w["metrics"] = cp.getboolean("web", "metrics", fallback=True)  # /metrics: the API's figures as Prometheus text, under the API's checks
+        except ValueError:
+            say(f"nuc-console: {path}: [web] metrics is not a boolean: kept yes")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
@@ -268,6 +282,10 @@ def load(path=None, warn=None, overlay=True):
             cfg["console"]["blank_minutes"] = minutes
         except ValueError:
             say(f"nuc-console: {path}: [console] blank_minutes must be an integer (0-60): kept off")
+        try:
+            cfg["console"]["wake_on_problem"] = cp.getboolean("console", "wake_on_problem", fallback=True)
+        except ValueError:
+            say(f"nuc-console: {path}: [console] wake_on_problem must be yes or no: kept yes")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours
