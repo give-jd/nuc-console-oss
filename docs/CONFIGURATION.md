@@ -225,11 +225,24 @@ mute = journal-errors, thermal
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
 Security alarms can never be muted: ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
+
+## `[thresholds]` — where a reading becomes a problem
+
+```ini
+[thresholds]
+memory_pressure_pct = 10
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
+
+**Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors.
 
 ## `[telegram]` — alerts on your phone (off by default)
 

@@ -12,8 +12,9 @@ screen. A card made of ui.Raw lines (raw_card) is still drawn by both renderers.
 How a problem becomes the state of a card (PROBLEM_CARDS: the problem ids of problems.problems_raw, and the cards they belong to):
 
   collector-containers  stale-containers  unhealthy-container  container-exited      containers
-  collector-boot  failed-units  journal-errors                                       boot
-  thermal  throttling                                                                system
+  collector-boot  failed-units  journal-errors  display-stuck  disk-io-errors  memory-errors   boot
+  nic-resets  oom-killed
+  thermal  throttling  memory-pressure                                                  system
   collector-net  stale-net  net-sections                                             exposure firewall webapps databases tailscale
   db-open-lan                                                                        databases exposure
   docker-bypass                                                                      firewall exposure
@@ -112,7 +113,8 @@ PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
     "container-exited": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
-    "thermal": ("system",), "throttling": ("system",),
+    "display-stuck": ("boot",), "disk-io-errors": ("boot",), "memory-errors": ("boot",), "nic-resets": ("boot",), "oom-killed": ("boot",),
+    "thermal": ("system",), "throttling": ("system",), "memory-pressure": ("system",),
     "collector-net": _NET_CARDS, "stale-net": _NET_CARDS, "net-sections": _NET_CARDS,
     "db-open-lan": ("databases", "exposure"), "docker-bypass": ("firewall", "exposure"), "funnel-public": ("tailscale", "exposure"),
     "over-exposed": ("exposure",), "expose-unmatched": ("exposure",),

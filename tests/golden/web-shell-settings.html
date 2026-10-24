@@ -9,9 +9,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="291b7ac47a">
+<header class="topbar" data-card="__top" data-rev="e18c51f29a">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<span class="status err" role="status">✖ 7 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1">
 <kbd>1</kbd>Overview</a>
@@ -628,7 +628,20 @@ hidden =
 <code>mute</code>
 </span>
 <span class="sm">not set</span>
-<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot</span>
+<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, display-stuck, oom-killed, memory-pressure, nic-resets. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, display-stuck, oom-killed, memory-pressure, nic-resets</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-thresholds">
+<summary>
+<code>[thresholds]</code> Thresholds</summary>
+<p class="hintl">Where a reading becomes an ATTENTION problem. Only memory pressure for now; the kernel-log alarms use fixed windows (docs/CONFIGURATION.md).</p>
+<div class="ck cko" id="k-thresholds-memory_pressure_pct">
+<span class="cn">
+<code>memory_pressure_pct</code>
+</span>
+<code class="cv">10</code>
+<p class="hintl">Memory pressure (the kernel&#x27;s PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises memory-pressure. 10 is already a machine that waits for memory. <span class="sm">1-100 · default 10</span>
 </p>
 </div>
 </details>
