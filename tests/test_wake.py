@@ -119,6 +119,10 @@ class Ioctl(unittest.TestCase):
             self.assertFalse(wake.unblank(7))
 
     def test_vt_only(self):
+        with mock.patch.object(wake, "fcntl", mock.Mock()):  # Windows has no fcntl; the check is about the terminal, not the module
+            self._vt_only()
+
+    def _vt_only(self):
         with mock.patch.object(nuc_config, "LINUX", True), mock.patch.object(os, "isatty", return_value=True):
             self.assertTrue(wake.is_vt(3, {"TERM": "linux"}))
             self.assertFalse(wake.is_vt(3, {"TERM": "xterm-256color"}))
@@ -140,10 +144,11 @@ class Config(unittest.TestCase):
     def test_default_and_off(self):
         import tempfile
         self.assertTrue(nuc_config.load(path="/nonexistent/x.ini", overlay=False)["console"]["wake_on_problem"])
-        with tempfile.NamedTemporaryFile("w", suffix=".ini") as f:
-            f.write("[console]\nwake_on_problem = no\n")
-            f.flush()
-            self.assertFalse(nuc_config.load(path=f.name, overlay=False)["console"]["wake_on_problem"])
+        with tempfile.TemporaryDirectory() as d:  # closed before it is read: Windows refuses a second open of a file held for writing
+            path = os.path.join(d, "x.ini")
+            with open(path, "w") as f:
+                f.write("[console]\nwake_on_problem = no\n")
+            self.assertFalse(nuc_config.load(path=path, overlay=False)["console"]["wake_on_problem"])
 
 
 if __name__ == "__main__":

@@ -82,10 +82,16 @@ def snap(root):
     return {s: f(root) for s, f in integrity.COLLECT.items()}
 
 
+# the users/keys/cron/units sections read /etc and the homes by file descriptor, without following links (os.getuid, O_NOFOLLOW, dir_fd): the
+# collector only runs them on Linux (collector.LINUX_ONLY_NET), so on Windows there is nothing to test
+linux_only = unittest.skipIf(os.name == "nt", "the baseline sections are Linux-only: POSIX owners, links and descriptors")
+
+
 def net_with(sections, **kw):
     return dict({"ts": time.time(), "errors": {}, "absent": [], "ufw": None, "listeners": []}, **sections, **kw)
 
 
+@linux_only
 class Sections(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
@@ -373,6 +379,7 @@ class Unit(unittest.TestCase):
             self.assertIn("ProtectHome=read-only", f.read())
 
 
+@linux_only
 class Compatibility(unittest.TestCase):
     """An installation that updates has a baseline with the ports only: nothing alarms, one quiet note says what to do."""
 
@@ -451,6 +458,7 @@ class AcceptFlow(unittest.TestCase):
             hostdata.NET_STATE, hostdata.STATE = old
         return rc, bl, out.getvalue()
 
+    @linux_only
     def test_linux_baseline_has_the_sections_and_a_version(self):
         with tempfile.TemporaryDirectory() as d:
             cur = snap(build(d))
@@ -470,6 +478,7 @@ class AcceptFlow(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(set(json.load(open(bl))), {"ts", "ports"})
 
+    @linux_only
     def test_a_failed_section_is_left_out_not_blessed(self):
         with tempfile.TemporaryDirectory() as d:
             cur = snap(build(d))

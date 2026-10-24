@@ -36,6 +36,9 @@ def read(path):
         return f.read()
 
 
+A_PEM = os.path.join(os.path.abspath(os.sep), "etc", "ssl", "a.pem")  # absolute on every OS ("/etc/..." is not on Windows since Python 3.13)
+
+
 def samples(key):
     """Values the page can send for a key, each with what config.ini then holds."""
     if key.kind == confedit.BOOL:
@@ -57,7 +60,7 @@ def samples(key):
         ("web", "token_file"): [("/etc/nuc-console/token", "/etc/nuc-console/token"), ("", "")],
         ("web", "allowed_hosts"): [("Nuc.Example.lan,b.example.ts.net", "nuc.example.lan, b.example.ts.net"), ("", "")],
         ("services", "must_run"): [("docker, ssh, NetworkManager.service", "docker, ssh, NetworkManager.service"), ("", "")],
-        ("tls", "watch"): [("nas=192.168.1.20:443, f=/etc/ssl/a.pem", "nas=192.168.1.20:443, f=/etc/ssl/a.pem"), ("", "")],
+        ("tls", "watch"): [("nas=192.168.1.20:443, f=" + A_PEM, "nas=192.168.1.20:443, f=" + A_PEM), ("", "")],
         ("containers", "restart_ignore"): [("Job-1, *-test-*", "job-1, *-test-*"), ("", "")],
         ("telegram", "username"): [("@Some_User", "some_user"), ("", "")],
         ("ai", "endpoint"): [("http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1")],

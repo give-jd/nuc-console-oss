@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"  # hermetic: never read the host's config.ini
@@ -378,6 +379,12 @@ class CollectNet(unittest.TestCase):
         collector.LINUX, collector.MACOS, collector.WINDOWS, collector.OS_NAME = True, False, False, "linux"
         collector.UNSUPPORTED_BOOT = ()
         collector.OFF = set()
+        # the Linux-only readings of the boot pass belong to the machine running the tests (no os.uname on Windows, no /proc/mounts on macOS)
+        for p in (mock.patch.object(collector, "collect_reboot", return_value={"flag": False, "running": "7.0.0-1-generic", "newest": None, "kernel_old": False}),
+                  mock.patch.object(collector, "disk_rows", return_value=[]),
+                  mock.patch.dict(collector.integrity.COLLECT, {k: (lambda: {}) for k in collector.integrity.COLLECT})):  # /etc/passwd, /home... are the machine's
+            p.start()
+            self.addCleanup(p.stop)
         collector.run = self.fake_run
         collector.shutil.which = lambda name, path=None: "/usr/bin/" + name
         collector.unit_of_pid = lambda pid: {812: "ssh.service", 3000: "docker.service"}.get(pid)
@@ -533,11 +540,12 @@ class WindowsAndMacBoot(unittest.TestCase):
             daemons = staticmethod(lambda run: ([], ["com.example.bad"]))
         try:
             collector.LINUX, collector.MACOS, collector.WINDOWS, collector.OS_NAME = False, True, False, "darwin"
-            collector.UNSUPPORTED_BOOT = ("analyze", "blame", "journal", "deps")   # what the module sets on macOS
+            collector.UNSUPPORTED_BOOT = collector.UNSUPPORTED_BOOT_BY_OS["darwin"]   # what the module sets on macOS
             collector.boot_time = lambda: 1700000000
             collector.run = lambda name, *a, **k: (_ for _ in ()).throw(collector.Absent(name))
             collector.cmac = FakeMac
-            b = collector.collect_boot()
+            with mock.patch.object(collector, "disk_rows", return_value=[]):  # the DISKS reading (`mount`) is the host's, not this test's
+                b = collector.collect_boot()
         finally:
             for k, v in saved.items():
                 setattr(collector, k, v)
