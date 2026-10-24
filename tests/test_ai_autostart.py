@@ -320,8 +320,13 @@ class AlarmTest(Base):
         self.assertEqual(self.raw()[0][1], "AI is on but its model server is not running: turn AI off and on again on the AI page")
 
     def test_the_catalog_and_the_rules(self):
-        title, why, fix = problems.CATALOG["ai-down"]
-        self.assertIn("nuc-console-ai serve --install-service", fix)
+        # CATALOG is the words of the host's OS (and of a portable run): the Linux words are BASE_CATALOG, the others OS_CATALOG, whatever runs this
+        title, why, fix = problems.BASE_CATALOG["ai-down"]
+        self.assertIn("sudo nuc-console-ai serve --install-service", fix)
+        self.assertIn("not recorded in Events", why)
+        self.assertIn("nuc-console-ai.cmd serve --install-service", problems.OS_CATALOG["windows"]["ai-down"][2])
+        self.assertNotIn("sudo", problems.OS_CATALOG["windows"]["ai-down"][2])
+        self.assertIn("ai-down", problems.CATALOG)
         self.assertIn("ai-down", nuc_config.MUTABLE_ALERTS, "operational: a muted AI hides no attack surface")
         self.assertNotIn("ai-down", problems.NOT_ACCEPTABLE)
         self.assertIn("ai-down", problems.OS_CATALOG["windows"])
