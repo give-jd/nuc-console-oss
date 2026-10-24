@@ -99,7 +99,8 @@ class NotBack(unittest.TestCase):
             self.assertEqual(sorted(rec), ["before", "btime", "running"])
             self.assertEqual(rec["running"], ["web-1"])
             self.assertEqual(rec["btime"], NOW - 120)
-            self.assertEqual(oct(os.stat(path).st_mode & 0o777), oct(0o644))
+            if os.name != "nt":  # Windows has no permission bits to speak of: it always reports 0o666
+                self.assertEqual(oct(os.stat(path).st_mode & 0o777), oct(0o644))
             b = boot([ct("web-1")], up=120, before=collector.remember_running(["web-1"], NOW - 118, path))
             self.assertEqual(list(found(b)), ["containers-not-back"])
             self.assertIn("db-1", found(b)["containers-not-back"][1])
