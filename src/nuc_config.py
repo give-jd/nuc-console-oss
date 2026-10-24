@@ -76,7 +76,7 @@ def load(path=None, warn=None, overlay=True):
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True},
-           "console": {"font": "", "blank_minutes": 0}}
+           "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
@@ -262,6 +262,10 @@ def load(path=None, warn=None, overlay=True):
             cfg["console"]["blank_minutes"] = minutes
         except ValueError:
             say(f"nuc-console: {path}: [console] blank_minutes must be an integer (0-60): kept off")
+        try:
+            cfg["console"]["wake_on_problem"] = cp.getboolean("console", "wake_on_problem", fallback=True)
+        except ValueError:
+            say(f"nuc-console: {path}: [console] wake_on_problem must be yes or no: kept yes")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours

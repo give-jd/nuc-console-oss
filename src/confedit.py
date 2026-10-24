@@ -194,6 +194,8 @@ KEYS = (
          {"pattern": re.compile(r"[A-Za-z0-9_.+-]{0,64}")}),
         ("blank_minutes", INT, "0", INSTALLED,
          "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
+        ("wake_on_problem", BOOL, "yes", INSTALLED,
+         "yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0."),
     ))
     + _k("web", (
         ("enabled", BOOL, "no", INSTALLED, "yes: an installation runs the web view as a service (off by default)."),

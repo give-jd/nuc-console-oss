@@ -3,6 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- `[console] wake_on_problem` (default `yes`): a new or worse problem wakes a console screen blanked by `blank_minutes`, once per 30 s at most. `no` keeps the old behaviour (only a key wakes it).
+
 ## [2.5.2] - 2026-10-23
 
 A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).
