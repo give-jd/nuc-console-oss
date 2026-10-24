@@ -106,10 +106,16 @@ class Transitions(unittest.TestCase):
 
 class Ioctl(unittest.TestCase):
     def test_exact_request_and_oserror_swallowed(self):
-        with mock.patch.object(wake.fcntl, "ioctl") as io:
+        fake = mock.Mock()  # a stand-in module: fcntl does not exist on Windows and macOS has no TIOCLINUX, the logic is the same everywhere
+        with mock.patch.object(wake, "fcntl", fake):
             self.assertTrue(wake.unblank(7))
-            io.assert_called_once_with(7, wake.termios.TIOCLINUX, bytes([4]))
-        with mock.patch.object(wake.fcntl, "ioctl", side_effect=PermissionError):
+            fake.ioctl.assert_called_once_with(7, wake.TIOCLINUX, bytes([4]))
+            self.assertEqual(wake.TIOCLINUX, 0x541C)
+        fake = mock.Mock()
+        fake.ioctl.side_effect = PermissionError
+        with mock.patch.object(wake, "fcntl", fake):
+            self.assertFalse(wake.unblank(7))
+        with mock.patch.object(wake, "fcntl", None):  # Windows: no module at all
             self.assertFalse(wake.unblank(7))
 
     def test_vt_only(self):
@@ -123,11 +129,11 @@ class Ioctl(unittest.TestCase):
             self.assertFalse(wake.is_vt(3, {"TERM": "linux"}))
 
     def test_not_a_vt_no_ioctl(self):
-        with mock.patch.object(wake, "is_vt", return_value=False), mock.patch.object(wake.fcntl, "ioctl") as io:
+        with mock.patch.object(wake, "is_vt", return_value=False), mock.patch.object(wake, "fcntl", mock.Mock()) as fake:
             w = wake.Waker(True, 3)
             w.feed(pl())
             self.assertFalse(w.feed(pl(("a", 3))))
-            io.assert_not_called()
+            fake.ioctl.assert_not_called()
 
 
 class Config(unittest.TestCase):
