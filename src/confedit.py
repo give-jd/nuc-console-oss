@@ -196,6 +196,8 @@ KEYS = (
          {"pattern": re.compile(r"[A-Za-z0-9_.+-]{0,64}")}),
         ("blank_minutes", INT, "0", INSTALLED,
          "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
+        ("wake_on_problem", BOOL, "yes", INSTALLED,
+         "yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0."),
     ))
     + _k("web", (
         ("enabled", BOOL, "no", INSTALLED, "yes: an installation runs the web view as a service (off by default)."),
@@ -210,6 +212,9 @@ KEYS = (
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
+        ("metrics", BOOL, "yes", START,
+         "yes (the default): /metrics gives the figures of /api/v1/overview as Prometheus text, behind the very checks of /api/v1 (a token off "
+         "loopback). no: the route is a 404."),
         ("settings_actions", BOOL, "no", LOCK,
          "yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it "
          "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),
