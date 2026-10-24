@@ -115,6 +115,8 @@ PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
     "container-exited": ("containers",), "container-no-restart": ("containers",), "containers-not-back": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
+    "service-down": ("boot",), "cert-expiring": ("boot",), "cert-expired": ("boot",), "cert-unreadable": ("boot",), "watch-config": (),
+    "ssh-root-login": ("exposure",), "ssh-password-auth": ("exposure",), "ssh-empty-passwords": ("exposure",),
     "backup-stale": ("boot",), "backup-missing": ("boot",), "reboot-required": ("boot",), "updates-pending": ("boot",),
     "clock-unsynced": ("boot",), "disk-inodes": ("disks",),
     "display-stuck": ("boot",), "disk-io-errors": ("boot",), "memory-errors": ("boot",), "nic-resets": ("boot",), "oom-killed": ("boot",),

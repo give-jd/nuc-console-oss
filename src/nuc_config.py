@@ -6,6 +6,7 @@ A missing file means defaults (everything on).
 A broken file never stops the dashboard: the problem goes to stderr and defaults apply for the bad keys.
 """
 import configparser
+import ipaddress
 import json
 import os
 import re
@@ -51,6 +52,41 @@ MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited",
                   "container-no-restart", "containers-not-back",
                   "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
 
+# [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
+# validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
+UNIT_RE = re.compile(r"[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}")  # a systemd unit name; never starts with '-' (an option)
+WATCH_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,32}")
+WATCH_MAX = 20  # units under [services] must_run
+TLS_MAX = 10  # entries under [tls] watch (each can cost a connect and a handshake)
+WATCH_BUDGET_S = 30  # the collector stops starting new checks of a section after this many seconds
+# a certificate is fetched only from this machine or a private network: nuc-console makes no other outbound connection than Telegram's.
+# (the same list as exposure.PRIVATE_NETS; tests/test_watch_checks.py keeps them equal)
+WATCH_NETS = tuple(ipaddress.ip_network(n) for n in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                                                     "100.64.0.0/10", "::1/128", "fe80::/10", "fc00::/7"))
+
+
+def watch_entry(spec):
+    """'name = host:port' or 'name = /abs/cert.pem' -> (name, "net", host, port) or (name, "file", path, 0). ValueError(reason) otherwise.
+    A host is an IP literal (or localhost) in WATCH_NETS: a name would need a DNS lookup, and anything else is not ours to connect to."""
+    name, eq, target = (x.strip() for x in spec.partition("="))
+    if not eq or not WATCH_NAME_RE.fullmatch(name):
+        raise ValueError("write name = host:port or name = /path/cert.pem (name: letters, digits, . _ -)")
+    if os.path.isabs(target) or (os.name == "nt" and re.match(r"[A-Za-z]:[\\/]", target)):  # a drive path is a file only on Windows
+        return name, "file", target, 0
+    host, _, port = target.rpartition(":")
+    host = "127.0.0.1" if host.lower() == "localhost" else host[1:-1] if host[:1] == "[" and host[-1:] == "]" else host
+    if not (port.isascii() and port.isdigit() and 0 < int(port) < 65536):
+        raise ValueError("'%s': write host:port (port 1-65535) or an absolute path" % target[:60])
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError("'%s': only IP addresses (or localhost): no DNS lookup is made" % host[:60])
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    if not any(ip in n for n in WATCH_NETS):
+        raise ValueError("'%s' is not a private, loopback or Tailscale address: nuc-console does not connect elsewhere" % host[:60])
+    return name, "net", str(ip), int(port)
+
+
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
 EXPOSE_WORDS = {"local": "LOCALE", "localhost": "LOCALE", "loopback": "LOCALE", "tailnet": "TAILNET", "tailscale": "TAILNET",
                 "lan": "LAN", "internet": "INTERNET", "public": "INTERNET"}
@@ -89,6 +125,9 @@ def load(path=None, warn=None, overlay=True):
     cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
+    cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
+    cfg["tls"] = {"watch": [], "warn_days": 21}  # [tls] watch: ["name=host:port" | "name=/path"] as watch_entry reads them
+    cfg["watch_warnings"] = []  # what [services] and [tls] asked that cannot be done: shown as an ATTENTION warning (watch-config)
     cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -194,6 +233,42 @@ def load(path=None, warn=None, overlay=True):
                 cfg["alerts"]["ignored"].append(x[:40])
                 say(f"nuc-console: {path}: [alerts] mute: '{x[:40]}' cannot be muted: ignored (it may be a security alarm or unknown; "
                     f"mutable: {', '.join(MUTABLE_ALERTS)})")
+    if cp.has_section("services") or cp.has_section("tls"):
+        def skip(why):
+            say(f"nuc-console: {path}: {why}")
+            cfg["watch_warnings"].append(why[:120])
+        for key in [k for k in cp.options("services") if k not in cp.defaults() and k != "must_run"] if cp.has_section("services") else ():
+            skip(f"[services] unknown key '{key[:40]}' ignored (known: must_run)")
+        units = [x for x in re.split(r"[,;\s]+", cp.get("services", "must_run", fallback="")) if x]
+        for u in units:
+            if not UNIT_RE.fullmatch(u):
+                skip(f"[services] must_run: '{u[:40]}' is not a unit name: skipped")
+            elif u in cfg["services"]["must_run"]:
+                pass
+            elif len(cfg["services"]["must_run"]) >= WATCH_MAX:
+                skip(f"[services] must_run: more than {WATCH_MAX} units: '{u[:40]}' skipped")
+            else:
+                cfg["services"]["must_run"].append(u)
+        for key in [k for k in cp.options("tls") if k not in cp.defaults() and k not in ("watch", "warn_days")] if cp.has_section("tls") else ():
+            skip(f"[tls] unknown key '{key[:40]}' ignored (known: watch, warn_days)")
+        try:
+            cfg["tls"]["warn_days"] = max(1, min(365, cp.getint("tls", "warn_days", fallback=21)))
+        except ValueError:
+            skip("[tls] warn_days must be an integer (1-365): kept 21")
+        seen = set()
+        for part in [x.strip() for x in cp.get("tls", "watch", fallback="").split(",") if x.strip()] if cp.has_section("tls") else ():
+            try:
+                name, kind, host, port = watch_entry(part)
+            except ValueError as e:
+                skip(f"[tls] watch: {e}")
+                continue
+            if name in seen:
+                skip(f"[tls] watch: '{name}' is there twice: the second is skipped")
+            elif len(seen) >= TLS_MAX:
+                skip(f"[tls] watch: more than {TLS_MAX} entries: '{name}' skipped")
+            else:
+                seen.add(name)
+                cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")
     if cp.has_section("containers"):  # restart_ignore = name, *-glob-*: containers that are meant to stay down after a reboot
         for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")

@@ -14,6 +14,9 @@ import os
 import platform
 import re
 import shutil
+import socket
+import ssl
+import stat
 import subprocess
 import sys
 import threading
@@ -22,6 +25,7 @@ from datetime import datetime, timezone
 
 import history  # noqa: E402  (same directory)
 import nuc_config  # noqa: E402
+import x509min  # noqa: E402
 
 CFG = nuc_config.load()
 OFF = {k for k, v in CFG["features"].items() if not v}
@@ -36,11 +40,12 @@ NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailsc
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
                "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
-                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",)}
+                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",),
+                "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock"),
-                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes")}  # the host-hygiene sections are Linux (inodes: macOS too)
+UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
+                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
 UNSUPPORTED_BOOT = UNSUPPORTED_BOOT_BY_OS.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
@@ -459,6 +464,56 @@ def parse_failed(text):
     return [ln.replace("●", "").split()[0] for ln in text.splitlines() if ln.replace("●", "").strip()]
 
 
+SSHD_KEYS = ("permitrootlogin", "passwordauthentication", "kbdinteractiveauthentication", "permitemptypasswords", "pubkeyauthentication", "x11forwarding")
+SERVICE_STATES = ("active", "inactive", "failed", "activating", "deactivating", "reloading", "maintenance")
+
+
+CLOCK = time.monotonic  # the sections of [services] and [tls] read it for their time budget (a test injects its own)
+
+
+def parse_sshd_t(text):
+    """`sshd -T` -> {setting: value} for the five settings the audit reads (values only, in lower case); the rest of the output is dropped."""
+    out = {}
+    for ln in text.splitlines():
+        key, _, rest = ln.strip().partition(" ")
+        val = (rest.split() or [""])[0].lower()
+        if key.lower() in SSHD_KEYS and re.fullmatch(r"[a-z-]{1,24}", val):
+            out.setdefault(key.lower(), val)
+    return out
+
+
+def service_state(is_active_out, load_state_out=""):
+    """The state of a unit from `systemctl is-active` (first line) and, for one that is not active, `systemctl show -p LoadState`:
+    one of SERVICE_STATES, 'not-found' (no such unit) or 'unknown' (anything else: never taken for running)."""
+    if "LoadState=not-found" in load_state_out:
+        return "not-found"
+    word = (is_active_out.split() or [""])[0]
+    return word if word in SERVICE_STATES else "unknown"
+
+
+def tls_der(host, port, timeout=3):
+    """The DER certificate a TLS server presents, or None. Verification is OFF on purpose: the goal is the expiry of whatever certificate is
+    served (a self-signed LAN one included), nothing is sent and nothing is trusted. Callers pass only addresses nuc_config.watch_entry accepted."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # nosec - see above
+    with socket.create_connection((host, port), timeout) as sock:
+        with ctx.wrap_socket(sock) as tls:
+            return tls.getpeercert(binary_form=True)
+
+
+def cert_file_der(path):
+    """The first certificate of a PEM file (at most x509min.MAX bytes, a regular file only: a FIFO or a device would block), or None."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        data = os.read(fd, x509min.MAX + 1)
+    finally:
+        os.close(fd)
+    return x509min.pem_to_der(data.decode("ascii", "replace")) if len(data) <= x509min.MAX else None
+
+
 def parse_reverse_deps(text):
     """`systemctl show -p RequiredBy -p RequisiteOf -p BoundBy UNIT` -> the units that need it (first level only), sorted.
 
@@ -846,12 +901,57 @@ def collect_boot():
                 "volumes_unused_anonymous": sum(bool(ANON_VOLUME.match(v)) for v in unused) if unused is not None else None,
                 "dangling_images": {"count": len(dimg.split()), "bytes": sum(parse_size(x) for x in dimg.split())} if rc == 0 else None}
 
+    def services():
+        """The units [services] must_run names, each asked on its own (a failure costs only its own entry): [{unit, state}]."""
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
+        for unit in [u for u in CFG["services"]["must_run"] if nuc_config.UNIT_RE.fullmatch(u)][:nuc_config.WATCH_MAX]:
+            if CLOCK() > end:  # out of time: the rest is said to be unchecked, never ok
+                out.append({"unit": unit, "state": "not-checked"})
+                continue
+            rc, text, _ = run("systemctl", "is-active", "--", unit, timeout=5)
+            load = ""
+            if rc is None or not text.startswith("active"):  # is-active says 'inactive' for a unit that does not exist: LoadState tells
+                load = run("systemctl", "show", "--no-pager", "-p", "LoadState", "--", unit, timeout=5)[1]
+            out.append({"unit": unit, "state": "unknown" if rc is None else service_state(text, load)})
+        return out
+
+    def sshd():
+        """The effective settings the audit reads. sshd -T needs root; a missing sshd or an error is 'Absent', never a pass."""
+        rc, text, _ = run("sshd", "-T", timeout=10)
+        got = parse_sshd_t(text) if rc == 0 else {}
+        if not got:
+            raise Absent("sshd -T")
+        return got
+
+    def certs():
+        """[{name, exp}] for [tls] watch: exp = notAfter (epoch) or None with why = 'unreachable' | 'unreadable' | 'refused' | 'not-checked' (the time budget ran out). Nothing else of
+        the certificate is kept. A host that is not private is refused here too (nuc_config.watch_entry), whatever the file says."""
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
+        for spec in CFG["tls"]["watch"][:nuc_config.TLS_MAX]:
+            if CLOCK() > end:
+                out.append({"name": spec.partition("=")[0][:32], "exp": None, "why": "not-checked"})
+                continue
+            try:
+                name, kind, where, port = nuc_config.watch_entry(spec)
+            except ValueError:
+                out.append({"name": spec.partition("=")[0][:32], "exp": None, "why": "refused"})
+                continue
+            try:
+                der = tls_der(where, port) if kind == "net" else cert_file_der(where)
+            except (OSError, ssl.SSLError, ValueError):
+                out.append({"name": name, "exp": None, "why": "unreachable" if kind == "net" else "unreadable"})
+                continue
+            exp = x509min.not_after(der)
+            out.append({"name": name, "exp": exp, "why": "" if exp is not None else "unreadable"})
+        return out
+
     d["btime"] = boot_time()
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
                     ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
-                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes)):
+                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
+                    ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
         section(key, fn)
     return d
 
