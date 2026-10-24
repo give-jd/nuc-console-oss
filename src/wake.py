@@ -57,6 +57,6 @@ class Waker:
             return False
         now = self.clock()
         if self.last is not None and now - self.last < MIN_GAP_S:
-            return False  # ponytail: the event is dropped, not queued; the next new problem wakes it
+            return False  # the event is dropped, not queued; the next new problem wakes it
         self.last = now
         return unblank(self.fd)
