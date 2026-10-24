@@ -25,6 +25,7 @@ import hostdata  # same directory: what is read from the machine and the collect
 import display  # same directory: the browser behind --kiosk and --open
 import nuc_config
 import prefs  # same directory: [ui], the console's theme, density, order and KPIs
+import events  # same directory: the EVENTS screen (the timeline of the history)
 import problems  # same directory: the problem list, its advice and what was accepted
 import procs
 import ui
@@ -788,7 +789,7 @@ def console_head(name, part, parts, w, text, code, shift, shown):
     """The header line of the console: ' host │ [1 Overview]  2 Map  3 CPU  4 Health  5 AI │ HH:MM:SS … ✖ N PROBLEMS' on the pill's colour.
     The tabs have a short form when the long one leaves no room for the host name. A page of the overview that is not 'Overview'
     (System, Boot, Details...) says which, after the tabs (the footer says which screen of how many)."""
-    cur, title = next(((n, t) for n, _f, t in ui.SCREENS if t == name), ("overview", "Overview"))
+    cur, title = ("", "") if name == "Events" else next(((n, t) for n, _f, t in ui.SCREENS if t == name), ("overview", "Overview"))  # Events has no tab: none is current
     bar_rev = theme_name() == "mono" or "7" in code.split(";")  # the bar is in reverse already: the current tab is the one that is not
     rev_on, rev_off = ("\x1b[27m", "\x1b[7m") if bar_rev else ("\x1b[7m", "\x1b[27m")
     extra = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") if name != title else ""  # the footer counts the screens
@@ -1217,6 +1218,10 @@ def once(argv):
         out = health_once(argv, w, h)
         if out is None:
             return 2
+    elif view == "events":  # the EVENTS screen (see events_once for its options)
+        out = events_once(argv, w, h)
+        if out is None:
+            return 2
     elif view == "ai":  # the AI screen (see ai_once for its options)
         if not on("ai"):
             print("the AI screen is off: [features] ai = no in config.ini", file=sys.stderr)
@@ -1453,6 +1458,74 @@ def health_once(argv, w, h):
     if opt("--select"):
         health_select(health_findings(data["report"]), hv, opt("--select"))
     return health_screen(data, pb, hv, w, h)[0]
+
+
+# ---- EVENTS screen: events.py's timeline (the history's events table) on the console, moved through with the keyboard -----------
+
+EVENTS_TTL = 5  # the events are read at most this often per request, whatever the number of keys or pages
+_EVENTS, _EVENTS_LOCK = {}, threading.Lock()
+
+
+def events_data(params):
+    """events.load() of params (events.parse_query's), at most once per EVENTS_TTL for the same ones. [features] health = no: the history is off
+    and the answer says so. The demo: demo.events_answer (--demo-health little|none for a young or an empty history)."""
+    key = (bool(DEMO), DEMO_OS, DEMO_HEALTH, on("health")) + tuple(sorted(params.items()))
+    with _EVENTS_LOCK:
+        now = time.time()
+        hit = _EVENTS.get(key)
+        if hit is None or not 0 <= now - hit["at"] < EVENTS_TTL:
+            if not on("health"):
+                hit = events.load(params, now, False)
+            elif DEMO:
+                import demo
+                hit = demo.events_answer(DEMO_OS, params, now, variant=DEMO_HEALTH)
+            else:
+                hit = events.load(params, now)
+            _EVENTS[key] = hit
+            while len(_EVENTS) > 16:
+                _EVENTS.pop(next(iter(_EVENTS)))
+        return hit
+
+
+def events_state(smp, ev):
+    """(the events for the view's period and kind, the header's problems): shared by the console loop and --once."""
+    st = snapshot(0)
+    sm = host_sample(smp)
+    keep(st, sm)
+    if DEMO:
+        demo_defaults()
+    return events_data(ev.params()), problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm.get("thermal"), baseline=st["baseline"])
+
+
+def events_footer(ev, n, w):
+    """Where the cursor is, and the keys (ui.KEYMAP): in short words when the screen is narrow, then the least needed go first."""
+    dyn = {"details": ("Enter: " + ("hide details" if ev.details else "details"), "Enter: " + ("hide" if ev.details else "details"))}
+    return clip(c(90, ui.footer("events", f" {events.footer_pos(ev, n)}   ", w, on, dyn)), w)
+
+
+def events_screen(data, pb, ev, w, h):
+    """The interactive EVENTS screen as one frame (header, body, key help): the live loop and --once."""
+    events.events_sync(ev, data["rows"])
+    body = events.events_lines(data, ev, w, body_rows(h))
+    return frame(("Events", 1, 1, body), 0, 1, w, h, pb, foot=events_footer(ev, len(data["rows"]), w))
+
+
+def events_once(argv, w, h):
+    """`--once --view events`: the EVENTS screen as the console draws it (tests, screenshots). --age 1h|24h|7d (default 24h), --kind KIND (one of
+    history.KINDS), --select N: the cursor on the Nth newest event (1 = the first), --details: its details pane. None: nothing to draw."""
+    opt = lambda k: argv[argv.index(k) + 1] if k in argv[:-1] else ""  # noqa: E731
+    try:
+        got = events.parse_query({k: [v] for k, v in (("age", opt("--age")), ("kind", opt("--kind"))) if v})
+    except events.QueryError as e:
+        print("--view events: " + str(e), file=sys.stderr)
+        return None
+    ev = events.EventsView(got["age"] or events.DEFAULT_AGE, got["kind"])
+    ev.details = "--details" in argv
+    data, pb = events_state(None if DEMO else hostdata.Sampler(), ev)
+    if opt("--select").isdigit() and data["rows"]:
+        ev.idx = max(0, min(int(opt("--select")) - 1, len(data["rows"]) - 1))
+        ev.cur = data["rows"][ev.idx]["id"]
+    return events_screen(data, pb, ev, w, h)
 
 
 # ---- AI screen: what this machine can run, and which local model to choose (aisetup.catalog(): the console, --once, the web page) ---
@@ -1876,7 +1949,7 @@ HELP_W = 64  # the help box's widest size (columns), inside the frame
 
 
 def new_view(name, opened):
-    """(mv, cv, hv, av): the screen `name` (map, cpu, health, ai) open, the others None."""
+    """(mv, cv, hv, av): the screen `name` (map, cpu, health, ai) open, the others None. (The EVENTS screen is never a start view.)"""
     v = {"map": MapView, "cpu": CpuView, "health": HealthView, "ai": AiView}[name]()
     v.opened = v.touched = opened
     return tuple(v if n == name else None for n in ("map", "cpu", "health", "ai"))
@@ -1963,7 +2036,9 @@ def main(argv):
         cv, cpu_d, cpu_fresh, cpu_rows_, rot_feed = None, None, 0.0, [], None  # the CPU screen, its data and rows; the rotation slide's feed
         hv, hd, hl = None, None, []  # the Health screen while it is shown, its report data and findings
         av, ad, al = None, None, []  # the AI screen while it is shown, its catalog data and model rows
-        avail = {"map": map_ok, "cpu": cpu_ok, "health": health_ok, "ai": ai_ok}  # the screens the digits (and Tab) can open
+        ev, ed = None, None  # the EVENTS screen while it is shown, and its rows
+        events_ok = bool(old or win_keys)  # it needs a keyboard too, and no feature: with the history off it says so
+        avail = {"map": map_ok, "cpu": cpu_ok, "health": health_ok, "ai": ai_ok, "events": events_ok}  # the screens the digits (and Tab) can open
         enabled = lambda f: avail.get(f, True)  # noqa: E731
         sl, idx, ov_cache = [], 0, None  # the overview's slides and the one shown; what a paused overview keeps showing
         paused, pause_t, pre_hold, pause_ov = False, 0.0, 0, False  # Z: the redraw is paused (since when; the hold it interrupted)
@@ -1990,7 +2065,7 @@ def main(argv):
                 size, dirty = (w, h), True
             w -= 1  # the Linux VT keeps the cursor on the last column: \x1b[K there would erase the last character
             now = time.time()
-            was_open = any(x is not None for x in (mv, cv, hv, av))
+            was_open = any(x is not None for x in (mv, cv, hv, av, ev))
             if mv is not None and now - mv.touched > MAP_IDLE_S:  # nobody at the keyboard: the monitor goes back to the rotation
                 t0, mv, paused, dirty = t0 + now - mv.opened, None, False, True
                 out.write("\x1b[2J")
@@ -2003,7 +2078,10 @@ def main(argv):
             if av is not None and now - av.touched > AI_IDLE_S:  # and the AI screen
                 t0, av, paused, dirty = t0 + now - av.opened, None, False, True
                 out.write("\x1b[2J")
-            if start != "overview" and was_open and mv is cv is hv is av is None:  # an idle screen: back to the start view, not the rotation
+            if ev is not None and now - ev.touched > events.IDLE_S:  # and the EVENTS screen
+                t0, ev, paused, dirty = t0 + now - ev.opened, None, False, True
+                out.write("\x1b[2J")
+            if start != "overview" and was_open and mv is cv is hv is av is ev is None:  # an idle screen: back to the start view, not the rotation
                 mv, cv, hv, av = new_view(start, now)
                 fresh = cpu_fresh = 0.0
                 err, cpu_d = None, None
@@ -2064,6 +2142,20 @@ def main(argv):
                     screen = frame(("AI", 1, 1, [c(31, f" error on the AI screen: {safe(repr(err))[:w - 28]}")]), 0, 1, w, h, pb,
                                    foot=c(90, " Esc: back   1-5: screens"))
                 wait = fresh - time.time()
+            elif ev is not None:  # the EVENTS screen: the rows come from a short cache, a new frame at every key
+                try:
+                    if now >= fresh and not paused:
+                        fresh, err = now + REFRESH_S, None
+                        ed, pb = events_state(smp, ev)
+                    if err is None:
+                        screen = events_screen(ed, pb, ev, w, h)
+                except Exception as e:  # noqa: BLE001 - a broken screen must not take the console down; Esc still goes back
+                    ed, err = None, e
+                    pb = last_pb + [(2, "the events screen could not be built")]  # never a reassuring "ALL OK"
+                if err is not None:
+                    screen = frame(("Events", 1, 1, [c(31, f" error on the events screen: {safe(repr(err))[:w - 30]}")]), 0, 1, w, h, pb,
+                                   foot=c(90, " Esc: back   1-5: screens"))
+                wait = fresh - time.time()
             else:
                 if paused and ov_cache is not None:  # the slide and the data it was paused on
                     sl, last_pb, kctx = ov_cache
@@ -2083,7 +2175,7 @@ def main(argv):
                 screen = frame(sl[idx], idx, len(sl), w, h, last_pb, keys=bool(old or win_keys), mapkey=map_ok, cpukey=cpu_ok, healthkey=health_ok,
                                aikey=ai_ok, ctx=kctx)  # no keyboard (a monitor): no keys are offered
                 wait = REFRESH_S
-            scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "overview"
+            scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "events" if ev is not None else "overview"
             if help_open:
                 screen = help_overlay(screen, scope, w, h, enabled, paused)
             if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
@@ -2107,7 +2199,7 @@ def main(argv):
                 if help_open:  # any key closes the help, and does nothing else
                     help_open = False
                     continue
-                view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av if av is not None else ev
                 if view is not None:
                     view.touched = time.time()
                 asking = av is not None and bool(av.confirm)  # a question waits: any key answers it (y: yes), as it always did
@@ -2155,6 +2247,12 @@ def main(argv):
                         tgt = "overview"
                     elif res == "period":  # asked again (the report of that period may be cached)
                         fresh = 0.0
+                elif ev is not None:
+                    res = events.events_key(ev, k, ed["rows"] if ed else [])
+                    if res == "back":
+                        tgt = "overview"
+                    elif res == "filter":  # another period or kind: asked again
+                        fresh = 0.0
                 elif av is not None:
                     res = ai_key(av, k, al)
                     if res == "back":
@@ -2177,7 +2275,7 @@ def main(argv):
                 elif tgt is not None and tgt != scope and (tgt == "overview" or avail.get(tgt)):
                     opened = view.opened if view is not None else time.time()  # the rotation stays paused all the time on the screens
                     resume()
-                    mv = cv = hv = av = None
+                    mv = cv = hv = av = ev = None
                     cpu_d = None
                     if tgt == "overview":
                         t0 += time.time() - opened  # the rotation was paused: it goes on where it was
@@ -2188,9 +2286,11 @@ def main(argv):
                         cv, cpu_fresh, rot_feed = CpuView(), 0.0, None
                     elif tgt == "health":
                         hv, fresh, err = HealthView(), 0.0, None
+                    elif tgt == "events":
+                        ev, fresh, err = events.EventsView(), 0.0, None
                     else:
                         av, fresh, err = AiView(), 0.0, None
-                    nv = mv if mv is not None else cv if cv is not None else hv if hv is not None else av
+                    nv = mv if mv is not None else cv if cv is not None else hv if hv is not None else av if av is not None else ev
                     if nv is not None:
                         nv.opened = nv.touched = opened
                     out.write("\x1b[2J")

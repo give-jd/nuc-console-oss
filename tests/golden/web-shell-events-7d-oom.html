@@ -1,0 +1,560 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-9GZYHRyC/l+um9jeWR6HmXZOs7IkgpqRthuNvzvX+oY=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<noscript>
+<meta http-equiv="refresh" content="2">
+</noscript>
+<title>demo-host · events · nuc-console</title>
+<link rel="stylesheet" href="/s/app.585ebd28.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="bccae933c5">
+<span class="host">demo-host</span>
+<span class="status err" role="status">✖ 6 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?" data-key="1">
+<kbd>1</kbd>Overview</a>
+<a href="/?view=map" data-key="2">
+<kbd>2</kbd>Map <span class="badge">7</span>
+</a>
+<a href="/?view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
+</div>
+</header>
+<div class="kpiblock" data-card="__kpis" data-rev="fe8ddc88b4">
+<div class="kpis" role="list" aria-label="Key figures">
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-attention">
+<span class="kl">Problems</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>6</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-exposure">
+<span class="kl">Internet</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>1</span>
+<span class="ks">public on the Internet</span>
+</a>
+<a class="kpi st-warn" role="listitem" data-state="warn" href="/?#c-exposure">
+<span class="kl">LAN</span>
+<span class="kv">
+<span class="sym s-warn" aria-hidden="true">!</span>3</span>
+<span class="ks">reachable from the LAN</span>
+</a>
+<a class="kpi st-err" role="listitem" data-state="err" href="/?#c-exposure">
+<span class="kl">Beyond</span>
+<span class="kv">
+<span class="sym s-err" aria-hidden="true">✖</span>2</span>
+<span class="ks">beyond [expose]</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
+<span class="kl">CPU</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>6<span class="u">%</span>
+</span>
+<span class="ks">16 threads</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
+<span class="kl">RAM</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>33<span class="u">%</span>
+</span>
+<span class="ks">10.2G/31.2G</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-disks">
+<span class="kl">Disk</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>38<span class="u">%</span>
+</span>
+<span class="ks">180.0G/480.0G /</span>
+</a>
+<a class="kpi st-ok" role="listitem" data-state="ok" href="/?#c-system">
+<span class="kl">Temp</span>
+<span class="kv">
+<span class="sym s-ok" aria-hidden="true">✔</span>72<span class="u">°C</span>
+</span>
+<span class="ks">limit 100°C</span>
+</a>
+</div>
+</div>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="view" data-refresh="2" data-frag="/?view=events&amp;age=7d&amp;kind=oom&amp;frag=1">
+<div class="vb" data-card="__view" data-rev="49aa1f64c1">
+<div class="hv ev">
+<header class="st">
+<h2>EVENTS</h2>
+<p class="bits">
+<span class="bit">
+<span class="t-muted">last 7 days</span>
+</span>
+<span class="bit">
+<span class="t-muted">1 events</span>
+</span>
+<span class="bit">
+<span class="t-muted">kind: out of memory</span>
+</span>
+</p>
+<div class="seg" role="group" aria-label="period">
+<a href="/?view=events&amp;age=1h&amp;kind=oom" data-key="h" title="key h">1h</a>
+<a href="/?view=events&amp;kind=oom" data-key="d" title="key d">24h</a>
+<span aria-current="true">7d</span>
+</div>
+<div class="seg" role="group" aria-label="kind">
+<a href="/?view=events&amp;age=7d">all</a>
+<a href="/?view=events&amp;age=7d&amp;kind=problem">problem</a>
+<a href="/?view=events&amp;age=7d&amp;kind=crash">crash</a>
+<a href="/?view=events&amp;age=7d&amp;kind=hang">hang</a>
+<span aria-current="true">out of memory</span>
+<a href="/?view=events&amp;age=7d&amp;kind=restart" data-key="f" title="key f">restart</a>
+<a href="/?view=events&amp;age=7d&amp;kind=exit_error">exit error</a>
+<a href="/?view=events&amp;age=7d&amp;kind=service_failed">service failed</a>
+<a href="/?view=events&amp;age=7d&amp;kind=unexpected_shutdown">unexpected off</a>
+<a href="/?view=events&amp;age=7d&amp;kind=hw_error">hardware</a>
+<a href="/?view=events&amp;age=7d&amp;kind=throttle">throttle</a>
+<a href="/?view=events&amp;age=7d&amp;kind=disk_low">disk low</a>
+<a href="/?view=events&amp;age=7d&amp;kind=login_fail">login failed</a>
+</div>
+<div class="seg" role="group" aria-label="download">
+<a href="/?view=events&amp;age=7d&amp;kind=oom&amp;format=csv">download CSV</a>
+<a href="/?view=events&amp;age=7d&amp;kind=oom&amp;format=json">download JSON</a>
+</div>
+</header>
+<table class="tbl">
+<colgroup>
+<col class="c-when">
+<col class="c-kind">
+<col class="c-subject">
+<col class="c-what">
+</colgroup>
+<thead>
+<tr>
+<th class="n" scope="col">When (UTC)</th>
+<th scope="col">Kind</th>
+<th scope="col">Subject</th>
+<th scope="col">What happened</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="n">2026-09-21 12:02:20</td>
+<td>
+<span class="t-err">✖ out of memory</span>
+</td>
+<td>node</td>
+<td>kernel OOM killer</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</main>
+<footer class="foot">refresh every <a href="/?view=events&amp;age=7d&amp;kind=oom&amp;refresh=1">−</a> 2s <a href="/?view=events&amp;age=7d&amp;kind=oom&amp;refresh=3">+</a>
+<span class="dot">·</span>
+<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="/?view=events&amp;age=7d&amp;kind=oom&amp;pause=1">pause</a>
+<span class="dot">·</span>
+<a class="lnk" href="/app?view=events&amp;age=7d&amp;kind=oom">live app</a>
+<span class="dot">·</span>text <a href="/?view=events&amp;age=7d&amp;kind=oom&amp;zoom=90">A−</a> 100% <a href="/?view=events&amp;age=7d&amp;kind=oom&amp;zoom=110">A+</a>
+<span class="dot">·</span>
+<a class="lnk" href="/setup?step=1">setup guide</a>
+<span class="dot">·</span>
+<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Devents%26age%3D7d%26kind%3Doom">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Events</h3>
+<dl>
+<dt>
+<kbd>h/d/w</kbd>
+</dt>
+<dd>1h/24h/7d</dd>
+<dt>
+<kbd>f</kbd>
+</dt>
+<dd>filter by kind</dd>
+</dl>
+</section>
+<section>
+<h3>Lists</h3>
+<dl>
+<dt>
+<kbd>↑↓</kbd>
+</dt>
+<dd>move</dd>
+<dt>
+<kbd>PgUp/PgDn/Home/End</kbd>
+</dt>
+<dd>page</dd>
+<dt>
+<kbd>Enter</kbd>
+</dt>
+<dd>details</dd>
+</dl>
+</section>
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS). It polls main[data-frag] for the page's cards as an HTML
+// fragment and replaces the cards whose data-rev changed. The fragment is parsed inertly and every node and attribute is checked
+// against two allowlists before anything is taken over; a fragment that fails the check reloads the page. It waits while the tab is
+// hidden, while paused and while you type or select; a failed poll backs off (2 s to 60 s) and says so: numbers never look fresh.
+// Classes it sets on <html>, for the server's CSS:
+//   stale    the numbers on the page are old (the #stale banner says since when)
+//   paused   the refresh is paused with the [data-pause] toggle
+// It also trues up the grid's row spans: the server estimates each overview card's height (class rN), the script measures it and sets
+// the exact span, after load, after every swap and on resize (debounced); the classes r2..r200 are the server's CSS. The class
+// attribute is rewritten as a whole (the class names are computed, and classList is only used with literal names here).
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
+// (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const FRAG_TAGS = new Set("a abbr article aside b br button caption circle code col colgroup dd details div dl dt em figure footer form g h2 h3 h4 header hr i input kbd label li line meter nav ol option p path polyline pre progress rect section select small span strong sub summary sup svg table tbody td text textarea tfoot th thead time title tr u ul".split(" ")), FRAG_ATTRS = new Set("action aria-controls aria-disabled aria-current aria-describedby aria-expanded aria-hidden aria-label aria-labelledby aria-live aria-pressed aria-sort aria-valuemax aria-valuemin aria-valuenow autocomplete checked class colspan cx cy d data-card data-copy data-density data-depth data-done data-fail data-k data-key data-kpi data-max-lines data-pause data-problem data-rev data-row data-set data-state data-theme datetime disabled fill for height high href id lang low max maxlength method min name open optimum placeholder points preserveAspectRatio r readonly required role rowspan rx ry scope selected size stroke stroke-linecap stroke-linejoin stroke-width tabindex title transform type value viewBox width x x1 x2 y y1 y2".split(" "));
+  const root = document.documentElement, page = document.querySelector("main"), banner = document.getElementById("stale");
+  if (!page || page.hasAttribute("data-edit")) return;
+  const url = page.getAttribute("data-frag") || "", secs = Number(page.getAttribute("data-refresh"));
+  const period = url && secs >= 1 ? Math.min(secs, 3600) * 1000 : 0, spin = Number(page.getAttribute("data-rotate")) * 1000;
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const opened = new Map();  // <details> the reader opened or closed by hand: data-k -> open
+  let etag = "", fails = 0, lastOk = Date.now(), touched = 0, timer = 0, busy = false, dead = false, policy = null;
+  let paused = page.getAttribute("data-paused") === "1";
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  try { policy = window.trustedTypes ? window.trustedTypes.createPolicy("nuc-frag", {createHTML: s => s}) : null; } catch (err) { policy = null; }
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+  const kiosk = () => root.getAttribute("data-density") === "wall" && root.hasAttribute("data-kiosk");
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+
+  function show(text) {  // the banner under the top bar; "" takes it down
+    root.classList.toggle("stale", !!text);
+    if (banner) { banner.textContent = text; banner.hidden = !text; }
+  }
+  const late = () => show("stale since " + clock(lastOk));
+  function plan(ms) { clearTimeout(timer); if (!dead && period) timer = setTimeout(tick, ms); }
+  function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
+    dead = true;
+    show("updating the page");
+    setTimeout(again, Math.max(0, 15000 - performance.now()));
+  }
+  function again() {  // a reload that keeps a kiosk wall where it was scrolled to (the next page restores it)
+    try { if (kiosk()) sessionStorage.setItem("nuc-wall-y", String(Math.round(window.scrollY))); } catch (err) { /* storage off */ }
+    location.reload();
+  }
+  function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
+    const a = document.activeElement, sel = window.getSelection();
+    if (a && (a.closest("form") || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+    if (sel && !sel.isCollapsed && !kiosk()) return true;
+    for (const f of document.querySelectorAll("input, textarea")) {
+      if (!/^(hidden|submit|button|reset|image|checkbox|radio)$/.test(f.type) && f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
+
+  function clean(n) {  // true when the node and everything below it is on the allowlists
+    if (n.nodeType === 3) return true;
+    if (n.nodeType !== 1 || !FRAG_TAGS.has(n.localName) || !(n instanceof HTMLElement || n instanceof SVGElement)) return false;
+    for (const a of n.attributes) {
+      const v = a.value;
+      if (!FRAG_ATTRS.has(a.name) || /^(on|style$)/.test(a.name)) return false;
+      if (a.name === "href" && !(v.startsWith("/?") || v.startsWith("#"))) return false;
+      if (a.name === "action" && !/^\/[^\/\\]/.test(v)) return false;
+      if (a.name === "method" && !/^(get|post)$/i.test(v)) return false;
+      if (a.name === "name" && !/^(input|select|textarea|button)$/.test(n.localName)) return false;
+    }
+    for (const c of n.childNodes) if (!clean(c)) return false;
+    return true;
+  }
+  function parse(text) {  // the fragment's blocks, or null when anything in it is off the allowlists
+    const doc = new DOMParser().parseFromString(policy ? policy.createHTML(text) : text, "text/html"), out = [];
+    if (doc.head.childNodes.length || doc.documentElement.attributes.length || doc.body.attributes.length) return null;
+    for (const n of doc.body.childNodes) {
+      if (n.nodeType === 3 && !n.data.trim()) continue;
+      if (n.nodeType !== 1 || !n.hasAttribute("data-card") || !clean(n)) return null;
+      out.push(n);
+    }
+    return out.length && out.length <= 200 ? out : null;
+  }
+  function put(old, node) {  // old gives way to a copy of node; the focus and the open <details> stay as the reader had them
+    const a = document.activeElement, f = a && old.contains(a) ? a.closest("[data-k]") : null, key = f && f.getAttribute("data-k");
+    const fresh = document.importNode(node, true);
+    for (const d of fresh.querySelectorAll("details[data-k]")) {
+      const k = d.getAttribute("data-k");
+      if (opened.has(k)) d.open = opened.get(k);
+    }
+    old.replaceWith(fresh);
+    if (key) for (const el of fresh.querySelectorAll("[data-k]")) if (el.getAttribute("data-k") === key) { el.focus({preventScroll: true}); break; }
+  }
+  function swap(blocks) {  // false when the page has other cards than the fragment: that is a new page, not an update
+    const live = Array.from(document.querySelectorAll("[data-card]")), ids = list => list.map(el => el.getAttribute("data-card")).join(" ");
+    if (ids(live) !== ids(blocks)) return false;
+    const x = window.scrollX, y = window.scrollY;
+    blocks.forEach((b, i) => { if (b.getAttribute("data-rev") !== live[i].getAttribute("data-rev")) put(live[i], b); });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+    return true;
+  }
+
+  function fit() {  // the grid's dense packing with the measured heights: each card spans the rows its own height needs (no hole, no overlap)
+    const g = getComputedStyle(page);
+    if (!/dense/.test(g.gridAutoFlow) || url.indexOf("card=") >= 0) return;  // one column (rows are auto), or one card in full
+    const hit = /([0-9.]+)px/.exec(g.gridAutoRows), unit = hit ? Number(hit[1]) : parseFloat(g.fontSize) * 0.5, todo = [];
+    if (!(unit > 1)) return;
+    for (const c of document.querySelectorAll("article.card[data-card]")) {  // measure all first, then write: one layout, not one per card
+      const names = (c.getAttribute("class") || "").split(/\s+/).filter(n => n), keep = names.filter(n => !/^r[0-9]+$/.test(n));
+      const h = c.getBoundingClientRect().height + (parseFloat(getComputedStyle(c).marginBottom) || 0);
+      const want = Math.min(200, Math.ceil(h / unit - 0.05)), next = want > 1 ? keep.concat("r" + want) : keep;
+      if (h > 0 && next.join(" ") !== names.join(" ")) todo.push([c, next]);
+    }
+    for (const [c, next] of todo) c.setAttribute("class", next.join(" "));
+  }
+  async function poll() {
+    const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
+    busy = true;
+    try {
+      const r = await load(url, etag, ctl.signal);
+      if (r.status === 401) { dead = true; show("session expired"); return; }
+      if (r.status !== 304) {
+        if (r.status !== 200 || r.headers.get("X-Nuc-Fragment") !== "1" || !/^text\/html\b/i.test(r.headers.get("Content-Type") || "")) throw new Error("not a fragment");
+        const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
+        if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
+        if (!blocks || !swap(blocks)) { reload(); return; }
+        fit();
+        etag = r.headers.get("ETag") || "";
+      }
+      fails = 0; lastOk = Date.now(); show("");
+      plan(period);
+    } catch (err) {
+      fails++; late();
+      plan(Math.min(60000, Math.max(period, 2000) * Math.pow(2, fails - 1)));
+    } finally { clearTimeout(kill); busy = false; }
+  }
+  function tick() {
+    if (document.hidden || dead || paused) return;  // visibilitychange and the toggle start it again
+    if (busy) { plan(period); return; }
+    if (editing()) {
+      if (Date.now() - lastOk > Math.max(30000, 5 * period)) late();  // a long pause for typing is still old data
+      plan(period);
+    } else poll();
+  }
+  function turn() {  // kiosk: one screen further down, back to the top at the end, unless someone is at the page
+    setTimeout(turn, spin);
+    const room = root.scrollHeight - window.innerHeight;
+    if (!kiosk() || document.hidden || paused || Date.now() - touched < 3 * spin || room < 8) return;
+    window.scrollTo({top: window.scrollY >= room - 8 ? 0 : Math.min(room, window.scrollY + window.innerHeight * 0.9), behavior: calm.matches ? "auto" : "smooth"});
+  }
+
+  document.addEventListener("click", e => {
+    const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
+    if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
+    const b = e.target.closest("[data-pause]");
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
+    e.preventDefault();
+    paused = !paused;
+    root.classList.toggle("paused", paused);
+    page.setAttribute("data-paused", paused ? "1" : "0");
+    for (const t of document.querySelectorAll("[data-pause]")) t.setAttribute("aria-pressed", String(paused));
+    if (!paused) plan(0);
+  }, true);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) plan(0); });
+  window.addEventListener("online", () => plan(0));
+  window.addEventListener("pointerdown", () => { touched = Date.now(); }, true);
+  window.addEventListener("keydown", () => { touched = Date.now(); }, true);
+  window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
+  root.classList.toggle("paused", paused);
+  let shaken = 0;
+  window.addEventListener("resize", () => { clearTimeout(shaken); shaken = setTimeout(fit, 150); });
+  window.addEventListener("load", fit);
+  fit();
+  if (!paused) plan(period);
+  if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
+    setTimeout(turn, spin);
+    setTimeout(again, 600000 - Date.now() % 600000 + 2000);
+    const nav = performance.getEntriesByType("navigation")[0];  // only a reload gives the place back: a fresh visit starts at the top
+    let y = 0;
+    try { y = nav && nav.type === "reload" && kiosk() ? Number(sessionStorage.getItem("nuc-wall-y")) || 0 : 0; } catch (err) { y = 0; }
+    if (y > 0) window.scrollTo({top: y, behavior: "instant"});
+  }
+})();
+</script>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link; a click on such a row, anywhere but on a link, a
+// button or a field of it, follows its link too (no overlay: a table row is no containing block in every engine). Keys with Ctrl, Alt
+// or Meta, keys typed into a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+  document.addEventListener("click", e => {  // a click on a row, not on a link, a button or a field of it, nor to select text: the row's link
+    if (e.defaultPrevented || e.button || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || String(window.getSelection() || "")) return;
+    const row = e.target.closest("[data-row]"), link = row && row.querySelector("a[href]");
+    if (link && !e.target.closest("a[href], button, input, select, textarea, label, summary")) link.click();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>

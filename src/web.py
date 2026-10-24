@@ -37,6 +37,7 @@ import appjs
 import ansi  # same directory: the console's drawing of a card, kept in the shell's cards for now
 import cards
 import confedit
+import events
 import exposure
 import graph
 import graphjs
@@ -54,7 +55,7 @@ import webjs
 import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
-from webpages import ai_asked, ai_native, ai_nodes, health_native, health_nodes, telegram_html
+from webpages import ai_asked, ai_native, ai_nodes, events_here, events_native, events_nodes, health_native, health_nodes, telegram_html
 from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
 
 MAX_CONN = 32        # simultaneous connections; more are dropped
@@ -240,6 +241,10 @@ class Server(http.server.ThreadingHTTPServer):
             sel, pause = state.get("sel", "") if state.get("sel", "") in ids else "", bool(state.get("pause"))
             norm = {"days": days, "sel": sel, "pause": pause}
             return serve(r / 2, lambda: self.health_page(here, days, sel, pause))
+        if view == "events":  # the period and the kind are clamped by view_params already: the cache key holds only values that exist
+            params = {"limit": events.LIMIT_DEFAULT, "since": 0, "kind": state.get("kind", ""), "age": state.get("age") or events.DEFAULT_AGE}
+            norm = {"age": params["age"], "kind": params["kind"], "pause": pause}
+            return serve(r / 2, lambda: self.events_page(here, params, pause))
         if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
             rows = screens.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
@@ -295,6 +300,7 @@ class Server(http.server.ThreadingHTTPServer):
         groups = ['<span class="live">live</span>',
                   f'<a class="lnk" data-pause data-key="Z" aria-pressed="false" href="{html.escape(here)}">pause</a>',
                   f'<a class="lnk" href="{html.escape(page_url({"view": view} if view else {}) if view else "/")}">shell</a>',
+                  f'<a class="lnk" href="{html.escape(app_url(dict(p, view="events")))}">events</a>' if view != "events" else "",
                   f'<a class="lnk" href="{wizard.link(1)}">setup guide</a>',
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>"]
@@ -347,6 +353,11 @@ class Server(http.server.ThreadingHTTPServer):
             hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": False}, **here)
             return self.cached(("api", name, days, sel), r / 2, lambda: webapi.document(name, {"period": days, "sel": sel,
                                "nodes": health_nodes(self.smp, days, sel, hhere)}, time.time()))
+        if name == "events":  # strictly checked (events.parse_query: a QueryError is a 400), unlike the screens' own clamped parameters
+            params = events.parse_query(q)
+            body = lambda: dict(events.json_rows(render.events_data(params)), nodes=events_nodes(params, events_here(params, here)))
+            return self.cached(("api", name, params["limit"], params["since"], params["kind"], params["age"]), r / 2,
+                               lambda: webapi.document(name, body(), time.time()))
         if name == "map":
             state = map_mode({k: p[k] for k in VIEW_KEYS["map"] if k not in ("as", "pause")})
             key = ("api", name) + tuple(sorted((k, tuple(sorted(v)) if isinstance(v, (set, frozenset, list, tuple)) else v) for k, v in state.items()))
@@ -534,6 +545,7 @@ class Server(http.server.ThreadingHTTPServer):
                   f'<a class="lnk" href="{html.escape(app_url(dict(vhere, view=view if view in APP_VIEWS else "")))}">live app</a>'
                   if not quiet and not edit and not wall and not (view == "map" and vhere.get("as") == "graph") else "",
                   "text " + self.sizes(link, zoom),
+                  f'<a class="lnk" href="{html.escape(page_url(dict(here, view="events")))}">events</a>' if not wall and not edit and view != "events" else "",
                   f'<a class="lnk" href="{wizard.link(1)}">setup guide</a>' if not wall and not edit else "",
                   '<span class="grp">theme: ' + " ".join(setlink("t" + code, label, eff["theme"] == name, theme=name) for name, label, code in THEMES) + "</span>",
                   '<span class="grp">density: ' + " ".join(setlink("d" + code, label, eff["density"] == name, density=name) for name, label, code in DENSITIES) + "</span>",
@@ -543,7 +555,7 @@ class Server(http.server.ThreadingHTTPServer):
             groups = [f"refreshed every {r} s", "read-only"]
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
-        scope = view if view in ("map", "cpu", "health", "ai") else "global" if view in QUIET_VIEWS else "overview"
+        scope = view if view in ("map", "cpu", "health", "ai", "events") else "global" if view in QUIET_VIEWS else "overview"
         groups_help = (ui.help_rows("editor", feats) + ui.help_rows("global", feats, bool(nuc_config.PORTABLE))) if edit \
             else ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause)
         helps = htmlview.help_dialog(groups_help)
@@ -1072,6 +1084,12 @@ class Server(http.server.ThreadingHTTPServer):
             return View("<p>health disabled in config.ini (<b>[features] health = no</b>)</p>", (), None, False)
         hhere = dict({"view": "health", "period": days if days != 7 else 0, "sel": sel, "pause": pause}, **here)
         return View(health_native(self.smp, days, sel, hhere), [], hhere, not pause, legacy=False)
+
+    def events_page(self, here, params, pause):
+        """The EVENTS page: the timeline of the history as components; the period, the kind and the downloads are links, so the URL holds the whole
+        view and the reload keeps it."""
+        ehere = events_here(params, here, pause)
+        return View(events_native(params, ehere), [], ehere, not pause, legacy=False)
 
     def ai_page(self, here, sel, pause, confirm, prompt=""):
         """The AI page: the AI switch and what it is doing at the top, the chat under it (the model answers as soon as the server does), then what

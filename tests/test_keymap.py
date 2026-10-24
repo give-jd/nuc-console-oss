@@ -418,6 +418,36 @@ class Dispatch(MapCase):
         frames = self.run_main([b"2", b"3", b"4", b"5", b"1", b"4", b"2", b"5", b"3", b"1"])
         self.assertEqual(self.shown(frames), ["overview", "map", "cpu", "health", "ai", "overview", "health", "map", "ai", "cpu", "overview"])
 
+    def test_e_opens_the_events_timeline_keys_filter_it_and_esc_goes_back(self):
+        import demo
+        import events
+        asked = []
+        render.events_state = lambda smp, ev: (asked.append((ev.age, ev.kind)), (demo.events_answer(None, ev.params(), self.now), []))[1]
+        frames = self.run_main([b"e", b"w", b"f", b"j", b"\r", b"\x1b", b"\x1b", b"e", b"3", b"1", b"e", b"q"])
+        text = ["\n".join(f) for f in frames]
+        self.assertIn("EVENTS", text[1])
+        self.assertIn("last 24 hours", text[1])
+        self.assertIn("last 7 days", text[2])                                              # w
+        self.assertIn("kind: problem", text[3])                                            # f
+        self.assertIn("event 2/", text[4])                                                 # j
+        self.assertIn("DETAILS", text[5])                                                  # Enter
+        self.assertNotIn("DETAILS", text[6])                                               # Esc closes the details first ...
+        self.assertIn("EVENTS", text[6])
+        self.assertIn("overview page (stub)", text[7])                                     # ... and the next one leaves
+        self.assertIn("EVENTS", text[8])
+        self.assertIn("CPU", text[9])                                                      # a digit leaves it too
+        self.assertIn("overview page (stub)", text[10])
+        self.assertIn("EVENTS", text[11])
+        self.assertIn("overview page (stub)", text[12])                                    # q: like Esc
+        self.assertIn(("7d", ""), asked)
+        self.assertIn(("7d", "problem"), asked)
+        self.assertEqual(events.DEFAULT_AGE, "24h")
+
+    def test_the_events_screen_needs_a_keyboard_and_the_help_names_it(self):
+        frames = self.run_main([2], keyboard=False)
+        self.assertNotIn("EVENTS", "\n".join(frames[0]))                                    # no keyboard: the rotation, nothing to open
+        self.assertTrue(any(k == "e" for _t, items in ui.help_rows("overview") for k, _v in items))
+
     def test_a_digit_of_the_screen_you_are_on_does_nothing_and_a_disabled_screen_is_no_screen(self):
         render.CFG["features"]["health"] = False
         frames = self.run_main([b"2", b"2", b"4", b"3", b"4", b"5"])

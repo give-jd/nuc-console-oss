@@ -781,6 +781,38 @@ def health_report(os_name=None, days=7, now=None, variant=""):
             "events": events, "logs": logs, "disks": disks, "thermal": thermal, "boots": boots, "notes": notes}
 
 
+# ---- EVENTS: the timeline of a demo machine (events.load() answers the same shape) ------------------------------------------------------
+
+# (minutes ago, kind, subject, detail, source, count): a night with a monitor that went black, a reboot and what the box said about it
+_EVENTS = (
+    (4, "problem", "thermal", "cleared (warning)", "problems", 1), (11, "problem", "thermal", "opened (warning)", "problems", 1),
+    (27, "restart", "shop-api-1", "container restarted", "docker", 2), (52, "login_fail", "sshd", "failed ssh login", "journal", 14),
+    (95, "problem", "unhealthy-container", "cleared (error)", "problems", 1), (118, "problem", "unhealthy-container", "opened (error)", "problems", 1),
+    (131, "oom", "node", "kernel OOM killer", "journal", 1), (203, "crash", "Xorg", "segmentation fault", "journal", 1),
+    (204, "service_failed", "gdm.service", "failed with result signal", "journal", 1), (212, "hw_error", "machine", "GPU hang: ring gfx timeout", "journal", 3),
+    (233, "problem", "failed-units", "opened (error)", "problems", 1), (241, "unexpected_shutdown", "machine", "the last boot ended without a clean shutdown", "journal", 1),
+    (245, "problem", "collector-net", "cleared (error)", "problems", 1), (601, "throttle", "cpu", "CPU throttled by heat", "journal", 38),
+    (1380, "disk_low", "/var", "less than 10% free", "journal", 1), (1500, "exit_error", "n8n", "exited with code 137", "docker", 1),
+    (4300, "restart", "shop-api-1", "container restarted", "docker", 1), (6100, "login_fail", "sshd", "failed ssh login", "journal", 220),
+    (8900, "crash", "node", "main process dumped core (SEGV)", "journal", 1), (9500, "problem", "port-new", "opened (port-change)", "problems", 1),
+)
+
+
+def events_answer(os_name=None, params=None, now=None, variant=""):
+    """events.load()'s answer for the demo machine: the same events at every run, relative to `now`, filtered by params (events.parse_query's:
+    kind, age or since, limit). variant "none" is a machine with no history yet, "little" one that has been recorded for five hours."""
+    import events
+    now = now if now is not None else time.time()
+    params = params or events.parse_query({})
+    if variant == "none":
+        return events.answer("none", params, now, msg=events.NO_HISTORY)
+    keep = [(i + 1, int(now - m * 60), k, subj, d, src, n) for i, (m, k, subj, d, src, n) in enumerate(_EVENTS) if variant != "little" or m <= 300]
+    since = events.since_of(params, now)
+    rows = [{"id": i, "ts": ts, "kind": k, "subject": subj, "detail": d, "source": src, "n": n} for i, ts, k, subj, d, src, n in keep
+            if ts >= since and (not params["kind"] or k == params["kind"])]
+    return events.answer("ok", params, now, rows[:params["limit"]], len(rows))
+
+
 # ---- AI: the three machines and the catalog aisetup.catalog() would hand the AI screen for each ------------------------------
 # The machines of MACHINES: a Linux desktop with a 12 GB NVIDIA card, a Windows desktop (16 GB RAM, an 8 GB card, nothing installed yet) and an M2 with
 # 16 GB of unified memory. The models are the catalog's candidates with approximate sizes; the verdicts come from _ai_assess(), a small copy of the rules of

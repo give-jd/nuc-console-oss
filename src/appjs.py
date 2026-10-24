@@ -77,8 +77,8 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   const TAG = {err: "\u2716 ERR", warn: "! WARN", info: "\u00b7 INFO"};
   const BADGE = {ok: "ok", warn: "warn", err: "err", accent: "accent", muted: ""};
   const RANK = {err: 0, down: 0, warn: 1, unknown: 2, ok: 3, info: 4};
-  const VIEWS = new Set(["", "cpu", "health", "map", "ai"]);
-  const KEEP = {"": [], cpu: ["sort", "sel"], health: ["period", "sel"], map: ["open", "shut", "all", "sel", "only"], ai: ["sel", "confirm", "prompt"]};
+  const VIEWS = new Set(["", "cpu", "health", "map", "ai", "events"]);
+  const KEEP = {"": [], cpu: ["sort", "sel"], health: ["period", "sel"], map: ["open", "shut", "all", "sel", "only"], ai: ["sel", "confirm", "prompt"], events: ["age", "kind"]};
   const SAFE_HREF = /^(?:\/(?!\/)|[?#]|https?:\/\/)[^\s\\"'<>]*$/, SAFE_PATH = /^\/[a-z][a-z0-9\/-]*$/, CTRL = /[\u0000-\u001f\u007f-\u009f]/g;
   let cfg = {};
   try { cfg = JSON.parse(cfgNode.textContent || "{}"); } catch (err) { return; }
@@ -466,7 +466,7 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     if (cfg.order === "severity" && !cfg.custom) list = list.map((x, i) => [x, i]).sort((a, b) => ((RANK[a[0][0].state] ?? 3) - (RANK[b[0][0].state] ?? 3)) || a[1] - b[1]).map(x => x[0]);
     return list.map(([c, w]) => card(c, w));
   }
-  const BOX = {cpu: "scr scr-cpu", health: "hv", map: "scr mapv", ai: "scr av"};
+  const BOX = {cpu: "scr scr-cpu", health: "hv", map: "scr mapv", ai: "scr av", events: "hv ev"};
   function screen(doc, view) { return [el("div", {class: BOX[view]}, (doc.nodes || []).map(draw))]; }
 
   // ---- the morph: the page becomes the fresh drawing, node by node; what is the same stays the same node -------------------------------

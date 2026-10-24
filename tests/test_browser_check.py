@@ -128,6 +128,7 @@ class Landmarks(unittest.TestCase):
     def test_complete_pages(self):
         pages = {"overview": '<div class="kpis"></div><article class="card st-ok">', "map": '<div class="scr mapv"></div>',
                  "map-graph": '<div id="gv"><svg></svg></div>', "cpu": '<div class="scr scr-cpu"></div>', "health": '<div class="hv"></div>',
+                 "events": '<div class="hv ev"></div>', "app-events": '<div class="hv ev"></div>',
                  "ai": '<div class="scr av"></div>', "settings": '<div class="settings"></div>',
                  "telegram": '<div class="settings av" id="tg"><form action="/telegram/pair"></form></div>',
                  "setup": '<div class="settings wz"><ol class="wz-steps"></ol></div>',

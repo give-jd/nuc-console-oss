@@ -1402,12 +1402,31 @@ def disk_rows():
     return hostinfo.filesystems()
 
 
+PROBLEMS_GRACE_S = 90  # after the collector starts its own state files may still be old: problems are not looked at before they are written
+
+
+def current_problems():
+    """{problem id: severity word} of the anomalies of this moment, as the screens judge them (problems.problems_raw over the files this
+    collector writes), before anything is accepted or muted: the history says what was wrong, not what the owner chose to hear about.
+    Only ids and severities leave this function, never the text of a problem."""
+    import hostdata
+    import problems
+    try:
+        thermal = hostdata.read_thermal()
+    except Exception:  # noqa: BLE001 - an unreadable sensor must not hide the other problems
+        thermal = None
+    raw = problems.problems_raw(hostdata.load_json(hostdata.NET_STATE), hostdata.load_containers(), boot=hostdata.load_json(hostdata.BOOT_STATE),
+                                thermal=thermal, baseline=problems.load_baseline())
+    return {pid: history.PROBLEM_SEV.get(sev, "warning") for sev, _text, pid in raw if pid in problems.CATALOG}
+
+
 class HistoryJob(object):
     """One step per minute of what the history thread does. `procs` and `cpu` are the renderer's samplers (procs.py,
     cpuinfo.py): created here, in the collector's own thread, and only read by it."""
 
-    def __init__(self, store, procs=None, cpu=None, wall=time.time, mono=time.monotonic):
+    def __init__(self, store, procs=None, cpu=None, wall=time.time, mono=time.monotonic, read_problems=None):
         self.store, self.procs, self.cpu, self.wall, self.mono = store, procs, cpu, wall, mono
+        self.read_problems, self.t_start, self.problem_recent = read_problems or current_problems, mono(), {}
         self.account, self.window = history.ProcAccount(), history.Window()
         self.errors = {}          # source -> short text of its last failure (meta last_errors)
         self.t_flush, self.t_events = mono(), None
@@ -1440,6 +1459,7 @@ class HistoryJob(object):
         """Runs what is due; every source on its own, so one failure leaves the others."""
         self.make_samplers()
         self.sample()
+        self.problems()
         if self.mono() - self.t_flush >= HIST_FLUSH_S:
             self.flush()
         if self.t_events is None or self.mono() - self.t_events >= HIST_EVENTS_S:
@@ -1505,6 +1525,22 @@ class HistoryJob(object):
             self.store.add_hours(app_rows, host_rows, {"last_errors": json.dumps(self.errors, sort_keys=True)})
         self.window.clear()
         self.t_flush = self.mono()
+
+    def problems(self):
+        """Problems that appeared or cleared since the last minute become events of kind 'problem' (history.problem_events); the set that
+        was open is kept in meta, so a restart of the collector compares with it. The first look ever only records the baseline."""
+        if self.mono() - self.t_start < PROBLEMS_GRACE_S:
+            return
+        try:
+            cur = self.read_problems()
+            prev = history.json_meta(self.store, "problems_open")
+            evs = history.problem_events(prev if isinstance(prev, dict) else None, cur, self.wall(), self.problem_recent)
+            text = json.dumps(cur, sort_keys=True, separators=(",", ":"))
+            if evs or text != self.store.meta("problems_open"):
+                self.store.add_events(evs, (), {"problems_open": text})
+            self.errors.pop("problems", None)
+        except Exception as e:  # noqa: BLE001
+            self.fail("problems", e)
 
     # -- every 5 minutes --
 

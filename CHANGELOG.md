@@ -3,6 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- **EVENTS timeline**: what happened on the machine and when, newest first, from the history the collector keeps. On the console press `e` on the dashboard (`h` `d` `w` the last hour, 24 hours, 7 days; `f` one kind at a time; `Enter` the details); on the web, the **events** link in the bottom bar (`?view=events&age=&kind=`, also in the live app), with **download CSV** / **download JSON** (`&format=csv|json`; a CSV cell that starts with `=`, `+`, `-` or `@` is quoted so a spreadsheet never runs it) and a phone layout that stacks each event. The data API has `/api/v1/events?limit=&since=&age=&kind=` (at most 500 events; every parameter strictly checked, a bad one is a `400`). With `[features] health = no`, or before there is any history, the screen and the page say so instead of showing an empty list. See [docs/HEALTH.md](docs/HEALTH.md#events-the-timeline).
+- The collector records when an alarm of the ATTENTION list opens or clears, as events of kind `problem` (the alarm's id and severity only, never its text; the same alarm flapping inside a minute is one event). Needs `sudo systemctl restart nuc-console-collector` after the update to start recording.
+
 ## [2.5.2] - 2026-10-23
 
 A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).

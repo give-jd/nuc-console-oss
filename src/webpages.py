@@ -1,6 +1,6 @@
-"""nuc-console web view: the Telegram, HEALTH and AI pages.
+"""nuc-console web view: the Telegram, HEALTH, EVENTS and AI pages.
 
-The Telegram page (`telegram_html`), the HEALTH page (`health_nodes`, `health_native`) and the AI page (`ai_nodes`, `ai_native`).
+The Telegram page (`telegram_html`), the HEALTH page (`health_nodes`, `health_native`), the EVENTS page (`events_nodes`, `events_native`) and the AI page (`ai_nodes`, `ai_native`).
 Functions of the data and of the links they are given; the Server of web.py calls them and owns the caches, the engines and the CSRF token."""
 import html
 import sys
@@ -8,6 +8,7 @@ import time
 from urllib.parse import urlsplit
 
 import advisor
+import events
 import htmlview
 import render
 import screens
@@ -142,6 +143,31 @@ def health_native(smp, days, sel, here):
     except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
         print("nuc-console web: health render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
         return '<p class="sm">the health screen could not be drawn (see the service log)</p>'
+
+
+def events_here(params, here, pause=False):
+    """The page's parameters for the EVENTS view of params (events.parse_query's): the period, the kind, the pause and the size/refresh ones of `here`."""
+    return dict({"view": "events", "age": params["age"] if params["age"] in ("1h", "7d") else "", "kind": params["kind"], "pause": pause}, **here)
+
+
+def events_nodes(params, here):
+    """The EVENTS screen's components for the web (events.events_nodes): the period, the kinds and the downloads as links, the table of events.
+    params: events.parse_query's answer (the page passes the default period); here: the page's parameters, which the links change one at a time.
+    The page and the data API draw these."""
+    data = render.events_data(params)
+    href = lambda age=None, kind=None, format=None: page_url(  # noqa: E731
+        here, **({"age": "" if age == "24h" else age} if age is not None else {}), **({"kind": kind} if kind is not None else {}),
+        **({"format": format} if format else {}))
+    return events.events_nodes(data, params["age"], params["kind"], href)
+
+
+def events_native(params, here):
+    """The EVENTS page of the shell, drawn from components. here: the page's parameters."""
+    try:
+        return '<div class="hv ev">' + "".join(htmlview.html(n) for n in events_nodes(params, here)) + "</div>"
+    except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
+        print("nuc-console web: events render error:", repr(e)[:200], file=sys.stderr)  # detail to the journal, not to the page
+        return '<p class="sm">the events page could not be drawn (see the service log)</p>'
 
 
 def ai_chat_nodes(snap, prompt_url=None, now=None):

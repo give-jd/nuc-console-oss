@@ -31,7 +31,8 @@ SCHEMA_VERSION = 1
 RETENTION_DAYS = {"app_hour": 30, "host_hour": 30, "log_day": 30, "events": 90, "disk_day": 400, "boots": 400}
 VACUUM_EVERY_S = 7 * 86400
 KINDS = ("crash", "hang", "oom", "restart", "exit_error", "service_failed", "unexpected_shutdown", "hw_error", "throttle",
-         "disk_low", "login_fail")
+         "disk_low", "login_fail", "problem")
+PROBLEM_DEBOUNCE_S = 60         # the same problem opening (or clearing) again within this long is one event, not two
 APP_TOP = 200                   # apps kept per hour by CPU time ...
 APP_BIG_RSS = 100 * 1024 * 1024  # ... plus every app that holds at least this much memory; the rest is summed into OTHER
 OTHER = "(other)"
@@ -656,6 +657,34 @@ def docker_events(prev, cur, now):
             add("oom", name, "container killed for memory (OOMKilled)")
         elif c["status"] == "exited" and c["exit"] != 0 and (p is None or p["status"] != "exited" or p["exit"] != c["exit"] or started_again):
             add("exit_error", name, "exited with code %d" % c["exit"])
+    return ev
+
+
+# ---- problem lifecycle (pure): a catalog problem appears or clears ------------------------------------------------------------
+
+PROBLEM_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")  # a catalog id: words joined by hyphens (never an address or a name)
+PROBLEM_SEV = {3: "port-change", 2: "error", 1: "warning"}  # as problems.problem_records says them
+
+
+def problem_events(prev, cur, now, recent=None):
+    """Two looks at the open problems ({problem id: severity word}; prev None: the first look ever, only the baseline) -> events of kind
+    'problem': subject = the id, detail 'opened (error)' or 'cleared (error)' (the severity it had). Nothing else about a problem is
+    kept: its text can name addresses or hosts. recent {(id, 'opened'|'cleared'): ts} is the de-bounce: the same id and state again within
+    PROBLEM_DEBOUNCE_S is not recorded (and does not extend the window), so a problem that flaps does not flood the history; it is
+    updated in place."""
+    if prev is None:
+        return []
+    recent = recent if recent is not None else {}
+    ev = []
+    for state, ids, src in (("opened", sorted(set(cur) - set(prev)), cur), ("cleared", sorted(set(prev) - set(cur)), prev)):
+        for pid in ids:
+            sev = clean(src.get(pid), 16) or "unknown"
+            if len(str(pid)) > SUBJECT_MAX or not PROBLEM_ID.match(str(pid)) or now - recent.get((pid, state), -1e18) < PROBLEM_DEBOUNCE_S:
+                continue
+            recent[(pid, state)] = now
+            ev.append({"ts": int(now), "kind": "problem", "subject": pid, "detail": "%s (%s)" % (state, sev), "source": "problems", "n": 1})
+    for k in [k for k, t in recent.items() if now - t > 10 * PROBLEM_DEBOUNCE_S]:
+        del recent[k]
     return ev
 
 
