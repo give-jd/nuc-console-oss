@@ -80,12 +80,23 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
      "ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems "
      "figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as "
      "nuc-console-accept: that one is a root command with a reason."),
+    ("containers", "Containers and reboots",
+     "Containers that are meant to stay down after a reboot or a Docker restart (one-shot jobs, test stacks) are named here so that the "
+     "container-no-restart alarm skips them."),
+    ("thresholds", "Thresholds",
+     "Where a reading becomes an ATTENTION problem. Only memory pressure for now; the kernel-log alarms use fixed windows (docs/CONFIGURATION.md)."),
     ("telegram", "Telegram alerts",
      "New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram "
      "page: the token is never in config.ini."),
     ("ai", "Local AI",
      "A small model on this machine that turns the HEALTH findings into advice and answers questions about the machine. It only reads and "
      "suggests: it never runs anything."),
+    ("services", "Services that must run",
+     "Systemd units (Linux) that must be active: one that is stopped, never started or missing is an ATTENTION error. failed-units only sees "
+     "units that FAILED. An administrator's setting: only config.ini changes it."),
+    ("tls", "TLS certificates to watch",
+     "Certificates whose expiry is checked: a host:port on this machine or a private network (an IP address, never a name; no outbound "
+     "connection is made anywhere else), or the path of a PEM file. An administrator's setting: only config.ini changes it."),
     ("webapps", "Web apps you expect",
      "One per line, name = port[, port...]: shown in WEB APPS as active, or DOWN when nothing listens there. A port listed here is an "
      "intended exposure: it no longer counts as a Docker port bypassing ufw."),
@@ -194,6 +205,8 @@ KEYS = (
          {"pattern": re.compile(r"[A-Za-z0-9_.+-]{0,64}")}),
         ("blank_minutes", INT, "0", INSTALLED,
          "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
+        ("wake_on_problem", BOOL, "yes", INSTALLED,
+         "yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0."),
     ))
     + _k("web", (
         ("enabled", BOOL, "no", INSTALLED, "yes: an installation runs the web view as a service (off by default)."),
@@ -208,6 +221,9 @@ KEYS = (
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
          {"pattern": re.compile(r"([a-z0-9.-]{1,253}(, *[a-z0-9.-]{1,253})*)?")}),
+        ("metrics", BOOL, "yes", START,
+         "yes (the default): /metrics gives the figures of /api/v1/overview as Prometheus text, behind the very checks of /api/v1 (a token off "
+         "loopback). no: the route is a 404."),
         ("settings_actions", BOOL, "no", LOCK,
          "yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it "
          "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),
@@ -217,6 +233,31 @@ KEYS = (
          "ATTENTION alarms to silence, comma-separated, of: %s. A muted alarm is still collected: it only leaves the list, the problems "
          "figure and Telegram, and is counted as muted. Anything else is ignored and reported." % ", ".join(nuc_config.MUTABLE_ALERTS),
          {"choices": nuc_config.MUTABLE_ALERTS, "unset": True}),
+    ))
+    + _k("services", (
+        ("must_run", TEXT, "", START,
+         "Unit names, comma-separated (up to %d, letters, digits and @ . _ : -): docker, ssh, tailscaled, fail2ban. Empty: the check is off. "
+         "Each is asked with systemctl is-active by the collector; Windows and macOS have no such check." % nuc_config.WATCH_MAX,
+         {"pattern": re.compile(r"([A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}(, *[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63})*)?")}),
+    ))
+    + _k("tls", (
+        ("watch", TEXT, "", START,
+         "Comma-separated name = host:port or name = /absolute/path.pem (up to %d). host: an IP address on this machine, a private network "
+         "or the tailnet (or localhost); a certificate is read without being trusted, only its end date is kept. Empty: nothing is watched."
+         % nuc_config.TLS_MAX, {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
+        ("warn_days", INT, "21", START, "Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error.",
+         {"lo": 1, "hi": 365}),
+    ))
+    + _k("containers", (
+        ("restart_ignore", LIST, "", NOW,
+         "Containers the container-no-restart alarm skips (restart policy no, on purpose), comma-separated: names or shell-style globs "
+         "such as *-test-*, matched without regard to case. Empty: none.",
+         {"pattern": re.compile(r"[a-z0-9_.*?\[\]-]{1,80}"), "unset": True}),
+    ))
+    + _k("thresholds", (
+        ("memory_pressure_pct", INT, "10", NOW,
+         "Memory pressure (the kernel's PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises "
+         "memory-pressure. 10 is already a machine that waits for memory.", {"lo": 1, "hi": 100}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,

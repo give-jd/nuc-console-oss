@@ -190,14 +190,26 @@ def snapshot(now=None, os_name=None):
             "analyze": {"parts": parts, "total": total},
             "blame": [{"unit": u, "s": s} for u, s in (("systemd-networkd-wait-online.service", 33.5), ("docker.service", 6.2),
                                                        ("snapd.service", 4.8), ("cloud-init.service", 3.9))],
-            "failed": [], "deps": {}, "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
+            "failed": [], "deps": {}, "services": [{"unit": u, "state": st} for u, st in (("docker", "active"), ("ssh", "active"), ("unattended-upgrades", "inactive"))],
+            "sshd": {"permitrootlogin": "prohibit-password", "passwordauthentication": "yes", "permitemptypasswords": "no", "pubkeyauthentication": "yes",
+                     "x11forwarding": "no"},
+            "certs": [{"name": "nas", "exp": int(now) + 240 * 86400, "why": ""}, {"name": "router", "exp": int(now) + 12 * 86400 + 3600, "why": ""}],
+            "enabled": [{"unit": f"svc{i}.service", "state": "active"} for i in range(24)],
             "journal": {"err": 2, "warn": 9, "capped": False, "top": [{"id": "kernel", "n": 4, "pr": 4, "last": "example warning"}]},
+            "kernlog": {"oom": {"n": 2, "last": int(now) - 5400, "procs": ["node"]}},
             "containers": [{"name": "shop-web-1", "started": int(now) - up + 40, "restart": "unless-stopped"},
                            {"name": "cache-1", "started": int(now) - 3600, "restart": "no"}],
             "docker_df": {"rows": [{"type": "Images", "count": "14", "active": "6", "size": "5.2GB", "reclaimable": "2.1GB (40%)"},
                                    {"type": "Containers", "count": "7", "active": "6", "size": "180MB", "reclaimable": "0B (0%)"},
                                    {"type": "Local Volumes", "count": "5", "active": "5", "size": "1.4GB", "reclaimable": "0B (0%)"}],
-                          "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}}}
+                          "volumes_unused": 12, "volumes_unused_anonymous": 9, "dangling_images": {"count": 0, "bytes": 0}},
+            # host hygiene (collector.collect_boot): a fresh backup, a stale one, a reboot asked for, three security updates, a synchronised clock, one full disk
+            "backups": [{"name": "nightly-db", "newest": int(now) - 3 * 3600, "size": 412 * MiB, "matches": 7, "max_age_days": 2},
+                        {"name": "photos", "newest": int(now) - 5 * 86400, "size": 96 * MiB, "matches": 1, "max_age_days": 2}],
+            "reboot": {"flag": True, "running": "6.8.0-demo", "newest": "6.8.0-demo", "kernel_old": False},
+            "updates": {"security": 3, "total": 14, "at": int(now) - 1200},
+            "clock": {"synced": True, "ntp": True},
+            "inodes": [{"mount": d[0], "pct": pct} for d, pct in zip(machine(os_name)["disks"], (4.2, 92.0))]}
     if os_name in ("windows", "darwin"):
         net, boot = _native(net, boot, os_name, now)
     import exposure
@@ -233,8 +245,9 @@ def _native(net, boot, os_name, now):
                     journal={"err": 3, "warn": 12, "capped": False, "top": [
                         {"id": "Microsoft-Windows-DistributedCOM", "n": 9, "pr": 4, "last": "example DCOM warning"},
                         {"id": "Service Control Manager", "n": 3, "pr": 3, "last": "example service error"}]},
-                    unsupported=["blame"], absent=["blame"])
+                    unsupported=["blame", "kernlog"], absent=["blame", "kernlog"])
         boot.pop("blame", None)
+        boot.pop("kernlog", None)
     else:
         own = [lst("*", 22, "launchd", ["open", "built-in, allowed"]), lst("*", 5000, "ControlCenter", ["open", "built-in, allowed"]),
                lst("*", 7000, "ControlCenter", ["open", "built-in, allowed"]),
@@ -242,14 +255,16 @@ def _native(net, boot, os_name, now):
         fw = {"kind": "darwin", "name": "macOS firewall", "state": 1, "off": [], "block_all": False, "stealth": True, "builtin": True,
               "downloaded": True, "apps_allowed": 3, "apps_blocked": 1, "pf": {"enabled": False, "rules": 0}}
         boot = dict(boot, kernel="macOS 15.6", enabled=[{"unit": f"com.example.daemon{i}", "state": "active"} for i in range(6)],
-                    unsupported=["analyze", "blame", "journal"], absent=["analyze", "blame", "journal"])
-        for k in ("analyze", "blame", "journal"):
+                    unsupported=["analyze", "blame", "journal", "kernlog"], absent=["analyze", "blame", "journal", "kernlog"])
+        for k in ("analyze", "blame", "journal", "kernlog"):
             boot.pop(k, None)
     gone = ("ufw", "docker_user", "iptables", "f2b", "drops")
     net = {k: v for k, v in net.items() if k not in gone and k not in ("users", "keys", "cron", "units", "smart")}  # Linux only
     net.update(os=os_name, firewall=fw, listeners=own + common, absent=list(gone), unsupported=list(gone))
     if not win:
         boot.pop("deps", None)  # macOS: launchd has no dependency graph to read
+    for k in ("reboot", "updates", "clock") + (("inodes",) if win else ()):  # collector.UNSUPPORTED_BOOT: the hygiene sections these collectors do not write
+        boot.pop(k, None)
     for it in net["dbs"]["items"]:
         it["ext_source"] = "n/d"  # Docker Desktop: the containers' namespaces are inside a VM
         it["external"], it["active"] = [], []  # nor who connects from the other containers (collector.db_items without conn_fn)
@@ -257,6 +272,8 @@ def _native(net, boot, os_name, now):
     links["containers"] = [dict(x, listen_src="image") for x in links["containers"]]
     links["conns"] = [e for e in links["conns"] if not e["from"].startswith("ct:")]  # what containers open is NATed by the VM
     net["links"] = links
+    boot = {k: v for k, v in boot.items() if k not in ("services", "sshd")}  # systemctl and sshd -T: Linux only (the certificates are read everywhere)
+    boot["absent"], boot["unsupported"] = boot["absent"] + ["services", "sshd"], boot["unsupported"] + ["services", "sshd"]
     return net, dict(boot, os=os_name, ts=now)
 
 
