@@ -42,6 +42,8 @@ SECURITY = {
     "ufw-off", "ufw-missing", "ufw-unreadable", "firewall-off", "firewall-unreadable", "firewall-policy",                   # the firewall
     "docker-bypass", "db-open-lan", "funnel-public", "over-exposed", "expose-unmatched",                                     # exposure
     "port-new", "port-changed", "port-gone", "port-compare-suspended", "baseline-missing", "baseline-unreadable",           # ports
+    "baseline-incomplete", "users-changed", "keys-changed", "cron-changed", "units-changed",                                 # the rest of the baseline
+    "disk-smart-failed", "disk-wear", "disk-media-errors",                                                                    # hardware integrity
     "collector-net", "collector-containers", "stale-net", "stale-containers", "net-sections", "config-unreadable",           # their data
     "telegram-unpaired", "telegram-failing",                                                                                 # the alerting
     "failed-units",                                                                                                          # a stopped fail2ban or sshd hides in it

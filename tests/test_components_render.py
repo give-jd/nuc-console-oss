@@ -390,7 +390,10 @@ class NativeCardTests(unittest.TestCase):
                             ("network_traffic", cardlines.ov_traffico, ctx.s)):
             for k in (-2, 0, 3):
                 card = cards.build(id, ctx, k, cards.Caps(100))
-                self.assertEqual(ansi.card_lines(card, 100)[0], fn(arg, 100, k), (id, k))
+                got = ansi.card_lines(card, 100)[0]
+                if id == "disks":
+                    got = [x for x in got if "SMART" not in x]  # the demo's SMART line (tests/test_integrity.py) is not part of the old block
+                self.assertEqual(got, fn(arg, 100, k), (id, k))
 
     def fs(self, n):
         return [{"mount": f"/m{i}", "used": 10 * 2 ** 30, "total": 100 * 2 ** 30} for i in range(n)]
@@ -416,7 +419,7 @@ class NativeCardTests(unittest.TestCase):
             self.assertFalse(card.truncated)
             self.assertEqual(len(card.body[0].rows), 8)
             self.assertFalse(any(isinstance(p, More) for p in card.body))
-            self.assertEqual(len(ansi.card_lines(card, 100)[0]), 9)
+            self.assertEqual(len(ansi.card_lines(card, 100)[0]), 10)  # title, 8 disks, the SMART line of the demo
 
     def test_disks_without_data_say_why(self):
         for fs, level, text in (([], "info", "no filesystems"), (None, "warn", "unavailable")):
