@@ -44,8 +44,9 @@ BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "
                 "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
-                    "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}.get(OS_NAME, ())  # the host-hygiene sections are Linux (inodes: macOS too)
+UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
+                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
+UNSUPPORTED_BOOT = UNSUPPORTED_BOOT_BY_OS.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
