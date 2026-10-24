@@ -13,6 +13,7 @@ try:
 except ImportError:  # Windows
     fcntl = termios = None
 
+TIOCLINUX = getattr(termios, "TIOCLINUX", 0x541C)  # Linux's request number: termios of macOS has none, Windows has no termios; used only on a Linux VT
 TIOCL_UNBLANKSCREEN = 4
 MIN_GAP_S = 30.0  # at most one wake in this time: a flapping alarm must not keep the monitor lit
 
@@ -29,7 +30,7 @@ def is_vt(fd, env=None):
 def unblank(fd):
     """The ioctl; True when the kernel took it. Any OSError (not the owner, not a VT) is swallowed."""
     try:
-        fcntl.ioctl(fd, termios.TIOCLINUX, bytes([TIOCL_UNBLANKSCREEN]))
+        fcntl.ioctl(fd, TIOCLINUX, bytes([TIOCL_UNBLANKSCREEN]))
         return True
     except (OSError, AttributeError, TypeError):
         return False
