@@ -968,8 +968,8 @@ def _k(keys, scope, action, label, prio, show="", short=None, feat=""):
 
 # scopes: global (every screen), overview, list (map cpu health ai), then one per screen; editor is the web layout editor (documented
 # only: the console never dispatches it)
-SCOPES = ("global", "overview", "list", "map", "cpu", "health", "ai", "editor")
-LIST_SCREENS = ("map", "cpu", "health", "ai")
+SCOPES = ("global", "overview", "list", "map", "cpu", "health", "ai", "events", "editor")
+LIST_SCREENS = ("map", "cpu", "health", "ai", "events")
 # the screens 1-5 open: (name, [features] switch that has to be on or "", the title in the help)
 SCREENS = (("overview", "", "Overview"), ("map", "map", "Map"), ("cpu", "cpu", "CPU"), ("health", "health", "Health"), ("ai", "ai", "AI"))
 HOLD_ALIAS = {"m": "map", "c": "cpu", "h": "health", "a": "ai"}  # the overview's old letters: they still open the screen
@@ -991,6 +991,7 @@ KEYMAP = (
     _k("c", "overview", "open-cpu", "open the CPU screen", None, "c", feat="cpu"),
     _k("h", "overview", "open-health", "open the Health screen", None, "h", feat="health"),
     _k("a", "overview", "open-ai", "open the AI screen", None, "a", feat="ai"),
+    _k("e", "overview", "open-events", "open the Events screen", None, "e"),  # no digit: the tabs are 1-5; the history it reads says plainly when it is off
     # -- every list (map, cpu, health, ai)
     _k("up down j k", "list", "move", "move", 2, "↑↓"),
     _k("pgup pgdn home end", "list", "page", "page", 9, "PgUp/PgDn/Home/End", short=""),
@@ -1005,6 +1006,9 @@ KEYMAP = (
     _k("p m t n u P M T N U", "cpu", "sort", "sort", 3, "p m t n u"),
     # -- health
     _k("d w m", "health", "period", "24h/7d/30d", 3, "d/w/m", short="period"),
+    # -- events (the timeline of history.db; the web: age=1h|24h|7d, kind=)
+    _k("h d w", "events", "age", "1h/24h/7d", 3, "h/d/w", short="period"),
+    _k("f", "events", "kind", "filter by kind", 3.1, "f", short="kind"),
     # -- ai (the keys that act are there unless [ai] web_actions = no locked them)
     _k("e", "ai", "toggle", "AI on/off", 3, "e", short="on/off"),
     _k("u", "ai", "use", "use model", 3.1, "u", short="use"),
@@ -1156,7 +1160,8 @@ def help_rows(scope, enabled=None, portable=False, paused=False):
             elif r.action == "help":
                 what = "this help"
             elif r.action.startswith("open-"):
-                what += " (as " + {"m": "2", "c": "3", "h": "4", "a": "5"}[r.keys[0]] + ")"
+                if r.keys[0] in "mcha":  # the letters that are also a digit
+                    what += " (as " + {"m": "2", "c": "3", "h": "4", "a": "5"}[r.keys[0]] + ")"
             items.append((show, what))
         if items:
             groups.append((GROUP_TITLE.get(s, s.capitalize()), items))

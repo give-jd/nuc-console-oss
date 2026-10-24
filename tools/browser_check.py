@@ -36,13 +36,13 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-VIEWS = ("overview", "map", "map-graph", "cpu", "health", "ai", "settings", "telegram", "setup", "layout")
-APP_VIEWS = ("overview", "cpu", "health", "map", "ai")  # the live app's screens (/app)
+VIEWS = ("overview", "map", "map-graph", "cpu", "health", "events", "ai", "settings", "telegram", "setup", "layout")
+APP_VIEWS = ("overview", "cpu", "health", "map", "ai", "events")  # the live app's screens (/app)
 THEMES = (("auto", "a"), ("dark", "d"), ("light", "l"), ("high-contrast", "h"))
 DENSITIES = (("wall", "w"), ("desk", "k"), ("compact", "c"))
 # the graph is paused: its script reloads the page when the refresh is due, and a reload inside --virtual-time-budget keeps some Chrome
 # builds (154 on the CI runner) from ever finishing the dump; paused, the same script runs (drawing, physics) and only the reload is off
-VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph&pause=1", "cpu": "&view=cpu", "health": "&view=health",
+VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph&pause=1", "cpu": "&view=cpu", "health": "&view=health", "events": "&view=events",
               "ai": "&view=ai", "settings": "&view=settings", "telegram": "&view=telegram", "setup": "&view=setup&step=3", "layout": "&edit=1"}
 WINDOW = "1440,900"
 VIRTUAL_TIME_MS = 4000  # the scripts fetch, poll and replace blocks: let the page run this long (virtual time, so it does not wait)
@@ -64,6 +64,7 @@ VIEW_LANDMARKS = {
     "map-graph": (("the graph", ('id="gv"',)), ("the graph's drawing", ("<svg",))),
     "cpu": (("the CPU screen", ('class="scr scr-cpu"',)),),
     "health": (("the findings", ('class="hv"',)),),
+    "events": (("the events", ('class="hv ev"',)),),
     "ai": (("the AI screen", ('class="scr av"',)),),
     "settings": (("the settings", ('class="settings"',)),),
     "telegram": (("the Telegram page", ('id="tg"',)), ("its pairing form", ('action="/telegram/pair"',))),
@@ -74,6 +75,7 @@ VIEW_LANDMARKS = {
     "app-overview": (("the key figures it drew", ('role="listitem"',)), ("a card it drew", ('<article class="card',))),
     "app-cpu": (("the CPU screen it drew", ('class="scr scr-cpu"',)),),
     "app-health": (("the findings it drew", ('class="hv"',)),),
+    "app-events": (("the events it drew", ('class="hv ev"',)),),
     "app-map": (("the map it drew", ('class="scr mapv"',)),),
     "app-ai": (("the AI screen it drew", ('class="scr av"',)),),
 }
@@ -348,12 +350,16 @@ def parity_page(view):
                 nodes = srv.api_cpu(here, "cpu", "")["nodes"]
             elif view == "health":
                 nodes = webpages.health_nodes(srv.smp, 7, "", dict({"view": "health", "period": 0, "sel": "", "pause": False}, **here))
+            elif view == "events":
+                import events
+                prm = events.parse_query({})
+                nodes = webpages.events_nodes(prm, webpages.events_here(prm, here))
             elif view == "map":
                 p = weburl.view_params({"view": ["map"]})
                 nodes = srv.api_map(here, weburl.map_mode({k: p[k] for k in weburl.VIEW_KEYS["map"] if k not in ("as", "pause")}), r)["nodes"]
             else:
                 nodes = srv.api_ai(here, "", "", shown)["nodes"]
-            box = {"cpu": "scr scr-cpu", "health": "hv", "map": "scr mapv", "ai": "scr av"}[view]
+            box = {"cpu": "scr scr-cpu", "health": "hv", "events": "hv ev", "map": "scr mapv", "ai": "scr av"}[view]
             screen = '<div class="%s">' % box + "".join(htmlview.html(n) for n in nodes) + "</div>"
     html_text = str(page).replace('<div class="kpiblock" id="kpis"></div>', '<div class="kpiblock" id="kpis"></div><!--END-KPIS-->', 1)
     html_text = html_text.replace("</main>", "</main><!--END-APP-->", 1)

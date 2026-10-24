@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlencode
 
 import aiweb
+import events
 import nuc_config
 import prefs
 import screens
@@ -53,6 +54,8 @@ def view_params(q):
     no such process).
     view=health: the HEALTH page: period=1|7|30 (days, default 7), sel= the id of the finding whose details are shown (page() drops one the
     report does not have), pause=1 no reload.
+    view=events: the EVENTS page (the timeline of the history): age=1h|24h|7d (default 24h), kind= one of history.KINDS, pause=1 no reload;
+    format=csv|json there is a download (webhttp), not a page.
     view=ai: the AI page: sel= the id of the model whose details are shown (page() drops one the catalog does not have), pause=1 no reload,
     confirm=on|delete|delete-all|clear the question the page asks first (page() drops one that does not apply; on and delete are about sel),
     prompt= the id of the chat's exchange whose whole prompt is shown (page() drops one the chat does not have).
@@ -65,7 +68,7 @@ def view_params(q):
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     zoom = num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "settings", "telegram", "setup") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "events", "settings", "telegram", "setup") else ""
     edit = not view and one("edit") == "1"  # the layout editor: the overview in edit mode
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
@@ -84,15 +87,17 @@ def view_params(q):
             "z": gzoom(num("z")),
             "sort": one("sort") if view == "cpu" and one("sort") in screens.CPU_SORTS[1:] else "",
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
+            **({"age": one("age") if one("age") in ("1h", "7d") else "",  # 24h is the default: no parameter, one URL
+                "kind": one("kind") if one("kind") in events.KINDS else ""} if view == "events" else {}),
             **({"step": min(5, max(1, num("step")))} if view == "setup" else {}),  # the setup guide's step (wizard.STEPS): 1-5, anything else the nearest
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else "",
                 "prompt": one("prompt") if aiweb.CHAT_ID.fullmatch(one("prompt")) else ""} if view == "ai" else {})}
 
 
-APP_VIEWS = ("cpu", "health", "map", "ai")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
+APP_VIEWS = ("cpu", "health", "map", "ai", "events")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
 HERE_KEYS = ("zoom", "rotate", "kiosk", "refresh", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "setup": ("step",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "events": ("age", "kind", "pause"), "setup": ("step",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
 
 
 def ui_oneshot(raw):
@@ -113,7 +118,8 @@ def view_url(p):
 def app_url(p):
     """The address of a screen of the live app for view_params() p: the screen and the parameters it takes, the defaults left out."""
     view = p["view"] if p["view"] in APP_VIEWS else ""
-    keep = {"cpu": ("sort", "sel"), "health": ("period", "sel"), "map": ("open", "shut", "all", "sel", "only"), "ai": ("sel", "confirm", "prompt")}.get(view, ())
+    keep = {"cpu": ("sort", "sel"), "health": ("period", "sel"), "map": ("open", "shut", "all", "sel", "only"), "ai": ("sel", "confirm", "prompt"),
+            "events": ("age", "kind")}.get(view, ())
     q = {"view": view}
     q.update((k, ".".join(p[k]) if k in ("open", "shut") and not isinstance(p[k], str) else p[k]) for k in keep if k in p)
     return APP_PATH + ("?" + urlencode([(k, "1" if v is True else v) for k, v in q.items() if v not in (0, False, None, "")]) if any(

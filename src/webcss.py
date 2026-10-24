@@ -649,6 +649,28 @@ svg.series rect{fill:currentColor}
 """
 
 # the Map screen drawn from components (screens.map_web; htmlview: Title, Legend, Seg, Outline, Props): everything under .mapv (and .scr, for the panels)
+# the EVENTS page (events.events_nodes) is a .hv screen (the title, its Segs) with a table of events: a phone (600 px and less) stacks each event
+# as a block, the time, the kind and the subject above what happened, so that nothing scrolls sideways
+EVENTS_VIEW = """
+.ev table.tbl{table-layout:auto}
+.ev table.tbl td:first-child{white-space:nowrap}
+.ev table.tbl td:last-child{white-space:normal;overflow-wrap:anywhere}
+.ev table.tbl td{overflow-wrap:anywhere}
+.ev .st .seg{max-width:100%}
+@media (max-width:600px){
+.ev table.tbl,.ev table.tbl tbody,.ev table.tbl tr,.ev table.tbl td{display:block;width:auto;max-width:100%}
+.ev table.tbl colgroup{display:none}
+.ev table.tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.ev table.tbl tbody tr{padding:.55em 0;border-bottom:1px solid var(--line)}
+.ev table.tbl tbody tr:last-child{border-bottom:0}
+.ev table.tbl td,.ev table.tbl td:first-child,.ev table.tbl td:last-child{padding:.08em 0;border:0;background:none;white-space:normal}
+.ev table.tbl td:nth-child(1){color:var(--muted);font-size:.86em}
+.ev table.tbl td:nth-child(2){font-weight:600}
+.ev table.tbl td:nth-child(3){color:var(--fg-strong)}
+.ev .st .seg{margin-left:0}
+}
+"""
+
 MAP_VIEW = """
 .mapv>*{min-width:0}
 .mapv .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
@@ -834,7 +856,7 @@ def graph_zoom_css():
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, WIZARD, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, WIZARD, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, EVENTS_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

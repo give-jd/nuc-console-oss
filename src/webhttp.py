@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 import advisor
 import appjs
 import cards
+import events
 import nuc_config
 import prefs
 import render
@@ -300,11 +301,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._set(q)
         if (q.get("view") or [""])[0] == "telegram" and (q.get("open") or [""])[0] == "1":
             return self._tg_open()
+        if (q.get("view") or [""])[0] == "events" and "format" in (self._strict_query() or q):  # format= (blank) is a bad format, not no format
+            return self._events_download(q)
         page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
         if (q.get("frag") or [""])[0] == "1" and getattr(page, "blocks", None) is not None:  # a page without blocks (the layout editor) is served whole
             return self._fragment(page.blocks)
         self._send(200, page.encode(), "text/html; charset=utf-8", csp=getattr(page, "csp", CSP), referrer=getattr(page, "referrer", "no-referrer"),
                    extra=(("Vary", "Cookie"),))
+
+    def _strict_query(self):
+        """The query string with its blank values kept (limit= is then a value that is not a number, not no limit); None when it has too many."""
+        try:
+            return parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=40)
+        except ValueError:
+            return None
+
+    def _events_download(self, q):
+        """/?view=events&format=csv|json (and age=, kind=, since=, limit= as the API takes them): the events as a file, the newest LIMIT_MAX of the
+        period the page shows (24 hours when none is given). CSV cells that start with = + - @ are quoted. Nothing to download (the history is
+        off, or empty of a file): 404 with the reason, not an empty file that looks like a quiet machine."""
+        q = self._strict_query() or {}
+        try:
+            if (q.get("format") or []) not in (["csv"], ["json"]):
+                raise events.QueryError("format: csv or json")
+            params = events.parse_query({k: v for k, v in q.items() if k in ("age", "kind", "since", "limit")})
+        except events.QueryError as e:
+            return self._send(400, (str(e) + "\n").encode())
+        if "limit" not in q:
+            params["limit"] = events.LIMIT_MAX
+        data = render.events_data(params)
+        if data["state"] != "ok":
+            return self._send(404, (data["msg"] + "\n").encode())
+        if q["format"] == ["csv"]:
+            body, ctype, name = events.csv_text(data["rows"]).encode("utf-8"), "text/csv; charset=utf-8", "nuc-console-events.csv"
+        else:
+            body, ctype, name = webapi.dump(events.json_rows(data)), webapi.JSON_TYPE, "nuc-console-events.json"
+        self._send(200, body, ctype, extra=(("Content-Disposition", 'attachment; filename="%s"' % name),))
 
     def _json(self, code, obj, extra=()):
         self._send(code, webapi.dump(obj), webapi.JSON_TYPE, extra=extra)
@@ -319,12 +351,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         srv = self.server
         if name == "":
             return self._json(200, srv.api_index())
+        if name == "events":  # its parameters are checked strictly: a blank one (limit=) is a mistake, not an absent one
+            q = self._strict_query()
+            if q is None:
+                return self._json(400, {"error": "too many parameters"})
         if name == "stream":
             return self._stream(q)
         if name not in webapi.VIEWS:
             return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
         try:
             doc = srv.api(name, q)
+        except events.QueryError as e:  # a parameter of /api/v1/events that is not valid: said, never guessed
+            return self._json(400, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 - a broken state must not take the server down
             print("nuc-console web: api %s error: %r" % (name, e), file=sys.stderr)  # detail to the journal, not to the answer
             return self._json(500, {"error": "the data could not be read (see the service log)"})
@@ -355,6 +393,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         connection and a thread: STREAMS_MAX at once (more: 503), and it ends after STREAM_S, the request deadline lifted (the client reconnects
         after RETRY_MS, with the last id). A client that stops reading is dropped by the socket's timeout."""
         srv = self.server
+        if "events" in (q.get("view") or []):
+            q = self._strict_query()
+            if q is None:
+                return self._json(400, {"error": "too many parameters"})
         names = []
         for v in q.get("view") or ["overview"]:
             if (v or "overview") not in names:
@@ -366,6 +408,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
         try:
             off = [v for v in names if srv.api(v, q) is None]
+        except events.QueryError as e:
+            return self._json(400, {"error": str(e)})
         except Exception as e:  # noqa: BLE001
             print("nuc-console web: api %s error: %r" % (names, e), file=sys.stderr)
             return self._json(500, {"error": "the data could not be read (see the service log)"})

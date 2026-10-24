@@ -92,6 +92,37 @@ finding that no longer exists is not a link. The model gets the findings as data
 never log lines), may only read the history through fixed queries, and cannot run or change anything: the commands in its advice are
 for you to check and run. With the advisor off the screen is exactly as above.
 
+## Events: the timeline
+
+The HEALTH findings say what keeps going wrong; the **EVENTS** screen says what happened, and when, one line per event, newest first: the
+morning after a monitor went black and the box was restarted, this is where you read the night. It lists the `events` table of the
+history: the kinds above (`crash`, `hang`, `oom`, `restart`, `exit_error`, `service_failed`, `unexpected_shutdown`, `hw_error`, `throttle`,
+`disk_low`, `login_fail`) and, since this screen, **`problem`**: the collector looks at the alarms of the ATTENTION list every minute and
+records when one **opens** and when it **clears** (`thermal`, `unhealthy-container`, `failed-units`, `port-new`...; `opened (error)`,
+`cleared (warning)`: the id and the severity it had, never the text of the alarm, which can name an address). Flapping does not flood the
+history: the same alarm opening (or clearing) again within 60 seconds is one event. The first look after the history is created is only a
+baseline (what was already wrong then is not an event); an alarm you muted or accepted is recorded too, because the timeline says what was
+wrong with the machine, not what you chose to hear about. Not recorded: the `throttling` alarm (it needs the rate of the last minute, which the
+collector does not keep; the `throttle` events above cover it) and the Telegram ones. An alarm that flips back and forth is capped: at most 6
+events per alarm and 120 in all per rolling hour, and one event with the detail `flapping` says that an alarm was cut; the next change that is
+recorded says the true state. Problem events are recorded by the collector from its own view of the configuration (settings changes made from
+the web settings page may need a collector restart to show up here).
+
+| Console | Web | |
+|---|---|---|
+| `e` from the dashboard | the **events** link in the bottom bar | open it (it has no digit: `1` to `5` are the screens as they were); `Esc` or `q` goes back, and so do 10 minutes without a key |
+| `h`, `d`, `w` | `age=1h`, `24h`, `7d` | the last hour, 24 hours (default), 7 days |
+| `f` | `kind=` | one kind at a time, all again after the last |
+| `↑` `↓` (`k` `j`), `PgUp` `PgDn`, `Home` `End` | | scroll (the console loads the newest 500 of the period) |
+| `Enter` or `Space` | | the details of an event: local and UTC time, how many times, who saw it |
+| | `format=csv`, `format=json` | download the events of the period (up to 500) |
+
+The console shows local time, the web UTC. With `[features] health = no` nothing is recorded and the screen says *the history is off*;
+with no history file yet it says *no history yet*; with a history and nothing in the period it says so too: an empty list is never the
+answer to "I could not read it". For a quick look over SSH: `render.py --once --view events` (`--age 1h|24h|7d`, `--kind KIND`, `--select N`,
+`--details`, `--demo`, `--demo-health none`). The data API is `/api/v1/events` ([WEB.md](WEB.md#the-data-api)). It has no place in the rotation of the
+monitor (`events_in_rotation` was left out: a timeline wants a keyboard to scroll).
+
 ## Turning it off
 
 `[features] health = no` in `config.ini`: no history thread, no file written. `[dashboard] health_in_rotation = yes` adds
