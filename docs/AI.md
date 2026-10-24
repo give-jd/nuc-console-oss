@@ -224,6 +224,28 @@ devices (`PrivateDevices=yes`), so a server started from the page runs on the CP
 unit (the account needs the `render`/`video` groups) or `sudo nuc-console-ai serve --install-service`, which is made for it. A server you run yourself
 (Ollama...) is never started or stopped from here; with the AI on by `config.ini` the page just asks it.
 
+### After a restart
+
+The server is a child of the web view, so it ends whenever the web view restarts: an update, a reboot, `systemctl restart nuc-console-web`. The page's `web.json`
+still says the AI is on, so the page showed `ON` above `NOT RUNNING` until someone turned it off and on again. Now, when the web view starts (a
+service, the desktop app, a portable run: the console never does this) and `web.json` has the AI on with a model, it waits about 5 s (the first page is served
+first) and starts that model's server in the background, with the page's own checks: the server and the model installed, the model not marked "too big", 127.0.0.1
+only, low priority, and **no second server** if something already answers at the endpoint (a service of yours, `nuc-console-ai serve`). One automatic attempt, and
+one more 60 s after a failure; never in a loop. If you pressed *Turn AI off* in this run, it does not start again until the next start. A failure never stops the web view:
+it is written to its log (stderr) and shown as the page's last note ("starting the model server by itself failed: ..."). `[ai] autostart = no` switches it off
+([CONFIGURATION.md](CONFIGURATION.md#ai--optional-local-model-for-the-health-screen-off-by-default)); `[ai] web_actions = no` too.
+
+If it cannot work (the server or the model is gone from the folder), the page says what to run. While nothing answers, the page shows one line, **NOT RUNNING: AI is on
+but the model server is not running** (*starting it* during the first seconds), not an `ON` above a `NOT RUNNING`.
+
+**The `ai-down` alarm** (ATTENTION, warning) is raised when the AI is on with a model and nothing has answered at its endpoint for more than 2 minutes (the grace for the
+automatic start and the model's load, counted from the start of the web view or from the last change). The web view, which owns the server, probes it every 30 s and writes
+`ai-status.json` next to `web.json` (`{"v":1,"ts":..,"enabled":..,"answering":..,"since":..,"model":".."}`, atomic, 0644); the console and the web pages only read that file and never
+probe on a frame. They treat it as untrusted: a regular file (a link is not followed) of at most 1 KB, owned by root or the reader, nobody else may write it, types checked; a
+file older than 3 minutes (the web view is not running) or from the future says nothing, and a missing one raises nothing. The root collector does not read what the web account
+wrote, so the history does not record it. It can be muted (`[alerts] mute = ai-down`: it is operational) and accepted. Fix: turn AI off and on again on the page, or
+`sudo nuc-console-ai serve --install-service`, a service that does not depend on the web view.
+
 ### Security of the buttons
 
 The rules are in [WEB.md](WEB.md#the-ai-pages-buttons) (the same access as viewing, a CSRF token, Origin/Referer/Fetch-Metadata checks, 4 KB, ids from the catalog, the CSP
@@ -489,6 +511,7 @@ manifest is in the folder of models and every layer it names is there with its s
 | The page or the screen says `locked by config.ini` | `[ai] web_actions = no`: set it to `yes` and restart the web view and the console (config is read when they start) |
 | A job says `another nuc-console process is downloading ...` | one job at a time, and the web view and the console share the folder: they wait for each other (`job.lock`, which clears itself 90 s after a process died) |
 | A job says `this account may not write to ...` | the folder is root's (made by an older `sudo nuc-console-ai setup`): `sudo chown -R nuc-console:nuc-console /var/lib/nuc-console/ai` (macOS: `_nuc-console`), or run the command it names |
+| `NOT RUNNING`, or the alarm `ai-down` | the AI is on and nothing answers: [After a restart](#after-a-restart) |
 | `ERROR`, or `the model server stopped at once` | the exit status and the server's last lines are shown: usually not enough memory or a port; `nuc-console-ai serve` in a terminal shows more |
 | `could not be loaded: the model server says: model requires more system memory ...` | the model does not fit what is free now: close something, or choose a smaller one |
 | `ON`, but it runs on the CPU although the machine has a GPU (Linux) | the web view's unit cannot open the GPU devices (`PrivateDevices=yes`); use `sudo nuc-console-ai serve --install-service` for a GPU ([GPU support](#gpu-support)) |

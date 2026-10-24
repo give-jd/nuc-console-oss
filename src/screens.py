@@ -2044,6 +2044,9 @@ def ai_control_nodes(snap, ch, cat, rows, sel, confirm, acts, links):
     it off, cancel), what turning it on will use, the folder the models go to, the answer to the last click, and the question a click asked first."""
     state, text = snap["state"]
     mark, tone = AI_MARK.get(state, ("?", "muted"))
+    if ai_not_running(snap):  # one statement instead of an ON badge above a NOT RUNNING one
+        mark, tone = AI_MODEL["down"]
+        text = "AI is on but the model server is not running: " + ("starting it" if snap.get("autostart") else "turn AI off and on again to start it")
     items = [Badge(mark, tone), _sp(text, None, True)]
     if snap["locked"]:
         pass
@@ -2109,12 +2112,17 @@ def ai_loaded_where(row):
     return f"where: ?{ctx}"
 
 
+def ai_not_running(snap):
+    """The AI is on (and asks a server this process did not start, or whose child is gone) and nothing answers at its endpoint."""
+    return (snap.get("state") or ("",))[0] == "on" and dd(snap.get("model")).get("state") == "down"
+
+
 def ai_model_lines(snap, acts, now=None):
     """The model's line under the switch (the engine's model_state): is it loaded, and where; is it starting, loading, answering (with how long so
     far and what it is doing); 'Load it now' when the server runs here without it. Nothing when the AI is off. Web only (Controls)."""
     ms = dd(snap.get("model"))
     st, model = ms.get("state"), hclean(ms.get("model"), 60) or "the model"
-    if not st or st == "off":
+    if not st or st == "off" or ai_not_running(snap):  # (the line above the model's already says so)
         return []
     now = time.time() if now is None else now
     since = ai_secs(now - ms["since"]) if num(ms.get("since")) else ""

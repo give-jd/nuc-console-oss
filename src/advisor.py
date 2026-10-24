@@ -888,6 +888,60 @@ def write_web_state(change, path=None):
             raise
 
 
+AI_STATUS_FILE = "ai-status.json"   # next to web.json: whether the model server answers, as the web view's engine saw it (see write_ai_status)
+AI_STATUS_MAX_BYTES = 1024
+
+
+def ai_status_path():
+    return os.path.join(os.path.dirname(web_state_path()), AI_STATUS_FILE)
+
+
+def read_ai_status(path=None):
+    """ai-status.json, written every 30 s by the web view's engine, which owns the model server: {"ts", "enabled", "answering", "since", "model"}
+    (ints and bools, "model" a clean name or ""), or None when there is no file or it is not trustworthy: a link (never followed), not a regular
+    file, over AI_STATUS_MAX_BYTES, another owner, writable by others, a wrong type. The reader decides what a stale `ts` means. Never raises."""
+    path = path or ai_status_path()
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):  # a link is not followed: whoever can plant one must not choose what is read
+            return None
+        d = _read_json(path, AI_STATUS_MAX_BYTES)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(d, dict) or d.get("v") != 1 or isinstance(d.get("v"), bool):
+        return None
+    if not (_is_int(d.get("ts"), 1) and _is_int(d.get("since"), 1) and isinstance(d.get("enabled"), bool) and isinstance(d.get("answering"), bool)):
+        return None
+    model = d.get("model")
+    return {"ts": d["ts"], "since": d["since"], "enabled": d["enabled"], "answering": d["answering"],
+            "model": model if isinstance(model, str) and WEB_MODEL.fullmatch(model) else ""}
+
+
+def write_ai_status(enabled, answering, since, model="", now=None, path=None):
+    """The file read_ai_status() reads: tmp file in the same folder and os.replace, mode 0644. Raises OSError when the folder cannot be written."""
+    path = path or ai_status_path()
+    out = {"v": 1, "ts": int(time.time() if now is None else now), "enabled": bool(enabled), "answering": bool(answering), "since": int(since),
+           "model": model if isinstance(model, str) and WEB_MODEL.fullmatch(model) else ""}
+    folder = os.path.dirname(path)
+    os.makedirs(folder, mode=0o755, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".status-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(out, f, separators=(",", ":"))
+        os.chmod(tmp, 0o644)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return out
+            except PermissionError:  # Windows: a reader has the file open this very moment
+                if not nuc_config.WINDOWS or attempt == 19:
+                    raise
+                time.sleep(0.05)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def web_actions_on(cfg):
     """[ai] web_actions (default yes): no = the admin lock: the AI page and screen only show, and web.json counts for nothing."""
     return bool(((cfg or {}).get("ai") or {}).get("web_actions", True))
