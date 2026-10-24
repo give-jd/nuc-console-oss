@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.a11723d2.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="3c62d5dcf4">
+<header class="topbar" data-card="__top" data-rev="c3308feb40">
 <span class="host">demo-host</span>
-<span class="status err" role="status">✖ 7 PROBLEMS</span>
+<span class="status err" role="status">✖ 8 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -39,12 +39,12 @@
 <a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="ca7247e244">
+<div class="kpiblock" data-card="__kpis" data-rev="638916640f">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>7</span>
+<span class="sym s-err" aria-hidden="true">✖</span>8</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -104,7 +104,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?frag=1">
-<article class="card s2 st-err r109" data-card="attention" data-rev="adc302e45a" id="c-attention" data-state="err">
+<article class="card s2 st-err r126" data-card="attention" data-rev="0a8011dd38" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -159,6 +159,19 @@
 <span class="d how">fix: <code class="cmd">journalctl -b -p err -o short | sort | uniq -c | sort -rn | head; accept it if it is known noise</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem journal-errors --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
+<div class="msg prob lv-warn" data-problem="container-no-restart">
+<span class="sym">!</span>
+<span class="pr">1 running container will not restart after a reboot: cache-1 <code class="pid" title="Running container will not restart after a reboot">container-no-restart</code>
+</span>
+<span class="d why">its restart policy is no: after a reboot or a Docker restart it stays down and nothing says so</span>
+<details class="fix" data-k="fix-container-no-restart">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">docker update --restart unless-stopped &lt;name&gt; (compose: restart: unless-stopped); a one-shot or test container on purpose: list it in [containers] restart_ignore</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem container-no-restart --reason &quot;...&quot;</code>
 </span>
 </details>
 </div>

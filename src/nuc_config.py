@@ -47,6 +47,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 # collectors, the config files, the port baseline) is ever here: a muted alarm of that kind would hide an attack surface. A new alarm is not
 # mutable until someone adds it here on purpose (tests/test_alerts_mute.py classifies every id and fails on one it has not seen).
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
+                  "container-no-restart", "containers-not-back",
                   "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
 
 # [expose]: the words for a reach, and the group names exposure.py uses for it (exposure.GROUPS); synonyms are accepted
@@ -82,6 +83,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
+    cfg["containers"] = {"restart_ignore": []}  # [containers] restart_ignore: names or globs (lower case) that container-no-restart skips
     cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
@@ -178,6 +180,10 @@ def load(path=None, warn=None, overlay=True):
                 cfg["alerts"]["ignored"].append(x[:40])
                 say(f"nuc-console: {path}: [alerts] mute: '{x[:40]}' cannot be muted: ignored (it may be a security alarm or unknown; "
                     f"mutable: {', '.join(MUTABLE_ALERTS)})")
+    if cp.has_section("containers"):  # restart_ignore = name, *-glob-*: containers that are meant to stay down after a reboot
+        for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
+            say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")
+        cfg["containers"]["restart_ignore"] = [x for x in re.split(r"[,;\s]+", cp.get("containers", "restart_ignore", fallback="").lower()) if x][:100]
     if cp.has_section("thresholds"):
         try:
             pct = cp.getint("thresholds", "memory_pressure_pct", fallback=10)
