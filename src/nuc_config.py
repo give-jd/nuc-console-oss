@@ -56,7 +56,9 @@ MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited",
 # validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
 UNIT_RE = re.compile(r"[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}")  # a systemd unit name; never starts with '-' (an option)
 WATCH_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,32}")
-WATCH_MAX = 20
+WATCH_MAX = 20  # units under [services] must_run
+TLS_MAX = 10  # entries under [tls] watch (each can cost a connect and a handshake)
+WATCH_BUDGET_S = 30  # the collector stops starting new checks of a section after this many seconds
 # a certificate is fetched only from this machine or a private network: nuc-console makes no other outbound connection than Telegram's.
 # (the same list as exposure.PRIVATE_NETS; tests/test_watch_checks.py keeps them equal)
 WATCH_NETS = tuple(ipaddress.ip_network(n) for n in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
@@ -69,7 +71,7 @@ def watch_entry(spec):
     name, eq, target = (x.strip() for x in spec.partition("="))
     if not eq or not WATCH_NAME_RE.fullmatch(name):
         raise ValueError("write name = host:port or name = /path/cert.pem (name: letters, digits, . _ -)")
-    if os.path.isabs(target) or re.match(r"[A-Za-z]:[\\/]", target):
+    if os.path.isabs(target) or (os.name == "nt" and re.match(r"[A-Za-z]:[\\/]", target)):  # a drive path is a file only on Windows
         return name, "file", target, 0
     host, _, port = target.rpartition(":")
     host = "127.0.0.1" if host.lower() == "localhost" else host[1:-1] if host[:1] == "[" and host[-1:] == "]" else host
@@ -262,8 +264,8 @@ def load(path=None, warn=None, overlay=True):
                 continue
             if name in seen:
                 skip(f"[tls] watch: '{name}' is there twice: the second is skipped")
-            elif len(seen) >= WATCH_MAX:
-                skip(f"[tls] watch: more than {WATCH_MAX} entries: '{name}' skipped")
+            elif len(seen) >= TLS_MAX:
+                skip(f"[tls] watch: more than {TLS_MAX} entries: '{name}' skipped")
             else:
                 seen.add(name)
                 cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")

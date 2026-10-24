@@ -105,6 +105,11 @@ class WatchConfig(unittest.TestCase):
         self.assertEqual(e("ts=100.64.0.7:443")[2], "100.64.0.7")
         self.assertEqual(e("ll=169.254.1.1:443")[2], "169.254.1.1")
         self.assertEqual(e("f = /etc/ssl/a.pem"), ("f", "file", "/etc/ssl/a.pem", 0))
+        with mock.patch.object(nuc_config.os, "name", "nt"):
+            self.assertEqual(e("f=C:\\certs\\a.pem"), ("f", "file", "C:\\certs\\a.pem", 0))
+        with mock.patch.object(nuc_config.os, "name", "posix"):
+            with self.assertRaises(ValueError):   # not a file on Linux or macOS: said, not read as a path
+                e("f=C:\\certs\\a.pem")
         for bad in ("203.0.113.9:443", "web=203.0.113.9:443", "web=8.8.8.8:443", "web=example.com:443", "web=server.example.ts.net:443", "web=10.0.0.1",
                     "web=10.0.0.1:0", "web=10.0.0.1:70000", "web=10.0.0.1:x", "=10.0.0.1:443", "we b=10.0.0.1:443", "web=relative/cert.pem",
                     "web=[2001:db8::1]:443", "web=::ffff:8.8.8.8:443", "web=0.0.0.0:443", "web=172.32.0.1:443", "web=100.128.0.1:443"):
@@ -148,6 +153,8 @@ class WatchConfig(unittest.TestCase):
         self.assertEqual(len(cfg["watch_warnings"]), len(said))
         cfg, said = self.load("[services]\nmust_run = " + ",".join("u%d" % i for i in range(30)) + "\n")
         self.assertEqual((len(cfg["services"]["must_run"]), len(said)), (20, 10))
+        cfg, said = self.load("[tls]\nwatch = " + ",".join("n%d=10.0.0.5:%d" % (i, 400 + i) for i in range(14)) + "\n")
+        self.assertEqual((len(cfg["tls"]["watch"]), len(said)), (nuc_config.TLS_MAX, 4))
         cfg, said = self.load("[tls]\nwarn_days = soon\n")
         self.assertEqual((cfg["tls"]["warn_days"], len(said)), (21, 1))
 
@@ -219,6 +226,16 @@ class Sections(unittest.TestCase):
         self.assertNotIn(("systemctl", "show", "--no-pager", "-p", "LoadState", "--", "docker"), self.calls)           # an active unit is not asked twice
         self.assertEqual(b["errors"], {})
 
+    def test_a_section_out_of_time_reports_the_rest_as_not_checked(self):
+        ticks = iter(range(0, 1000, 20))   # every call of the clock is 20 s later: the 30 s budget lasts two reads
+        with mock.patch.object(collector, "CLOCK", lambda: next(ticks)):
+            b = self.boot(must_run=["a", "b", "c", "d"], run=lambda name, *a: (0, "active\n", ""))
+        self.assertEqual([x["state"] for x in b["services"]], ["active", "not-checked", "not-checked", "not-checked"])
+        ticks = iter(range(0, 1000, 20))
+        with mock.patch.object(collector, "CLOCK", lambda: next(ticks)):
+            b = self.boot(watch=["a=10.0.0.5:443", "b=10.0.0.5:444", "c=/etc/x.pem"], der=lambda h, p, timeout=3: VALID)
+        self.assertEqual([(c["name"], c["why"]) for c in b["certs"]], [("a", ""), ("b", "not-checked"), ("c", "not-checked")])
+
     def test_systemctl_missing_or_timing_out_is_absent_or_unknown(self):
         self.assertIn("services", self.boot(must_run=["docker"])["absent"])
         b = self.boot(must_run=["docker"], run=lambda name, *a: (None, "", "TimeoutExpired"))
@@ -227,7 +244,7 @@ class Sections(unittest.TestCase):
     def test_sshd(self):
         b = self.boot(run=lambda name, *a: (0, SSHD_T, "") if (name, a) == ("sshd", ("-T",)) else (_ for _ in ()).throw(collector.Absent(name)))
         self.assertEqual(b["sshd"]["passwordauthentication"], "yes")
-        self.assertEqual(sorted(b["sshd"]), sorted(collector.SSHD_KEYS))
+        self.assertEqual(sorted(b["sshd"]), sorted(k for k in collector.SSHD_KEYS if k != "kbdinteractiveauthentication"))   # this sample has no such line
         self.assertIn(("sshd", "-T"), self.calls)
         for rc, out in ((255, "Missing privilege separation directory: /run/sshd\n"), (0, ""), (None, "")):
             b = self.boot(run=lambda name, *a: (rc, out, "") if name == "sshd" else (_ for _ in ()).throw(collector.Absent(name)))
@@ -388,6 +405,67 @@ class Problems(unittest.TestCase):
             self.assertEqual(sev, 1)
             self.assertIn("8.8.8.8", text)
             self.assertTrue(text.endswith("… +1"))
+
+    def test_not_checked_and_a_check_that_did_not_run_are_said(self):
+        day = 86400
+        with golden.FrozenWorld(cfg={"services": {"must_run": ["docker"]}, "tls": {"watch": ["a=10.0.0.5:443"], "warn_days": 21}}):
+            r = raw(boot())                                                       # configured, nothing came back
+            self.assertEqual(r["watch-config"][0], 1)
+            texts = [t for s, t, p in problems.problems_raw(None, None, NOW, boot=boot(), baseline=False) if p == "watch-config"]
+            self.assertTrue(any("systemctl is not available" in t for t in texts) and any("[tls] watch is set" in t for t in texts), texts)
+            texts = [t for s, t, p in problems.problems_raw(None, None, NOW, boot=boot(errors={"services": "x", "certs": "y"}), baseline=False) if p == "watch-config"]
+            self.assertTrue(any("must_run is set but the check failed" in t for t in texts) and any("watch is set but the check failed" in t for t in texts), texts)
+            ok = boot(services=[{"unit": "docker", "state": "active"}], certs=[{"name": "a", "exp": NOW + 90 * day, "why": ""}])
+            self.assertEqual(raw(ok), {})
+            late = boot(services=[{"unit": "docker", "state": "active"}, {"unit": "x", "state": "not-checked"}],
+                        certs=[{"name": "a", "exp": None, "why": "not-checked"}])
+            texts = [t for s, t, p in problems.problems_raw(None, None, NOW, boot=late, baseline=False) if p == "watch-config"]
+            self.assertEqual(sorted(t.split(" not checked")[0] for t in texts), ["1 certificate", "1 unit"])
+            self.assertNotIn("service-down", raw(late))
+            self.assertNotIn("cert-unreadable", raw(late))
+            self.assertEqual(raw(boot(os="windows")).keys(), {"watch-config"})    # only the [tls] one: services are Linux only
+        with golden.FrozenWorld():
+            self.assertEqual(raw(boot()), {})                                     # nothing configured: silence
+
+    def test_keyboard_interactive_counts_as_password_login(self):
+        with golden.FrozenWorld():
+            r = raw(boot(sshd={"passwordauthentication": "no", "kbdinteractiveauthentication": "yes"}))
+            self.assertEqual(r["ssh-password-auth"], (1, "sshd accepts keyboard-interactive/PAM password login (KbdInteractiveAuthentication yes)"))
+            self.assertEqual(raw(boot(sshd={"kbdinteractiveauthentication": "no", "passwordauthentication": "no"})), {})
+            self.assertIn("Match", problems.CATALOG["ssh-password-auth"][2])
+        self.assertEqual(collector.parse_sshd_t("KbdInteractiveAuthentication yes\n"), {"kbdinteractiveauthentication": "yes"})
+
+    def accepted_with(self, svc):
+        """problems() with ssh-less boot: the list of service-down items left once what was accepted is applied."""
+        b = boot(services=[{"unit": u, "state": "inactive"} for u in svc])
+        with mock.patch.object(problems, "load_accepted", lambda: self.acc):
+            return [t for (s, t), p in zip(problems.problems(None, None, NOW, boot=b, baseline=False), problems.problems(None, None, NOW, boot=b, baseline=False).pids)
+                    if p == "service-down"]
+
+    def test_accepting_covers_every_name_not_the_first_three(self):
+        with golden.FrozenWorld():
+            self.acc = {}
+            b3 = boot(services=[{"unit": u, "state": "inactive"} for u in ("a", "b", "c")])
+            (rec,) = [r for r in problems.problem_records(None, None, NOW, boot=b3, baseline=False) if r["id"] == "service-down"]
+            self.acc = {"service-down": {"fp": rec["fingerprint"], "reason": "x"}}
+            self.assertEqual(self.accepted_with(["a", "b", "c"]), [])             # accepted
+            self.assertEqual(self.accepted_with(["a", "b"]), [])                  # one left: not needlessly back
+            self.assertEqual(len(self.accepted_with(["a", "b", "c", "d"])), 1)    # a 4th (hidden by '… +1' in the text) brings it back
+            self.assertEqual(len(self.accepted_with(["a", "b", "z"])), 1)         # another one in its place too
+            b4 = boot(services=[{"unit": u, "state": "inactive"} for u in ("a", "b", "c", "d")])
+            (rec4,) = [r for r in problems.problem_records(None, None, NOW, boot=b4, baseline=False) if r["id"] == "service-down"]
+            self.acc = {"service-down": {"fp": rec4["fingerprint"], "reason": "x"}}
+            self.assertEqual(self.accepted_with(["a", "b", "c", "d"]), [])
+            self.assertEqual(len(self.accepted_with(["a", "b", "c", "d", "e"])), 1)
+            day = 86400
+            mk = lambda names: boot(certs=[{"name": n, "exp": NOW + 5 * day, "why": ""} for n in names])   # noqa: E731
+            (rec,) = [r for r in problems.problem_records(None, None, NOW, boot=mk("abc"), baseline=False) if r["id"] == "cert-expiring"]
+            self.acc = {"cert-expiring": {"fp": rec["fingerprint"], "reason": "x"}}
+            with mock.patch.object(problems, "load_accepted", lambda: self.acc):
+                left = lambda names: [p for p in problems.problems(None, None, NOW, boot=mk(names), baseline=False).pids if p == "cert-expiring"]   # noqa: E731
+                self.assertEqual((left("abc"), left("ab"), len(left("abcd"))), ([], [], 1))
+            self.assertTrue(problems.fp_matches("1|text 5", "1|text 5"))
+            self.assertFalse(problems.fp_matches("2|names:a", "1|names:a"))      # a worse (or other) severity is a new problem
 
     def test_the_decisions(self):
         new = {"service-down", "ssh-root-login", "ssh-password-auth", "ssh-empty-passwords", "cert-expiring", "cert-expired", "cert-unreadable", "watch-config"}

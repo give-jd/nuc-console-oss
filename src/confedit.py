@@ -244,7 +244,7 @@ KEYS = (
         ("watch", TEXT, "", START,
          "Comma-separated name = host:port or name = /absolute/path.pem (up to %d). host: an IP address on this machine, a private network "
          "or the tailnet (or localhost); a certificate is read without being trusted, only its end date is kept. Empty: nothing is watched."
-         % nuc_config.WATCH_MAX, {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
+         % nuc_config.TLS_MAX, {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
         ("warn_days", INT, "21", START, "Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error.",
          {"lo": 1, "hi": 365}),
     ))

@@ -105,7 +105,7 @@
 </p>
 </section>
 <main class="grid" data-edit>
-<article class="card s2 st-err" data-card="attention" data-rev="544261ca9c" id="c-attention" data-state="err" data-title="ATTENTION">
+<article class="card s2 st-err" data-card="attention" data-rev="620f8541b3" id="c-attention" data-state="err" data-title="ATTENTION">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -197,7 +197,7 @@
 <span class="d why">passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error</span>
 <details class="fix" data-k="fix-ssh-password-auth">
 <summary>fix</summary>
-<span class="d how">fix: <code class="cmd">PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows what is in force); or accept it with a reason if the LAN is trusted</code>
+<span class="d how">fix: <code class="cmd">PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows the global values: a Match block overrides them for its users or addresses, so read those too; KbdInteractiveAuthentication no closes the PAM password route); or accept it with a reason if the LAN is trusted</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem ssh-password-auth --reason &quot;...&quot;</code>
 </span>

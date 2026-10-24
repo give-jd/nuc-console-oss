@@ -463,8 +463,11 @@ def parse_failed(text):
     return [ln.replace("●", "").split()[0] for ln in text.splitlines() if ln.replace("●", "").strip()]
 
 
-SSHD_KEYS = ("permitrootlogin", "passwordauthentication", "permitemptypasswords", "pubkeyauthentication", "x11forwarding")
+SSHD_KEYS = ("permitrootlogin", "passwordauthentication", "kbdinteractiveauthentication", "permitemptypasswords", "pubkeyauthentication", "x11forwarding")
 SERVICE_STATES = ("active", "inactive", "failed", "activating", "deactivating", "reloading", "maintenance")
+
+
+CLOCK = time.monotonic  # the sections of [services] and [tls] read it for their time budget (a test injects its own)
 
 
 def parse_sshd_t(text):
@@ -899,8 +902,11 @@ def collect_boot():
 
     def services():
         """The units [services] must_run names, each asked on its own (a failure costs only its own entry): [{unit, state}]."""
-        out = []
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
         for unit in [u for u in CFG["services"]["must_run"] if nuc_config.UNIT_RE.fullmatch(u)][:nuc_config.WATCH_MAX]:
+            if CLOCK() > end:  # out of time: the rest is said to be unchecked, never ok
+                out.append({"unit": unit, "state": "not-checked"})
+                continue
             rc, text, _ = run("systemctl", "is-active", "--", unit, timeout=5)
             load = ""
             if rc is None or not text.startswith("active"):  # is-active says 'inactive' for a unit that does not exist: LoadState tells
@@ -917,10 +923,13 @@ def collect_boot():
         return got
 
     def certs():
-        """[{name, exp}] for [tls] watch: exp = notAfter (epoch) or None with why = 'unreachable' | 'unreadable' | 'refused'. Nothing else of
+        """[{name, exp}] for [tls] watch: exp = notAfter (epoch) or None with why = 'unreachable' | 'unreadable' | 'refused' | 'not-checked' (the time budget ran out). Nothing else of
         the certificate is kept. A host that is not private is refused here too (nuc_config.watch_entry), whatever the file says."""
-        out = []
-        for spec in CFG["tls"]["watch"][:nuc_config.WATCH_MAX]:
+        out, end = [], CLOCK() + nuc_config.WATCH_BUDGET_S
+        for spec in CFG["tls"]["watch"][:nuc_config.TLS_MAX]:
+            if CLOCK() > end:
+                out.append({"name": spec.partition("=")[0][:32], "exp": None, "why": "not-checked"})
+                continue
             try:
                 name, kind, where, port = nuc_config.watch_entry(spec)
             except ValueError:

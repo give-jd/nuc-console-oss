@@ -132,46 +132,74 @@ def ssh_exposed(net, cont):
     return any(r["proto"] == "tcp" and (r["port"] == 22 or r["name"] == "sshd") and (group_of(r) == "INTERNET" or expose_over(r)) for r in rows)
 
 
+FP_NAMES = {}  # (problem id, text) -> every name behind a service-down / cert-* item (the text shows three): what accepting it is tied to
+
+
+def _names(pid, text, names, out, sev):
+    FP_NAMES[(pid, text)] = sorted(set(names))
+    out.append((sev, text, pid))
+
+
 def host_checks(boot, net, cont, now):
     """What boot.json's services, sshd and certs sections say, as (severity, text, id): a unit that must run and does not, the sshd settings
     that weaken a login, a certificate near its end. Names and counts only; a section the collector did not write (Windows/macOS, not
-    configured, sshd absent) says nothing. A malformed value is skipped, never an error."""
-    out = []
-    down = [x for x in boot.get("services") or () if isinstance(x, dict) and isinstance(x.get("unit"), str)
-            and x.get("state") not in ("active", "activating", "reloading")]
+    configured, sshd absent) says nothing, unless the config asks for it on a system that has it (then watch-config says it did not run).
+    A malformed value is skipped, never an error."""
+    out, more = [], []
+    FP_NAMES.clear()
+    rows = [x for x in boot.get("services") or () if isinstance(x, dict) and isinstance(x.get("unit"), str)] if isinstance(boot.get("services"), list) else []
+    skipped = [x for x in rows if x.get("state") == "not-checked"]
+    down = [x for x in rows if x.get("state") not in ("active", "activating", "reloading", "not-checked")]
     if down:
-        out.append((2, "service not running: " + ", ".join(f"{safe(x['unit'])[:40]} ({safe(str(x.get('state')))[:12]})" for x in down[:3])
-                    + (f" … +{len(down) - 3}" if len(down) > 3 else ""), "service-down"))
+        text = ("service not running: " + ", ".join(f"{safe(x['unit'])[:40]} ({safe(str(x.get('state')))[:12]})" for x in down[:3])
+                + (f" … +{len(down) - 3}" if len(down) > 3 else ""))
+        _names("service-down", text, [x["unit"] for x in down], out, 2)
+    if skipped:
+        more.append(plural(len(skipped), "unit") + " not checked this pass (time limit): " + ", ".join(safe(x["unit"])[:40] for x in skipped[:3]))
+    local = boot.get("os") in (None, "linux")
+    if (CFG.get("services") or {}).get("must_run") and local:  # asked for, and nothing came back: not "all fine"
+        if "services" in (boot.get("errors") or {}):
+            more.append("[services] must_run is set but the check failed")
+        elif not isinstance(boot.get("services"), list):
+            more.append("[services] must_run is set but systemctl is not available / the check did not run")
     ssh = boot.get("sshd") if isinstance(boot.get("sshd"), dict) else {}
     if ssh.get("permitrootlogin") == "yes":
         out.append((1, "sshd allows root login (PermitRootLogin yes)", "ssh-root-login"))
-    if ssh.get("passwordauthentication") == "yes":
+    if ssh.get("passwordauthentication") == "yes" or ssh.get("kbdinteractiveauthentication") == "yes":
         wide = ssh_exposed(net, cont)
-        out.append((2 if wide else 1, "sshd accepts passwords (PasswordAuthentication yes)" + (", and port 22 reaches the Internet or beyond config.ini" if wide else ""),
-                    "ssh-password-auth"))
+        what = ("sshd accepts passwords (PasswordAuthentication yes)" if ssh.get("passwordauthentication") == "yes"
+                else "sshd accepts keyboard-interactive/PAM password login (KbdInteractiveAuthentication yes)")
+        out.append((2 if wide else 1, what + (", and port 22 reaches the Internet or beyond config.ini" if wide else ""), "ssh-password-auth"))
     if ssh.get("permitemptypasswords") == "yes":
         out.append((2, "sshd accepts empty passwords (PermitEmptyPasswords yes)", "ssh-empty-passwords"))
     warn = (CFG.get("tls") or {}).get("warn_days", 21)
-    soon, gone, lost = [], [], []
-    for c in boot.get("certs") or ():
+    soon, gone, lost, unchecked = [], [], [], []
+    certs = boot.get("certs")
+    for c in certs if isinstance(certs, list) else ():
         if not isinstance(c, dict) or not isinstance(c.get("name"), str):
             continue
-        exp = c.get("exp")
-        if isinstance(exp, bool) or not isinstance(exp, (int, float)):
-            lost.append(safe(c["name"])[:32])
-            continue
-        days = int((exp - now) // 86400)
-        name = safe(c["name"])[:32]
-        if exp <= now:
-            gone.append(f"{name} ({int((now - exp) // 86400)} d ago)")
-        elif days < warn:
-            soon.append(f"{name} ({days} d)")
-    if gone:
-        out.append((2, "TLS certificate expired: " + ", ".join(gone[:3]) + (f" … +{len(gone) - 3}" if len(gone) > 3 else ""), "cert-expired"))
-    if soon:
-        out.append((1, "TLS certificate expires soon: " + ", ".join(soon[:3]) + (f" … +{len(soon) - 3}" if len(soon) > 3 else ""), "cert-expiring"))
-    if lost:
-        out.append((1, "TLS certificate not read: " + ", ".join(lost[:3]) + (f" … +{len(lost) - 3}" if len(lost) > 3 else ""), "cert-unreadable"))
+        exp, name = c.get("exp"), safe(c["name"])[:32]
+        if c.get("why") == "not-checked":
+            unchecked.append(name)
+        elif isinstance(exp, bool) or not isinstance(exp, (int, float)):
+            lost.append(name)
+        elif exp <= now:
+            gone.append((name, f"{name} ({int((now - exp) // 86400)} d ago)"))
+        elif int((exp - now) // 86400) < warn:
+            soon.append((name, f"{name} ({int((exp - now) // 86400)} d)"))
+    for pid, sev, head, items in (("cert-expired", 2, "TLS certificate expired: ", gone), ("cert-expiring", 1, "TLS certificate expires soon: ", soon),
+                                  ("cert-unreadable", 1, "TLS certificate not read: ", [(n, n) for n in lost])):
+        if items:
+            _names(pid, head + ", ".join(t for _, t in items[:3]) + (f" … +{len(items) - 3}" if len(items) > 3 else ""), [n for n, _ in items], out, sev)
+    if unchecked:
+        more.append(plural(len(unchecked), "certificate") + " not checked this pass (time limit): " + ", ".join(unchecked[:3]))
+    if (CFG.get("tls") or {}).get("watch"):
+        if "certs" in (boot.get("errors") or {}):
+            more.append("[tls] watch is set but the check failed")
+        elif not isinstance(certs, list):
+            more.append("[tls] watch is set but the check did not run")
+    for m in more:
+        out.append((1, m, "watch-config"))
     return out
 
 
@@ -439,7 +467,7 @@ CATALOG = {
     "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
                        "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
     "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
-                          "PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows what is in force); or accept it with a reason if the LAN is trusted"),
+                          "PasswordAuthentication no in /etc/ssh/sshd_config once your key works, then sudo systemctl reload ssh (sshd -T shows the global values: a Match block overrides them for its users or addresses, so read those too; KbdInteractiveAuthentication no closes the PAM password route); or accept it with a reason if the LAN is trusted"),
     "ssh-empty-passwords": ("sshd accepts empty passwords", "an account with no password can log in over SSH",
                             "PermitEmptyPasswords no in /etc/ssh/sshd_config, then sudo systemctl reload ssh; passwd -l <user> for an account that should not log in"),
     "cert-expiring": ("A TLS certificate is about to expire", "when it does, browsers and clients refuse the service",
@@ -602,9 +630,22 @@ COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, 
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
 
 
+def fp_matches(accepted, current):
+    """An accepted fingerprint still covers the current one: equal, or (service-down, cert-*) the same severity and every name now failing
+    was already in the accepted list, so one leaving does not bring the alarm back and a new one does."""
+    if accepted == current:
+        return True
+    if accepted.partition("|")[0] != current.partition("|")[0]:
+        return False
+    a, c = accepted.partition("|")[2], current.partition("|")[2]
+    return a.startswith("names:") and c.startswith("names:") and set(c[6:].split("\n")) <= set(a[6:].split("\n"))
+
+
 def fingerprint(sev, text, pid):
     """What was accepted: severity + text. For exposure/health items the exact text (one more is a new problem); for noisy
     counters (journal errors, temperatures) the digits are ignored, so 118 -> 120 stays accepted but a worse severity does not."""
+    if (pid, text) in FP_NAMES:  # the text shows three names: the tie is to all of them
+        return f"{sev}|names:" + "\n".join(FP_NAMES[(pid, text)])
     return f"{sev}|" + (text if pid in COUNT_MATTERS else re.sub(r"\d+", "#", text))
 
 
@@ -655,7 +696,7 @@ def problems(*a, **kw):
         if pid in mute:
             out.muted += 1
             out.muted_known.append({"id": pid, "text": text})
-        elif pid in acc and acc[pid]["fp"] == fingerprint(sev, text, pid):
+        elif pid in acc and fp_matches(acc[pid]["fp"], fingerprint(sev, text, pid)):
             out.accepted += 1
             out.known.append({"id": pid, "text": text, "reason": acc[pid].get("reason", ""), "ts": acc[pid].get("ts")})
         else:
@@ -674,7 +715,7 @@ def problem_records(*a, **kw):
         title, why, fix = CATALOG.get(pid, (pid, "", ""))
         fp = fingerprint(sev, text, pid)
         out.append({"id": pid, "severity": {3: "port-change", 2: "error", 1: "warning"}.get(sev, "warning"), "text": text,
-                    "accepted": pid not in mute and pid in acc and acc[pid]["fp"] == fp, "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
+                    "accepted": pid not in mute and pid in acc and fp_matches(acc[pid]["fp"], fp), "muted": pid in mute, "reason": (acc.get(pid) or {}).get("reason", ""), "title": title,
                     "why": why, "fix": fix, "fingerprint": fp, "acceptable": pid not in NOT_ACCEPTABLE})
     return out
 
