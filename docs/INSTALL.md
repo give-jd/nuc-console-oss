@@ -200,6 +200,22 @@ Want them on your phone? The installer also sets up the optional Telegram notifi
 The first install stores the set of ports reachable from outside as the *expected* state. Afterwards a new, changed
 or vanished port shows a red banner. After an intended change: `sudo nuc-console-accept` (it refuses stale or partial data).
 
+On Linux the same baseline also holds four more things the collector reads as root (plain file reads, no command), and only as names, counts and
+SHA-256 digests, never the content of a file: the **accounts** that can log in or use sudo (uid 0, uid 1000 and up, members of `sudo`, `wheel`,
+`admin`, `docker`; `users-changed`, error), a hash and the number of keys of each account's **`~/.ssh/authorized_keys`** (`keys-changed`, error), a hash of
+`/etc/crontab`, of each `/etc/cron.d/*` file and of each user's crontab (`cron-changed`, warning), and the **units enabled by hand** under
+`/etc/systemd/system` with a hash of the unit files that live there (`units-changed`, warning). The alarm names what changed (added or removed names, which
+file); it is cleared only by `sudo nuc-console-accept`, never by `--problem`. **After an update from a version that did not track them**, the baseline
+file has the ports only: nothing alarms, one quiet warning, `baseline-incomplete`, says to run `sudo nuc-console-accept`, and the four are not watched
+until you do (check the accounts, keys, cron and units are what you expect first: accepting blesses them).
+
+### Disk health (optional)
+
+If `smartctl` (package `smartmontools`) or, for NVMe, `nvme` (`nvme-cli`) is installed, the collector reads the SMART health of every physical disk
+(`/dev/nvme0n1`, `/dev/sda`; not USB sticks, loop or virtual devices) as root, at most every 30 minutes, and the DISKS card shows one line each. Without either
+tool nothing is shown and nothing alarms; a disk that cannot be read (a USB bridge, a virtual disk) shows `?`. Alarms: `disk-smart-failed` (error),
+`disk-wear` (warning from 80 % of the rated wear, error from 95 %), `disk-media-errors` (warning; error when the count grew since the previous look).
+
 ## 6. Console font and screen blanking (optional)
 
 The default VT font is small on a full-HD monitor, and a monitor that is always on is worn by a static picture. Both are off until you ask, in `/etc/nuc-console/config.ini`:

@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timezone
 
 import history  # noqa: E402  (same directory)
+import integrity  # noqa: E402
 import nuc_config  # noqa: E402
 
 CFG = nuc_config.load()
@@ -33,11 +34,12 @@ elif MACOS:
 # collected section -> feature that enables it (disabled = like a missing tool: no error, no alarm)
 NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailscale", "ufw": "firewall",
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
-               "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
+               "f2b": "fail2ban", "firewall": "firewall", "links": "map",
+               "users": "exposure", "keys": "exposure", "cron": "exposure", "units": "exposure", "smart": "disks"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
                 "containers": ("boot", "containers"), "docker_df": ("docker_disk",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
-LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
+LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b", "users", "keys", "cron", "units", "smart")
 UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps"), "windows": ("blame",)}.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
@@ -1212,6 +1214,9 @@ def collect_net():
             raise RuntimeError(err or "tailscale failed")
         return parse_ts_peers(out)
 
+    def smart():
+        return collect_smart()
+
     if not LINUX:
         section("firewall", firewall)  # before the listeners: their verdicts depend on it
     section("listeners", listeners)
@@ -1224,7 +1229,51 @@ def collect_net():
     section("ts_peers", ts_peers)
     section("f2b", f2b_jails)
     section("drops", drops)
+    for key, fn in integrity.COLLECT.items():  # the baseline's other sections: plain reads as root, no command
+        section(key, fn)
+    section("smart", smart)
     return d
+
+
+SMART_TTL_S, SMART_TIMEOUT_S = 1800, 10
+_SMART = {"t": None, "val": None, "media": {}}  # the last answer (a disk is asked at most every 30 minutes) and the error counts it showed
+
+
+def collect_smart(now=None, root="/"):
+    """net.json 'smart': [{dev, model, health, wear, spare, media, crit, poh, realloc, grown}] of the physical disks, from smartctl, else nvme-cli
+    (fixed argv, the device name validated by integrity.DEVICE). Raises Absent when neither tool is installed; a disk that could not be read is
+    listed with health None (shown '?', never green). 'grown': the error count is higher than at the previous look."""
+    now = time.monotonic() if now is None else now
+    if _SMART["t"] is not None and now - _SMART["t"] < SMART_TTL_S and _SMART["val"] is not None:
+        return _SMART["val"]
+    tools, rows = 0, []
+    for dev in integrity.block_devices(root):
+        model, row = integrity.sysfs_model(dev, root), None
+        try:
+            rc, out, _ = run("smartctl", "-j", "-H", "-A", "/dev/" + dev, timeout=SMART_TIMEOUT_S)  # its exit status is a bit mask: the JSON decides
+            tools += 1
+            row = integrity.parse_smartctl(dev, out, model) if rc is not None else None
+        except Absent:
+            pass
+        if row is None and dev.startswith("nvme"):
+            try:
+                rc, out, _ = run("nvme", "smart-log", "-o", "json", "/dev/" + dev, timeout=SMART_TIMEOUT_S)
+                tools += 1
+                row = integrity.parse_nvme(dev, out, model) if rc == 0 else None
+            except Absent:
+                pass
+        if row is None:
+            row = integrity._entry(dev, model, None, None, None, None, None, None, None)
+        errs = (row["media"] or 0) + (row["realloc"] or 0)
+        row["grown"] = dev in _SMART["media"] and errs > _SMART["media"][dev]
+        _SMART["media"][dev] = errs
+        rows.append(row)
+    if not tools:
+        if integrity.block_devices(root):
+            raise Absent("smartctl")  # disks, but neither tool: not an error
+        return []
+    _SMART["t"], _SMART["val"] = now, rows
+    return rows
 
 
 def sane_c(value):

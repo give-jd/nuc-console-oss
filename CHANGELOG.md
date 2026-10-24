@@ -3,6 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- The baseline (`sudo nuc-console-accept`) also covers, on Linux, the accounts that can log in or use sudo, the SSH `authorized_keys` of each account, the cron files and the units enabled by hand: `users-changed`, `keys-changed` (errors), `cron-changed`, `units-changed` (warnings). They are read as root by the collector as names, counts and hashes only, and are cleared only by accepting the baseline. An existing baseline (ports only) raises no alarm after the update: a quiet warning, `baseline-incomplete`, says to run `sudo nuc-console-accept`.
+- Disk health: the collector reads SMART (`smartctl -j`, else `nvme smart-log`) of each physical disk at most every 30 minutes and raises `disk-smart-failed`, `disk-wear` (warning from 80 %, error from 95 %) and `disk-media-errors`; the DISKS card shows one short health and wear line per device. Nothing is shown when neither tool is installed.
+
 ## [2.5.2] - 2026-10-23
 
 A patch release: one flaky-test race fixed in the model setup, a count added to the web API, and two guides corrected. Nothing needs doing after the update except `sudo systemctl restart nuc-console` (the update does it).

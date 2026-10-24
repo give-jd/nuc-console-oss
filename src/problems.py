@@ -14,6 +14,7 @@ import time
 
 import cards  # same directory: the card registry (a problem belongs to a card)
 import hostdata
+import integrity
 import nuc_config
 import ui
 from exposure import (SENSITIVE, baseline_diff, expose_apply, expose_over_items, expose_unmatched, exposure_keys, exposure_partial,
@@ -72,15 +73,16 @@ def accept_baseline(if_missing=False, path=None, now=None):
     if cur is None:
         print("port list unavailable: baseline not created", file=sys.stderr)
         return 1
+    extra = integrity.baseline_sections(net)  # Linux: users, keys, cron, units (what could be read); elsewhere none: the file is as before
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
-        json.dump({"ts": now, "ports": cur}, f, indent=1)
+        json.dump(dict({"v": integrity.BASELINE_VERSION, "ts": now, "ports": cur}, **extra) if extra else {"ts": now, "ports": cur}, f, indent=1)
         f.flush()
         os.fsync(f.fileno())  # a power cut must not leave an empty file
     os.chmod(tmp, 0o644)
     os.replace(tmp, path)
-    print(f"baseline written: {len(cur)} exposed ports in {path}")
+    print(f"baseline written: {len(cur)} exposed ports" + (" and " + ", ".join(extra) if extra else "") + f" in {path}")
     return 0
 
 
@@ -210,6 +212,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
                 out.append((3, f"CHANGED {k.partition(':')[0]}: {why}", "port-changed"))
             if gone:
                 out.append((1, plural(len(gone), "port") + f" no longer exposed: if intended, {ACCEPT_CMD}", "port-gone"))
+    if isinstance(baseline, dict):  # users, keys, cron, units (Linux): a section the baseline lacks is one quiet note, never an alarm
+        out.extend(integrity.baseline_problems(net, baseline, ACCEPT_CMD))
+    out.extend(integrity.smart_problems(net.get("smart")))
     if net.get("listeners") is not None:
         rows = exposure_rows(net, cont)
         pub = [r for r in rows if r["net"] == 1]
@@ -281,6 +286,21 @@ CATALOG = {
     "port-new": ("New exposed port", "something started listening where it did not before", "identify it (ss -ltnp); if intended: sudo nuc-console-accept; if not, stop it"),
     "port-changed": ("Exposed port changed", "a different service or a weaker filter on a known port", "check what changed; if intended: sudo nuc-console-accept"),
     "port-gone": ("Port no longer exposed", "a service you expected is gone", "if intended: sudo nuc-console-accept"),
+    "baseline-incomplete": ("Baseline does not cover everything yet", "the baseline was written before accounts, SSH keys, cron and enabled units were tracked: changes there are not detected",
+                            "sudo nuc-console-accept (it rewrites the baseline with ports, users, keys, cron and units as they are now: check them first)"),
+    "users-changed": ("Login or sudo accounts changed", "an account that can log in or become root appeared or went since the baseline",
+                      "getent passwd; getent group sudo; if intended: sudo nuc-console-accept; if not, lock the account (usermod -L) and look for how it was made"),
+    "keys-changed": ("SSH authorized_keys changed", "a key that lets someone log in was added, removed or replaced since the baseline",
+                     "check ~/.ssh/authorized_keys of the account named; if intended: sudo nuc-console-accept; if not, remove the key and find out how it got there"),
+    "cron-changed": ("Cron jobs changed", "a scheduled job was added, removed or edited since the baseline",
+                     "read the file named (/etc/crontab, /etc/cron.d, crontab -l -u <user>); if intended: sudo nuc-console-accept; if not, remove it"),
+    "units-changed": ("Enabled systemd units changed", "a service or timer was enabled, disabled or edited by hand since the baseline",
+                      "systemctl list-unit-files --state=enabled; systemctl cat <unit>; if intended: sudo nuc-console-accept; if not, disable it"),
+    "disk-smart-failed": ("Disk reports a failing SMART state", "the drive says it is failing or has a critical warning: data may be lost",
+                          "back up now; sudo smartctl -a /dev/<disk> (or sudo nvme smart-log /dev/<disk>); replace the drive"),
+    "disk-wear": ("Disk worn out", "an SSD near its rated write endurance will start to fail", "plan its replacement; sudo smartctl -a /dev/<disk>; reduce writes (logs, swap, databases)"),
+    "disk-media-errors": ("Disk media errors", "the drive found data it could not read or sectors it had to remap: an early sign of failure",
+                          "back up; sudo smartctl -a /dev/<disk> and watch whether the count keeps growing; replace the drive if it does"),
 }
 
 
@@ -377,7 +397,7 @@ if nuc_config.PORTABLE:
 
 
 MUTED_HINT = "[alerts] mute in config.ini"  # where a muted alarm is switched back on (mute is not accept: no reason, no root, no accepted.json)
-NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden"}  # port changes are handled by the baseline: sudo nuc-console-accept
+NOT_ACCEPTABLE = {"port-new", "port-changed", "port-gone", "feature-hidden", "users-changed", "keys-changed", "cron-changed", "units-changed"}  # port changes are handled by the baseline: sudo nuc-console-accept
 COUNT_MATTERS = {"db-open-lan", "docker-bypass", "funnel-public", "unhealthy-container", "container-exited", "failed-units"}
 COUNT_MATTERS.add("over-exposed")  # which services go beyond [expose] matters, not only how many: a new one is a new problem
 COUNT_MATTERS.add("expose-unmatched")  # a new typo is a new problem: an accepted one must not hide it
