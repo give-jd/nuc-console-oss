@@ -231,7 +231,9 @@ def hygiene_problems(boot, now):
         out.append((1, plural(len(old), "backup") + " older than allowed: " + ", ".join(f"{n} ({d} d)" for n, d in old[:3]), "backup-stale"))
     rb = boot.get("reboot")
     if isinstance(rb, dict):
-        if rb.get("flag") is True:
+        if rb.get("flag") is True and isinstance(rb.get("sources"), list):  # Windows (collect_windows.reboot_pending): which signals, fixed words
+            out.append((1, "reboot required: Windows asked for one (" + ", ".join(safe(s)[:24] for s in rb["sources"][:3]) + ")", "reboot-required"))
+        elif rb.get("flag") is True:
             out.append((1, "reboot required: the system asked for one (/run/reboot-required)", "reboot-required"))
         elif rb.get("kernel_old") is True and isinstance(rb.get("running"), str) and isinstance(rb.get("newest"), str):
             out.append((1, f"reboot required: running kernel {safe(rb['running'])[:40]}, {safe(rb['newest'])[:40]} installed", "reboot-required"))
@@ -351,6 +353,9 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         psi, limit = thermal.get("psi"), (CFG.get("thresholds") or {}).get("memory_pressure_pct", 10)
         if isinstance(psi, (int, float)) and not isinstance(psi, bool) and psi > limit:  # no PSI on this OS/kernel: None, no problem
             out.append((1, f"memory pressure {psi:.1f} % (processes waited for memory; the limit is {limit} %)", "memory-pressure"))
+        cm, climit = thermal.get("commit"), (CFG.get("thresholds") or {}).get("commit_pressure_pct", 90)
+        if isinstance(cm, (int, float)) and not isinstance(cm, bool) and cm >= climit:  # Windows only; the text has no figure that moves (notify keys by text)
+            out.append((1, f"Windows commit charge at or above {climit} % of its limit (RAM and page files nearly all promised)", "memory-pressure"))
     if not hostdata.on("boot"):
         pass
     elif boot is None:
@@ -576,6 +581,12 @@ OS_CATALOG = {
                         "publish the DB on 127.0.0.1 (compose: \"127.0.0.1:5432:5432\") or stop it if unused"),
         "firewall-off": ("Windows Firewall off", "every listening service is reachable from that network",
                          "Windows Security > Firewall & network protection: turn it on; or, as administrator: Set-NetFirewallProfile -All -Enabled True"),
+        "reboot-required": ("Reboot required", "an update or installer left work for the next start: the old files are still in use",
+                            "restart Windows when it suits you (Settings > Windows Update); the line names the signal: Windows Update, "
+                            "servicing, or files waiting to be replaced"),
+        "memory-pressure": ("Memory commit nearly at its limit", "processes were promised almost all of RAM plus the page files: new allocations will start to fail",
+                            "Task Manager > Details, sort by Commit size; close or restart the biggest app; check the page file is not capped "
+                            "(System Properties > Advanced > Performance > Virtual memory). The limit is [thresholds] commit_pressure_pct"),
         "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
         "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
         "port-new": ("New exposed port", "something started listening where it did not before",
