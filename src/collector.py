@@ -36,15 +36,16 @@ NET_FEATURE = {"listeners": "exposure", "serve": "exposure", "ts_peers": "tailsc
                "docker_user": "firewall", "iptables": "firewall", "drops": "firewall", "dbs": "databases",
                "f2b": "fail2ban", "firewall": "firewall", "links": "map"}
 BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "deps": ("boot",), "enabled": ("boot",), "journal": ("boot",),
-                "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",)}
+                "kernlog": ("boot",), "containers": ("boot", "containers"), "docker_df": ("docker_disk",), "inodes": ("disks",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b")
-UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "reboot", "updates", "clock"),
-                    "windows": ("blame", "reboot", "updates", "clock", "inodes")}.get(OS_NAME, ())  # the host-hygiene sections are Linux (inodes: macOS too)
+UNSUPPORTED_BOOT = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock"),
+                    "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes")}.get(OS_NAME, ())  # the host-hygiene sections are Linux (inodes: macOS too)
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
 OUT_BOOT = os.path.join(nuc_config.RUN_DIR, "boot.json")
 OUT_SENSORS = os.path.join(nuc_config.RUN_DIR, "sensors.json")
+RUNNING_RECORD = os.path.join(nuc_config.LIB_DIR, "running.json")  # names of the containers that ran with a restart policy (see remember_running)
 INTERVAL_S = 10
 NET_INTERVAL_S = 30
 BOOT_INTERVAL_S = 300  # boot does not change: every 5 minutes is enough
@@ -493,6 +494,38 @@ def parse_journal(text, cap=500):
     return {"err": err, "warn": warn, "capped": n >= cap, "top": top}
 
 
+KERN_LINE = re.compile(r"^(\d+)(?:\.\d+)? \S+ kernel: (.*)$")
+
+
+def parse_kernlog(text, now=None):
+    """`journalctl -k -o short-unix` text -> {class: {'n', 'last'}} for the classes with at least one line inside their window
+    (history.KERNEL_WINDOW_S; the OOM killer: all of this boot) - 'display' also {'driver'}, 'oom' {'procs'}: names only. Counts and
+    the time of the last line; no line is kept."""
+    now = time.time() if now is None else now
+    out = {}
+    for ln in text.splitlines():
+        m = KERN_LINE.match(ln)
+        if not m:
+            continue
+        ts = int(m.group(1))
+        for cls, detail in history.classify_kernel(m.group(2)):
+            win = history.KERNEL_WINDOW_S.get(cls)
+            if win is not None and now - ts > win:
+                continue
+            e = out.setdefault(cls, {"n": 0, "last": 0})
+            e["n"] += 1
+            e["last"] = max(e["last"], ts)
+            if cls == "display":
+                drivers = e.setdefault("drivers", {})
+                drivers[detail] = drivers.get(detail, 0) + 1
+            elif cls == "oom" and detail not in e.setdefault("procs", []) and len(e["procs"]) < 5:
+                e["procs"].append(detail)
+    if "display" in out:  # the driver that said it most
+        d = out["display"].pop("drivers")
+        out["display"]["driver"] = max(d, key=d.get)
+    return out
+
+
 def parse_iso(text):
     """Docker StartedAt '2026-09-29T10:00:00.123456789Z' -> epoch."""
     base, _, frac = text.rstrip("Z").partition(".")
@@ -660,6 +693,36 @@ def collect_inodes():
     return out[:32]
 
 
+def remember_running(names, btime, path=None, now=None):
+    """The memory behind containers-not-back: the NAMES (nothing else) of the containers that were running with a restart policy at the last
+    look, in a small file of the collector's own (LIB_DIR/running.json). Returns the names that were running before the last reboot: on a new
+    boot (btime moved by more than a minute) the file's `running` becomes `before` and is kept for the whole boot, so containers that have
+    not come back yet are not forgotten when `running` is rewritten. The first look of a boot may find Docker down: nothing is written then
+    (the caller is not reached), so the old file still tells what ran before. A file that cannot be read or written costs the check, not
+    the section. Ceiling: the look is the boot collector's, every 5 minutes: a container stopped by hand in the 5 minutes before a reboot
+    is still counted as running."""
+    path = path or RUNNING_RECORD
+    try:
+        with open(path, encoding="utf-8") as f:
+            rec = json.load(f)
+        if not isinstance(rec, dict):
+            rec = {}
+    except (OSError, ValueError):
+        rec = {}
+    old = rec.get("btime")
+    known = isinstance(old, (int, float)) and not isinstance(old, bool)
+    new_boot = known and abs(old - btime) > 60
+    clean = lambda v: [x for x in v if isinstance(x, str)][:200] if isinstance(v, list) else []  # noqa: E731
+    before = clean(rec.get("running")) if new_boot else clean(rec.get("before"))
+    out = {"btime": btime if new_boot or not known else old, "running": sorted(set(names))[:200], "before": before}
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_atomic(out, path)
+    except OSError:
+        pass
+    return before
+
+
 def collect_boot():
     d = {"ts": time.time(), "errors": {}, "absent": [], "kernel": os_release(), "os": OS_NAME}
 
@@ -746,19 +809,29 @@ def collect_boot():
         need(rc in (0, 1), err, "journalctl")
         return parse_journal(out)
 
+    def kernlog():
+        # this boot's kernel log, only the lines that may be a fault (a coarse -g; history.classify_kernel decides), at most 5000 of
+        # them, 20 s. rc 1 = nothing found: not an error
+        rc, out, err = run("journalctl", "-k", "-b", "-o", "short-unix", "-g",
+                           "timed out|timeout|GPU HANG|ERROR|error|Out of memory|Hardware Error|Machine check|EDAC|corruption|"
+                           "Reset adapter|Link is Down|read-only|failed command|exception Emask",
+                           "-n", "5000", "--no-pager", timeout=20)
+        need(rc in (0, 1), err, "journalctl -k")
+        return parse_kernlog(out)
+
     def containers():
         rc, out, err = run("docker", "ps", "-q")
         need(rc == 0, err, "docker ps")
         ids = out.split()
-        if not ids:
-            return []
-        rc, out, err = run("docker", "inspect", "--format",
-                           "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
-        need(rc == 0, err, "docker inspect")
         rows = []
-        for ln in out.splitlines():
-            name, started, policy = ln.split("|")
-            rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        if ids:
+            rc, out, err = run("docker", "inspect", "--format",
+                               "{{.Name}}|{{.State.StartedAt}}|{{.HostConfig.RestartPolicy.Name}}", *ids)
+            need(rc == 0, err, "docker inspect")
+            for ln in out.splitlines():
+                name, started, policy = ln.split("|")
+                rows.append({"name": name.lstrip("/"), "started": parse_iso(started), "restart": policy or "no"})
+        d["containers_before"] = remember_running([r["name"] for r in rows if r["restart"] != "no"], d["btime"])
         return rows
 
     def docker_df():
@@ -776,7 +849,7 @@ def collect_boot():
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
-                    ("journal", journal), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
+                    ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
                     ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes)):
         section(key, fn)
     return d

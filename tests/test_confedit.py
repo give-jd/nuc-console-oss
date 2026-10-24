@@ -56,6 +56,7 @@ def samples(key):
         ("web", "bind"): [("192.0.2.10", "192.0.2.10")],
         ("web", "token_file"): [("/etc/nuc-console/token", "/etc/nuc-console/token"), ("", "")],
         ("web", "allowed_hosts"): [("Nuc.Example.lan,b.example.ts.net", "nuc.example.lan, b.example.ts.net"), ("", "")],
+        ("containers", "restart_ignore"): [("Job-1, *-test-*", "job-1, *-test-*"), ("", "")],
         ("telegram", "username"): [("@Some_User", "some_user"), ("", "")],
         ("ai", "endpoint"): [("http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1")],
         ("ai", "model"): [("qwen3-8b", "qwen3-8b"), ("hf.co/example/repo:Q4_K_M", "hf.co/example/repo:Q4_K_M"), ("", "")],
@@ -71,7 +72,7 @@ class Schema(unittest.TestCase):
         text = read(SHIPPED)
         for key in confedit.KEYS:
             if (key.section, key.name) not in shipped:  # [ui] and [dashboard] sections: there, commented out, with their default
-                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections"), ("alerts", "mute")])
+                self.assertIn((key.section, key.name), [(k.section, k.name) for k in confedit.BY_SECTION["ui"]] + [("dashboard", "sections"), ("alerts", "mute"), ("thresholds", "memory_pressure_pct")])
                 self.assertRegex(text, r"(?m)^# %s = " % key.name)
         self.assertEqual(set(cp.sections()), set(confedit.TITLES) | {"features"})
         self.assertEqual([s for s, _t, _w in confedit.SECTIONS][-2:], list(confedit.MAPS))

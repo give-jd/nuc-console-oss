@@ -52,8 +52,28 @@ def hwmon_dir(name):
     return next((h for h in glob.glob("/sys/class/hwmon/hwmon*") if read_file(h + "/name") == name), None)
 
 
+def parse_psi(text):
+    """/proc/pressure/memory -> the `some` line's avg60 in percent, or None when the text is not that."""
+    for ln in (text or "").splitlines():
+        f = ln.split()
+        if f[:1] == ["some"]:
+            for kv in f[1:]:
+                k, _, v = kv.partition("=")
+                if k == "avg60":
+                    try:
+                        return float(v)
+                    except ValueError:
+                        return None
+    return None
+
+
+def read_psi(path="/proc/pressure/memory"):
+    """Memory pressure (PSI, Linux 4.20+, unprivileged): `some avg60` in percent. None where there is no PSI (old kernel, macOS, Windows)."""
+    return parse_psi(read_file(path)) if LINUX else None
+
+
 def read_thermal():
-    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None}.
+    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None, 'psi': memory some avg60 %|None}.
 
     The maximum is the sensor's own (temp1_max: CPU package, NVMe composite), not a constant of ours.
     """
@@ -74,6 +94,7 @@ def read_thermal():
     mx = read_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
     cur = [int(x) for x in cur if x and x.isdigit()]
     out["clk"] = (sum(cur) / len(cur) / 1e6, int(mx) / 1e6) if cur and mx and mx.isdigit() else None
+    out["psi"] = read_psi()  # memory pressure rides with the sensors (same sampler, same switch); problems.py judges it
     return out
 
 

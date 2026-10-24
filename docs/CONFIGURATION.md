@@ -143,6 +143,7 @@ Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root ea
 |---|---|---|
 | `font` | empty | A font for `setfont`, e.g. `Lat15-TerminusBold32x16` (Terminus 16x32: readable on a full-HD monitor; Debian/Ubuntu: `sudo apt install console-terminus`). Empty: the font stays as it is. Letters, digits and `_ . + -` only |
 | `blank_minutes` | `0` | Minutes without a key before the screen goes black and the monitor sleeps (`setterm --blank` and `--powerdown`), 0–60; `0` = never: after a number, the next start of the service takes the timer back and wakes a black screen. The header already moves every 10 minutes against burn-in; this is what lets the monitor rest |
+| `wake_on_problem` | `yes` | With `blank_minutes` above 0: a problem that was not on the previous frame (not accepted, not muted), or one whose severity rose, wakes the blanked screen (`TIOCL_UNBLANKSCREEN` on the console the dashboard owns, no root needed), at most once per 30 s; the first frame after a start never wakes it. `no`: only a key does. Linux console only; read when the dashboard starts, so apply a change with `sudo systemctl restart nuc-console`. The Telegram notifier is separate |
 
 Why not the kernel parameter `consoleblank=` (and `dpkg-reconfigure console-setup`)? Both need a bootloader or system-wide change and a reboot, apply to every console and not only the dashboard's, and one wrong edit of the kernel command line can stop the machine booting: the installer never does it. The cost of this way: it is set when the service starts (a reboot or restart re-applies it) and only on the dashboard's terminal. If you want the kernel way anyway, add `consoleblank=600` to `GRUB_CMDLINE_LINUX_DEFAULT` yourself. **Check once** that the monitor really sleeps with the dashboard redrawing every couple of seconds: output to the console can wake a blanked screen on some kernels; if it does, use the monitor's own sleep timer.
 
@@ -224,6 +225,7 @@ Four more alarms come from the collector's boot data (every 5 minutes) and need 
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
+| `metrics` | `yes` | `/metrics`: the figures of `/api/v1/overview` as Prometheus text, under the same token, `Host` and bind rules as `/api/v1/*` (it adds no data); `no` makes the route a 404. Applies at the next start. [WEB.md](WEB.md#metrics) |
 | `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
 | `refresh_seconds` | — | Older place of `[dashboard] refresh_seconds`: still read (1–10) for the web pages while `[dashboard]` has none. Use `[dashboard]` |
 
@@ -251,11 +253,40 @@ mute = journal-errors, thermal
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `reboot-required`, `disk-inodes`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
+| `mute` | empty | ATTENTION alarms to silence, by id (`nuc-console-problems` prints the ids). A **closed** list: `journal-errors`, `thermal`, `throttling`, `container-exited`, `unhealthy-container`, `collector-boot`, `reboot-required`, `disk-inodes`, `container-no-restart`, `containers-not-back`, `display-stuck`, `oom-killed`, `memory-pressure`, `nic-resets`. A muted alarm leaves the ATTENTION list, the **Problems** figure and the Telegram messages, and ATTENTION says `· N muted` (the web folds the list under it); `nuc-console-problems` lists them under a `muted` heading. The collectors keep producing the data: only what is shown is muted. Applies at once on the console and the web (the notifier reads it within 30 seconds) |
 
 Security and integrity alarms can never be muted: `updates-pending`, `clock-unsynced`, `backup-stale`, `backup-missing`; ports and the baseline (`port-new`, `port-changed`, `port-gone`, `baseline-*`, `port-compare-suspended`), the firewall (`ufw-*`, `firewall-*`), exposure (`db-open-lan`, `docker-bypass`, `funnel-public`, `over-exposed`, `expose-unmatched`), the data those judgements read (`collector-net`, `collector-containers`, `stale-*`, `net-sections`, `config-unreadable`) and the alerting itself (`telegram-*`). A name that is not on the list above, a security id included, is ignored, said on stderr (`journalctl -u nuc-console`) and raised in ATTENTION as `mute-ignored`; the rest of the line still applies. A new alarm is not mutable until it is added to `nuc_config.MUTABLE_ALERTS` on purpose.
 
 **Muting is not accepting.** *Accept* (`sudo nuc-console-accept --problem <id> --reason "…"`) is a root command with a written reason, kept in `accepted.json`, tied to the alarm's severity and text, so a worse situation shows up again; the alarm stays in the list, dimmed. *Mute* is a line of this file for the alarm ids above: no reason, no root, nothing in `accepted.json`, and it hides the alarm whatever it says until you remove the line.
+
+## `[containers]` — containers that stay down after a reboot
+
+```ini
+[containers]
+restart_ignore = job-runner, *-test-*
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `restart_ignore` | empty | Containers the `container-no-restart` alarm skips: names or shell-style globs (`*-test-*`), comma-separated, matched without regard to case. For one-shot jobs and test stacks that are meant to stay down after a reboot. Applies at once |
+
+Two operational alarms (both can be muted with `[alerts] mute`) come from the boot collector's look at Docker, every 5 minutes, and need `[features] boot` and `containers`:
+
+- `container-no-restart` (warning): a **running** container whose restart policy is `no` (or empty) will not come back after a reboot or a Docker restart. One alarm, with up to three names and the count. Fix: `docker update --restart unless-stopped <name>` (compose: `restart: unless-stopped`), or list it in `restart_ignore`.
+- `containers-not-back` (error): in the first 20 minutes after a boot, containers that were running with a restart policy (`always`, `unless-stopped`, `on-failure`) before the reboot and are not running now. The collector keeps their **names only** (no image, environment or command line) in `running.json` in its own state folder (`/var/lib/nuc-console` on Linux), rewritten at every look; at a new boot that list becomes the "before" list for the whole boot. A container stopped by hand earlier was not in the list and is not flagged (one stopped in the 5 minutes before the reboot still is: that is the look's resolution). It clears when they run again, and in any case 20 minutes after the boot. If Docker is not installed, or the file cannot be written, there is no alarm and no error.
+
+## `[thresholds]` — where a reading becomes a problem
+
+```ini
+[thresholds]
+memory_pressure_pct = 10
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
+
+**Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors.
 
 ## `[telegram]` — alerts on your phone (off by default)
 
