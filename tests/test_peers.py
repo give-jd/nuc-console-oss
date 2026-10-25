@@ -40,6 +40,7 @@ with open(PEM) as _f:
     LEAF = _f.read().split("-----BEGIN PRIVATE")[0]
 PIN = "sha256:" + hashlib.sha256(ssl.PEM_cert_to_DER_cert(LEAF)).hexdigest()
 ip = peers.ipaddress.ip_address
+ABS_TOKEN = os.path.join(os.path.abspath(os.sep), "etc", "nuc-console", "peers", "b.token")  # absolute on every OS (a bare "/x" is not on Windows from Python 3.13)
 
 
 def slurp(path):
@@ -111,12 +112,12 @@ class Config(unittest.TestCase):
         return nuc_config.load(path, warn=said.append, overlay=False, **kw), said
 
     def test_the_grammar(self):
-        cfg, said = self.load("[hosts]\nnuc-b = https://nuc-b.example.net token=/x/b.token pin=sha256:%s scope=views alert=yes\n"
-                              "nas = http://100.64.1.7:8787 insecure=no   # a comment\n" % ("AB" * 32))
+        cfg, said = self.load("[hosts]\nnuc-b = https://nuc-b.example.net token=%s pin=sha256:%s scope=views alert=yes\n"
+                              "nas = http://100.64.1.7:8787 insecure=no   # a comment\n" % (ABS_TOKEN, "AB" * 32))
         self.assertEqual(said, [])
         b, nas = cfg["hosts"]
         self.assertEqual((b["name"], b["url"], b["token"], b["pin"], b["scope"], b["alert"], b["insecure"]),
-                         ("nuc-b", "https://nuc-b.example.net", "/x/b.token", "sha256:" + "ab" * 32, "views", True, False))
+                         ("nuc-b", "https://nuc-b.example.net", ABS_TOKEN, "sha256:" + "ab" * 32, "views", True, False))
         self.assertEqual((nas["url"], nas["scope"], nas["alert"]), ("http://100.64.1.7:8787", "summary", False))
         self.assertEqual(nas["token"], os.path.join(nuc_config.peers_token_dir(), "nas.token"))  # the default token path
 
@@ -206,9 +207,9 @@ class Config(unittest.TestCase):
         self.assertIn("hosts", confmigrate.KEEP)
         with open(os.path.join(ROOT, "config", "config.ini"), encoding="utf-8") as f:
             dist = f.read()
-        old = "[web]\nenabled = yes\n\n[hosts]\nnuc-b = https://nuc-b.example.net token=/x/b.token alert=yes\n"
+        old = "[web]\nenabled = yes\n\n[hosts]\nnuc-b = https://nuc-b.example.net token=%s alert=yes\n" % ABS_TOKEN
         new, _lost = confmigrate.build(old, dist)
-        self.assertIn("nuc-b = https://nuc-b.example.net token=/x/b.token alert=yes", new)
+        self.assertIn("nuc-b = https://nuc-b.example.net token=%s alert=yes" % ABS_TOKEN, new)
         self.assertNotIn("legacy", new.split("[hosts]")[-1].split("\n[")[0])
 
     def test_config_ini_documents_the_section(self):
@@ -253,6 +254,31 @@ class Addresses(unittest.TestCase):
                   "240.0.0.1", "255.255.255.255", "192.0.2.1", "198.51.100.7", "203.0.113.9", "198.18.0.1", "2001:db8::1", "::ffff:169.254.169.254",
                   "fec0::1", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "fd00:ec2::254", "100.100.100.200", "192.0.0.192"):
             self.assertEqual(peers.classify(ip(a), allow_loopback=True), "forbidden", a)
+
+    def test_the_classes_are_the_same_on_every_python(self):
+        """A fixed table, answered by the explicit networks of peers.py (the stdlib's is_private/is_global/is_reserved changed between versions)."""
+        table = (
+            ("0.0.0.0", "forbidden"), ("0.255.255.255", "forbidden"), ("169.254.169.254", "forbidden"), ("224.0.0.1", "forbidden"),
+            ("240.0.0.1", "forbidden"), ("255.255.255.255", "forbidden"), ("192.0.0.0", "forbidden"), ("192.0.0.192", "forbidden"),
+            ("192.0.2.1", "forbidden"), ("198.51.100.1", "forbidden"), ("203.0.113.1", "forbidden"), ("198.18.0.1", "forbidden"),
+            ("198.19.255.254", "forbidden"), ("192.88.99.1", "forbidden"), ("100.100.100.200", "forbidden"),
+            ("::", "forbidden"), ("::2", "forbidden"), ("::1.2.3.4", "forbidden"), ("fe80::1", "forbidden"), ("ff02::1", "forbidden"),
+            ("fec0::1", "forbidden"), ("2001:db8::1", "forbidden"), ("2001::1", "forbidden"), ("64:ff9b:1::1", "forbidden"), ("100::1", "forbidden"),
+            ("fd00:ec2::254", "forbidden"), ("4000::1", "forbidden"), ("8000::1", "forbidden"), ("5f00::1", "forbidden"),
+            ("10.0.0.1", "private"), ("172.16.0.1", "private"), ("172.31.255.255", "private"), ("192.168.0.1", "private"),
+            ("fc00::1", "private"), ("fd12:3456::1", "private"),
+            ("100.64.0.1", "tailnet"), ("100.127.255.255", "tailnet"), ("fd7a:115c:a1e0::1", "tailnet"),
+            ("1.1.1.1", "public"), ("8.8.8.8", "public"), ("93.184.216.34", "public"), ("172.15.0.1", "public"), ("172.32.0.1", "public"),
+            ("100.63.255.255", "public"), ("100.128.0.1", "public"), ("192.0.1.1", "public"), ("198.17.255.255", "public"), ("198.20.0.1", "public"),
+            ("2606:4700::1111", "public"), ("2001:4860:4860::8888", "public"), ("2a00:1450::1", "public"),
+        )
+        for addr, kind in table:
+            self.assertEqual(peers.classify(ip(addr)), kind, addr)
+        for addr in ("127.0.0.1", "127.255.255.255", "::1"):
+            self.assertEqual((peers.classify(ip(addr)), peers.classify(ip(addr), allow_loopback=True)), ("forbidden", "loopback"), addr)
+        for addr, kind in (("::ffff:10.0.0.1", "private"), ("::ffff:169.254.169.254", "forbidden"), ("::ffff:8.8.8.8", "public"),
+                           ("::ffff:100.64.0.1", "tailnet"), ("64:ff9b::808:808", "public"), ("2002:808:808::", "public")):
+            self.assertEqual(peers.classify(ip(addr)), kind, addr)
 
     def test_loopback_only_for_the_tests(self):
         for a in ("127.0.0.1", "127.8.8.8", "::1", "::ffff:127.0.0.1"):
@@ -453,6 +479,16 @@ class Limits(Base):
 
 # ---- Parsing -------------------------------------------------------------------------------------------------------------------------
 class Parsing(Base):
+    def test_a_nest_the_interpreter_may_or_may_not_survive_is_one_answer(self):
+        for depth in (65, 200, 5000, 100000):  # RecursionError on some Pythons, a parsed list on others: bad-json on all
+            for open_, close in ((b"[", b"]"), (b'{"a":', b"}")):
+                with self.assertRaises(peers.PeerError, msg=depth) as c:
+                    peers.parse_summary(open_ * depth + b"1" + close * depth)
+                self.assertEqual(c.exception.reason, "bad-json", depth)
+        ok = peers.parse_summary(b'{"api":1,"view":"summary","host":"h","x":' + b"[" * 63 + b"]" * 63 + b"}")  # under the limit it is a document
+        self.assertEqual(ok["host"], "h")
+        self.assertEqual(peers.loads(b"[" * 63 + b"]" * 63), eval("[" * 63 + "]" * 63))
+
     def test_bad_documents(self):
         for mode, error in (("empty", "bad-json"), ("not-json", "bad-json"), ("nested", "bad-json"), ("types", "bad-shape")):
             e = self.poll(self.fake(mode=mode))

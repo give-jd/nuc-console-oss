@@ -132,12 +132,26 @@ def _int_text(text):
     return int(text)
 
 
+def _too_deep(value, limit=64):
+    stack = [(value, 1)]  # iterative: the document is the attacker's
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, (dict, list)):
+            if depth > limit:
+                return True
+            stack.extend((x, depth + 1) for x in (item.values() if isinstance(item, dict) else item))
+    return False
+
+
 def loads(body):
     """The JSON of bytes a peer sent -> the value; ValueError for anything that is not strictly that (bad bytes, nesting too deep, NaN)."""
     try:
-        return json.loads(body.decode("utf-8"), parse_constant=_no_constant, parse_int=_int_text)
+        value = json.loads(body.decode("utf-8"), parse_constant=_no_constant, parse_int=_int_text)
     except (ValueError, RecursionError, MemoryError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
         raise ValueError("not json") from None
+    if _too_deep(value):  # whether the interpreter's parser gave up (RecursionError) or went on, a nest this deep is the same answer
+        raise ValueError("too deep")
+    return value
 
 
 def tree(v, depth=0, limit=40):
@@ -161,11 +175,23 @@ _QUAD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}")
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 _PATH = re.compile(r"/[A-Za-z0-9._~/-]*")
 _PORT = re.compile(r"[0-9]{1,5}")
-TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
-PRIVATE = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
-# addresses of cloud metadata services outside link-local (AWS IPv6, Alibaba): reached from a private or CGNAT range otherwise
+def _nets(*names):
+    return tuple(ipaddress.ip_network(n) for n in names)
+
+
+TAILNET = _nets("100.64.0.0/10", "fd7a:115c:a1e0::/48")
+PRIVATE = _nets("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+LOOPBACK = _nets("127.0.0.0/8", "::1/128")
+GLOBAL6 = _nets("2000::/3")
+# never contacted (IANA special-purpose registries): this network and unspecified, link-local (cloud metadata included), multicast, reserved
+# and broadcast, protocol assignments, documentation, benchmarking, 6to4 relay anycast; IPv6: unspecified and the rest of ::/8, link-local,
+# multicast, site-local, documentation, Teredo, NAT64 local-use, discard-only, ORCHID, benchmarking; and two cloud metadata addresses that sit
+# in a private or CGNAT range. Listed before TAILNET and PRIVATE.
+FORBIDDEN = _nets("0.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4", "192.0.0.0/24", "192.0.2.0/24", "198.51.100.0/24",
+                  "203.0.113.0/24", "198.18.0.0/15", "192.88.99.0/24", "100.100.100.200/32",
+                  "::/8", "fe80::/10", "ff00::/8", "fec0::/10", "2001:db8::/32", "3fff::/20", "2001::/32", "2001:2::/48", "2001:10::/28",
+                  "2001:20::/28", "64:ff9b:1::/48", "100::/64", "5f00::/16", "fd00:ec2::/32")
 NAT64, SIX2FOUR = ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("2002::/16")
-METADATA = tuple(ipaddress.ip_network(n) for n in ("fd00:ec2::/32", "100.100.100.200/32"))
 
 
 class Target(object):
@@ -210,18 +236,22 @@ def classify(ip, allow_loopback=False):
     return _kind(actual, allow_loopback)
 
 
+def _in(ip, nets):
+    return any(ip.version == n.version and ip in n for n in nets)
+
+
 def _kind(ip, allow_loopback):
-    if ip.is_unspecified or ip.is_multicast or ip.is_link_local or getattr(ip, "is_site_local", False) or ip == ipaddress.IPv4Address("255.255.255.255"):
-        return "forbidden"
-    if ip.is_loopback:  # before is_reserved: ::1 is inside the reserved ::/8
+    """The class of one address from EXPLICIT tables only (never the stdlib's is_private/is_global/is_reserved, whose answers changed between
+    Python versions): the same answer on every version."""
+    if _in(ip, LOOPBACK):  # before FORBIDDEN: ::1 is inside ::/8
         return "loopback" if allow_loopback else "forbidden"
-    if ip.is_reserved or any(ip.version == n.version and ip in n for n in METADATA):
+    if _in(ip, FORBIDDEN):
         return "forbidden"
-    if any(ip.version == n.version and ip in n for n in TAILNET):
+    if _in(ip, TAILNET):
         return "tailnet"
-    if any(ip.version == n.version and ip in n for n in PRIVATE):
+    if _in(ip, PRIVATE):
         return "private"
-    if ip.is_private or not ip.is_global:  # documentation, benchmarking, shared, site-local, 0.0.0.0/8, ...: no service of a person
+    if ip.version == 6 and not _in(ip, GLOBAL6):  # outside 2000::/3 nothing is assigned to a service of a person
         return "forbidden"
     return "public"
 
