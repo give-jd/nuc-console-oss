@@ -3,7 +3,9 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.7.0] - 2026-10-25
+
+The AI comes back by itself after a restart, and the first Windows and macOS checks. **The AI's model server is started again when the web service restarts** (`[ai] autostart = yes`), with an `ai-down` alarm when the AI is on and nothing answers; Windows gains `reboot-required` from the registry, a commit-charge `memory-pressure` and the disk, display and BugCheck event ids, all without a new PowerShell script; macOS gains kernel panics in the history, `memory-pressure` and `updates-pending` from the Software Update plist. A minor version: `config.ini` is kept and nothing needs doing after the update except what 2.6.0 already asked (`sudo nuc-console-accept` once). The Windows and macOS facts (registry paths, event ids, plist keys, panic file names) come from the vendors' documentation and have not yet been run on a real Windows or Mac: a wrong name shows "unknown", never a false green. Still Python 3.8+, standard library only.
 
 ### Added
 - **macOS checks, first batch** (no new helper, no `log show`, no `smartctl`): kernel panics (`.panic` files and `Kernel*`/`panic*` `.ips` reports, `bug_type` 210, in the DiagnosticReports folders) are recorded in the event history as `unexpected_shutdown` / `kernel panic` (date only; the 4 KB head is read and nothing of the report is kept); `memory-pressure` follows macOS's own level (`kern.memorystatus_vm_pressure_level`: warning 2, critical 4 as a warning and an error); `updates-pending` reads `/Library/Preferences/com.apple.SoftwareUpdate.plist` (no network) and says when the update check has not run for over 14 days. The plist key names are from memory of macOS and still to be confirmed on a Mac.
