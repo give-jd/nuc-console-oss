@@ -17,7 +17,7 @@ import threading
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
 OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
-VERSION = "2.5.2"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
+VERSION = "2.6.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
 PORTABLE = os.environ.get("NUC_CONSOLE_HOME", "")  # portable run (run.sh / run.cmd): config, state and baseline in that folder
 if PORTABLE:
     BASE_DIR = os.path.abspath(PORTABLE)
@@ -74,7 +74,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
                   "reboot-required", "disk-inodes",
                   "container-no-restart", "containers-not-back",
-                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down")
 
 # [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
 # validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
@@ -185,7 +185,7 @@ def load(path=None, warn=None, overlay=True):
                    "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
-                  "daily": False, "gpu": "auto", "web_actions": True},
+                  "daily": False, "gpu": "auto", "web_actions": True, "autostart": True},
            "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["backups"] = {}  # [backups]: name -> {"path": absolute path or glob, "max_age_days": int}; read by the root collector only
@@ -415,7 +415,7 @@ def load(path=None, warn=None, overlay=True):
             say(f"nuc-console: {path}: [display] zoom must be an integer (percent)")
     if cp.has_section("ai"):  # the optional local model of the HEALTH screen (docs/HEALTH.md): off unless asked for
         ai = cfg["ai"]
-        for key in ("enabled", "allow_remote", "daily", "web_actions"):  # web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
+        for key in ("enabled", "allow_remote", "daily", "web_actions", "autostart"):  # autostart: the web view starts the model server again when it starts; web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
             try:
                 ai[key] = cp.getboolean("ai", key, fallback=ai[key])
             except ValueError:

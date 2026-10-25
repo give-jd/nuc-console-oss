@@ -290,6 +290,9 @@ KEYS = (
         ("web_actions", BOOL, "yes", LOCK,
          "yes: the AI page and the AI screen may set a model up, switch the AI on and off, delete models and ask; no: they only show (an "
          "administrator's lock)."),
+        ("autostart", BOOL, "yes", START,
+         "yes: when the web view starts (after an update or a reboot) and the AI is on with a model chosen, it starts the model server again "
+         "unless one already answers. no: only the AI page's buttons start it. Applies at the next start of the web view."),
         ("daily", BOOL, "no", START,
          "yes: the collector asks for one digest of the last 7 days a day (at low priority), shown on the HEALTH screen. It needs "
          "enabled = yes and the Health screen."),
