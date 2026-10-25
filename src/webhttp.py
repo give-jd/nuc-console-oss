@@ -56,6 +56,7 @@ SETUP_ACTIONS = ("finish", "skip")  # POST /setup/<action>: the setup guide's ma
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS}
 DRAIN_MAX = 65536    # bytes of an unread form that a refusal swallows (and drops) before closing, so the client can read the refusal
 DRAIN_S = 0.25       # ... and for at most this long
+DRAIN_PEEK_S = 0.05  # a client that has sent nothing after the headers within this long is not waited for
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 PEER_SUMMARY = (API_PATH, API_PATH + "/summary")  # what a peer token of scope `summary` may GET: nothing else, not even a 404 to probe with
 PEER_VIEWS = PEER_SUMMARY + tuple(API_PATH + "/" + v for v in ("overview", "cpu", "health", "map", "events"))  # scope `views`: the read-only screens
@@ -327,7 +328,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         left = min(int(n), cap) if n and NUM.fullmatch(n) else 0
         end = time.monotonic() + DRAIN_S
         try:
-            self.connection.settimeout(0.05)
+            self.connection.settimeout(DRAIN_PEEK_S)
             if left > 0 and not self.rfile.peek(1):  # buffered bytes, else one 50 ms look at the socket; a timeout is an OSError: nothing to swallow
                 left = 0
             while left > 0 and time.monotonic() < end:
