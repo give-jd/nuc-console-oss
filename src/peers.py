@@ -1228,7 +1228,7 @@ def serve(stop, reload_flag, load=None, path=None, tick=1.0, make=None, **net):
     path = path or nuc_config.config_path()
     make = make or Poller
     folder, state = nuc_config.peers_cache_dir(), nuc_config.peers_state_dir()
-    seen, poller, current, stamp = set(), None, None, "unset"  # ponytail: a loader that raises is retried every tick (stamp not moved)
+    seen, poller, current, stamp = set(), None, None, "unset"  # a loader that raises is retried every tick (stamp not moved)
     while not stop.is_set():
         try:
             now_stamp = _cfg_stamp(path)
