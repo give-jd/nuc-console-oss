@@ -28,7 +28,31 @@ elif WINDOWS:  # one root for config, state and logs; install-windows.ps1 restri
 else:  # macOS uses the Linux paths, except the runtime directory (no /run there)
     ETC_DIR, RUN_DIR, LIB_DIR = "/etc/nuc-console", "/var/run/nuc-console" if MACOS else "/run/nuc-console", "/var/lib/nuc-console"
 DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
-FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
+
+
+def peers_token_dir():
+    """Where the token of each [hosts] peer lives by default (<name>.token): Linux/macOS /etc/nuc-console/peers, Windows
+    %ProgramData%\\nuc-console\\peers, a portable run <data>/peers. One place for every OS."""
+    return os.path.join(ETC_DIR, "peers")
+
+
+def peers_cache_dir():
+    """Where the peer poller (peers.py) writes what it saw: Linux /run/nuc-console-peers, macOS /var/run/nuc-console-peers, Windows
+    <ProgramData>\\nuc-console\\run\\peers, a portable run <data>/peers-cache. $NUC_CONSOLE_PEERS_CACHE overrides it."""
+    if os.environ.get("NUC_CONSOLE_PEERS_CACHE"):
+        return os.environ["NUC_CONSOLE_PEERS_CACHE"]
+    if PORTABLE:
+        return os.path.join(BASE_DIR, "peers-cache")
+    return os.path.join(RUN_DIR, "peers") if WINDOWS else RUN_DIR + "-peers"
+
+
+HOSTS_MAX = 16  # entries under [hosts]
+HOST_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+HOST_RESERVED = ("fleet",)  # fleet.json is the cache's index
+HOST_SCOPES = ("summary", "views", "full")
+HOST_PIN_RE = re.compile(r"sha256:[0-9a-fA-F]{64}")
+HOST_URL_RE = re.compile(r"https?://[^\s\"'`\\]{1,300}")
+FEATURES =("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health", "ai")
 MODES = ("overview", "rotate")
 REFRESH_MIN, REFRESH_MAX = 1, 10  # seconds between two redraws ([dashboard] refresh_seconds): every screen and page
@@ -102,6 +126,53 @@ def expose_port(key):
     return int(head), proto or "tcp"
 
 
+def parse_hosts(rows, say):
+    """[hosts] rows [(name, "url [token=PATH] [pin=sha256:HEX] [scope=summary|views|full] [alert=yes] [insecure=yes]")] -> [{"name", "url",
+    "token", "pin", "scope", "alert", "insecure"}] in file order. The separator is spaces (config.ini treats ';' as a comment). A malformed
+    row is ignored and `say` is told why; the text says the peer's name and the option, never a file's content. The URL is only checked for
+    its shape here: peers.parse_url judges it (and says "invalid" in the list) when it is used."""
+    out, seen = [], set()
+    for name, raw in rows:
+        name = name.strip().lower()
+        shown = re.sub(r"[^a-z0-9-]", "?", name[:32])
+        if not HOST_NAME_RE.fullmatch(name) or name in HOST_RESERVED:
+            say(f"'{shown}': a peer name is a-z, 0-9 and - (1-32, starting with a letter or digit): row ignored")
+            continue
+        if len(out) >= HOSTS_MAX:
+            say(f"{name}: more than {HOSTS_MAX} peers: row ignored")
+            continue
+        words = raw.split()
+        host = {"name": name, "url": "", "token": os.path.join(peers_token_dir(), name + ".token"), "pin": "", "scope": "summary",
+                "alert": False, "insecure": False}
+        why = ""
+        if not words or not HOST_URL_RE.fullmatch(words[0]):
+            why = "the value starts with an http:// or https:// URL without spaces or quotes"
+        else:
+            host["url"] = words[0]
+        for w in words[1:]:
+            key, eq, val = w.partition("=")
+            key = key.lower()
+            if not eq or not val:
+                why = "options are key=value, separated by spaces"
+            elif key == "token" and os.path.isabs(val) and not re.search(r"[\x00-\x1f\"'`]", val) and len(val) <= 300:
+                host["token"] = val
+            elif key == "pin" and HOST_PIN_RE.fullmatch(val):
+                host["pin"] = val.lower()
+            elif key == "scope" and val.lower() in HOST_SCOPES:
+                host["scope"] = val.lower()
+            elif key in ("alert", "insecure") and val.lower() in ("yes", "no", "true", "false", "on", "off", "1", "0"):
+                host[key] = val.lower() in ("yes", "true", "on", "1")
+            else:
+                why = f"option '{re.sub(r'[^a-z]', '?', key[:12])}' is not token=ABSOLUTE-PATH, pin=sha256:HEX64, scope=summary|views|full, alert=yes|no or insecure=yes|no"
+            if why:
+                break
+        if why:
+            say(f"{name}: {why}: row ignored")
+        else:
+            out.append(host)
+    return out
+
+
 def load(path=None, warn=None, overlay=True):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int, ...}. warn: what to do with each complaint about the file (a line of
     text): printed to stderr unless given (the settings page collects them to refuse a value before it writes it).
@@ -128,6 +199,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
     cfg["tls"] = {"watch": [], "warn_days": 21}  # [tls] watch: ["name=host:port" | "name=/path"] as watch_entry reads them
     cfg["watch_warnings"] = []  # what [services] and [tls] asked that cannot be done: shown as an ATTENTION warning (watch-config)
+    cfg["hosts"] = []  # [hosts]: the peers peers.py polls, see parse_hosts; never from the overlay, never from the settings page
     cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
     try:
         if not cp.read(path, encoding="utf-8-sig"):  # UTF-8 on every OS (Windows would assume cp1252); Notepad may add a BOM
@@ -269,6 +341,9 @@ def load(path=None, warn=None, overlay=True):
             else:
                 seen.add(name)
                 cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")
+    if cp.has_section("hosts"):
+        cfg["hosts"] = parse_hosts([(k, cp.get("hosts", k, raw=True)) for k in cp.options("hosts") if k not in cp.defaults()],
+                                   lambda why: say(f"nuc-console: {path}: [hosts] {why}"))
     if cp.has_section("containers"):  # restart_ignore = name, *-glob-*: containers that are meant to stay down after a reboot
         for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")

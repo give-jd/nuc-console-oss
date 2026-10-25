@@ -521,6 +521,33 @@ there `config.ini` is the file of the account the web view runs as, so writing i
 (The shell's [layout editor](#edit-the-layout) changes only the `nuc_ui` cookie of your browser, never `config.ini`; the settings page's Export block is what you paste there.
 The Telegram page does not write `config.ini` either: it asks the notifier, an unprivileged service, which keeps the page's choice in its own `web.json`.)
 
+## Fleet cache
+
+The fleet client (`src/peers.py`, `nuc-console-fleet once`) writes what it saw of the `[hosts]` peers into a folder of its own: Linux `/run/nuc-console-peers`,
+macOS `/var/run/nuc-console-peers`, Windows `%ProgramData%\nuc-console\run\peers`, a portable run `<data>/peers-cache` (`NUC_CONSOLE_PEERS_CACHE` overrides it). The web view and the
+console only **read** this folder; they never open a socket to a peer and never hold a peer's token. One JSON file per peer, `<name>.json`, written atomically (a file aside, then rename), mode 0644:
+
+```json
+{"v": 1, "name": "nuc-b", "url_display": "https://nuc-b.example.ts.net", "ts": 1792925628, "state": "ok", "error": "",
+ "summary": {"host": "nuc-b", "host_id": "0123456789abcdef", "version": "2.6.0", "os": "linux", "api": 1, "state": "ok", "status_text": "ALL OK",
+             "counts": {"err": 0, "warn": 0, "unknown": 0}, "worst": [], "stale": false, "at": 1792925627.4, "problems": 0},
+ "views": {"overview": {"api": 1, "view": "overview", "...": "..."}},
+ "scope": "summary", "warn": ["legacy-peer"], "insecure": false, "identity": "ok", "last_ok": 1792925628, "skew_s": 0, "age_s": 1}
+```
+
+`state` is one of `ok`, `warn`, `err`, `down`, `unknown`, `info` (what the peer reports) or `unreachable`, `unauthorized` (401/403 or no usable token file), `incompatible` (an API newer than
+this client reads, or no such page), `untrusted` (pin or certificate not accepted, or the `host_id` changed), `stale` (the peer says its data is old, or its own `at` is more than 2 minutes behind its own `Date`).
+`error` is empty or a word of `peers.REASONS` (`timeout`, `connect`, `redirect`, `too-large`, `pin-mismatch`, ...): never text from the peer. `summary` holds only the fields the client whitelists, each with
+its type and length (strings at most 120 characters, no control character); `views` is present only for `scope=views` or `full`: the overview, cpu, health, map and events documents as opaque JSON, at most 2 MB each, nested at most 40 deep, keys named like `csrf` or `token` removed.
+`warn` is a list of words: `legacy-peer` (a 2.5.x peer: no `host_id` or `counts`), `full-scope-token`, `clock-skew` (the peer's `Date` differs from this clock by more than 60 s; `skew_s` is the difference, the age of the data is `Date` minus the peer's `at`, never this clock against `at`),
+`insecure-transport`, `showing-old-data` (the peer is unreachable: the last summary and documents are kept, `last_ok` says when), `view-failed:<name>`, `views-dropped`. `identity` is `changed` when the peer's `host_id`,
+remembered at the first contact in the file `known` of the same folder (like `known_hosts`; the folder is volatile on Linux, so the memory starts again after a reboot), is not the one that answered: the peer is then `untrusted` and its data is dropped.
+To accept a replaced machine, remove its line from `known`.
+
+`fleet.json` is the index: `{"v": 1, "ts": ..., "worst": "<state>", "peers": [{"name", "state"}]}`; the worst state orders `ok = info < warn < unknown = stale = incompatible < unauthorized = untrusted < unreachable = err < down`.
+A reader uses `peers.read_cache(folder, views=False)`, which treats the folder as another account's: no link, regular files only, not writable by group or others, owned by root, itself or the folder's owner, at most 12 MB (64 KB for `fleet.json`), every field rebuilt with its type,
+text cleaned again, and an `ok`, `info`, `warn` or `unknown` entry older than 2 minutes returned as `stale` (`cache-old`). Whether the poller runs at all is `fleet["age_s"]`. A peer that cannot be read is skipped and counted in `skipped`, never shown as ok.
+
 ## Threat model in one paragraph
 
 The page shows your topology (ports, container names, client IPs seen on databases, and on the map which service talks to which), exactly like the monitor. With loopback + `tailscale serve` only your tailnet can read it.

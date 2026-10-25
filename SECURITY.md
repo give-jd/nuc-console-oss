@@ -122,6 +122,23 @@ Things to be aware of (by design):
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
 
+## The peer client
+
+`src/peers.py` is the one place that fetches from the network on behalf of a configured peer (`[hosts]`, [CONFIGURATION.md](docs/CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default)); the web view and the console never open a socket to a peer
+and never read a peer's token. It follows foreign input, so each rule has a test (`tests/test_peers.py`):
+
+- **Targets.** Only the entries of `[hosts]`; no request, query or overlay ever supplies a URL. `[hosts]` is not in the overlay and not writable from the settings page, not even in a portable run.
+- **URL.** `http`/`https` only, no user info, query or fragment, port 1-65535; the host is a DNS name or an IP literal in its plain spelling (decimal, hex and octal spellings are refused; an IPv4-mapped IPv6 literal is judged as the IPv4 address inside it).
+- **Addresses.** Every address of a name is judged and the connection goes to the checked address: the name is resolved once, so DNS rebinding finds nothing to rebind. Link-local (the cloud metadata address included), multicast, unspecified, reserved, broadcast, documentation and site-local addresses are never contacted;
+  nor are the metadata addresses outside link-local (`100.100.100.200`, `fd00:ec2::/32`). Loopback only through an internal parameter that the tests use, never from the configuration. A name with one forbidden address among good ones is refused whole. Private, CGNAT and ULA ranges are allowed, a public address only over `https`.
+- **Transport.** Plain `http` only to `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, or to a private address with `insecure=yes` (the cache then says `insecure` so that it can be raised as an alarm). `https` verifies the chain and the name with the system's CAs (TLS 1.2 or newer), or the SHA-256 of the leaf certificate (`pin=`) **instead of** them; a mismatch is `untrusted`, there is no fallback. Nothing is sent before the certificate is accepted.
+- **Request.** No redirect (any 3xx is an error and nothing is re-sent), no proxy from the environment, no keep-alive, only the headers `Host`, `Authorization: Bearer`, `Accept: application/json` and a fixed `User-Agent`, GET only.
+- **Limits.** 3 s per socket operation and 5 s for the whole request (a watchdog shuts the socket down, so a peer that sends one byte a second is cut at 5 s); the body is read in chunks and stops at 256 KB (2 MB for a document) whatever `Content-Length` or the chunks claim; `Content-Type: application/json`, no `Content-Encoding`, status 200 (anything else is a word from a fixed list, a remote body is never echoed); 16 peers, 4 requests at a time, per-peer backoff from 5 s to 5 minutes with jitter, 15 s between polls (never under 5 s).
+- **Token.** Read from its file by a reader that wants a regular file opened without following a link, no group/other permission bits, owned by root or by the polling account, in a folder others cannot write to, at most 512 bytes and only token characters. It goes into the `Authorization` header of that peer and nowhere else: not the cache, an error message, a log or an argument.
+- **Parsing.** `json.loads` in a `try` (bad bytes, nesting too deep, `NaN`, long numbers), then a whitelist of fields with types and lengths; every remote string passes `ui.safe` (and loses invisible format characters) before it enters the cache; documents of the `views` scope are opaque, depth- and size-limited, and lose keys named like `csrf` or `token`.
+- **Trust.** The `host_id` seen at the first contact is remembered; a different one (or none any more) makes the peer `untrusted` with its data dropped. The skew of the peer's clock is measured from its `Date` header, never by comparing its `at` with this clock. A peer that is unreachable, old, untrusted or unreadable is never shown as ok.
+- **What it cannot do.** A compromised peer can lie about its own state: the client shows it as that peer's claim, and cannot know better. It cannot write anything here: the client only reads, and what it accepts is a whitelist.
+
 ## Verifying a release
 
 Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed, and by nothing else. On a fresh runner it:

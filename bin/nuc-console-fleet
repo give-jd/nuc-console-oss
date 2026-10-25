@@ -1,0 +1,10 @@
+#!/bin/sh
+# The peers of [hosts] in config.ini (docs/CONFIGURATION.md): what the fleet client sees of them. It only reads from the peers (one GET each).
+#   nuc-console-fleet list           the configured peers and the last state the poller cached
+#   nuc-console-fleet test NAME      one poll of that peer, now, in this terminal: the state and the reason in words (never the token)
+#   nuc-console-fleet once           poll every peer and write the cache (what the poller will do on its own)
+# The token files are read by the account that owns them: sudo -u nuc-console-peers nuc-console-fleet test NAME
+# not installed here (an extracted folder, the portable run)? NUC_CONSOLE_HOME=./data python3 src/peers.py list does the same there
+[ -f /opt/nuc-console/peers.py ] || { echo "nuc-console is not installed here. In an extracted (portable) folder use: NUC_CONSOLE_HOME=./data python3 src/peers.py list | test NAME | once" >&2; exit 1; }
+# env -u: these variables must not be able to point the client at another configuration or another cache
+exec env -u NUC_CONSOLE_CONFIG -u NUC_CONSOLE_PEERS_CACHE /usr/bin/python3 /opt/nuc-console/peers.py "$@"
