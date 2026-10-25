@@ -29,6 +29,7 @@ import events  # same directory: the EVENTS screen (the timeline of the history)
 import wake  # same directory: wakes a blanked console on a new problem
 import problems  # same directory: the problem list, its advice and what was accepted
 import procs
+import remotedoc  # same directory: a remote host's view documents, read back into components
 import ui
 import screens  # same directory: the full screens' view-models and the components of each screen
 from ansi import ANSI, bar, c, cc, clip, columns, kv, msg, msg_wrap, pad, section, vlen
@@ -457,6 +458,20 @@ def pack(blocks, ncol, cw, w, body_h, gap):
     return columns([(col, cw) for col in cols], w, gap=3) if ncol > 1 else cols[0]
 
 
+def even_columns(pre, ncol, cw, w):
+    """The blocks `pre` (lines each, in a fixed order) in ncol columns of cw, as even as possible: the shortest column height that holds
+    every one of them. The scrolling page's layout, and a remote host's overview."""
+    blocks = [(lambda c_, lines=lines: lines) for lines in pre]
+    lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if pack(blocks, ncol, cw, w, mid, [""]) is None:
+            lo = mid + 1
+        else:
+            hi = mid
+    return pack(blocks, ncol, cw, w, hi, [""])
+
+
 def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=None, details=None, scroll=False):
     """Everything on one screen. If it does not fit, details shrink (k = 0..3); at the last level no empty lines.
 
@@ -519,17 +534,7 @@ def page_overview(s, cont, net, boot, w, body_h, pb=None, baseline=False, now=No
         return pages
 
     if scroll:
-        pre = [fn(cw) for _, fn in make_cand(-2, True)]
-        blocks = [(lambda c_, lines=lines: lines) for lines in pre]
-        # the shortest column height that holds every section in the fixed order: the columns come out even
-        lo, hi = max(len(x) + 2 for x in pre), sum(len(x) + 2 for x in pre)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if pack(blocks, ncol, cw, w, mid, [""]) is None:
-                lo = mid + 1
-            else:
-                hi = mid
-        return pack(blocks, ncol, cw, w, hi, [""])
+        return even_columns([fn(cw) for _, fn in make_cand(-2, True)], ncol, cw, w)
 
     # first detail is removed keeping the empty lines between blocks; only at the very end are those removed too
     # from the richest (k=-2, full tables) to the most compact; on very small consoles the last level drops BOOT and DATABASE
@@ -725,8 +730,13 @@ def kept_ctx(pb):
 
 def kpi_line(ctx, w):
     """The KPI line: symbol, label and value of each KPI of [ui] (kpis or the preset's), the last ones dropped until it fits w columns."""
+    return kpi_line_of(cards.kpis(ctx, prefs.effective(ui_cfg())[0]["kpis"]), w)
+
+
+def kpi_line_of(kpis, w):
+    """kpi_line() of the figures themselves (ui.Kpi): a remote host's come from its document."""
     items = []
-    for k in cards.kpis(ctx, prefs.effective(ui_cfg())[0]["kpis"]):
+    for k in kpis:
         col, val = ui.sgr(KPI_TOKEN[k.state]), k.value + k.unit
         items.append((len(f"{k.symbol} {k.label} {val}"),
                       cc(col, k.symbol) + " " + c(ui.sgr("muted"), k.label) + " " + (val if k.state in ("ok", "info") else cc(col, val))))
@@ -859,6 +869,115 @@ def overview_footer(name, idx, n, w, size, keys, hint, shown):
 
 def first_slide_of(sl, page_idx):
     return next((i for i, s in enumerate(sl) if s[0] == PAGES[page_idx]), 0)
+
+
+# ---- a REMOTE host's screens: its documents (src/remotedoc.py) drawn by the code that draws the local ones ---------------------------------
+# Pure functions: the document is already read (a peers.py cache entry), nothing here reads the host, a file or the clock. The frame is the
+# local one (header, KPI line, body, footer) with two differences nobody can miss: the header is the remote marker, never the local pill, and a
+# banner (remote_banner) says when the data is old, the transport is not safe or the host is not the one that answered first.
+
+REMOTE_CODE = "1;7;35"  # the remote header: bold, reverse video and magenta: no local header is ever drawn so
+REMOTE_BANNER = {  # the cache entry's state -> (banner colour, what it says)
+    "stale": ("banner_warn", "! STALE: the last reading is old; what follows may no longer be true"),
+    "unreachable": ("banner_err", "\u2716 UNREACHABLE: this host does not answer; what follows is its last reading"),
+    "unauthorized": ("banner_err", "\u2716 UNAUTHORIZED: this host refuses our token; what follows is its last reading"),
+    "untrusted": ("banner_err", "\u2716 UNTRUSTED: the certificate or the identity of this host does not match; do not rely on this"),
+    "incompatible": ("banner_warn", "! INCOMPATIBLE: this host speaks a newer web API; update this console"),
+    "down": ("banner_err", "\u2716 DOWN: this host reports itself down"),
+}
+
+
+def remote_age(age_s):
+    """How old a reading is, short: 12s, 3m, 5h, 2d ('?' when it is not known)."""
+    if not isinstance(age_s, (int, float)) or isinstance(age_s, bool) or age_s != age_s or age_s < 0:
+        return "?"
+    s = int(min(age_s, 10 ** 9))
+    return f"{s}s" if s < 120 else f"{s // 60}m" if s < 7200 else f"{s // 3600}h" if s < 172800 else f"{s // 86400}d"
+
+
+def remote_header(name, age_s, w=0):
+    """The header line while a remote host is shown: '⇄ name (remote 12s)' in reverse video, bold and magenta, w columns wide (0: as long as
+    it is). The local header is ' host │ [1 Overview] ... │ HH:MM:SS ... status' on the status pill's colour: the two are never alike."""
+    text = f" \u21c4 {remotedoc.clean(str(name)[:40])} (remote {remote_age(age_s)}) "
+    return c(REMOTE_CODE, pad(text[:w], w) if w else text)
+
+
+def remote_banner(entry, w):
+    """The banners (lines, each w columns wide) a peers.py cache entry asks for, the worst first: the host is not the one that answered first
+    (identity changed), the state (stale, unreachable ...), the transport is plain http outside Tailscale (insecure). Nothing the peer wrote
+    is in them. An entry that is not a dict gives the 'untrusted' one."""
+    e = entry if isinstance(entry, dict) else {"state": "untrusted"}
+    out = []
+    if e.get("identity") not in (None, "ok"):
+        out.append(("banner_err", "\u2716 IDENTITY CHANGED: this is not the host that answered first; check the address"))
+    if e.get("state") in REMOTE_BANNER:
+        out.append(REMOTE_BANNER[e["state"]])
+    if e.get("insecure") is True:
+        out.append(("banner_warn", "! INSECURE: plain http outside Tailscale; anyone on the path can read or change this"))
+    return [clip(c(ui.sgr(tok), pad(" " + words, w)), w) for tok, words in out]
+
+
+def remote_overview(d, w):
+    """The overview of a decoded remote document as lines, nothing cut: every card at the richest level in columns as even as possible, as the
+    scrolling page draws the local one (page_overview(scroll=True)). The order is the document's layout when it has one, else its cards'."""
+    by_id = {}
+    for card in d.cards:
+        by_id.setdefault(card.id, card)
+    order = [by_id[i] for i, _w in d.layout if i in by_id]
+    cards_ = order or d.cards
+    ncol = 3 if w >= NCOL3 else 2 if w >= WIDE else 1
+    cw = (w - 3 * (ncol - 1)) // ncol
+    pre = []
+    for card in cards_:
+        try:
+            pre.append(mark_title(ansi.card_lines(card, cw)[0], card.state))
+        except Exception:  # noqa: BLE001 - a card that cannot be drawn is a line, the others stay
+            pre.append([msg("warn", "a card of the remote host could not be drawn")])
+    return even_columns(pre, ncol, cw, w) if pre else [msg("info", "the remote host sent no cards")]
+
+
+def remote_body(doc, w):
+    """The body of a remote host's screen as lines, nothing cut (the pager's text; remote_view cuts each to w as frame() does). doc: a dict (the JSON of a view document)
+    or a remotedoc.Document. Never raises: a document that cannot be read, is too new or is not a remote view is one line saying so."""
+    d = doc if isinstance(doc, remotedoc.Document) else remotedoc.decode(doc)
+    try:
+        if d.ok and d.view == "overview":
+            lines = remote_overview(d, w)
+        else:
+            lines = []
+            for n in d.nodes:
+                try:
+                    lines += ansi.render(n, w)[0]
+                except Exception:  # noqa: BLE001
+                    lines.append(msg("warn", "an element of the remote host could not be drawn"))
+                if len(lines) > remotedoc.MAX_LINES:
+                    break
+    except Exception:  # noqa: BLE001
+        lines = [msg("err", "the remote host's view could not be drawn")]
+    if d.cut:
+        lines.append(msg("warn", "the remote document is bigger than this console reads: part of it is left out"))
+    return lines[:remotedoc.MAX_LINES]
+
+
+def remote_view(host, doc, w, h, age_s=None, kpis=None, foot=None, banner=(), top=0):
+    """A remote host's screen as exactly h lines (each w columns wide, no raw escape sequence of the data): the remote header, the banners
+    (remote_banner), the KPI line when the frame has one (kpis: ui.Kpi of the host, default the document's own), the body from line `top`
+    on (the pager: remote_body has all of it) and the footer (default: where the body is). The local frame's rows otherwise: the same code
+    draws them, so a remote overview looks like a local one."""
+    d = doc if isinstance(doc, remotedoc.Document) else remotedoc.decode(doc)
+    body = remote_body(d, w)
+    rows = ([remote_header(host, age_s, w)] + list(banner))[:max(0, h - 1)]
+    figures = d.kpis if kpis is None else kpis
+    if kpi_on(h) and figures and len(rows) < h - 1:
+        rows.append(kpi_line_of(figures, w))
+    room = max(0, h - 1 - len(rows))
+    top = max(0, min(int(top), max(0, len(body) - room)))
+    shown = body[top:top + room]
+    rows += [clip(x, w) for x in shown]
+    if foot is None:
+        foot = c(90, clip(f" remote host: lines {top + 1}-{top + len(shown)} of {len(body)}" if body else " remote host: nothing to show", w))
+    rows += [""] * (h - 1 - len(rows)) + [foot if vlen(foot) <= w else clip(foot, w)]
+    return rows[:h]
 
 
 DEMO = False  # --demo: synthetic data (src/demo.py) instead of the real state

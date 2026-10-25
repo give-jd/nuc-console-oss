@@ -29,7 +29,7 @@ SCREENS = ("overview", "map", "cpu", "health", "ai")
 NAMES = {"overview": "Overview", "map": "Map", "cpu": "CPU", "health": "Health", "ai": "AI"}
 SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar on a narrow line
 PROCS = [{"pid": 100 + i, "name": f"p{i}", "user": "u", "cpu": 50.0 - i, "mem": 10.0 + i, "time": 100.0 - i} for i in range(8)]
-STUBBED = ("CpuFeed", "cpu_screen", "health_state", "health_screen", "ai_state", "ai_screen", "ai_do", "ai_busy", "slides", "map_graph")
+STUBBED = ("CpuFeed", "cpu_screen", "health_state", "health_screen", "ai_state", "ai_screen", "ai_do", "ai_busy", "slides", "map_graph", "events_state")
 
 
 class Exit(Exception):

@@ -26,7 +26,7 @@ STREAM_VIEWS_MAX = 3  # views one stream may carry (a page: its view and the sum
 JSON_TYPE = "application/json; charset=utf-8"
 STREAM_TYPE = "text/event-stream; charset=utf-8"
 
-_FIELDS = {}  # class -> the names of its fields, inherited ones first, console-only ones left out
+_FIELDS = {}  # (class, console) -> the names of its fields, inherited ones first, console-only ones left out (unless console)
 
 
 class Doc(bytes):
@@ -34,37 +34,41 @@ class Doc(bytes):
     rev = ""
 
 
-def fields(cls):
+def fields(cls, console=False):
     """The fields of a component class that the API carries: every __slots__ of the class and its bases (a Notice has Msg's level and text),
-    in order, less CONSOLE_ONLY."""
-    names = _FIELDS.get(cls)
+    in order, less CONSOLE_ONLY (console=True keeps them: see data())."""
+    names = _FIELDS.get((cls, console))
     if names is None:
         seen = []
         for k in reversed(cls.__mro__):
-            seen += [n for n in getattr(k, "__slots__", ()) if n not in seen and n not in CONSOLE_ONLY]
-        names = _FIELDS[cls] = tuple(seen)
+            seen += [n for n in getattr(k, "__slots__", ()) if n not in seen and (console or n not in CONSOLE_ONLY)]
+        names = _FIELDS[cls, console] = tuple(seen)
     return names
 
 
-def data(x):
-    """x as plain JSON values. A component is {"type": its class name, field: value, ...}; a Bar adds its state (computed from its value and
+def data(x, console=False):
+    """x as plain JSON values. console=True is the console flavour (src/remotedoc.py reads both): nothing is left out or expanded (the
+    widths, gaps, heights and indents stay, Cols carry their widths in "widths", Only and Cap are components); the documents the web API
+    serves are never this. Without it: A component is {"type": its class name, field: value, ...}; a Bar adds its state (computed from its value and
     thresholds), Raw lines lose their colours, the children of Cols lose the console's widths. In a list, Only("console") is left out and Only("web") and Cap give their children in place, as
     the web draws them. A float that is not a number is null; a value of another kind is its text."""
     if isinstance(x, ui.Raw):
         return {"type": "Raw", "lines": [ui.safe(ansi.ANSI.sub("", str(line))) for line in x.lines]}
     if isinstance(x, ui.Component):
         out = {"type": type(x).__name__}
-        for n in fields(type(x)):
-            out[n] = data(getattr(x, n))
+        for n in fields(type(x), console):
+            out[n] = data(getattr(x, n), console)
         if isinstance(x, ui.Bar):
             out["state"] = x.state
         if isinstance(x, ui.Cols):  # [(node, the console's width)]: the web lays them out in a grid, whatever the width
-            out["children"] = list(_items(n for n, _w in x.children))
+            out["children"] = list(_items((n for n, _w in x.children), console))
+            if console:
+                out["widths"] = [w for _n, w in x.children]
         return out
     if isinstance(x, (list, tuple)):
-        return list(_items(x))
+        return list(_items(x, console))
     if isinstance(x, dict):
-        return {str(k): data(v) for k, v in x.items()}
+        return {str(k): data(v, console) for k, v in x.items()}
     if isinstance(x, float):
         return x if math.isfinite(x) else None
     if x is None or isinstance(x, (bool, int, str)):
@@ -72,9 +76,11 @@ def data(x):
     return str(x)
 
 
-def _items(xs):
+def _items(xs, console=False):
     for x in xs:
-        if isinstance(x, ui.Only):
+        if console:
+            yield data(x, True)
+        elif isinstance(x, ui.Only):
             if x.surface == "web":
                 for y in _items(x.children):
                     yield y
@@ -130,12 +136,15 @@ def dump(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
 
 
-def document(view, body, at):
+def document(view, body, at, console=False):
     """The document of `view`: its fields (body: a dict of components and values) as plain data, with the API version, the rev and the time
-    the data was read."""
-    body = data(body)
+    the data was read. console: the console flavour (data()), marked "flavour": "console"; only the tests and src/remotedoc.py use it."""
+    body = data(body, console)
     tag = rev(body)
-    doc = Doc(dump(dict({"api": VERSION, "view": view, "rev": tag, "at": round(float(at), 3)}, **body)))
+    head = {"api": VERSION, "view": view, "rev": tag, "at": round(float(at), 3)}
+    if console:
+        head["flavour"] = "console"
+    doc = Doc(dump(dict(head, **body)))
     doc.rev = tag
     return doc
 
