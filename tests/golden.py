@@ -161,8 +161,9 @@ class FrozenWorld(object):
     known. Everything is put back on exit: the same objects with the same contents (the tests of this repository change render.CFG in
     place and keep references to what is inside it)."""
 
-    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW, env=None, chat=()):
+    def __init__(self, cfg=None, mode="overview", accepted=(), now=NOW, env=None, chat=(), fleet=None):
         self.cfg, self.mode, self.accepted, self.clock, self.env = cfg or {}, mode, accepted, Clock(now), env or {}
+        self.fleet = fleet  # a function (now) -> the entries of the peers' cache, written into a temporary folder the web view reads (None: no cache)
         self.chat = chat  # the AI chat's exchanges, as the engine keeps them (CHAT), put into the engine of the server
         self._undo, self._tmp, self._server = [], None, None
 
@@ -216,6 +217,11 @@ class FrozenWorld(object):
             self._undo.append((os.environ, None, dict(os.environ)))  # put back on exit; no NO_COLOR of the machine that renders (a case sets its own)
             os.environ.pop("NO_COLOR", None)
             os.environ.update(self.env)
+            if self.fleet is not None:
+                import fleetfix
+                folder = os.path.join(self._tmp.name, "peers-cache")
+                fleetfix.write(folder, self.fleet(self.clock.now), self.clock.now, getattr(self.fleet, "poller", True))
+                os.environ["NUC_CONSOLE_PEERS_CACHE"] = folder
             marker = os.path.join(self._tmp.name, "setup.json")  # the setup guide's marker: seen, so that no page carries the banner (a case with NUC_GOLDEN_SETUP=fresh has none)
             os.environ["NUC_CONSOLE_SETUP"] = marker
             if self.env.get("NUC_GOLDEN_SETUP") != "fresh":
@@ -334,11 +340,11 @@ class Case(object):
     """One golden file. console: args are the arguments of `render.py --once --demo --color`; web: query is the query string of the page
     (the name starts with 'web-'). cfg: changes to the configuration; mode: render.MODE; accepted: see FrozenWorld; env: environment
     variables (NO_COLOR) the case sets."""
-    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted", "env", "chat")
+    __slots__ = ("name", "args", "query", "cfg", "mode", "accepted", "env", "chat", "fleet")
 
-    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=(), env=None, chat=()):
+    def __init__(self, name, args=(), query=None, cfg=None, mode="overview", accepted=(), env=None, chat=(), fleet=None):
         self.name, self.args, self.query, self.cfg, self.mode, self.accepted = name, tuple(args), query, cfg or {}, mode, accepted
-        self.env, self.chat = env or {}, chat
+        self.env, self.chat, self.fleet = env or {}, chat, fleet
 
     @property
     def filename(self):
@@ -349,7 +355,7 @@ class Case(object):
         return os.path.join(GOLDEN_DIR, self.filename)
 
     def render(self):
-        with FrozenWorld(self.cfg, self.mode, self.accepted, env=self.env, chat=self.chat) as world:
+        with FrozenWorld(self.cfg, self.mode, self.accepted, env=self.env, chat=self.chat, fleet=self.fleet) as world:
             return world.page(self.query) if self.query is not None else world.once(self.args)
 
 
@@ -376,6 +382,28 @@ CHAT = (  # the AI chat after two exchanges: an answer from the state and one qu
      "took": 3, "prompt": []})
 ACCEPTED = (("container-exited", 1, "1 container exited with an error"),
             ("docker-bypass", 1, "1 Docker port bypassing ufw (DOCKER-USER empty)"))
+
+
+def _fleetfix():
+    import fleetfix
+    return fleetfix
+
+
+def FLEET(now):
+    """The poller's cache for the Hosts golden pages: ok, warn, unreachable (old data), a 2.5.x peer read with a full token and a late clock, and a
+    machine that is not the one that answered first."""
+    f = _fleetfix()
+    return [f.entry("alpha", now), f.entry("bravo", now, "warn", counts=(0, 2, 0), worst=("Disk almost full", "A container exited")),
+            f.entry("charlie", now, "unreachable", age=300, error="connect", warn=["showing-old-data"]),
+            f.entry("delta", now, "ok", scope="full", skew_s=90, insecure=True), f.entry("echo", now, "ok", identity="changed", error="identity-changed")]
+
+
+def NO_POLLER(now):
+    """Entries nobody refreshed and no fleet.json: written without the poller's index, so a different folder state (see FrozenWorld)."""
+    return [_fleetfix().entry(n, now - 3000, ts=now - 3000) for n in ("alpha", "bravo", "charlie", "delta", "echo")]
+
+
+NO_POLLER.poller = False
 
 
 def _cases():
@@ -496,6 +524,12 @@ def _cases():
     for n in range(1, 6):
         add(f"web-shell-setup-{n}", query=f"view=setup&step={n}")
     add("web-shell-overview-tour", query="", env={"NUC_GOLDEN_SETUP": "fresh"})
+    # the Hosts page (PR5): five peers in five states worst first, the banners; one in detail; the poller absent; the settings section; the overview's tab and link
+    peers_cfg = {"hosts": [_fleetfix().peer(n) for n in ("alpha", "bravo", "charlie", "delta", "echo")]}
+    for name, query, fleet in (("hosts", "view=hosts", FLEET), ("hosts-detail", "view=hosts&host=bravo", FLEET), ("hosts-no-poller", "view=hosts", NO_POLLER),
+                               ("hosts-settings", "view=settings", FLEET), ("hosts-overview", "", FLEET)):
+        add("web-shell-" + name, query=query, cfg=peers_cfg, fleet=fleet)
+    add("web-shell-hosts-off", query="view=hosts", cfg=dict(peers_cfg, features={"fleet": False}), fleet=FLEET)  # the feature off: the overview, no tab
     return out
 
 

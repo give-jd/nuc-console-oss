@@ -60,6 +60,8 @@ def view_params(q):
     confirm=on|delete|delete-all|clear the question the page asks first (page() drops one that does not apply; on and delete are about sel),
     prompt= the id of the chat's exchange whose whole prompt is shown (page() drops one the chat does not have).
     view=setup: the setup guide (/setup?step=N is its address), step=1-5.
+    view=hosts: the Hosts page (only with [hosts] and [features] fleet, else the overview): host=<id> one configured peer in detail (page() drops
+    an id the configuration does not have); go=<id> there is a redirect to that peer's own address (Handler._host_open), not a page.
     view=telegram: the Telegram page (pair this machine with your bot, switch the alerts, test); open=1 there: a redirect to the t.me link of the
     pairing that waits (Handler._tg_open).
     edit=1: the layout editor (the overview in edit mode; with another view it is dropped).
@@ -68,7 +70,7 @@ def view_params(q):
     one = lambda k: (q.get(k) or [""])[0]  # noqa: E731
     num = lambda k: int(one(k)) if NUM.fullmatch(one(k)) else 0  # noqa: E731
     zoom = num("zoom")
-    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "events", "settings", "telegram", "setup") else ""
+    view = one("view") if one("view") in ("map", "cpu", "health", "ai", "events", "settings", "telegram", "setup", "hosts") else ""
     edit = not view and one("edit") == "1"  # the layout editor: the overview in edit mode
     sel = one("sel") if view == "map" and KEY.fullmatch(one("sel")) else \
         one("sel")[:HEALTH_SEL_MAX] if view == "health" else one("sel")[:AI_SEL_MAX] if view == "ai" else \
@@ -89,6 +91,7 @@ def view_params(q):
             **({"period": {"1": 1, "7": 7, "30": 30}.get(one("period"), 0)} if view == "health" else {}),
             **({"age": one("age") if one("age") in ("1h", "7d") else "",  # 24h is the default: no parameter, one URL
                 "kind": one("kind") if one("kind") in events.KINDS else ""} if view == "events" else {}),
+            **({"host": one("host") if nuc_config.HOST_NAME_RE.fullmatch(one("host")) else ""} if view == "hosts" else {}),  # a configured peer (page() checks)
             **({"step": min(5, max(1, num("step")))} if view == "setup" else {}),  # the setup guide's step (wizard.STEPS): 1-5, anything else the nearest
             **({"confirm": one("confirm") if one("confirm") in AI_CONFIRMS else "",
                 "prompt": one("prompt") if aiweb.CHAT_ID.fullmatch(one("prompt")) else ""} if view == "ai" else {})}
@@ -97,7 +100,7 @@ def view_params(q):
 APP_VIEWS = ("cpu", "health", "map", "ai", "events")  # the screens the live app draws besides the overview (settings, Telegram, the graph: the shell's)
 HERE_KEYS = ("zoom", "rotate", "kiosk", "refresh", "ui")  # the size, refresh and interface parameters every view has
 VIEW_KEYS = {"map": ("open", "shut", "all", "sel", "only", "pause", "as", "stacks", "ext", "local", "z"), "cpu": ("sort", "sel"),
-             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "events": ("age", "kind", "pause"), "setup": ("step",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
+             "health": ("period", "sel", "pause"), "ai": ("sel", "pause"), "events": ("age", "kind", "pause"), "setup": ("step",), "hosts": ("host",), "": ("card", "edit")}  # and what each view reads besides (settings, telegram: nothing)
 
 
 def ui_oneshot(raw):

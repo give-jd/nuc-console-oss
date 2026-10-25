@@ -30,6 +30,7 @@ import render
 import tgweb
 import webapi
 import webcss
+import webhosts
 import webjs
 import webmetrics
 from weburl import APP_PATH, NUM, app_url, view_params, view_url
@@ -446,6 +447,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._set(q)
         if (q.get("view") or [""])[0] == "telegram" and (q.get("open") or [""])[0] == "1":
             return self._tg_open()
+        if (q.get("view") or [""])[0] == "hosts" and "go" in q and srv.fleet_on():
+            return self._host_open(q)
         if (q.get("view") or [""])[0] == "events" and "format" in (self._strict_query() or q):  # format= (blank) is a bad format, not no format
             return self._events_download(q)
         page = srv.page(cookie=self._cookie(prefs.COOKIE_NAME), **view_params(q))
@@ -502,8 +505,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(400, {"error": "too many parameters"})
         if name == "stream":
             return self._stream(q)
-        if name not in webapi.VIEWS:
-            return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
+        views = srv.api_views()
+        if name not in views:
+            return self._json(404, {"error": "no such view: one of " + ", ".join(views)})
         try:
             doc = srv.api(name, q)
         except events.QueryError as e:  # a parameter of /api/v1/events that is not valid: said, never guessed
@@ -550,9 +554,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 names.append(v or "overview")
         if len(names) > webapi.STREAM_VIEWS_MAX:
             return self._json(400, {"error": "a stream carries at most %d views" % webapi.STREAM_VIEWS_MAX})
-        bad = [v for v in names if v not in webapi.VIEWS]
+        views = srv.api_views()
+        bad = [v for v in names if v not in views]
         if bad:
-            return self._json(404, {"error": "no such view: one of " + ", ".join(webapi.VIEWS)})
+            return self._json(404, {"error": "no such view: one of " + ", ".join(views)})
         try:
             off = [v for v in names if srv.api(v, q) is None]
         except events.QueryError as e:
@@ -604,6 +609,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if link and tgweb.BOT_LINK.fullmatch(link):
             return self._send(302, extra=(("Location", link),))
         self._send(303, extra=(("Location", "/?view=telegram"),))
+
+    def _host_open(self, q):
+        """/?view=hosts&go=<id>: a redirect to the address of that configured peer, so that the browser goes to the other host's own origin (which
+        serves its own pages with its own token: nothing of this server's cookie or token goes there, and this one fetches nothing). The id is
+        checked against [hosts] and the address is the configured one, rebuilt (webhosts.go_target): never a URL from the request. An id that is
+        not a configured one: 404. A link on another site does not send anyone anywhere: back to the page."""
+        site = self.headers.get("Sec-Fetch-Site")
+        if site not in (None, "same-origin", "none"):
+            return self._send(303, extra=(("Location", "/?view=hosts"),))
+        where = webhosts.go_target(render.CFG.get("hosts") or [], (q.get("go") or [""])[0])
+        if where is None:
+            return self._send(404, b"not found\n")
+        self._send(302, extra=(("Location", where),))
 
     def _fragment(self, blocks):
         """?frag=1 on a shell page: only its blocks (what the refresh script swaps in), with an ETag of them: the same tag in If-None-Match is a 304."""

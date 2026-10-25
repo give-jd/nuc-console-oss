@@ -132,7 +132,8 @@ class Landmarks(unittest.TestCase):
                  "ai": '<div class="scr av"></div>', "settings": '<div class="settings"></div>',
                  "telegram": '<div class="settings av" id="tg"><form action="/telegram/pair"></form></div>',
                  "setup": '<div class="settings wz"><ol class="wz-steps"></ol></div>',
-                 "layout": '<span data-edit></span><article class="card x">', "wall": '<div class="kpis"></div><article class="card st-ok">',
+                 "layout": '<span data-edit></span><article class="card x">',
+                 "hosts": '<div class="fl-grid"><article class="fl-card st-ok"></article></div>', "wall": '<div class="kpis"></div><article class="card st-ok">',
                  "app-overview": '<a class="kpi st-ok" role="listitem"></a><article class="card s1">', "app-cpu": '<div class="scr scr-cpu"></div>',
                  "app-health": '<div class="hv"></div>', "app-map": '<div class="scr mapv"></div>', "app-ai": '<div class="scr av"></div>'}
         self.assertEqual(set(pages), set(bc.VIEW_LANDMARKS))

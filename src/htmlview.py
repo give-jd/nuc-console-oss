@@ -663,9 +663,11 @@ def tab(key, label, href, current, badge=""):
             + f'><kbd>{esc(key)}</kbd>{esc(label)}' + (f' <span class="badge">{badge}</span>' if badge else "") + "</a>")
 
 
-def topbar(host, pill_state, pill_text, tabs, clock, help_href, settings_href, settings_current):
-    """The top bar block (data-card="__top"): host, the status pill, the tabs (already built by tab()), the clock, ? and the settings."""
-    inner = (f'<span class="host">{esc(host)}</span><span class="status {esc(pill_state)}" role="status">{esc(pill_text)}</span>'
+def topbar(host, pill_state, pill_text, tabs, clock, help_href, settings_href, settings_current, host_href=""):
+    """The top bar block (data-card="__top"): host, the status pill, the tabs (already built by tab()), the clock, ? and the settings.
+    host_href: the host name is a link to the Hosts page (only when that page is on)."""
+    name = (f'<a class="host" href="{esc(host_href)}" title="All hosts">{esc(host)}</a>' if host_href else f'<span class="host">{esc(host)}</span>')
+    inner = (f'{name}<span class="status {esc(pill_state)}" role="status">{esc(pill_text)}</span>'
              f'<nav class="tabs" aria-label="Screens">{"".join(tabs)}</nav><div class="tb-r"><time class="clock">{esc(clock)}</time>'
              f'<a class="ib" href="{esc(help_href)}" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>'
              f'<a class="ib" href="{esc(settings_href)}" aria-label="Settings" title="Settings"'

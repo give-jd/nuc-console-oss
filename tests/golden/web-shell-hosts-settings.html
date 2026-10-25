@@ -1,0 +1,1289 @@
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-9GZYHRyC/l+um9jeWR6HmXZOs7IkgpqRthuNvzvX+oY=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!doctype html>
+<html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>demo-host · settings · nuc-console</title>
+<link rel="stylesheet" href="/s/app.51c727e3.css">
+</head>
+<body>
+<header class="topbar" data-card="__top" data-rev="c788e65f0e">
+<a class="host" href="/?view=hosts" title="All hosts">demo-host</a>
+<span class="status err" role="status">✖ 15 PROBLEMS</span>
+<nav class="tabs" aria-label="Screens">
+<a href="/?" data-key="1">
+<kbd>1</kbd>Overview</a>
+<a href="/?view=map" data-key="2">
+<kbd>2</kbd>Map</a>
+<a href="/?view=cpu" data-key="3">
+<kbd>3</kbd>CPU</a>
+<a href="/?view=health" data-key="4">
+<kbd>4</kbd>Health <span class="badge">
+<span class="s-err">✖1</span> <span class="s-warn">!6</span>
+</span>
+</a>
+<a href="/?view=ai" data-key="5">
+<kbd>5</kbd>AI <span class="badge">
+<span class="s-ok">●</span> on</span>
+</a>
+<a href="/?view=hosts" data-key="6">
+<kbd>6</kbd>Hosts <span class="badge">
+<span class="s-down">✖3</span>
+</span>
+</a>
+</nav>
+<div class="tb-r">
+<time class="clock">14:13:20</time>
+<a class="ib" href="#help" data-key="?" aria-label="Help: keyboard shortcuts" title="Help (?)">?</a>
+<a class="ib" href="/?view=settings" aria-label="Settings" title="Settings" aria-current="page">⚙︎</a>
+</div>
+</header>
+<div id="stale" class="stale-banner" role="status" hidden>
+</div>
+<main class="view">
+<div class="settings">
+<section class="sec" aria-labelledby="sec-guide">
+<h3 class="sech" id="sec-guide">Setup guide</h3>
+<p class="hintl">What the screens show, what is on and off and what each piece costs, in five short steps. <a class="lnk" href="/setup?step=1">Open the setup guide</a>
+</p>
+</section>
+<section class="sec" aria-labelledby="sec-app">
+<h3 class="sech" id="sec-app">Appearance</h3>
+<div class="fs">
+<span class="lab">Theme <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Theme">
+<a href="/?set=ta&amp;back=view%3Dsettings" data-set data-theme="auto" aria-current="true">Auto</a>
+<a href="/?set=td&amp;back=view%3Dsettings" data-set data-theme="dark">Dark</a>
+<a href="/?set=tl&amp;back=view%3Dsettings" data-set data-theme="light">Light</a>
+<a href="/?set=th&amp;back=view%3Dsettings" data-set data-theme="high-contrast">High contrast</a>
+</div>
+</div>
+<div class="fs">
+<span class="lab">Density <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Density">
+<a href="/?set=dw&amp;back=view%3Dsettings" data-set data-density="wall">Wall</a>
+<a href="/?set=dk&amp;back=view%3Dsettings" data-set data-density="desk" aria-current="true">Desk</a>
+<a href="/?set=dc&amp;back=view%3Dsettings" data-set data-density="compact">Compact</a>
+</div>
+<p class="hintl">Wall hides the small print and cuts long lists to 3 lines; compact fits more.</p>
+</div>
+<div class="fs">
+<span class="lab">Preset <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Preset">
+<span aria-current="true">Default</span>
+<a href="/?set=ps&amp;back=view%3Dsettings" data-set>Security</a>
+<a href="/?set=pv&amp;back=view%3Dsettings" data-set>Server</a>
+<a href="/?set=pd&amp;back=view%3Dsettings" data-set>Desktop</a>
+</div>
+<p class="hintl">A preset is a layout, a set of key figures and the cards it hides; choosing one drops your own layout and key figures.</p>
+</div>
+<div class="fs">
+<span class="lab">Layout <span class="src sm">default</span>
+</span>
+<div>
+<a class="lnk" href="/?edit=1">Edit layout</a>
+</div>
+<p class="hintl">Move, resize and hide the cards of the overview. It is kept in this browser; a preset or Reset layout brings the preset's back.</p>
+</div>
+<div class="fs">
+<span class="lab">Order <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Order">
+<span aria-current="true">By severity</span>
+<a href="/?set=of&amp;back=view%3Dsettings" data-set>Fixed</a>
+</div>
+<p class="hintl">By severity: what needs you comes first. Fixed: the layout&#x27;s order, nothing moves. A layout of your own (from this browser, the link or config.ini) means fixed, unless you choose By severity here.</p>
+</div>
+<div class="fs">
+<span class="lab">Start view <span class="src sm">default</span>
+</span>
+<div class="seg" role="group" aria-label="Start view">
+<span aria-current="true">Overview</span>
+<a href="/?set=vm&amp;back=view%3Dsettings" data-set>Map</a>
+<a href="/?set=vc&amp;back=view%3Dsettings" data-set>CPU</a>
+<a href="/?set=vh&amp;back=view%3Dsettings" data-set>Health</a>
+<a href="/?set=va&amp;back=view%3Dsettings" data-set>AI</a>
+</div>
+</div>
+<div class="fs">
+<span class="lab">Key figures (at most 8, shown in the order chosen) <span class="src sm">default</span>
+</span>
+<p class="hintl" id="kpi-full">All 8 places are taken: untick one (✔) to make room, then add another (+).</p>
+<ul class="kchk">
+<li class="on">
+<a href="/?set=kin_la_be_cp_rm_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Problems</a>
+<span class="o">1</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_la_be_cp_rm_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Internet</a>
+<span class="o">2</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_be_cp_rm_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> LAN</a>
+<span class="o">3</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_cp_rm_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Beyond</a>
+<span class="o">4</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> DB on LAN</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Firewall</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_rm_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> CPU</a>
+<span class="o">5</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_dk_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> RAM</a>
+<span class="o">6</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_rm_tp&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Disk</a>
+<span class="o">7</span>
+</li>
+<li class="on">
+<a href="/?set=kpb_in_la_be_cp_rm_dk&amp;back=view%3Dsettings" data-set>
+<span class="box" aria-hidden="true">✔</span> Temp</a>
+<span class="o">8</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Load</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Containers</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Unhealthy</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Failed units</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> SSH</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Tailnet</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Rx</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Tx</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Uptime</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> Health</span>
+</li>
+<li class="off">
+<span aria-disabled="true" title="all 8 places are taken: untick one first">
+<span class="box" aria-hidden="true">+</span> AI</span>
+</li>
+</ul>
+</div>
+<div class="fs expo">
+<span class="lab" id="exp-lab">Export</span>
+<pre id="export" tabindex="0" aria-labelledby="exp-lab">[ui]
+theme = auto
+density = desk
+start_view = overview
+preset = default
+order = severity
+kpis = problems, internet, lan, beyond, cpu, ram, disk, temp
+layout = attention:2, exposure:2, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks
+hidden =
+</pre>
+<button type="button" class="lnk" data-copy="#export" data-done="Copied" data-fail="Selected: press Ctrl+C">Copy</button>
+<code class="ck-v" id="cookie-v">1</code>
+<p class="hintl">Saved in this browser (the cookie above). To make it everyone's default, paste the block into config.ini.</p>
+</div>
+<div class="fs">
+<a class="lnk" data-set href="/?set=reset&amp;back=view%3Dsettings">Reset to the defaults</a>
+</div>
+</section>
+<section class="sec" id="features" aria-labelledby="sec-feat">
+<h3 class="sech" id="sec-feat">Screens and sections</h3>
+<p class="hintl">Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit <b>[features]</b> in <code class="cmd">/etc/nuc-console/config.ini</code>, then <code class="cmd">sudo systemctl restart nuc-console-collector</code>.</p>
+<ul class="feats">
+<li class="on" data-feature="map">
+<span class="ft">
+<b>Map screen</b> <span class="sm">who reaches what, and what is behind it</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="cpu">
+<span class="ft">
+<b>CPU screen</b> <span class="sm">per-core load, temperatures, the processes</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="health">
+<span class="ft">
+<b>Health screen</b> <span class="sm">which apps cause trouble over time; the collector keeps history.db</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="ai">
+<span class="ft">
+<b>AI screen</b> <span class="sm">the local model: what fits this machine, the chat</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="fleet">
+<span class="ft">
+<b>Hosts screen</b> <span class="sm">the other nuc-console hosts of [hosts]: their state at a glance (web tab 6); nothing shows while [hosts] is empty</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="exposure">
+<span class="ft">
+<b>Exposure</b> <span class="sm">listening ports by scope, port alarms, Funnel</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="firewall">
+<span class="ft">
+<b>Firewall</b> <span class="sm">the firewall&#x27;s rules and recent drops</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="fail2ban">
+<span class="ft">
+<b>fail2ban</b> <span class="sm">jails and bans, inside Firewall</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="containers">
+<span class="ft">
+<b>Containers</b> <span class="sm">Docker containers and their health</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="databases">
+<span class="ft">
+<b>Databases</b> <span class="sm">database and broker ports, who connects</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="webapps">
+<span class="ft">
+<b>Web apps</b> <span class="sm">declared apps and the web listeners found</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="tailscale">
+<span class="ft">
+<b>Tailscale</b> <span class="sm">the tailnet&#x27;s peers</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="boot">
+<span class="ft">
+<b>Boot</b> <span class="sm">boot time, slowest and failed units, journal errors</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="docker_disk">
+<span class="ft">
+<b>Docker disk</b> <span class="sm">what Docker keeps on the disk</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="network_traffic">
+<span class="ft">
+<b>Network traffic</b> <span class="sm">per-interface throughput</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="sessions">
+<span class="ft">
+<b>Sessions</b> <span class="sm">logged-in users and SSH sessions</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="disks">
+<span class="ft">
+<b>Disks</b> <span class="sm">mounted filesystems</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+<li class="on" data-feature="thermal">
+<span class="ft">
+<b>Thermal</b> <span class="sm">CPU and NVMe temperatures, throttling</span>
+</span>
+<span class="fs-st on">✔ on</span>
+</li>
+</ul>
+</section>
+<section class="sec" id="config" aria-labelledby="sec-cfg">
+<h3 class="sech" id="sec-cfg">config.ini</h3>
+<p class="hintl">What <code class="cmd">/etc/nuc-console/config.ini</code> sets, key by key, and what each one does. Read-only here (off in config.ini: [web] settings_actions = yes turns it on): edit the file, then apply it: <code class="cmd">sudo systemctl restart nuc-console nuc-console-collector nuc-console-web</code>. [features] is <a class="lnk" href="#features">Screens and sections</a> above.</p>
+<div class="cfgl">
+<details class="cfgs" id="cfg-dashboard">
+<summary>
+<code>[dashboard]</code> Console and rotation</summary>
+<p class="hintl">The text console and the pages that take turns on a monitor with no keyboard (rotation, Details pages); the pace of every screen. A console that runs reads config.ini again when it starts.</p>
+<div class="ck cko" id="k-dashboard-sections">
+<span class="cn">
+<code>sections</code>
+</span>
+<code class="cv">attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks</code>
+<p class="hintl">The order of the overview&#x27;s sections, first to last (the console, and the web shell&#x27;s default preset). A section left out keeps its place at the end; one switched off under Screens and sections is not drawn. <span class="sm">comma-separated: attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks · default: all, in this order</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-mode">
+<span class="cn">
+<code>mode</code>
+</span>
+<code class="cv">overview</code>
+<p class="hintl">The console: overview = one screen, no keyboard needed; rotate = three pages that take turns (the arrow keys move through them). <span class="sm">overview | rotate · default overview</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-rotate_seconds">
+<span class="cn">
+<code>rotate_seconds</code>
+</span>
+<code class="cv">15</code>
+<p class="hintl">Seconds each page stays when pages take turns (rotate, the Details pages, a full-screen window); on the web shell&#x27;s wall page, the seconds between two scrolls. <span class="sm">3-600 · default 15</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-refresh_seconds">
+<span class="cn">
+<code>refresh_seconds</code>
+</span>
+<code class="cv">2</code>
+<p class="hintl">Seconds between two redraws of every screen and page (a page&#x27;s - / + links change it there for a while). Faster: livelier bars, a little more CPU. <span class="sm">1-10 · default 2</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-columns">
+<span class="cn">
+<code>columns</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">The console&#x27;s layout width in characters; 0 = the real console&#x27;s. Set it when the monitor shows less than the console believes it has: the layout is never larger than the real console. <span class="sm">0 (automatic) or 40-500 · default 0</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-rows">
+<span class="cn">
+<code>rows</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">The console&#x27;s layout height in lines; 0 = the real console&#x27;s. <span class="sm">0 (automatic) or 10-200 · default 0</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-spacing">
+<span class="cn">
+<code>spacing</code>
+</span>
+<code class="cv">1</code>
+<p class="hintl">1 = a blank line under each section title (more air, a few more rows); 0 = compact. The console. <span class="sm">0-1 · default 1</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-details">
+<span class="cn">
+<code>details</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: a monitor with no keyboard turns to Details pages that show in full what the overview cut (… +N more), then comes back; no: the overview alone, never rotating. <span class="sm">yes or no · default yes</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-overview_seconds">
+<span class="cn">
+<code>overview_seconds</code>
+</span>
+<code class="cv">45</code>
+<p class="hintl">How long the overview stays before the Details pages (details = yes). <span class="sm">10-600 · default 45</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-map_in_rotation">
+<span class="cn">
+<code>map_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the MAP screen, opened as far as it fits, joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-cpu_in_rotation">
+<span class="cn">
+<code>cpu_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the CPU screen joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-dashboard-health_in_rotation">
+<span class="cn">
+<code>health_in_rotation</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the HEALTH screen joins the pages that take turns. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-ui">
+<summary>
+<code>[ui]</code> Look and layout: everyone&#x27;s defaults</summary>
+<p class="hintl">What the console and every browser start with. A browser&#x27;s own choices (Appearance, above) and ?ui= in a link come first; a key that is not set falls to the preset, then to the built-in default.</p>
+<div class="ck cko" id="k-ui-theme">
+<span class="cn">
+<code>theme</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">auto follows the system&#x27;s light or dark mode; dark; light; high-contrast: the strongest colours. <span class="sm">auto | dark | light | high-contrast (or empty: not set) · default auto</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-density">
+<span class="cn">
+<code>density</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">wall: big type for a monitor across the room, small print hidden, lists cut to 3 lines; desk: the default; compact: more on one screen. <span class="sm">wall | desk | compact (or empty: not set) · default desk</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-start_view">
+<span class="cn">
+<code>start_view</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The screen the console and the web view open at. <span class="sm">overview | map | cpu | health | ai (or empty: not set) · default overview</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-preset">
+<span class="cn">
+<code>preset</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A ready-made layout, key figures and hidden cards: default; security (exposure and the firewall first); server (the system and the containers first); desktop (no containers, databases or web apps). layout, kpis and hidden below override it. <span class="sm">default | security | server | desktop (or empty: not set) · default default</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-order">
+<span class="cn">
+<code>order</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">severity: a card that needs attention moves up; fixed: the cards keep the layout&#x27;s order. On the console the cards keep their order unless this says severity. <span class="sm">severity | fixed (or empty: not set) · default severity</span>
+</p>
+</div>
+<div class="ck cko" id="k-ui-kpis">
+<span class="cn">
+<code>kpis</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Up to 8 key figures for the top row, in order, of: problems, internet, lan, beyond, db_lan, firewall, cpu, ram, disk, temp, load, containers, unhealthy, failed_units, ssh, tailnet, rx, tx, uptime, health, ai. none = no row at all; empty: the preset&#x27;s.</p>
+</div>
+<div class="ck cko" id="k-ui-layout">
+<span class="cn">
+<code>layout</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The cards that show, in order: name or name:width (1-4 columns on the web), of: attention, exposure, webapps, firewall, system, containers, databases, boot, network_traffic, sessions, tailscale, docker_disk, disks. Cards left out of layout and hidden are added at the end. Empty: the preset&#x27;s.</p>
+</div>
+<div class="ck cko" id="k-ui-hidden">
+<span class="cn">
+<code>hidden</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The cards that do not show (same names). none = nothing hidden; empty: the preset&#x27;s.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-display">
+<summary>
+<code>[display]</code> Display at login (macOS and Windows installations)</summary>
+<p class="hintl">How an installed nuc-console shows itself when you log in. The desktop app is its own window: of this section it uses zoom only.</p>
+<div class="ck cko" id="k-display-mode">
+<span class="cn">
+<code>mode</code>
+</span>
+<code class="cv">browser</code>
+<p class="hintl">browser: at every login it opens in a normal window of your browser; fullscreen: full screen, the overview and the Details pages taking turns (Alt+F4 / Cmd+Q closes it); none: it never opens by itself (a machine without a monitor). The installers apply it. <span class="sm">browser | fullscreen | none · default browser</span>
+</p>
+</div>
+<div class="ck cko" id="k-display-zoom">
+<span class="cn">
+<code>zoom</code>
+</span>
+<code class="cv">100</code>
+<p class="hintl">Text size of the web pages in percent (the A- / A+ links change it while you look). Bigger: fewer columns. <span class="sm">50-200 · default 100</span>
+</p>
+</div>
+<div class="ck cko" id="k-display-browser">
+<span class="cn">
+<code>browser</code>
+</span>
+<code class="cv">auto</code>
+<p class="hintl">The browser of the full-screen window: auto = Edge, then Chrome, then Firefox (Windows); Chrome, Edge, Brave, Chromium, else Safari (macOS); or the full path of a Chromium-based browser. <span class="sm">default auto</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-console">
+<summary>
+<code>[console]</code> Linux text console (an installation&#x27;s service)</summary>
+<p class="hintl">The font and the screen blanking of the monitor the dashboard draws on, applied when nuc-console.service starts; both off by default.</p>
+<div class="ck cko" id="k-console-font">
+<span class="cn">
+<code>font</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A font for setfont, e.g. Lat15-TerminusBold32x16 (big text on a full-HD monitor). Empty: the font stays as it is.</p>
+</div>
+<div class="ck cko" id="k-console-blank_minutes">
+<span class="cn">
+<code>blank_minutes</code>
+</span>
+<code class="cv">0</code>
+<p class="hintl">Minutes without a key before the screen goes black and the monitor sleeps; 0 = never. <span class="sm">0-60 · default 0</span>
+</p>
+</div>
+<div class="ck cko" id="k-console-wake_on_problem">
+<span class="cn">
+<code>wake_on_problem</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0. <span class="sm">yes or no · default yes</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-host">
+<summary>
+<code>[host]</code> This machine&#x27;s name</summary>
+<p class="hintl">The label of this machine in the headers, the Telegram messages and the web summary. An installation reads it from config.ini only.</p>
+<div class="ck cko" id="k-host-name">
+<span class="cn">
+<code>name</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The name this machine goes by (1-40 letters, digits, . _ -, starting with a letter or digit). Empty: the host name. Useful when several machines share one.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-web">
+<summary>
+<code>[web]</code> Web view (an installation&#x27;s service)</summary>
+<p class="hintl">The optional web service of an installation, the dashboard&#x27;s only network listener. The desktop app and a portable run always serve 127.0.0.1 on a port of their own, without a token: they use the grid size and allowed_hosts only.</p>
+<div class="ck cko" id="k-web-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: an installation runs the web view as a service (off by default). <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-bind">
+<span class="cn">
+<code>bind</code>
+</span>
+<code class="cv">127.0.0.1</code>
+<p class="hintl">The address it listens on. 127.0.0.1 = this machine only: publish it with tailscale serve or a reverse proxy. Any other address needs token_file, or the service refuses to start. <span class="sm">default 127.0.0.1</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-port">
+<span class="cn">
+<code>port</code>
+</span>
+<code class="cv">8787</code>
+<p class="hintl">The TCP port it listens on (by default: http://127.0.0.1:8787). <span class="sm">1-65535 · default 8787</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-token_file">
+<span class="cn">
+<code>token_file</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A file with a secret of 16 characters or more (mode 0600, readable by the nuc-console user): every request must carry it. Never write the token itself in config.ini.</p>
+</div>
+<div class="ck cko" id="k-web-peer_tokens_file">
+<span class="cn">
+<code>peer_tokens_file</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A file (mode 0600, owned by the nuc-console user) of tokens that other nuc-console hosts use to watch this one, one per line: label scope token (scope summary or views). They read a few documents and can do nothing else. Empty = none.</p>
+</div>
+<div class="ck cko" id="k-web-allowed_hosts">
+<span class="cn">
+<code>allowed_hosts</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, 127.0.0.1, the bind address, the hostname and *.ts.net always are.</p>
+</div>
+<div class="ck cko" id="k-web-metrics">
+<span class="cn">
+<code>metrics</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes (the default): /metrics gives the figures of /api/v1/overview as Prometheus text, behind the very checks of /api/v1 (a token off loopback). no: the route is a 404. <span class="sm">yes or no · default yes</span>
+</p>
+</div>
+<div class="ck cko" id="k-web-settings_actions">
+<span class="cn">
+<code>settings_actions</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it only shows, and what it chose before counts for nothing (an administrator&#x27;s opt-in). <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-alerts">
+<summary>
+<code>[alerts]</code> Alarms you may mute</summary>
+<p class="hintl">ATTENTION alarms about how the machine runs (errors, temperature, a stopped container) can be silenced: they leave the list, the problems figure and Telegram, and the screen counts them as muted. Security alarms (ports, the firewall, exposure) cannot be muted. Not the same as nuc-console-accept: that one is a root command with a reason.</p>
+<div class="ck cko" id="k-alerts-mute">
+<span class="cn">
+<code>mute</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">ATTENTION alarms to silence, comma-separated, of: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, reboot-required, disk-inodes, container-no-restart, containers-not-back, display-stuck, oom-killed, memory-pressure, nic-resets, ai-down. A muted alarm is still collected: it only leaves the list, the problems figure and Telegram, and is counted as muted. Anything else is ignored and reported. <span class="sm">comma-separated: journal-errors, thermal, throttling, container-exited, unhealthy-container, collector-boot, reboot-required, disk-inodes, container-no-restart, containers-not-back, display-stuck, oom-killed, memory-pressure, nic-resets, ai-down</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-containers">
+<summary>
+<code>[containers]</code> Containers and reboots</summary>
+<p class="hintl">Containers that are meant to stay down after a reboot or a Docker restart (one-shot jobs, test stacks) are named here so that the container-no-restart alarm skips them.</p>
+<div class="ck cko" id="k-containers-restart_ignore">
+<span class="cn">
+<code>restart_ignore</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Containers the container-no-restart alarm skips (restart policy no, on purpose), comma-separated: names or shell-style globs such as *-test-*, matched without regard to case. Empty: none.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-thresholds">
+<summary>
+<code>[thresholds]</code> Thresholds</summary>
+<p class="hintl">Where a reading becomes an ATTENTION problem. Only memory pressure for now; the kernel-log alarms use fixed windows (docs/CONFIGURATION.md).</p>
+<div class="ck cko" id="k-thresholds-memory_pressure_pct">
+<span class="cn">
+<code>memory_pressure_pct</code>
+</span>
+<code class="cv">10</code>
+<p class="hintl">Memory pressure (the kernel&#x27;s PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises memory-pressure. 10 is already a machine that waits for memory. <span class="sm">1-100 · default 10</span>
+</p>
+</div>
+<div class="ck cko" id="k-thresholds-commit_pressure_pct">
+<span class="cn">
+<code>commit_pressure_pct</code>
+</span>
+<code class="cv">90</code>
+<p class="hintl">Windows: the commit charge (memory promised to processes) at or above this percent of the commit limit (RAM + page files) raises memory-pressure. At 100 the system refuses new allocations. <span class="sm">1-100 · default 90</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-telegram">
+<summary>
+<code>[telegram]</code> Telegram alerts</summary>
+<p class="hintl">New and resolved ATTENTION problems on your phone, through a bot of your own. The pairing (the bot token) is done on the Telegram page: the token is never in config.ini.</p>
+<div class="ck cko" id="k-telegram-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the notifier sends. The Telegram page can switch it on too, and cannot switch off a yes written here. <span class="sm">yes or no · default no · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-username">
+<span class="cn">
+<code>username</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Your Telegram @username (5-32 letters, digits, _): who may receive the messages. The pairing writes it. <span class="sm">the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-detail">
+<span class="cn">
+<code>detail</code>
+</span>
+<code class="cv">titles</code>
+<p class="hintl">titles: only a problem&#x27;s title leaves this machine; full: its text too (container names, ports), which then goes through Telegram&#x27;s servers. <span class="sm">titles | full · default titles · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-resolved">
+<span class="cn">
+<code>resolved</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: a message also when a problem is gone. <span class="sm">yes or no · default yes · the notifier reads it within 30 seconds</span>
+</p>
+</div>
+<div class="ck cko" id="k-telegram-web_actions">
+<span class="cn">
+<code>web_actions</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: the Telegram page may pair, switch on and off and send a test; no: it only shows (an administrator&#x27;s lock). <span class="sm">yes or no · default yes · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-ai">
+<summary>
+<code>[ai]</code> Local AI</summary>
+<p class="hintl">A small model on this machine that turns the HEALTH findings into advice and answers questions about the machine. It only reads and suggests: it never runs anything.</p>
+<div class="ck cko" id="k-ai-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the advisor is on, with the model below. The AI page&#x27;s on and off do the same without this file; a yes here wins. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-endpoint">
+<span class="cn">
+<code>endpoint</code>
+</span>
+<code class="cv">http://127.0.0.1:11434/v1</code>
+<p class="hintl">The OpenAI-compatible server the advisor asks (Ollama, llama.cpp server, LM Studio): on this machine, unless allow_remote = yes. <span class="sm">default http://127.0.0.1:11434/v1</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-model">
+<span class="cn">
+<code>model</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The model&#x27;s name as the server lists it, or a catalog id such as qwen3-8b. Empty: the server&#x27;s first.</p>
+</div>
+<div class="ck cko" id="k-ai-gpu">
+<span class="cn">
+<code>gpu</code>
+</span>
+<code class="cv">auto</code>
+<p class="hintl">auto: the model server nuc-console starts uses the GPU when the model fits there, all of it or some layers; no: it runs on the CPU. Applies when the server starts again (AI off, then on). <span class="sm">auto | no · default auto</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-allow_remote">
+<span class="cn">
+<code>allow_remote</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the endpoint may be on another machine, and the machine&#x27;s history goes there with each question. <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-timeout_s">
+<span class="cn">
+<code>timeout_s</code>
+</span>
+<code class="cv">120</code>
+<p class="hintl">Seconds an answer may take. <span class="sm">10-600 · default 120</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-web_actions">
+<span class="cn">
+<code>web_actions</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: the AI page and the AI screen may set a model up, switch the AI on and off, delete models and ask; no: they only show (an administrator&#x27;s lock). <span class="sm">yes or no · default yes · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-autostart">
+<span class="cn">
+<code>autostart</code>
+</span>
+<code class="cv">yes</code>
+<p class="hintl">yes: when the web view starts (after an update or a reboot) and the AI is on with a model chosen, it starts the model server again unless one already answers. no: only the AI page&#x27;s buttons start it. Applies at the next start of the web view. <span class="sm">yes or no · default yes</span>
+</p>
+</div>
+<div class="ck cko" id="k-ai-daily">
+<span class="cn">
+<code>daily</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the collector asks for one digest of the last 7 days a day (at low priority), shown on the HEALTH screen. It needs enabled = yes and the Health screen. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-services">
+<summary>
+<code>[services]</code> Services that must run</summary>
+<p class="hintl">Systemd units (Linux) that must be active: one that is stopped, never started or missing is an ATTENTION error. failed-units only sees units that FAILED. An administrator&#x27;s setting: only config.ini changes it.</p>
+<div class="ck cko" id="k-services-must_run">
+<span class="cn">
+<code>must_run</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Unit names, comma-separated (up to 20, letters, digits and @ . _ : -): docker, ssh, tailscaled, fail2ban. Empty: the check is off. Each is asked with systemctl is-active by the collector; Windows and macOS have no such check.</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-tls">
+<summary>
+<code>[tls]</code> TLS certificates to watch</summary>
+<p class="hintl">Certificates whose expiry is checked: a host:port on this machine or a private network (an IP address, never a name; no outbound connection is made anywhere else), or the path of a PEM file. An administrator&#x27;s setting: only config.ini changes it.</p>
+<div class="ck cko" id="k-tls-watch">
+<span class="cn">
+<code>watch</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Comma-separated name = host:port or name = /absolute/path.pem (up to 10). host: an IP address on this machine, a private network or the tailnet (or localhost); a certificate is read without being trusted, only its end date is kept. Empty: nothing is watched.</p>
+</div>
+<div class="ck cko" id="k-tls-warn_days">
+<span class="cn">
+<code>warn_days</code>
+</span>
+<code class="cv">21</code>
+<p class="hintl">Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error. <span class="sm">1-365 · default 21</span>
+</p>
+</div>
+</details>
+<details class="cfgs" id="cfg-webapps">
+<summary>
+<code>[webapps]</code> Web apps you expect</summary>
+<p class="hintl">One per line, name = port[, port...]: shown in WEB APPS as active, or DOWN when nothing listens there. A port listed here is an intended exposure: it no longer counts as a Docker port bypassing ufw.</p>
+<div class="ck wide">
+<pre class="cmap">admin-console = 9443
+shop-web = 8080</pre>
+</div>
+</details>
+<details class="cfgs" id="cfg-expose">
+<summary>
+<code>[expose]</code> Intended reach of services</summary>
+<p class="hintl">One per line, name or port = local | tailnet | lan | internet: the widest reach you intend. When the real reach is wider, ATTENTION raises over-exposed (the other alarms are never silenced by it). A name is a container, a compose service or project, a process, a systemd unit, a database name or kind, or a [webapps] name; a port is 8080 or 8080/udp. Several lines on one service: the most restrictive wins.</p>
+<div class="ck wide">
+<pre class="cmap">n8n = tailnet
+shop-db = local
+shop-web = lan</pre>
+</div>
+</details>
+</div>
+</section>
+<section class="sec" id="alerts" aria-labelledby="sec-alerts">
+<h3 class="sech" id="sec-alerts">Phone alerts</h3>
+<p class="hintl">New and resolved ATTENTION problems of this machine on your phone, through a Telegram bot of your own (free, about two minutes): create the bot with @BotFather, pair it with your @username, press Start, send a test. The Telegram page walks you through it. The machine only sends: it never reads your messages.</p>
+<div class="fs">
+<span>
+<span class="pl d big">OFF</span> off: no alert leaves this machine</span>
+<div>
+<a class="btn pri" href="/?view=telegram#tg">Set up Telegram alerts</a>
+</div>
+</div>
+</section>
+<section class="sec" id="hosts" aria-labelledby="sec-hosts">
+<h3 class="sech" id="sec-hosts">Hosts</h3>
+<p class="hintl">The other nuc-console hosts this one watches ([hosts] in config.ini, the administrator's: this page never writes it, and no token is shown). Poller: running.</p>
+<dl class="about">
+<dt>alpha</dt>
+<dd>https://alpha.example.net · token summary · last: <span class="chip st-ok">✔ ok</span> 10 s ago<br>pair or test: <code class="cmd">nuc-console-fleet test alpha</code>
+</dd>
+<dt>bravo</dt>
+<dd>https://bravo.example.net · token summary · last: <span class="chip st-warn">! warn</span> 10 s ago<br>pair or test: <code class="cmd">nuc-console-fleet test bravo</code>
+</dd>
+<dt>charlie</dt>
+<dd>https://charlie.example.net · token summary · last: <span class="chip st-down">✖ unreachable</span> 5 min ago<br>pair or test: <code class="cmd">nuc-console-fleet test charlie</code>
+</dd>
+<dt>delta</dt>
+<dd>https://delta.example.net · token full · last: <span class="chip st-ok">✔ ok</span> 10 s ago<br>pair or test: <code class="cmd">nuc-console-fleet test delta</code>
+</dd>
+<dt>echo</dt>
+<dd>https://echo.example.net · token summary · last: <span class="chip st-err">✖ untrusted</span> 10 s ago<br>pair or test: <code class="cmd">nuc-console-fleet test echo</code>
+</dd>
+</dl>
+</section>
+<section class="sec" aria-labelledby="sec-about">
+<h3 class="sech" id="sec-about">About this machine</h3>
+<p class="sm">Read-only: this page changes nothing on the machine.</p>
+<dl class="about">
+<dt>version</dt>
+<dd>
+<b>nuc-console 0.0.0</b> <span class="sm">to update, run <code class="cmd">nuc-console-update</code> yourself: nothing here goes online</span>
+</dd>
+<dt>mode</dt>
+<dd>installed on this machine</dd>
+<dt>config</dt>
+<dd>
+<code class="cmd">/etc/nuc-console/config.ini</code> <span class="sm">no file: the defaults are in use</span>
+</dd>
+<dt>web access</dt>
+<dd>loopback only (127.0.0.1), no token</dd>
+<dt>display</dt>
+<dd>mode browser · zoom 100%</dd>
+<dt>Telegram</dt>
+<dd>off ([telegram] enabled = no) · <a class="lnk" href="/?view=telegram">Telegram page</a>
+</dd>
+<dt>AI buttons</dt>
+<dd>allowed ([ai] web_actions = yes): the AI page can switch the AI on and off, ask and delete models</dd>
+</dl>
+</section>
+</div>
+</main>
+<footer class="foot">text <a href="/?zoom=90&amp;view=settings">A−</a> 100% <a href="/?zoom=110&amp;view=settings">A+</a>
+<span class="dot">·</span>
+<a class="lnk" href="/?view=events">events</a>
+<span class="dot">·</span>
+<a class="lnk" href="/setup?step=1">setup guide</a>
+<span class="dot">·</span>
+<span class="grp">theme: <a class="lnk" data-set data-theme="auto" aria-current="true" href="/?set=ta&amp;back=view%3Dsettings">auto</a> <a class="lnk" data-set data-theme="dark" href="/?set=td&amp;back=view%3Dsettings">dark</a> <a class="lnk" data-set data-theme="light" href="/?set=tl&amp;back=view%3Dsettings">light</a> <a class="lnk" data-set data-theme="high-contrast" href="/?set=th&amp;back=view%3Dsettings">high contrast</a>
+</span>
+<span class="dot">·</span>
+<span class="grp">density: <a class="lnk" data-set data-density="wall" href="/?set=dw&amp;back=view%3Dsettings">wall</a> <a class="lnk" data-set data-density="desk" aria-current="true" href="/?set=dk&amp;back=view%3Dsettings">desk</a> <a class="lnk" data-set data-density="compact" href="/?set=dc&amp;back=view%3Dsettings">compact</a>
+</span>
+<span class="dot">·</span>read-only · AI actions<span class="upd">updated 14:13:20</span>
+</footer>
+<section class="ov" id="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+<a class="ov-bg" href="#" tabindex="-1" aria-label="Close help">
+</a>
+<div class="dlg">
+<header>
+<h2 id="help-title">Keyboard</h2>
+<a class="ib" href="#" data-key="? Escape" aria-label="Close help">✕</a>
+</header>
+<div class="keys">
+<section>
+<h3>Everywhere</h3>
+<dl>
+<dt>
+<kbd>1-5</kbd>
+</dt>
+<dd>Overview, Map, CPU, Health, AI</dd>
+<dt>
+<kbd>Esc</kbd>
+</dt>
+<dd>close details or help, else back</dd>
+<dt>
+<kbd>q</kbd>
+</dt>
+<dd>like Esc</dd>
+<dt>
+<kbd>?</kbd>
+</dt>
+<dd>this help</dd>
+<dt>
+<kbd>r</kbd>
+</dt>
+<dd>redraw now</dd>
+<dt>
+<kbd>Z</kbd>
+</dt>
+<dd>pause the redraw</dd>
+<dt>
+<kbd>Tab/Shift+Tab</kbd>
+</dt>
+<dd>next/previous screen</dd>
+</dl>
+</section>
+</div>
+</div>
+</section>
+<script>// nuc-console web view: partial refresh (src/webjs.py REFRESH_JS). It polls main[data-frag] for the page's cards as an HTML
+// fragment and replaces the cards whose data-rev changed. The fragment is parsed inertly and every node and attribute is checked
+// against two allowlists before anything is taken over; a fragment that fails the check reloads the page. It waits while the tab is
+// hidden, while paused and while you type or select; a failed poll backs off (2 s to 60 s) and says so: numbers never look fresh.
+// Classes it sets on <html>, for the server's CSS:
+//   stale    the numbers on the page are old (the #stale banner says since when)
+//   paused   the refresh is paused with the [data-pause] toggle
+// It also trues up the grid's row spans: the server estimates each overview card's height (class rN), the script measures it and sets
+// the exact span, after load, after every swap and on resize (debounced); the classes r2..r200 are the server's CSS. The class
+// attribute is rewritten as a whole (the class names are computed, and classList is only used with literal names here).
+// In wall density with kiosk on it also scrolls one screen every main[data-rotate] seconds, and the page it reloads every ten minutes
+// (and when it cannot take a fragment in) comes back at the same scroll position (sessionStorage "nuc-wall-y", this tab only).
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const FRAG_TAGS = new Set("a abbr article aside b br button caption circle code col colgroup dd details div dl dt em figure footer form g h2 h3 h4 header hr i input kbd label li line meter nav ol option p path polyline pre progress rect section select small span strong sub summary sup svg table tbody td text textarea tfoot th thead time title tr u ul".split(" ")), FRAG_ATTRS = new Set("action aria-controls aria-disabled aria-current aria-describedby aria-expanded aria-hidden aria-label aria-labelledby aria-live aria-pressed aria-sort aria-valuemax aria-valuemin aria-valuenow autocomplete checked class colspan cx cy d data-card data-copy data-density data-depth data-done data-fail data-k data-key data-kpi data-max-lines data-pause data-problem data-rev data-row data-set data-state data-theme datetime disabled fill for height high href id lang low max maxlength method min name open optimum placeholder points preserveAspectRatio r readonly required role rowspan rx ry scope selected size stroke stroke-linecap stroke-linejoin stroke-width tabindex title transform type value viewBox width x x1 x2 y y1 y2".split(" "));
+  const root = document.documentElement, page = document.querySelector("main"), banner = document.getElementById("stale");
+  if (!page || page.hasAttribute("data-edit")) return;
+  const url = page.getAttribute("data-frag") || "", secs = Number(page.getAttribute("data-refresh"));
+  const period = url && secs >= 1 ? Math.min(secs, 3600) * 1000 : 0, spin = Number(page.getAttribute("data-rotate")) * 1000;
+  const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const opened = new Map();  // <details> the reader opened or closed by hand: data-k -> open
+  let etag = "", fails = 0, lastOk = Date.now(), touched = 0, timer = 0, busy = false, dead = false, policy = null;
+  let paused = page.getAttribute("data-paused") === "1";
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  try { policy = window.trustedTypes ? window.trustedTypes.createPolicy("nuc-frag", {createHTML: s => s}) : null; } catch (err) { policy = null; }
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const clock = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+  const kiosk = () => root.getAttribute("data-density") === "wall" && root.hasAttribute("data-kiosk");
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+
+  function show(text) {  // the banner under the top bar; "" takes it down
+    root.classList.toggle("stale", !!text);
+    if (banner) { banner.textContent = text; banner.hidden = !text; }
+  }
+  const late = () => show("stale since " + clock(lastOk));
+  function plan(ms) { clearTimeout(timer); if (!dead && period) timer = setTimeout(tick, ms); }
+  function reload() {  // a page that cannot take the fragment in as it is: load it whole, at most once in 15 seconds
+    dead = true;
+    show("updating the page");
+    setTimeout(again, Math.max(0, 15000 - performance.now()));
+  }
+  function again() {  // a reload that keeps a kiosk wall where it was scrolled to (the next page restores it)
+    try { if (kiosk()) sessionStorage.setItem("nuc-wall-y", String(Math.round(window.scrollY))); } catch (err) { /* storage off */ }
+    location.reload();
+  }
+  function editing() {  // the reader is working on the page: a form has the focus, an input holds text, text is selected
+    const a = document.activeElement, sel = window.getSelection();
+    if (a && (a.closest("form") || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return true;
+    if (sel && !sel.isCollapsed && !kiosk()) return true;
+    for (const f of document.querySelectorAll("input, textarea")) {
+      if (!/^(hidden|submit|button|reset|image|checkbox|radio)$/.test(f.type) && f.value !== f.defaultValue) return true;
+    }
+    return false;
+  }
+
+  function clean(n) {  // true when the node and everything below it is on the allowlists
+    if (n.nodeType === 3) return true;
+    if (n.nodeType !== 1 || !FRAG_TAGS.has(n.localName) || !(n instanceof HTMLElement || n instanceof SVGElement)) return false;
+    for (const a of n.attributes) {
+      const v = a.value;
+      if (!FRAG_ATTRS.has(a.name) || /^(on|style$)/.test(a.name)) return false;
+      if (a.name === "href" && !(v.startsWith("/?") || v.startsWith("#"))) return false;
+      if (a.name === "action" && !/^\/[^\/\\]/.test(v)) return false;
+      if (a.name === "method" && !/^(get|post)$/i.test(v)) return false;
+      if (a.name === "name" && !/^(input|select|textarea|button)$/.test(n.localName)) return false;
+    }
+    for (const c of n.childNodes) if (!clean(c)) return false;
+    return true;
+  }
+  function parse(text) {  // the fragment's blocks, or null when anything in it is off the allowlists
+    const doc = new DOMParser().parseFromString(policy ? policy.createHTML(text) : text, "text/html"), out = [];
+    if (doc.head.childNodes.length || doc.documentElement.attributes.length || doc.body.attributes.length) return null;
+    for (const n of doc.body.childNodes) {
+      if (n.nodeType === 3 && !n.data.trim()) continue;
+      if (n.nodeType !== 1 || !n.hasAttribute("data-card") || !clean(n)) return null;
+      out.push(n);
+    }
+    return out.length && out.length <= 200 ? out : null;
+  }
+  function put(old, node) {  // old gives way to a copy of node; the focus and the open <details> stay as the reader had them
+    const a = document.activeElement, f = a && old.contains(a) ? a.closest("[data-k]") : null, key = f && f.getAttribute("data-k");
+    const fresh = document.importNode(node, true);
+    for (const d of fresh.querySelectorAll("details[data-k]")) {
+      const k = d.getAttribute("data-k");
+      if (opened.has(k)) d.open = opened.get(k);
+    }
+    old.replaceWith(fresh);
+    if (key) for (const el of fresh.querySelectorAll("[data-k]")) if (el.getAttribute("data-k") === key) { el.focus({preventScroll: true}); break; }
+  }
+  function swap(blocks) {  // false when the page has other cards than the fragment: that is a new page, not an update
+    const live = Array.from(document.querySelectorAll("[data-card]")), ids = list => list.map(el => el.getAttribute("data-card")).join(" ");
+    if (ids(live) !== ids(blocks)) return false;
+    const x = window.scrollX, y = window.scrollY;
+    blocks.forEach((b, i) => { if (b.getAttribute("data-rev") !== live[i].getAttribute("data-rev")) put(live[i], b); });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+    return true;
+  }
+
+  function fit() {  // the grid's dense packing with the measured heights: each card spans the rows its own height needs (no hole, no overlap)
+    const g = getComputedStyle(page);
+    if (!/dense/.test(g.gridAutoFlow) || url.indexOf("card=") >= 0) return;  // one column (rows are auto), or one card in full
+    const hit = /([0-9.]+)px/.exec(g.gridAutoRows), unit = hit ? Number(hit[1]) : parseFloat(g.fontSize) * 0.5, todo = [];
+    if (!(unit > 1)) return;
+    for (const c of document.querySelectorAll("article.card[data-card]")) {  // measure all first, then write: one layout, not one per card
+      const names = (c.getAttribute("class") || "").split(/\s+/).filter(n => n), keep = names.filter(n => !/^r[0-9]+$/.test(n));
+      const h = c.getBoundingClientRect().height + (parseFloat(getComputedStyle(c).marginBottom) || 0);
+      const want = Math.min(200, Math.ceil(h / unit - 0.05)), next = want > 1 ? keep.concat("r" + want) : keep;
+      if (h > 0 && next.join(" ") !== names.join(" ")) todo.push([c, next]);
+    }
+    for (const [c, next] of todo) c.setAttribute("class", next.join(" "));
+  }
+  async function poll() {
+    const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 10000);
+    busy = true;
+    try {
+      const r = await load(url, etag, ctl.signal);
+      if (r.status === 401) { dead = true; show("session expired"); return; }
+      if (r.status !== 304) {
+        if (r.status !== 200 || r.headers.get("X-Nuc-Fragment") !== "1" || !/^text\/html\b/i.test(r.headers.get("Content-Type") || "")) throw new Error("not a fragment");
+        const text = await r.text(), blocks = text.length < 4e6 ? parse(text) : null;
+        if (editing()) { plan(period); return; }  // the reader started typing meanwhile: not now
+        if (!blocks || !swap(blocks)) { reload(); return; }
+        fit();
+        etag = r.headers.get("ETag") || "";
+      }
+      fails = 0; lastOk = Date.now(); show("");
+      plan(period);
+    } catch (err) {
+      fails++; late();
+      plan(Math.min(60000, Math.max(period, 2000) * Math.pow(2, fails - 1)));
+    } finally { clearTimeout(kill); busy = false; }
+  }
+  function tick() {
+    if (document.hidden || dead || paused) return;  // visibilitychange and the toggle start it again
+    if (busy) { plan(period); return; }
+    if (editing()) {
+      if (Date.now() - lastOk > Math.max(30000, 5 * period)) late();  // a long pause for typing is still old data
+      plan(period);
+    } else poll();
+  }
+  function turn() {  // kiosk: one screen further down, back to the top at the end, unless someone is at the page
+    setTimeout(turn, spin);
+    const room = root.scrollHeight - window.innerHeight;
+    if (!kiosk() || document.hidden || paused || Date.now() - touched < 3 * spin || room < 8) return;
+    window.scrollTo({top: window.scrollY >= room - 8 ? 0 : Math.min(room, window.scrollY + window.innerHeight * 0.9), behavior: calm.matches ? "auto" : "smooth"});
+  }
+
+  document.addEventListener("click", e => {
+    const s = e.target.closest("summary"), d = s && s.parentElement, k = d && d.getAttribute("data-k");
+    if (k) opened.set(k, !d.open);  // before the click's own effect: what the reader is about to make of it
+    const b = e.target.closest("[data-pause]");
+    if (!b || !plain(e) || !period) return;  // a page that does not poll (a graph reloads itself) leaves the link to the server
+    e.preventDefault();
+    paused = !paused;
+    root.classList.toggle("paused", paused);
+    page.setAttribute("data-paused", paused ? "1" : "0");
+    for (const t of document.querySelectorAll("[data-pause]")) t.setAttribute("aria-pressed", String(paused));
+    if (!paused) plan(0);
+  }, true);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) plan(0); });
+  window.addEventListener("online", () => plan(0));
+  window.addEventListener("pointerdown", () => { touched = Date.now(); }, true);
+  window.addEventListener("keydown", () => { touched = Date.now(); }, true);
+  window.addEventListener("wheel", () => { touched = Date.now(); }, {capture: true, passive: true});
+  root.classList.toggle("paused", paused);
+  let shaken = 0;
+  window.addEventListener("resize", () => { clearTimeout(shaken); shaken = setTimeout(fit, 150); });
+  window.addEventListener("load", fit);
+  fit();
+  if (!paused) plan(period);
+  if (spin >= 3000) {  // a wall: scroll, and start the page again every ten minutes, so that the server's burn-in shift (its shift-N class) moves
+    setTimeout(turn, spin);
+    setTimeout(again, 600000 - Date.now() % 600000 + 2000);
+    const nav = performance.getEntriesByType("navigation")[0];  // only a reload gives the place back: a fresh visit starts at the top
+    let y = 0;
+    try { y = nav && nav.type === "reload" && kiosk() ? Number(sessionStorage.getItem("nuc-wall-y")) || 0 : 0; } catch (err) { y = 0; }
+    if (y > 0) window.scrollTo({top: y, behavior: "instant"});
+  }
+})();
+</script>
+<script>// nuc-console web view: keyboard (src/webjs.py KEYS_JS). A key press clicks the link or button the server marked with data-key:
+// the keymap is the server's, this script has none. In a list, the arrows, j and k, PageUp and PageDown, Home and End move the
+// focus over the elements marked data-row and Enter follows the focused row's link; a click on such a row, anywhere but on a link, a
+// button or a field of it, follows its link too (no overlay: a table row is no containing block in every engine). Keys with Ctrl, Alt
+// or Meta, keys typed into a field and keys while a card is grabbed in the layout editor are left alone. It sets no classes and keeps nothing.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const STEP = new Map([["ArrowDown", 1], ["j", 1], ["ArrowUp", -1], ["k", -1], ["PageDown", 2], ["PageUp", -2]]);
+  const shown = el => el.getClientRects().length > 0;
+  const typing = t => !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+
+  function press(key, scope) {  // click the first visible, enabled element that asks for this key
+    for (const el of scope.querySelectorAll("a[data-key], button[data-key]")) {
+      if (!el.getAttribute("data-key").split(" ").includes(key) || el.disabled || el.getAttribute("aria-disabled") === "true" || !shown(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }
+  function move(key) {  // the focus to another row of the list
+    const rows = Array.from(document.querySelectorAll("[data-row]")).filter(shown), n = rows.length;
+    if (!n) return false;
+    const a = document.activeElement, cur = rows.indexOf(a && a.closest("[data-row]")), step = STEP.get(key) || 0;
+    const page = Math.max(1, Math.floor(window.innerHeight / (rows[0].getBoundingClientRect().height || 24)) - 1);
+    let i = cur < 0 ? (step > 0 || key === "Home" ? 0 : n - 1) : cur + (Math.abs(step) > 1 ? Math.sign(step) * page : step);
+    if (key === "Home") i = 0;
+    if (key === "End") i = n - 1;
+    const row = rows[Math.max(0, Math.min(n - 1, i))];
+    if (!row.hasAttribute("tabindex") && !/^(A|BUTTON)$/.test(row.tagName)) row.tabIndex = -1;  // so that it can take the focus
+    row.focus();
+    return true;
+  }
+  function follow() {  // Enter on a row that is not itself a link: the link inside it
+    const a = document.activeElement, row = a && a.closest("[data-row]");
+    if (!row || /^(A|BUTTON)$/.test(a.tagName)) return false;
+    const link = row.querySelector("a[href]");
+    if (link) link.click();
+    return !!link;
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || typing(e.target) || document.querySelector("[data-grab]")) return;
+    const k = e.key, help = document.querySelector("#help:target");
+    let hit = false;
+    if (!help && (STEP.has(k) || k === "Home" || k === "End")) hit = move(k);
+    else if (!help && k === "Enter") hit = follow();
+    if (!hit && !e.repeat) hit = press(k, help || document);
+    if (hit) e.preventDefault();
+  });
+  document.addEventListener("click", e => {  // a click on a row, not on a link, a button or a field of it, nor to select text: the row's link
+    if (e.defaultPrevented || e.button || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || String(window.getSelection() || "")) return;
+    const row = e.target.closest("[data-row]"), link = row && row.querySelector("a[href]");
+    if (link && !e.target.closest("a[href], button, input, select, textarea, label, summary")) link.click();
+  });
+})();
+</script>
+<script>// nuc-console web view: preferences (src/webjs.py PREFS_JS). A click on a[data-set] (href="/?set=...") is sent to the server in
+// the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
+// go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
+// back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
+// copies the text of #export. It never touches the cookie. It sets no classes.
+(function main() {
+  "use strict";
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
+  const KEY = "nuc-ui", SYNC = "nuc-ui-sync", SAFE = /^[A-Za-z0-9_.~:,-]{1,256}$/, WORD = /^[a-z-]{1,16}$/;
+  const root = document.documentElement;
+  const load = (url, etag, signal) => {  // the only door to the network: this server's "/?..." pages
+    if (typeof url !== "string" || !url.startsWith("/?")) return Promise.reject(new Error("refused"));
+    return fetch(url, {credentials: "same-origin", cache: "no-store", redirect: "error", headers: etag ? {"If-None-Match": etag} : {}, signal});
+  };
+  const read = k => { try { return localStorage.getItem(k); } catch (err) { return null; } };
+  const write = (k, v) => { try { localStorage.setItem(k, v); } catch (err) { /* storage off or full */ } };
+  const plain = e => !(e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey);
+  const mark = (b, on) => { if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); };
+
+  function apply(a) {  // what the link switches to, on the page now; a preference the page does not show needs the server's redraw
+    const th = a.getAttribute("data-theme"), de = a.getAttribute("data-density");
+    if (th === null && de === null) { location.reload(); return; }
+    if (th !== null && WORD.test(th)) root.setAttribute("data-theme", th);
+    if (de !== null && WORD.test(de)) root.setAttribute("data-density", de);
+    for (const b of document.querySelectorAll("a[data-set]")) {
+      if (th !== null && b.hasAttribute("data-theme")) mark(b, b.getAttribute("data-theme") === th);
+      if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
+    }
+  }
+  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
+    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
+    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+    if (!navigator.clipboard) pick();
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+  }
+
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
+    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
+    e.preventDefault();
+    load(href + "&frag=1").then(r => {
+      if (r.status !== 204) throw new Error("status " + r.status);
+      const p = r.headers.get("X-Nuc-Prefs");
+      if (p && SAFE.test(p)) write(KEY, p);
+      apply(a);
+    }).catch(() => location.assign(href));  // without the script this is what the link does anyway
+  });
+
+  const mine = root.getAttribute("data-prefs"), kept = read(KEY);
+  if (root.getAttribute("data-prefs-src") === "cookie" && mine && SAFE.test(mine)) write(KEY, mine);
+  else if (root.getAttribute("data-prefs-src") === "config" && kept && kept !== "1" && SAFE.test(kept) && Date.now() - (Number(read(SYNC)) || 0) > 300000) {
+    write(SYNC, String(Date.now()));  // once in a while, so that a browser that refuses the cookie is not sent in circles
+    load("/?set=" + kept + "&frag=1").then(r => { if (r.status === 204) location.reload(); }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
