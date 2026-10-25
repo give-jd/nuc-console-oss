@@ -29,7 +29,9 @@ SCREENS = ("overview", "map", "cpu", "health", "ai")
 NAMES = {"overview": "Overview", "map": "Map", "cpu": "CPU", "health": "Health", "ai": "AI"}
 SHORT = {"overview": "Ov", "map": "Map", "cpu": "CPU", "health": "Hlth", "ai": "AI"}  # the tab bar on a narrow line
 PROCS = [{"pid": 100 + i, "name": f"p{i}", "user": "u", "cpu": 50.0 - i, "mem": 10.0 + i, "time": 100.0 - i} for i in range(8)]
-STUBBED = ("CpuFeed", "cpu_screen", "health_state", "health_screen", "ai_state", "ai_screen", "ai_do", "ai_busy", "slides", "map_graph")
+# events_state: test_e_opens_the_events_timeline_keys_filter_it_and_esc_goes_back stubs it and used to leave the stub in place, so that any
+# later test that draws the EVENTS screen (tests/test_remotedoc.py sorts right after this module) read no state and failed with KeyError.
+STUBBED = ("CpuFeed", "cpu_screen", "health_state", "health_screen", "ai_state", "ai_screen", "ai_do", "ai_busy", "slides", "map_graph", "events_state")
 
 
 class Exit(Exception):
