@@ -326,8 +326,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         left = min(int(n), cap) if n and NUM.fullmatch(n) else 0
         end = time.monotonic() + DRAIN_S
         try:
-            self.connection.settimeout(0.01)
-            if left > 0 and not self.rfile.peek(1):  # buffered bytes, else one 10 ms look at the socket; a timeout is an OSError: nothing to swallow
+            self.connection.settimeout(0.05)
+            if left > 0 and not self.rfile.peek(1):  # buffered bytes, else one 50 ms look at the socket; a timeout is an OSError: nothing to swallow
                 left = 0
             while left > 0 and time.monotonic() < end:
                 self.connection.settimeout(max(0.01, end - time.monotonic()))
