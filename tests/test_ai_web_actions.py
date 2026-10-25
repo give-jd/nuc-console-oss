@@ -2040,6 +2040,31 @@ class WebSecurity(WebBase):
         self.assertEqual(advisor.read_web_state(self.eng.web_path()), {}, "nothing was written")
         self.assertEqual(self.httpd.requests, [], "nothing was fetched")
 
+    def test_a_refusal_swallows_a_bounded_part_of_the_unread_form_so_the_client_can_read_it(self):
+        head = "POST /ai/use HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nOrigin: http://evil.example\r\nContent-Type: application/x-www-form-urlencoded\r\n" % self.port
+        for size in (webhttp.POST_MAX * 4, webhttp.DRAIN_MAX):  # refused before the body is read (foreign Origin) and too big (413 for Content-Length)
+            out = self.raw(head + "Content-Length: %d\r\n\r\n" % size + "x" * size)
+            self.assertTrue(out.startswith("HTTP/1.0 403"), out[:60])
+            self.assertIn("another site", out)
+        big = head.replace("http://evil.example", "http://127.0.0.1:%d" % self.port) + "Content-Length: %d\r\n\r\n" % (webhttp.POST_MAX + 1)
+        self.assertTrue(self.raw(big + "x" * (webhttp.POST_MAX + 1)).startswith("HTTP/1.0 413"))
+
+    def test_the_drain_of_a_refusal_never_reads_more_than_its_cap(self):
+        class Conn:
+            def settimeout(self, _t):
+                pass
+        fake = mock.Mock(spec=["headers", "connection", "rfile"])
+        fake.headers = {"Content-Length": str(900000)}
+        fake.connection = Conn()
+        fake.rfile = io.BufferedReader(io.BytesIO(b"x" * (900000)))
+        webhttp.Handler._drain(fake)
+        self.assertLessEqual(fake.rfile.tell(), webhttp.DRAIN_MAX + 8192)
+        self.assertGreater(fake.rfile.tell(), 0)
+        fake.headers = {"Content-Length": "abc"}  # no valid length: nothing is read
+        before = fake.rfile.tell()
+        webhttp.Handler._drain(fake)
+        self.assertEqual(fake.rfile.tell(), before)
+
     def test_clear_needs_the_token_and_forgets_the_chat_the_page_draws_in_its_box(self):
         self.eng.history.append({"kind": "ask", "q": "why <so> slow?", "res": {"text": "busy", "tools_used": [], "model": "m", "calls": [], "state": True},
                                  "error": "", "at": 0})

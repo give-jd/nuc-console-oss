@@ -53,6 +53,8 @@ TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 SETTINGS_ACTIONS = ("feature", "config", "reset")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
 SETUP_ACTIONS = ("finish", "skip")  # POST /setup/<action>: the setup guide's marker (wizard.mark): finished or skipped; it writes no setting
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS}
+DRAIN_MAX = 65536    # bytes of an unread form that a refusal swallows (and drops) before closing, so the client can read the refusal
+DRAIN_S = 1.0        # ... and for at most this long
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
 PEER_SUMMARY = (API_PATH, API_PATH + "/summary")  # what a peer token of scope `summary` may GET: nothing else, not even a 404 to probe with
 PEER_VIEWS = PEER_SUMMARY + tuple(API_PATH + "/" + v for v in ("overview", "cpu", "health", "map", "events"))  # scope `views`: the read-only screens
@@ -313,6 +315,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._head(code, ctype, None if code in (204, 304) else len(body), extra, csp, referrer, cache)  # 204, 304: no body, and no length either
         if body and self.command != "HEAD":  # HEAD: the headers of the GET (Content-Length included), no body
             self.wfile.write(body)
+        if self.command == "POST" and not getattr(self, "_body_read", False):
+            self._drain()
+
+    def _drain(self, cap=DRAIN_MAX):
+        """A refusal that never read the form: swallow (and drop) a bounded part of it before the connection closes. Closing on unread data makes
+        the TCP stack send RST, and the client (Windows above all, and a browser) can lose the answer it was about to read."""
+        n = self.headers.get("Content-Length")
+        left = min(int(n), cap) if n and NUM.fullmatch(n) else 0
+        end = time.monotonic() + DRAIN_S
+        try:
+            while left > 0 and time.monotonic() < end:
+                self.connection.settimeout(max(0.05, end - time.monotonic()))
+                got = self.rfile.read1(min(left, 8192))
+                if not got:
+                    break
+                left -= len(got)
+        except (OSError, ValueError):
+            pass
 
     def _head(self, code, ctype, length, extra=(), csp=CSP, referrer="no-referrer", cache="no-store"):
         """The status line and the headers every answer has (length None: no Content-Length, a stream's or a 204's)."""
@@ -652,6 +672,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if int(n) > POST_MAX:
             return self._send(413, b"too big\n")
         body = self.rfile.read(int(n))
+        self._body_read = True
         try:
             form = parse_qs(body.decode("utf-8"), keep_blank_values=True, max_num_fields=20)
         except (ValueError, UnicodeDecodeError):
