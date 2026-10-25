@@ -134,7 +134,7 @@ PROBLEM_CARDS = {
     "ufw-missing": ("firewall",), "ufw-off": ("firewall",), "ufw-unreadable": ("firewall",),
     "config-unreadable": ("exposure", "webapps"),
     "feature-hidden": ("exposure", "firewall"),
-    "telegram-unpaired": (), "telegram-failing": (), "mute-ignored": (), "ai-down": (),  # (the ai KPI says "down" itself: there is no AI card)
+    "telegram-unpaired": (), "telegram-failing": (), "mute-ignored": (), "ai-down": (), "peer-down": (), "fleet-poller-down": (), "peer-insecure": (), "peer-identity": (),  # (the ai KPI says "down" itself: there is no AI card)
 }
 SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)
 

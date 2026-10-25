@@ -651,7 +651,7 @@ def new_entry(peer, now):
         shown = ""
     return {"v": 1, "name": peer["name"], "url_display": shown, "ts": int(now), "state": "unknown", "error": "", "summary": {}, "views": {},
             "scope": peer.get("scope", "summary"), "warn": [], "insecure": False, "identity": "ok", "last_ok": None, "skew_s": None,
-            "age_s": None}
+            "age_s": None, "fails": 0}
 
 
 def poll_peer(peer, prev=None, wall=time.time, **net):
@@ -705,6 +705,9 @@ def poll_peer(peer, prev=None, wall=time.time, **net):
             entry["warn"].append("showing-old-data")
     except Exception:  # noqa: BLE001  (a bug must not take the poller down, nor leak a message)
         entry["state"], entry["error"] = "unreachable", "internal"
+    # rounds in a row that ended in a failed state: what the peer-down alarm counts (problems.peer_state); a good answer starts again at 0
+    before = _int((prev or {}).get("fails"), 10 ** 6) or 0
+    entry["fails"] = min(before + 1, 10 ** 6) if entry["state"] in FAILED else 0
     entry["insecure"] = bool(info["plain"])
     if info["plain"]:
         entry["warn"].append("insecure-transport")
@@ -893,7 +896,7 @@ def valid_entry(obj, name):
            "ts": ts, "state": obj["state"], "error": err, "scope": obj["scope"], "identity": obj["identity"], "insecure": obj["insecure"],
            "warn": [clean(w, 40) for w in warn if isinstance(w, str)], "summary": flat_summary(obj.get("summary")),
            "last_ok": _int(obj.get("last_ok"), 4102444800), "skew_s": obj["skew_s"] if isinstance(obj.get("skew_s"), int) and not isinstance(obj.get("skew_s"), bool) else None,
-           "age_s": _int(obj.get("age_s"), 10 ** 9), "views": {}, "view_index": {}}
+           "age_s": _int(obj.get("age_s"), 10 ** 9), "fails": _int(obj.get("fails"), 10 ** 6) or 0, "views": {}, "view_index": {}}
     index = obj.get("view_index")
     if isinstance(index, dict):
         for vname in VIEWS:

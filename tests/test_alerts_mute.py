@@ -37,7 +37,8 @@ import render  # noqa: E402
 # Every alarm id, on one side: the ones a person may silence (how the machine runs) and the ones never (an attack surface, or what its
 # judgement reads, or the alerting itself). MUTABLE_ALERTS must be exactly the first set.
 OPERATIONAL = {"journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot", "reboot-required", "disk-inodes",
-               "container-no-restart", "containers-not-back", "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down"}
+               "container-no-restart", "containers-not-back", "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down",
+               "peer-down", "fleet-poller-down"}
 SECURITY = {
     "ufw-off", "ufw-missing", "ufw-unreadable", "firewall-off", "firewall-unreadable", "firewall-policy",                   # the firewall
     "docker-bypass", "db-open-lan", "funnel-public", "over-exposed", "expose-unmatched",                                     # exposure
@@ -54,6 +55,7 @@ SECURITY = {
     "updates-pending", "clock-unsynced",                                                                                     # unpatched software, a wrong clock
     "backup-stale", "backup-missing",                                                                                        # a guard the person configured: not to be silenced
     "disk-io-errors", "memory-errors",                                                                                       # hardware integrity: never hidden
+    "peer-insecure", "peer-identity",                                                                                        # a token in clear; another machine behind a trusted address
 }
 SM = {"cpu": {"cpu0": 0.1}, "thermal": {"cpu": (101.0, 105.0), "nvme": (33.0, 85.85), "throttle_s": 469.0, "recent": 0, "clk": (2.6, 4.9)}}
 
