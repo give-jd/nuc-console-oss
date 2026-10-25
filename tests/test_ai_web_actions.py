@@ -2058,7 +2058,7 @@ class WebSecurity(WebBase):
         s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
         self.addCleanup(s.close)
         s.sendall(head.encode("latin-1"))
-        time.sleep(0.05)  # the body follows the headers a moment later, as a slow client's does
+        time.sleep(0.01)  # the body follows the headers a moment later, as a slow client's does
         s.sendall(b"x" * 4096)
         out = b""
         while True:
