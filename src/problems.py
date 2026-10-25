@@ -297,6 +297,17 @@ def host_checks(boot, net, cont, now):
             more.append("[tls] watch is set but the check failed")
         elif not isinstance(certs, list):
             more.append("[tls] watch is set but the check did not run")
+    post = boot.get("posture")
+    if (CFG.get("posture") or {}).get("enabled") and isinstance(post, dict):  # opt-in; a stale file after the switch went off says nothing
+        mine = nuc_config.POSTURE_CHECKS.get(boot.get("os") or nuc_config.OS_NAME, ())  # the checks of the host the data comes from: nothing foreign
+        states = {c: v for c, v in post.items() if c in mine and v in ("ok", "fail", "unknown")}
+        bad = [c for c in states if states[c] == "fail"]
+        if bad:
+            bad.sort()
+            _names("posture", "security posture: " + ", ".join(nuc_config.POSTURE_WORDS[c] for c in bad[:3]) + (f" … +{len(bad) - 3}" if len(bad) > 3 else ""),
+                   bad, out, 1)
+        elif states and set(states.values()) == {"unknown"}:  # a check that cannot be read must not look like a pass
+            out.append((1, "posture checks could not be read", "posture"))
     for m in more:
         out.append((1, m, "watch-config"))
     return out
@@ -585,6 +596,9 @@ CATALOG = {
     "service-down": ("A service that must run is not running", "failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; "
                      "[services] must_run names the ones you expect",
                      "systemctl status <unit>; journalctl -u <unit>; sudo systemctl enable --now <unit>, or take it off [services] must_run if it is no longer expected"),
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection the OS offers is off: disk encryption, boot or system integrity, or remote access without network-level authentication. "
+                "On a kiosk this can be intended (auto-login needs FileVault off, an old board has no Secure Boot): accept it with a reason",
+                "[posture] in config.ini (enabled = no switches it off, checks = limits it); the check named in the text says what to change"),
     "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
                        "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
     "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
@@ -732,6 +746,10 @@ CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when it is on (
                          "sudo systemctl restart nuc-console-notify"),
 })
 OS_CATALOG["windows"].update({
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection Windows offers is off. On a kiosk this can be intended (a board without UEFI, RDP kept open on purpose): accept it with a reason",
+                "Secure Boot off: enable it in the UEFI setup (needs a UEFI/GPT install); RDP without NLA: System Properties > Remote > tick 'Allow connections only from computers running "
+                "Remote Desktop with Network Level Authentication', or turn RDP off; SMB1: Turn Windows features on or off > untick 'SMB 1.0/CIFS File Sharing Support' "
+                "(or, as administrator: Set-ItemProperty HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters SMB1 0); or [posture] checks in config.ini"),
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
                           "the web view's Telegram page (settings), or nuc-console-telegram.cmd --setup (administrator prompt: the bot token from "
                           "@BotFather, your @username), then tap the link it shows and press Start"),
@@ -740,6 +758,9 @@ OS_CATALOG["windows"].update({
                          "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
 })
 OS_CATALOG["darwin"].update({
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection macOS offers is off. On a kiosk this can be intended (automatic login needs FileVault off): accept it with a reason",
+                "FileVault off: System Settings > Privacy & Security > FileVault (or sudo fdesetup enable); SIP off: boot to Recovery, Terminal, csrutil enable; Gatekeeper off: "
+                "sudo spctl --global-enable; or [posture] checks in config.ini"),
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
                           "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
                           "then tap the link it shows and press Start"),

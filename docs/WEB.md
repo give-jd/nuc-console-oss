@@ -474,7 +474,7 @@ carries `csrf` (this process's random token) and `back` (the view to come back t
 - **Where a post comes from**: if a request has an `Origin` or a `Referer`, its host and port must be the `Host` the request was addressed to (`null`, another
   port, another name, a user name in front: `403`); `Sec-Fetch-Site` other than `same-origin` or `none`: `403`. The AI page is therefore sent with
   `Referrer-Policy: same-origin` (the other pages keep `no-referrer`: with it a browser sends `Origin: null` on a post, which would be refused).
-- **Body**: `application/x-www-form-urlencoded` (else `415`), a `Content-Length` of at most **4 KB** (else `413`, not read; none or chunked: `400`), at most 20 fields.
+- **Body**: `application/x-www-form-urlencoded` (else `415`), a `Content-Length` of at most **4 KB** (else `413`, not read into memory: a refusal that left the form unread swallows and drops at most 64 KB of it, for at most 0.25 s (and not at all when the client sent nothing after the headers), so that the client can read the refusal instead of a reset; none or chunked: `400`), at most 20 fields.
 - **Values**: a model id must be one the catalog has (else `400`), a number is digits; a question is cleaned and cut by the advisor; nothing from a request
   reaches a path, a command line or a shell, and the files and the server they act on are the pinned ones.
 - **CSP**: the AI page has `form-action 'self'` (its forms post to this server and nowhere else), and so do the Telegram page and a portable run's

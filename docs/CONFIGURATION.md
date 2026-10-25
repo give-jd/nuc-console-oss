@@ -333,6 +333,21 @@ warn_days = 21
 
 Both lists are read from `config.ini` only: the settings overlay of an installation cannot set them (root runs what they say).
 
+## `[posture]` — security posture alarms (opt-in, off by default)
+
+```ini
+[posture]
+enabled = yes
+checks = secure-boot, rdp-nla, smb1
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `no` | The master switch. Off: nothing is read and `posture` is never raised (on a kiosk these settings are often intended, so they are noise unless you ask). Read from `config.ini` only (not in the settings overlay); applies after `sudo systemctl restart nuc-console-collector` (macOS: `sudo launchctl kickstart -k system/com.nuc-console.collector`; Windows: restart the collector task) |
+| `checks` | empty = every check of this OS | Comma-separated, of a closed set. **Windows**: `secure-boot` (`UEFISecureBootEnabled` = 0 in `HKLM\SYSTEM\CurrentControlSet\Control\SecureBoot\State`; a legacy BIOS has no key: unknown), `rdp-nla` (a fail only when RDP is on and NLA is 0; RDP off is ok. Group Policy wins, value by value: `fDenyTSConnections` and `UserAuthentication` under `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services` when present, else `...\Control\Terminal Server` and `...\WinStations\RDP-Tcp`; a missing source or a policy key that cannot be read is unknown), `smb1` (`SMB1` under `...\Services\LanmanServer\Parameters`: 0 ok, 1 fail; when the value is missing the SMB1 server driver decides, `...\Services\mrxsmb10`: no such key or `Start` = 4 ok, `Start` 0-3 fail, anything unreadable or ambiguous unknown, never ok). **macOS**: `filevault` (`fdesetup status`), `sip` (`csrutil status`), `gatekeeper` (`spctl --status`). **Linux**: none yet (the section is accepted and does nothing). A name outside the set is skipped and said; a name of another OS is ignored here. `bitlocker` is **not implemented**: it cannot be read reliably without PowerShell or localised `manage-bde` text, and the console adds no PowerShell script for it. |
+
+One alarm, `posture` (warning), names the failing checks by fixed words ("security posture: Secure Boot off, SMB1 enabled"). A check that cannot be read (no key, access denied, a tool that is missing or prints something unexpected) is *unknown*: never ok and never an alarm by itself; only when **every** requested check is unknown does `posture` say "posture checks could not be read", so a broken check is not silent. `posture` cannot be muted (it is a security alarm); accept it with a reason when it is intended (`nuc-console-accept --problem posture --reason "kiosk, auto-login"`). The acceptance is tied to the list of failing checks, as for `service-down`: accepting `secure-boot` does not hide a later `smb1`; but an accepted failing set stays accepted when one of its members is fixed, and also when that member breaks again later (subset acceptance, as for `service-down`): only a name that was not in the accepted list brings the alarm back. On macOS, `System Integrity Protection status: disabled (Custom Configuration)` (like `enabled (Custom Configuration)`) is reported as unknown, not as a fail or ok.
+
 ## `sshd` audit (no key)
 
 On Linux the root collector runs `sshd -T` (every 5 minutes, with the BOOT section) and keeps six effective settings (the five plus `KbdInteractiveAuthentication`), values only; `sshd -T` shows the global values, a `Match` block can override them. Nothing to configure; a machine without `sshd`, or where `sshd -T` fails, simply has no result (never a pass). `ssh-root-login` (warning: `PermitRootLogin yes`), `ssh-password-auth` (warning: `PasswordAuthentication yes`, or `KbdInteractiveAuthentication yes`, the PAM password route; an **error** when the exposure data says port 22 or the `sshd` process is reachable from the Internet, or beyond what you declared under `[expose]`) and `ssh-empty-passwords` (error: `PermitEmptyPasswords yes`). Many LANs choose passwords: accept the alarm with a reason (`sudo nuc-console-accept --problem ssh-password-auth --reason "..."`); it is tied to its severity, so it comes back if port 22 becomes reachable from further away. They cannot be muted.
