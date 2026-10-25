@@ -958,6 +958,24 @@ def endpoint_for(port):
     return "http://%s:%d/v1" % (LOOPBACK, int(port))
 
 
+def port_busy(port):
+    """Does anything accept connections on 127.0.0.1:port? Any listener counts, HTTP or not. Never raises."""
+    try:
+        with socket.create_connection((LOOPBACK, int(port)), timeout=1):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _require_free_port(port):
+    """The service would fail at once with 'address already in use' (and be restarted for ever) when another server holds its port: the model
+    server the web view starts by itself ([ai] autostart) is the usual one. Said before anything is installed, with both ways out."""
+    if port_busy(port):
+        raise SetupError("port %d on %s is already taken, probably by the model server the web view started (the AI page's Stop button, or "
+                         "[ai] autostart = no in config.ini and a restart of the web view, frees it): the service would fail at once. "
+                         "Free the port and run this again. Another port: --port" % (int(port), LOOPBACK))
+
+
 def write_config(path, endpoint, model_id):
     """[ai] endpoint and model, through nuc_config.set_key: only those two lines change, comments and the rest are kept."""
     nuc_config.set_key(path, "ai", "endpoint", endpoint)
@@ -1256,7 +1274,8 @@ def systemd_unit(argv, ram_mb=None, gpu=False, groups=()):
     video: the ones the machine has) let the service user open them; everything else of the sandbox stays."""
     state = "/var/lib/" + SERVICE_NAME  # writable by the service user only (StateDirectory): the server keeps its key here (~/.ollama)
     lines = [
-        "[Unit]", "Description=nuc-console local AI model server (Ollama, %s only)" % LOOPBACK, "After=network.target", "",
+        "[Unit]", "Description=nuc-console local AI model server (Ollama, %s only)" % LOOPBACK, "After=network.target",
+        "StartLimitIntervalSec=600", "StartLimitBurst=10", "",  # ten failures in a row (the port taken, a model that does not fit): failed, not 500 restarts
         "[Service]", "Type=simple", "User=" + SERVICE_NAME,
         "ExecStart=" + " ".join(systemd_quote(a) for a in argv),
         "Environment=HOME=%s TMPDIR=%s" % (state, state), "StateDirectory=" + SERVICE_NAME,
@@ -1389,6 +1408,7 @@ def install_service(d, model, port, ctx, plat=None, gpu=True):
     if _is_win(plat):
         # a task that is running keeps its old model and ignores /Run: stop it first
         subprocess.run([tool("schtasks", plat), "/End", "/TN", "\\nuc-console\\ai"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        _require_free_port(port)
         subprocess.run([tool("icacls", plat), d, "/grant", "*S-1-5-19:(OI)(CI)RX"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         logs = os.path.dirname(argv[-1])
         os.makedirs(logs, exist_ok=True)
@@ -1402,6 +1422,8 @@ def install_service(d, model, port, ctx, plat=None, gpu=True):
         print("service: scheduled task \\nuc-console\\ai (LOCAL SERVICE, at boot, below-normal priority) started; log: %s" % argv[-1])
     elif _is_mac(plat):
         _mac_user()
+        subprocess.run([tool("launchctl"), "bootout", "system/" + MAC_LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _require_free_port(port)
         home, log, plist = "/var/db/" + SERVICE_NAME, "/var/log/nuc-console/ai.log", "/Library/LaunchDaemons/%s.plist" % MAC_LABEL
         for p in (home, "/var/log/nuc-console"):
             os.makedirs(p, exist_ok=True)
@@ -1410,7 +1432,6 @@ def install_service(d, model, port, ctx, plat=None, gpu=True):
         open(log, "a").close()
         shutil.chown(log, MAC_USER, MAC_USER)
         _write_root_file("/etc/newsyslog.d/%s.conf" % SERVICE_NAME, "%s  %s:%s  644  5  1024  *  NJ\n" % (log, MAC_USER, MAC_USER))
-        subprocess.run([tool("launchctl"), "bootout", "system/" + MAC_LABEL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _write_root_file(plist, launchd_plist(argv, home, log))
         shutil.chown(plist, "root", "wheel")
         run([tool("launchctl"), "bootstrap", "system", plist])
@@ -1418,6 +1439,8 @@ def install_service(d, model, port, ctx, plat=None, gpu=True):
     else:
         _linux_user()
         unit = "/etc/systemd/system/%s.service" % SERVICE_NAME
+        run([tool("systemctl"), "stop", SERVICE_NAME + ".service"], check=False)  # a reinstall: its own instance holds the port
+        _require_free_port(port)
         _write_root_file(unit, systemd_unit(argv, model["ram_mb"], gpu=gpu, groups=_gpu_groups() if gpu else ()))
         systemctl = tool("systemctl")
         run([systemctl, "daemon-reload"])
