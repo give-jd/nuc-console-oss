@@ -2049,11 +2049,74 @@ class WebSecurity(WebBase):
         big = head.replace("http://evil.example", "http://127.0.0.1:%d" % self.port) + "Content-Length: %d\r\n\r\n" % (webhttp.POST_MAX + 1)
         self.assertTrue(self.raw(big + "x" * (webhttp.POST_MAX + 1)).startswith("HTTP/1.0 413"))
 
+    def test_a_stalled_refusal_does_not_hold_the_connection_and_a_form_sent_after_the_headers_is_still_swallowed(self):
+        head = "POST /ai/use HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nOrigin: http://evil.example\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 5000\r\n\r\n" % self.port
+        t0 = time.monotonic()
+        out = self.raw(head)  # the body never comes: the server must not wait for it
+        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertTrue(out.startswith("HTTP/1.0 403"), out[:60])
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        self.addCleanup(s.close)
+        s.sendall(head.encode("latin-1"))
+        time.sleep(0.05)  # the body follows the headers a moment later, as a slow client's does
+        s.sendall(b"x" * 4096)
+        out = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            out += chunk
+        self.assertTrue(out.startswith(b"HTTP/1.0 403"), out[:60])
+
+    def test_a_413_for_a_huge_content_length_reads_at_most_the_cap(self):
+        seen, done, real = [], threading.Event(), webhttp.Handler._drain
+
+        class Counting:
+            def __init__(self, f):
+                self.f, self.n = f, 0
+
+            def peek(self, k):
+                return self.f.peek(k)
+
+            def read1(self, k):
+                got = self.f.read1(k)
+                self.n += len(got)
+                return got
+
+        def drain(handler, *a):
+            handler.rfile = Counting(handler.rfile)
+            try:
+                real(handler, *a)
+            finally:
+                seen.append(handler.rfile.n)
+                done.set()
+        size = 900000
+        head = ("POST /ai/use HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nOrigin: http://127.0.0.1:%d\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n" % (self.port, self.port, size))
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        self.addCleanup(s.close)
+
+        def send():
+            try:
+                s.sendall(head.encode("latin-1") + b"x" * size)
+            except OSError:
+                pass  # the server closed before the end: that is the point
+        with mock.patch.object(webhttp.Handler, "_drain", drain):
+            t = threading.Thread(target=send, daemon=True)
+            t.start()
+            self.assertTrue(done.wait(10), "the refusal was drained")
+        s.close()
+        t.join(10)
+        self.assertEqual(len(seen), 1)
+        self.assertGreater(seen[0], 0)
+        self.assertLessEqual(seen[0], webhttp.DRAIN_MAX + 8192)
+
     def test_the_drain_of_a_refusal_never_reads_more_than_its_cap(self):
         class Conn:
             def settimeout(self, _t):
                 pass
-        fake = mock.Mock(spec=["headers", "connection", "rfile"])
+        fake = mock.Mock(spec=["headers", "connection", "rfile", "timeout"])
+        fake.timeout = 10
         fake.headers = {"Content-Length": str(900000)}
         fake.connection = Conn()
         fake.rfile = io.BufferedReader(io.BytesIO(b"x" * (900000)))
