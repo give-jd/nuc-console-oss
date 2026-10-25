@@ -560,6 +560,18 @@ hidden =
 </p>
 </div>
 </details>
+<details class="cfgs" id="cfg-host">
+<summary>
+<code>[host]</code> This machine&#x27;s name</summary>
+<p class="hintl">The label of this machine in the headers, the Telegram messages and the web summary. An installation reads it from config.ini only.</p>
+<div class="ck cko" id="k-host-name">
+<span class="cn">
+<code>name</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The name this machine goes by (1-40 letters, digits, . _ -, starting with a letter or digit). Empty: the host name. Useful when several machines share one.</p>
+</div>
+</details>
 <details class="cfgs" id="cfg-web">
 <summary>
 <code>[web]</code> Web view (an installation&#x27;s service)</summary>
@@ -594,6 +606,13 @@ hidden =
 </span>
 <span class="sm">not set</span>
 <p class="hintl">A file with a secret of 16 characters or more (mode 0600, readable by the nuc-console user): every request must carry it. Never write the token itself in config.ini.</p>
+</div>
+<div class="ck cko" id="k-web-peer_tokens_file">
+<span class="cn">
+<code>peer_tokens_file</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A file (mode 0600, owned by the nuc-console user) of tokens that other nuc-console hosts use to watch this one, one per line: label scope token (scope summary or views). They read a few documents and can do nothing else. Empty = none.</p>
 </div>
 <div class="ck cko" id="k-web-allowed_hosts">
 <span class="cn">

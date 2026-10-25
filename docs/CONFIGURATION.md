@@ -135,6 +135,17 @@ settings page of the new web interface, which also shows where every value comes
 URL and no cookie: it reads this section, then the preset, then the default. The server never writes
 the browser's choices anywhere. The settings page has an **Export** button that gives you a `[ui]` block like the one above, to paste here.
 
+## `[host]` — this machine's name
+
+```ini
+[host]
+name = nuc-a
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | empty (the host name) | The label of this machine: the host name in the console and web headers, the `nuc-console · <name>` line of the Telegram messages and `host` in `/api/v1/summary`. `A-Z a-z 0-9 . _ -`, starting with a letter or digit, at most 40 characters. Anything else is ignored with one warning on stderr and the host name is used. Applies when the services restart. Read from `config.ini` only: the settings overlay never carries `[host]` (nor the future `[hosts]`), so the settings page shows it but an installation cannot change it from there. It is a label, not an identity: the machine's identity is the `host_id` file (`/var/lib/nuc-console/host_id`, made once by the collector; see SECURITY.md) |
+
 ## `[console]` — font and screen blanking of the Linux console (both off by default)
 
 Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root each time `nuc-console.service` starts (`ExecStartPre=-+`), on the terminal the dashboard draws on (`NUC_CONSOLE_VT`). Apply a change with `sudo systemctl restart nuc-console`. A missing `setfont` or `setterm`, an unknown font or an error never stops the dashboard: the step is skipped and the reason is in `journalctl -u nuc-console`.
@@ -210,13 +221,13 @@ Four more alarms come from the collector's boot data (every 5 minutes) and need 
 | Alarm | Level | When | Mute |
 |---|---|---|---|
 | `reboot-required` | warning | `/run/reboot-required` exists, or the running kernel (`uname -r`) is older than the newest `/boot/vmlinuz-*` of the same flavour (`7.0.0-34-generic` against `7.0.0-38-generic`); the kernel test needs both to be readable | yes |
-| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent | no |
+| `updates-pending` | warning | `apt-get -s dist-upgrade` (a simulation: no network, nothing changes; run at most once an hour) lists upgrades from a `-security` suite. Only the counts are kept, never package names. Debian and Ubuntu; elsewhere the check is simply absent. **macOS**: no command and no network, the collector reads `/Library/Preferences/com.apple.SoftwareUpdate.plist` (`LastRecommendedUpdatesAvailable`, the count of updates macOS already knows about; `LastSuccessfulDate`): any count above 0 raises it ("N software updates pending"), and the text adds "the update check has not run for N days" when the last successful check is over 14 days old. A missing file or key, a wrong type or a bad plist is no problem (an unreadable file shows as unknown) | no |
 | `clock-unsynced` | warning | `timedatectl show` says `NTPSynchronized=no`. Without `timedatectl` (no systemd, a container) nothing is said | no |
 | `disk-inodes` | warning at 90 % of a filesystem's inodes used, error at 97 % | the filesystems of the DISKS card; those that report no fixed count (btrfs, xfs: `f_files` 0) are left out. Linux and macOS | yes |
 
 **Windows `reboot-required`**: the SYSTEM collector reads three places of the registry (`winreg`, no PowerShell, key names and whether a value is empty only): `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired` (key exists), `...\Component Based Servicing\RebootPending` (key exists) and `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager` value `PendingFileRenameOperations` (not empty). The alarm names which signals said yes (Windows Update, servicing, files to replace). A signal that cannot be read counts as unknown, never as "no restart needed". The last signal is also left by some installers and security software, so it can stay on until the next restart. Mutable like on Linux.
 
-`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too) and `reboot-required`, which Windows has in its own form (below); Windows has no `updates-pending`, `clock-unsynced` or `disk-inodes`, and macOS has no `reboot-required`, `updates-pending` or `clock-unsynced` (the tools that would answer, `softwareupdate`, `sntp`, `systemsetup`, are not run).
+`updates-pending` and `clock-unsynced` touch security (unpatched software, certificates and tokens that depend on the time) and cannot be muted. These checks are Linux only, except `disk-inodes` (macOS too) and `reboot-required`, which Windows has in its own form (above); `updates-pending` also exists on macOS, from the plist read above (no network). Windows has no `updates-pending`, `clock-unsynced` or `disk-inodes`, and macOS has no `reboot-required` or `clock-unsynced` (the tools that would answer, `sntp`, `systemsetup`, are not run).
 
 ## `[web]` — web view: read-only, except the AI page's buttons (off by default)
 
@@ -226,6 +237,7 @@ Four more alarms come from the collector's boot data (every 5 minutes) and need 
 | `bind` | `127.0.0.1` | Anything else **requires** `token_file` (the service refuses to start otherwise) |
 | `port` | `8787` | |
 | `token_file` | empty | File with a secret (16+ chars of `A-Za-z0-9._~-`), mode 0600, owned by root or `nuc-console` (Windows: keep it in `%ProgramData%\nuc-console`, whose ACL lets only SYSTEM and Administrators write). Never put the token in `config.ini` (world-readable) |
+| `peer_tokens_file` | empty | Root's `config.ini` only (not in the settings page's overlay). A file of tokens that **other nuc-console hosts** use to watch this one, mode 0600, owned by root or the service user (as `token_file`), read again when it changes (deleting a line revokes it, no restart). One per line, `label scope token`; scope `summary` (the index and `/api/v1/summary`) or `views` (also overview, cpu, health, map, events); at most 16. Needs `token_file` (without a viewer token it is not read). Nothing else can be done with such a token. Exact list and threat model: [WEB.md](WEB.md#peer-tokens) |
 | `allowed_hosts` | empty | Extra `Host` names accepted when no token is set (DNS-rebinding guard); `localhost`, `127.0.0.1`, the bind address, the hostname and `*.ts.net` always are |
 | `metrics` | `yes` | `/metrics`: the figures of `/api/v1/overview` as Prometheus text, under the same token, `Host` and bind rules as `/api/v1/*` (it adds no data); `no` makes the route a 404. Applies at the next start. [WEB.md](WEB.md#metrics) |
 | `settings_actions` | `no` | Opt-in, and a lock. `yes`: the settings page of an installation may change the presentation keys, in `settings.ini` (below), **only when `token_file` is set** (without a token any local user could use the page); `no` (the default, and what a value that is not yes/no counts as): it only shows, and what it chose before counts for nothing. A portable run does not use it |
@@ -242,7 +254,7 @@ Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Suppor
 | `[features]` | **off only.** `no` switches a section off; `yes` is ignored: a section that `config.ini` switches off stays off and only the administrator switches it on, so the overlay can make root's collector run less, never more |
 | `[dashboard]`, `[ui]`, `[display] zoom` | any value the dashboard takes; it wins over `config.ini` |
 
-Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
+Everything else in the file is ignored and logged once: `[host]`, `[hosts]`, `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
 overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
 or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
 notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.
@@ -287,7 +299,7 @@ commit_pressure_pct = 90
 
 | Key | Default | Meaning |
 |---|---|---|
-| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, macOS, Windows) there is no problem and no error |
+| `memory_pressure_pct` | `10` | 1-100. The kernel's memory pressure (PSI, `some avg60` of `/proc/pressure/memory`, percent of the last minute in which some process waited for memory) above this raises `memory-pressure` (warning). Read with the temperatures, so `[features] thermal = no` switches it off too. Without PSI (Linux before 4.20, Windows) there is no problem and no error. On **macOS** the level `sysctl kern.memorystatus_vm_pressure_level` (read without root) is used instead of the percentage: *warning* (2) raises a warning, *critical* (4) an error; this threshold does not apply |
 | `commit_pressure_pct` | `90` | 1-100. **Windows only.** The commit charge (memory promised to processes) at or above this percent of the commit limit (RAM plus page files; `GetPerformanceInfo`) raises `memory-pressure` (warning) with Windows wording. It is a different measure from the Linux key above, so the two are separate. Read with the temperatures (`[features] thermal = no` switches it off); where it cannot be read there is no problem and no error. Ignored on Linux and macOS |
 
 **Kernel-log alarms (Linux)** have fixed windows, no keys: the root collector reads this boot's kernel log (`journalctl -k -b`, at most 5000 candidate lines, 20 s) and keeps only a count and the time of the newest line per class, never a line. `display-stuck` (error) clears when no graphics-driver timeout is newer than 30 minutes; `disk-io-errors` and `memory-errors` (errors; hardware, so they can be neither muted nor accepted) and `nic-resets` (warning, from 3 resets or link-downs) look at the last 24 hours; `oom-killed` (warning) lasts for the boot and names the killed process, not its command line. Where a kernel log is not read (macOS, Windows) these sections are "not available on this OS", not errors. On Windows the matching events go to the history and the Health page instead (no alarm): the display driver reset (`Display` 4101), disk and file-system errors (`disk` 7, 11, 51, 153; `Ntfs` 55, 140) as hardware events, an unexpected shutdown (`EventLog` 6008) and a blue screen (`BugCheck` 1001) as unexpected shutdowns. Only the source name and the number are read, never the message.

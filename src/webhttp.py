@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -53,6 +54,13 @@ SETTINGS_ACTIONS = ("feature", "config", "reset")  # POST /settings/<action>: a 
 SETUP_ACTIONS = ("finish", "skip")  # POST /setup/<action>: the setup guide's marker (wizard.mark): finished or skipped; it writes no setting
 POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS}
 POST_MAX = 4096      # bytes of a form: a question is 500 characters, everything else is an id
+PEER_SUMMARY = (API_PATH, API_PATH + "/summary")  # what a peer token of scope `summary` may GET: nothing else, not even a 404 to probe with
+PEER_VIEWS = PEER_SUMMARY + tuple(API_PATH + "/" + v for v in ("overview", "cpu", "health", "map", "events"))  # scope `views`: the read-only screens
+PEER_PATHS = {"summary": PEER_SUMMARY, "views": PEER_VIEWS}  # scope -> the exact paths (no trailing slash, no alias); never ai, telegram, stream, pages, /metrics
+PEER_MAX = 16        # entries of [web] peer_tokens_file
+PEER_FILE_MAX = 16384  # bytes of that file (16 lines of ~300 are 5 KB); more: the whole file is refused
+PEER_LABEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+PEER_TOKEN = re.compile(r"[A-Za-z0-9._~-]{32,256}")
 
 
 def page_csp(scripts=(), shell=False, forms=False):
@@ -133,6 +141,121 @@ def local_token(path):
             os.remove(path)
             raise ValueError(f"could not restrict {path} to your account (icacls)")
     return token
+
+
+class PeerTokens:
+    """[web] peer_tokens_file: the tokens another nuc-console host uses to watch this one. One entry per line, `label scope token` (white space;
+    `#` starts a comment; label [a-z0-9][a-z0-9-]{0,31}; scope summary or views; token 32+ characters of A-Z a-z 0-9 . _ ~ -). The file is read as
+    a secret (read_token's rules, and a link, a device, a file over PEER_FILE_MAX bytes, or one that is not valid UTF-8 are refused too: then
+    no peer token works, the failure closed) and read again whenever its stat changes: revoking a token is deleting its line, no restart.
+    A line that is not one is ignored with one message on stderr that says its number and why, never its text. `reserved`: the viewer's token,
+    which a peer entry must never repeat. match() compares with every token, always; last() is what the settings page shows."""
+
+    def __init__(self, path, reserved=""):
+        self.path, self.reserved = path or "", reserved
+        self.entries = ()  # ((label, scope, token bytes), ...)
+        self._key = False  # (not None, which is a file that is missing: the first reload reads whatever there is)
+        self._lock = threading.Lock()
+        self._seen = {}  # label -> (monotonic, wall time) of the last request that carried its token
+        self.ignored = 0  # lines the last read could not use (or -1: the whole file was refused)
+
+    def _say(self, text):
+        print("nuc-console web: peer tokens: " + text, file=sys.stderr)
+
+    def reload(self):
+        """Read the file again when its stat (mtime, ctime, size, inode, mode) is not the one last read; a missing path is an empty list."""
+        if not self.path:
+            return
+        try:
+            st = os.lstat(self.path)
+            key = (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino, st.st_mode)
+        except OSError:
+            key = None
+        if key == self._key:
+            return
+        with self._lock:
+            if key == self._key:
+                return
+            if key is None:
+                self.entries, self.ignored = (), -1
+                self._say("the file cannot be found: no peer token is accepted")
+            else:
+                self.entries, self.ignored = self._read()
+            self._seen = {k: v for k, v in self._seen.items() if k in {e[0] for e in self.entries}}  # a revoked label forgets its last use
+            self._key = key  # last: a thread with the same stat must not skip the read and use the old list
+
+    def _read(self):
+        try:
+            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        except OSError as e:
+            self._say("the file cannot be opened (%s): no peer token is accepted" % (e.strerror or "error"))
+            return (), -1
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise ValueError("it is not a regular file")
+            if not nuc_config.WINDOWS:  # Windows has no mode bits: the installer protects the folder with an ACL
+                if st.st_mode & 0o077:
+                    raise ValueError("it must not be readable by group/others (chmod 600)")
+                if st.st_uid not in (0, os.geteuid()):
+                    raise ValueError("it must be owned by root or by the service user")
+            with os.fdopen(fd, "rb", closefd=False) as f:
+                raw = f.read(PEER_FILE_MAX + 1)
+            if len(raw) > PEER_FILE_MAX:
+                raise ValueError("it is over %d bytes" % PEER_FILE_MAX)
+            text = raw.decode("utf-8")
+        except (OSError, ValueError) as e:  # UnicodeDecodeError is a ValueError
+            self._say("the file is refused (%s): no peer token is accepted" % ("not valid UTF-8" if isinstance(e, UnicodeError) else e if isinstance(e, ValueError) else "unreadable"))
+            return (), -1
+        finally:
+            os.close(fd)
+        out, labels, bad = [], set(), 0
+        for n, line in enumerate(text.splitlines(), 1):
+            parts = line.split("#", 1)[0].split()
+            if not parts:
+                continue
+            why = ""
+            if len(parts) != 3:
+                why = "not `label scope token`"
+            elif not PEER_LABEL.fullmatch(parts[0]):
+                why = "bad label"
+            elif parts[1] not in PEER_PATHS:
+                why = "bad scope"
+            elif not PEER_TOKEN.fullmatch(parts[2]):
+                why = "bad token"
+            elif parts[0] in labels:
+                why = "label repeated"
+            elif parts[2] == self.reserved or any(parts[2].encode() == t for _l, _s, t in out):
+                why = "token repeated"
+            elif len(out) >= PEER_MAX:
+                why = "more than %d entries" % PEER_MAX
+            if why:
+                bad += 1
+                self._say("line %d ignored (%s)" % (n, why))
+                continue
+            labels.add(parts[0])
+            out.append((parts[0], parts[1], parts[2].encode()))
+        return tuple(out), bad
+
+    def match(self, given):
+        """(label, scope) of the entry whose token `given` is, else None; every token is compared, whatever the lengths."""
+        self.reload()
+        g = given.encode("utf-8", "replace")
+        hit = None
+        for label, scope, tok in self.entries:
+            if hmac.compare_digest(g, tok) and hit is None:
+                hit = (label, scope)
+        return hit
+
+    def touch(self, label):
+        self._seen[label] = (time.monotonic(), time.time())
+
+    def last(self):
+        """[(label, scope, seconds since its last request or None, wall time of it or None)] for the settings page: never a token."""
+        self.reload()
+        now = time.monotonic()
+        return [(label, scope, now - self._seen[label][0] if label in self._seen else None,
+                 self._seen[label][1] if label in self._seen else None) for label, scope, _t in self.entries]
 
 
 def check_bind(bind, token):
@@ -227,6 +350,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return v
         return ""
 
+    def _peer(self):
+        """(label, scope) when the request carries a peer token as `Authorization: Bearer` (a cookie or ?token= is never looked at), else None.
+        Only a server with a viewer token has peers (without one the view is open on loopback and a peer token means nothing)."""
+        peers = getattr(self.server, "peers", None)
+        auth = self.headers.get("Authorization", "")
+        if peers is None or not self.server.token or not auth.startswith("Bearer "):
+            return None
+        hit = peers.match(auth[7:].strip())
+        if hit:
+            peers.touch(hit[0])
+        return hit
+
+    def _peer_no(self):
+        """What a peer token gets for anything outside its list (a page, a POST, a stream, /metrics, another view, an unknown view): 403, a fixed text,
+        no CSRF token, no cookie, no hint of what exists."""
+        self._send(403, b"forbidden: this token reads a few read-only documents and nothing else\n")
+
     def _set(self, q):
         """/?set=<field>&back=<view>: one appearance preference into the nuc_ui cookie (validated by prefs.apply_set, nothing else is stored), then
         a redirect to the view `back` names, rebuilt from its validated parameters (never the text given: no open redirect). set=reset clears it."""
@@ -280,7 +420,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if srv.token:
             given = self._token_from(q)
             if not hmac.compare_digest(given.encode(), srv.token.encode()):
-                return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
+                peer = self._peer()  # a peer token (Authorization: Bearer only) is another kind of access: a few GETs, nothing else
+                if peer is None:
+                    return self._send(401, b"unauthorized\n", extra=(("WWW-Authenticate", 'Bearer realm="nuc-console"'),))
+                if u.path not in PEER_PATHS[peer[1]]:
+                    return self._peer_no()
+                return self._api(u.path[len(API_PATH):].strip("/"), q, peer=True)
             if "token" in q and u.path in ("/", APP_PATH, SETUP_PATH):  # move the token out of the URL (history, logs, referrers) into a cookie; the view stays (validated parameters only)
                 where = (view_url(view_params(q)) if u.path == "/" else app_url(view_params(q)) if u.path == APP_PATH
                          else setup_link(view_params(dict(q, view=["setup"]))["step"]))
@@ -341,7 +486,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _json(self, code, obj, extra=()):
         self._send(code, webapi.dump(obj), webapi.JSON_TYPE, extra=extra)
 
-    def _api(self, name, q):
+    def _api(self, name, q, peer=False):
         """The data API, after the checks every request has (Host or token): /api/v1 (what there is), /api/v1/<view> (its document, with an ETag:
         304 when If-None-Match has it), /api/v1/stream (_stream). Read-only. A request a browser marks as coming from another site is refused (no
         page of another site reads this, and none can make it work for it either)."""
@@ -368,6 +513,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(500, {"error": "the data could not be read (see the service log)"})
         if doc is None:
             return self._json(404, {"error": "this screen is off in config.ini ([features] %s = no)" % name})
+        if peer and b'"csrf":' in doc:  # fail closed: no view a peer may read carries a form's token (tests walk them); if one ever did, it leaves nothing
+            return self._peer_no()
         tag = '"%s"' % doc.rev
         if tag in [t.strip() for t in self.headers.get("If-None-Match", "").split(",")]:
             return self._send(304, extra=(("ETag", tag),))
@@ -468,6 +615,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(200, blocks.encode(), "text/html; charset=utf-8", extra=extra)
 
     def do_POST(self):  # noqa: N802 - the forms of the AI page, of the Telegram page and of a portable run's settings, and nothing else
+        if self._peer():
+            return self._peer_no()
         u = urlsplit(self.path)
         area, sep, act = u.path[1:].partition("/")
         if not sep or area not in POST_AREAS or u.query:
@@ -522,6 +671,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(303, extra=(("Location", where),), referrer="same-origin")  # Post/Redirect/Get: a reload never posts again
 
     def _no(self):
+        if self._peer():
+            return self._peer_no()
         self._send(405, b"read-only\n", extra=(("Allow", "GET, HEAD"),))
     do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _no
     do_HEAD = do_GET  # the same checks and headers as GET: _send writes no body for HEAD

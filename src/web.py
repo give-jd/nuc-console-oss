@@ -54,7 +54,7 @@ import webmetrics
 import webcss
 import webjs
 import wizard
-from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
+from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, PeerTokens, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
 from webpages import ai_asked, ai_native, ai_nodes, events_here, events_native, events_nodes, health_native, health_nodes, telegram_html
 from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
@@ -159,6 +159,7 @@ class Server(http.server.ThreadingHTTPServer):
 
     def __init__(self, addr, cfg, token="", demo=False, zoom=100):
         self.cfg, self.token, self.zoom = cfg, token, zoom
+        self.peers = PeerTokens(cfg.get("peer_tokens_file", "") if token else "", token)  # other hosts' read-only tokens ([web] peer_tokens_file; needs a token)
         self.allowed = {"localhost", "127.0.0.1", "::1", addr[0].lower(), socket.gethostname().lower()} | set(cfg.get("allowed_hosts", []))
         self.slots = threading.BoundedSemaphore(MAX_CONN)
         self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
@@ -291,7 +292,7 @@ class Server(http.server.ThreadingHTTPServer):
                 print("nuc-console web: app %s error: %r" % (name, e), file=sys.stderr)
         top = first.get("summary") or first.get("overview") or {}
         state, text = (top.get("status") or {}).get("state", "unknown"), (top.get("status") or {}).get("text", "?")
-        host = socket.gethostname()
+        host = nuc_config.host_label(render.CFG)
         tabs = [htmlview.tab(digit, TAB_TITLES[name], APP_PATH if name == "overview" else APP_PATH + "?view=" + name, (name if name != "overview" else "") == view)
                 for digit, name in ui.screen_keys(feats)]
         here = app_url(dict(p, view=view))
@@ -392,7 +393,7 @@ class Server(http.server.ThreadingHTTPServer):
                 built.append(ui.Card(cid, entry.title if entry else cid, "could not be drawn (see the service log)", "unknown", []))
         state, text = self.shell_pill(ctx.problems)
         stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
-        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
+        return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
                 "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
                 "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
@@ -403,9 +404,11 @@ class Server(http.server.ThreadingHTTPServer):
         ctx = self.shell_frame(r)
         state, text = self.shell_pill(ctx.problems)
         stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
-        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS),
+        return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS),
                 "stale": stale, "restart": render.CMD.get("restart", ""), "problems": len(ctx.problems or []),
-                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True))}
+                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
+                "host_id": nuc_config.read_host_id(), "version": nuc_config.VERSION, "os": render.cpu_os(),
+                "counts": webapi.counts(ctx.problems), "worst": webapi.worst(ctx.problems)}
 
     def machine_state(self):
         """The machine as the pages show it now, for the AI's chat (advisor.machine_state: the model reads it with a question): the status, the
@@ -423,7 +426,7 @@ class Server(http.server.ThreadingHTTPServer):
                 rows = ((self.cpu_feed.read() or {}).get("procs") or {}).get("procs") or []
         report = (ctx.health or {}).get("report") if isinstance(ctx.health, dict) else None
         findings = report.get("findings") if isinstance(report, dict) and isinstance(report.get("findings"), list) else []
-        return advisor.machine_state(socket.gethostname(), render.cpu_os(), time.time(), text, pb, figures, rows, findings)
+        return advisor.machine_state(nuc_config.host_label(render.CFG), render.cpu_os(), time.time(), text, pb, figures, rows, findings)
 
     def api_cpu(self, here, sort, sel):
         nodes, sel = self.cpu_nodes(dict({"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}, **here), sort, sel)
@@ -498,7 +501,7 @@ class Server(http.server.ThreadingHTTPServer):
         pause = bool(vhere.get("pause", pause))
         if pause:
             vhere["pause"] = True
-        host = socket.gethostname()
+        host = nuc_config.host_label(render.CFG)
         link = lambda text, **kw: f'<a href="{html.escape(page_url(vhere, **kw))}">{text}</a>'  # noqa: E731
         back = urlsplit(page_url(vhere)).query
         setlink = lambda field, text, cur, **data: set_link(field, back, text, cur, **data)  # noqa: E731
@@ -951,6 +954,8 @@ class Server(http.server.ThreadingHTTPServer):
         loop = is_loopback(bind)
         rows.append(("web access", ("loopback only (" + esc(bind) + ")" if loop else esc(bind)) + (", a token is required" if self.token else
                                                                                                ", no token" if loop else "")))
+        if self.peers.path:  # read-only: the labels and when each was last used (a token is never shown; there is no access log by design)
+            rows.append(("peer tokens", self.peers_text()))
         d = cfg.get("display") or {}
         rows.append(("display", f'mode {esc(d.get("mode", "browser"))} · zoom {int(self.zoom)}%'))
         rows.append(("Telegram", esc(self.telegram_text()) + ' · <a class="lnk" href="%s">Telegram page</a>' % esc(page_url(dict(here, view="telegram")))))
@@ -961,6 +966,16 @@ class Server(http.server.ThreadingHTTPServer):
         dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows)
         return (f'<section class="sec" aria-labelledby="sec-about"><h3 class="sech" id="sec-about">About this machine</h3>'
                 f'<p class="sm">Read-only: this page changes nothing on the machine.</p><dl class="about">{dl}</dl></section>')
+
+    def peers_text(self):
+        """The settings page's line about [web] peer_tokens_file: label, scope and last use of each token (HTML, escaped); never a token."""
+        items = []
+        for label, scope, age, wall in self.peers.last():
+            used = "never used" if age is None else "last used %s ago (%s)" % (ui.fmt_ago(age), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(wall)))
+            items.append("<b>%s</b> · %s · %s" % (html.escape(label), html.escape(scope), html.escape(used)))
+        note = "" if self.peers.ignored == 0 else " (the file is refused: see the service log)" if self.peers.ignored < 0 else \
+            " (%d line%s ignored: see the service log)" % (self.peers.ignored, "" if self.peers.ignored == 1 else "s")
+        return ("<br>".join(items) or "none") + html.escape(note)
 
     @staticmethod
     def telegram_text():
@@ -1054,7 +1069,7 @@ class Server(http.server.ThreadingHTTPServer):
             ids = sorted(v["ids"])
             w, h = canvas(len(ids))
             pos = self.layout(ids, sorted({(e["src"], e["dst"]) for e in v["edges"]}), w, h)
-            body = graph_body(G, pb, v, pos, w, h, gh, r, socket.gethostname())
+            body = graph_body(G, pb, v, pos, w, h, gh, r, nuc_config.host_label(render.CFG))
             tree = tree_url(G, v["sel"], only, pause, here)
             script = GRAPH_SCRIPT
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
@@ -1298,7 +1313,8 @@ def main(argv):
         # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says.
         # A portable run (run.sh / run.ps1, NUC_CONSOLE_HOME) is always like that: nothing listens beyond 127.0.0.1, and [web] token_file is
         # ignored. An installation (macOS/Windows) keeps the token_file the user set.
-        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="" if nuc_config.PORTABLE else cfg["token_file"])
+        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="" if nuc_config.PORTABLE else cfg["token_file"],
+                   peer_tokens_file="" if nuc_config.PORTABLE else cfg["peer_tokens_file"])
     if not cfg["enabled"] and not demo:
         print("nuc-console web view is disabled ([web] enabled = no in config.ini)")
         return 0

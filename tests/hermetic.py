@@ -37,7 +37,7 @@ for _k in ("COLUMNS", "LINES", "NO_COLOR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", 
            "NUC_CONSOLE_WEB"):
     os.environ.pop(_k, None)
 os.environ["HOME"] = os.environ["USERPROFILE"] = os.path.join(SCRATCH, "home")
-for _k, _f in (("CONFIG", "config.ini"), ("BASELINE", "baseline.json"), ("ACCEPTED", "accepted.json"), ("NET", "net.json"),
+for _k, _f in (("CONFIG", "config.ini"), ("HOST_ID", "host_id"), ("BASELINE", "baseline.json"), ("ACCEPTED", "accepted.json"), ("NET", "net.json"),
                ("STATE", "containers.json"), ("SETTINGS", "settings.ini"), ("BOOT", "boot.json"), ("SENSORS", "sensors.json"),
                ("PEERS_CACHE", "peers-cache"), ("PEERS_STATE", "peers-state")):
     os.environ["NUC_CONSOLE_" + _k] = os.path.join(ABSENT, _f)
@@ -50,6 +50,9 @@ with open(os.environ["NUC_CONSOLE_SETUP"], "w") as _f:
     _f.write('{"how": "skipped", "at": 0, "version": "0"}')
 
 import nuc_config  # noqa: E402  (after the environment: it reads NUC_CONSOLE_HOME and NUC_CONSOLE_NOTIFY_DIR when imported)
+
+import collector  # noqa: E402
+collector.SOFTWAREUPDATE_PLIST = os.path.join(ABSENT, "SoftwareUpdate.plist")  # a macOS runner's own plist is not a test's input
 
 # what the installed console owns: where nuc_config says it lives on this OS (the temporary folder of a portable run is not the host)
 HOST_DIRS = tuple(os.path.normcase(os.path.abspath(d)) for d in (nuc_config.ETC_DIR, nuc_config.RUN_DIR, nuc_config.LIB_DIR)
