@@ -266,7 +266,8 @@ To say how far a service may reach, declare it under `[expose]` (`shop-db = loca
 
 `[hosts]` in `config.ini` lists other nuc-console machines to watch (docs/CONFIGURATION.md); `nuc-console-fleet list` shows them with their last cached state, `nuc-console-fleet test NAME` polls one now
 and says in words why it is not ok, `nuc-console-fleet forget NAME` accepts a replaced machine, `nuc-console-fleet once` polls them all and writes the cache (on Linux the installer also runs it as the service `nuc-console-peers`, only while `[hosts]` has a peer: docs/INSTALL.md, "Fleet poller") the web view and the console will read (docs/WEB.md, "Fleet cache"). The client follows no redirect, honours no proxy, caps every answer and
-never reaches link-local addresses (SECURITY.md, "The peer client"). Nothing happens without `[hosts]`.
+never reaches link-local addresses (SECURITY.md, "The peer client"). Nothing happens without `[hosts]`. With `[hosts]` the web view has a **Hosts** tab (`[features] fleet`): one card per machine, worst first, with an
+**Open on NAME** link that takes the browser to that machine's own web view (docs/WEB.md, "Hosts"); it reads the poller's cache and opens no connection itself.
 
 ## AI advisor (optional)
 

@@ -48,6 +48,7 @@ their start. In a portable run and the desktop app the settings page turns them 
 | `cpu` | the **CPU** screen: per-core load and frequency, temperatures, top processes, like htop (console key `3`, web `cpu` link) | `/proc`, `/sys` (Linux); system calls and `ps` (macOS); Windows API. Temperatures on macOS/Windows: the collector (`powermetrics`; WMI, LibreHardwareMonitor/OpenHardwareMonitor if installed) |
 | `health` | the **HEALTH** screen: which apps, services and containers cause trouble over time (CPU, memory, crashes, restarts, OOM), disks filling up, hot hours (console key `4`, web `health` link) | the collector keeps `history.db` (SQLite): per-app CPU/memory per hour, events and log *templates* from `journalctl` (Linux), the Event Log (Windows), crash reports (macOS) |
 | `ai` | the **AI** screen: this machine's RAM and GPU, and for each model of its list whether it fits (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big) and how fast it would be (console key `5`, web `ai` link; it is not a rotating page). It reads the hardware, and it is where you set a model up (choose one: it is downloaded, started and turned on; AI on/off; delete) unless `[ai] web_actions = no`; it shows with `[ai] enabled = no` too; `no`: no screen, no key, no link, the hardware is never probed. The advisor itself is `[ai]` below | — (unprivileged: `/proc`, `/sys`, the registry, Windows API; `nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler` with fixed arguments and a time limit of 5 s at most) |
+| `fleet` | the **Hosts** screen (web tab `6`, `/?view=hosts`, `/api/v1/hosts`, a section in the settings page): the machines of `[hosts]` at a glance, from the poller's cache; it shows only while `[hosts]` has entries, and it opens no connection ([WEB.md](WEB.md#hosts)). `no`: no tab, no page, no document | — (reads the poller's cache folder; the poller itself is unprivileged) |
 | `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console key `2`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
@@ -401,6 +402,7 @@ Rules that are not options: at most **16** peers; a row that is wrong is ignored
 `http://` is only for Tailscale addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) unless `insecure=yes`; a public address is `https://` only;
 link-local (169.254.0.0/16 with the cloud metadata address, `fe80::/10`), multicast, unspecified and reserved addresses are never contacted, and loopback is not either.
 `[hosts]` is **not** in the settings overlay and is never written by the settings page, not even in a portable run: edit `config.ini`.
+The web view shows the peers as the **Hosts** tab (`[features] fleet`, on by default; only while `[hosts]` is not empty): see [WEB.md](WEB.md#hosts). The settings page lists them read-only.
 The poll interval is 15 s (never under 5 s); a peer that fails is retried after 5 s, 10 s, 20 s ... up to 5 minutes. See [SECURITY.md](../SECURITY.md#the-peer-client) for what the client does and refuses.
 
 ## `[ai]` — optional local model for the HEALTH screen (off by default)

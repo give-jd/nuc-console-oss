@@ -53,6 +53,7 @@ import webapi
 import webmetrics
 import webcss
 import webjs
+import webhosts
 import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, PeerTokens, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
@@ -133,6 +134,7 @@ KPI_CARD = {"problems": "attention", "internet": "exposure", "lan": "exposure", 
             "cpu": "system", "ram": "system", "temp": "system", "load": "system", "uptime": "system", "disk": "disks", "containers": "containers",
             "unhealthy": "containers", "failed_units": "boot", "ssh": "sessions", "tailnet": "tailscale", "rx": "network_traffic", "tx": "network_traffic"}
 KPI_VIEW = {"health": "health", "ai": "ai"}  # the key figures that open a screen
+FLEET_TTL = 5        # seconds the Hosts page and document keep what they read of the poller's cache (it writes every 15 s)
 STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "stale-net", "collector-boot")  # a collector that is not running
 QUIET_VIEWS = ("settings", "telegram", "setup")  # shell-only pages to change things on or read: no key figures, no refresh or pause links
 PLAIN_VIEWS = ("settings", "setup")  # and the ones that never reload or poll
@@ -216,6 +218,8 @@ class Server(http.server.ThreadingHTTPServer):
         view='map': the MAP page, state = its open/shut/all/sel/only/pause parameters (see view_params).
         cookie is the nuc_ui cookie the request came with (prefs.effective checks it)."""
         r = refresh or self.cfg["refresh_seconds"]
+        if view == "hosts" and not self.fleet_on():
+            view = ""  # no [hosts], or [features] fleet = no: the page is not there, as an unknown view is not
         here = {"zoom": zoom, "rotate": rotate, "kiosk": kiosk, "refresh": refresh, "ui": ui}
         zoom = zoom or min(ZOOMS, key=lambda z: abs(z - self.zoom))
         self.cpu_feed.max_age = r  # processes are read at most once per refresh interval, however many viewers and pages ask
@@ -247,6 +251,10 @@ class Server(http.server.ThreadingHTTPServer):
             params = {"limit": events.LIMIT_DEFAULT, "since": 0, "kind": state.get("kind", ""), "age": state.get("age") or events.DEFAULT_AGE}
             norm = {"age": params["age"], "kind": params["kind"], "pause": pause}
             return serve(r / 2, lambda: self.events_page(here, params, pause))
+        if view == "hosts":  # a configured peer's id, or nothing: the cache key holds only values that exist
+            host = state.get("host", "") if state.get("host", "") in {h["name"] for h in render.CFG.get("hosts") or []} else ""
+            norm = {"host": host}
+            return serve(r / 2, lambda: self.hosts_page(here, host))
         if view == "ai":  # the selected model, and the question asked first, are checked here too: the cache key holds only what exists
             rows = screens.ai_rows(render.ai_data()["cat"]) if render.CFG["features"].get("ai", True) else []  # one catalog per AI_TTL
             ids = {m["id"] for m in rows}
@@ -296,7 +304,8 @@ class Server(http.server.ThreadingHTTPServer):
         tabs = [htmlview.tab(digit, TAB_TITLES[name], APP_PATH if name == "overview" else APP_PATH + "?view=" + name, (name if name != "overview" else "") == view)
                 for digit, name in ui.screen_keys(feats)]
         here = app_url(dict(p, view=view))
-        top_bar = htmlview.topbar(host, state, text, tabs, time.strftime("%H:%M:%S"), "#help", page_url({"view": "settings"}), False)
+        top_bar = htmlview.topbar(host, state, text, tabs, time.strftime("%H:%M:%S"), "#help", page_url({"view": "settings"}), False,
+                                  page_url({"view": "hosts"}) if self.fleet_on() else "")
         back = urlsplit(page_url({"view": view} if view else {})).query
         setlink = lambda field, label, cur, **data: set_link(field, back, label, cur, **data)  # noqa: E731
         groups = ['<span class="live">live</span>',
@@ -327,8 +336,24 @@ class Server(http.server.ThreadingHTTPServer):
     def api_index(self):
         """GET /api/v1: what there is."""
         return {"api": webapi.VERSION, "version": nuc_config.VERSION, "refresh": self.cfg["refresh_seconds"],
-                "views": [v for v in webapi.VIEWS if v in ("overview", "telegram", "summary") or render.CFG["features"].get(v, True)],
+                "views": [v for v in self.api_views() if v in ("overview", "telegram", "summary", "hosts") or render.CFG["features"].get(v, True)],
                 "documents": API_PATH + "/<view>", "stream": API_PATH + "/stream?view=<view>"}
+
+    def fleet_on(self):
+        """Is the fleet on: [hosts] has entries and [features] fleet is not no. Off, nothing of it exists: no tab, no page, no document."""
+        return bool(render.CFG.get("hosts")) and bool(render.CFG["features"].get("fleet", True))
+
+    def api_views(self):
+        """The views /api/v1 has now: webapi.VIEWS, and hosts while the fleet is on."""
+        return webapi.VIEWS + (("hosts",) if self.fleet_on() else ())
+
+    def fleet_doc(self):
+        """The hosts document's fields (webhosts.build): [hosts] against what the poller last wrote. Read from its cache folder (files only: this
+        process opens no connection to another host), at most once per FLEET_TTL whoever asks."""
+        def build():
+            me = {"name": nuc_config.host_label(render.CFG), "host_id": nuc_config.read_host_id() or "", "version": nuc_config.VERSION, "os": render.cpu_os()}
+            return webhosts.build(render.CFG.get("hosts") or [], nuc_config.peers_cache_dir(), me, time.time())
+        return self.cached(("fleet",), FLEET_TTL, build)
 
     def metrics(self):
         """GET /metrics: the frame the overview is built from, as Prometheus text (webmetrics.py); built at most once per half refresh interval."""
@@ -349,6 +374,8 @@ class Server(http.server.ThreadingHTTPServer):
             return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_overview(r), time.time()))
         if name == "summary":
             return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_summary(r), time.time()))
+        if name == "hosts":
+            return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.fleet_doc(), time.time())) if self.fleet_on() else None
         if name == "cpu":
             self.cpu_feed.max_age = r
             sort, sel = p["sort"] or "cpu", p["sel"]
@@ -521,7 +548,7 @@ class Server(http.server.ThreadingHTTPServer):
         note = htmlview.banner("!", "some of the data is old or missing: a collector is not running?",
                                f'restart it: <code class="cmd">{html.escape(render.CMD.get("restart", ""))}</code>') if stale else ""
         top = htmlview.topbar(host, *self.shell_pill(ctx.problems), self.shell_tabs(ctx, here, view, r, feats), clock, "#help",
-                              page_url(dict(here, view="settings")), view in QUIET_VIEWS)
+                              page_url(dict(here, view="settings")), view in QUIET_VIEWS, page_url(dict(here, view="hosts")) if self.fleet_on() else "")
         kpis = "" if view in QUIET_VIEWS else htmlview.kpis_block(tiles, note)
         # the page
         r_live = int(v.wait or r) if v.live and not pause else 0  # the meta refresh (inside <noscript>: with the scripts, they poll)
@@ -564,7 +591,7 @@ class Server(http.server.ThreadingHTTPServer):
             groups = [f"refreshed every {r} s", "read-only"]
         if here["kiosk"]:
             groups.append(html.escape(render.KIOSK_HINT))
-        scope = view if view in ("map", "cpu", "health", "ai", "events") else "global" if view in QUIET_VIEWS else "overview"
+        scope = view if view in ("map", "cpu", "health", "ai", "events") else "global" if view in QUIET_VIEWS or view == "hosts" else "overview"
         groups_help = (ui.help_rows("editor", feats) + ui.help_rows("global", feats, bool(nuc_config.PORTABLE))) if edit \
             else ui.help_rows(scope, feats, bool(nuc_config.PORTABLE), pause)
         helps = htmlview.help_dialog(groups_help)
@@ -620,6 +647,13 @@ class Server(http.server.ThreadingHTTPServer):
         for digit, name in ui.screen_keys(feats):
             href = page_url(dict(here, view=name)) if name != "overview" else page_url(here)
             out.append(htmlview.tab(digit, TAB_TITLES[name], href, view == ("" if name == "overview" else name), badges.get(name, "")))
+        if self.fleet_on():  # the sixth tab, only while there are hosts to watch (ui.SCREENS is the console's list: the console gets its own key)
+            try:
+                mark = webhosts.badge(self.fleet_doc())
+            except Exception as e:  # noqa: BLE001 - a badge is a nicety: the tab stays
+                print("nuc-console web: hosts badge error:", repr(e)[:200], file=sys.stderr)
+                mark = ""
+            out.append(htmlview.tab("6", "Hosts", page_url(dict(here, view="hosts")), view == "hosts", mark))
         return out
 
     def overview_view(self, here, eff, ctx, r, pause, only, visible, custom=False):
@@ -751,7 +785,7 @@ class Server(http.server.ThreadingHTTPServer):
         feats, forms = self.features_html(back)
         guide = (f'<section class="sec" aria-labelledby="sec-guide"><h3 class="sech" id="sec-guide">Setup guide</h3><p class="hintl">What the screens show, what is on and off '
                  f'and what each piece costs, in five short steps. <a class="lnk" href="{wizard.link(1)}">Open the setup guide</a></p></section>')
-        return View(f'<div class="settings">{guide}{appearance}{feats}{self.config_html(back)}{self.alerts_html(here)}{self.about_html(here)}</div>', [],
+        return View(f'<div class="settings">{guide}{appearance}{feats}{self.config_html(back)}{self.alerts_html(here)}{self.hosts_settings_html()}{self.about_html(here)}</div>', [],
                     vhere, False, forms=forms, legacy=False)
 
     def features_html(self, back, to=""):
@@ -767,7 +801,7 @@ class Server(http.server.ThreadingHTTPServer):
         rows = []
         for key, title, what in FEATURE_WORDS:
             on = bool(feats.get(key, True))
-            state = f'<span class="fs-st {"on" if on else "off"}">{"✔ on" if on else "○ off"}</span>'
+            state = f'<span class="fs-st {"on" if on else "off"}">{("✔ on" if key != "fleet" or render.CFG.get("hosts") else "✔ on (no [hosts])") if on else "○ off"}</span>'
             ctl = (f'<form class="f" method="post" action="/settings/feature">{hidden}<input type="hidden" name="name" value="{key}">'
                    f'<input type="hidden" name="on" value="{"no" if on else "yes"}"><button class="btn{"" if on else " pri"}" type="submit">'
                    f'{"Turn off" if on else "Turn on"}</button></form>' if ok else "")
@@ -936,6 +970,25 @@ class Server(http.server.ThreadingHTTPServer):
                 'through it. The machine only sends: it never reads your messages.</p>'
                 f'<div class="fs"><span><span class="pl {cls} big">{pill}</span> {esc(line)}</span>'
                 f'<div><a class="btn pri" href="{go}">{esc(label)}</a></div></div></section>')
+
+    def hosts_settings_html(self):
+        """The settings page's 'Hosts' section (read-only), only while the fleet is on."""
+        if not self.fleet_on():
+            return ""
+        try:
+            return webhosts.settings_html(render.CFG.get("hosts") or [], self.fleet_doc())
+        except Exception as e:  # noqa: BLE001 - the page stays
+            print("nuc-console web: hosts settings error:", repr(e)[:200], file=sys.stderr)
+            return ""
+
+    def hosts_page(self, here, host):
+        """The Hosts page of the shell (webhosts.page_html): one card per configured host from the poller's cache, worst first; host=<id> one in detail."""
+        try:
+            body = webhosts.page_html(self.fleet_doc(), here, host)
+        except Exception as e:  # noqa: BLE001 - a broken cache must not take the page down
+            print("nuc-console web: hosts render error:", repr(e)[:200], file=sys.stderr)
+            body = '<p class="sm">the Hosts page could not be drawn (see the service log)</p>'
+        return View(body, [], dict({"view": "hosts", "host": host}, **here), True, legacy=False)
 
     def about_html(self, here=None):
         """'About this machine': what the machine is and how it is set up, read-only (this page changes nothing on it)."""

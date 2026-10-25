@@ -118,6 +118,7 @@ FEATURE_WORDS = (  # [features], the settings page's switches, screens first: (k
     ("cpu", "CPU screen", "per-core load, temperatures, the processes"),
     ("health", "Health screen", "which apps cause trouble over time; the collector keeps history.db"),
     ("ai", "AI screen", "the local model: what fits this machine, the chat"),
+    ("fleet", "Hosts screen", "the other nuc-console hosts of [hosts]: their state at a glance (web tab 6); nothing shows while [hosts] is empty"),
     ("exposure", "Exposure", "listening ports by scope, port alarms, Funnel"),
     ("firewall", "Firewall", "the firewall's rules and recent drops"),
     ("fail2ban", "fail2ban", "jails and bans, inside Firewall"),
