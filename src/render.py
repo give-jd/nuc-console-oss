@@ -906,7 +906,7 @@ def remote_banner(entry, w):
     """The banners (lines, each w columns wide) a peers.py cache entry asks for, the worst first: the host is not the one that answered first
     (identity changed), the state (stale, unreachable ...), the transport is plain http outside Tailscale (insecure). Nothing the peer wrote
     is in them. An entry that is not a dict gives the 'untrusted' one."""
-    e = entry if isinstance(entry, dict) else {"state": "untrusted"}
+    e = entry if isinstance(entry, dict) and isinstance(entry.get("state"), str) else {"state": "untrusted"}
     out = []
     if e.get("identity") not in (None, "ok"):
         out.append(("banner_err", "\u2716 IDENTITY CHANGED: this is not the host that answered first; check the address"))
@@ -964,17 +964,22 @@ def remote_view(host, doc, w, h, age_s=None, kpis=None, foot=None, banner=(), to
     (remote_banner), the KPI line when the frame has one (kpis: ui.Kpi of the host, default the document's own), the body from line `top`
     on (the pager: remote_body has all of it) and the footer (default: where the body is). The local frame's rows otherwise: the same code
     draws them, so a remote overview looks like a local one."""
+    w = max(1, w if isinstance(w, int) and not isinstance(w, bool) else 1)
+    h = max(1, h if isinstance(h, int) and not isinstance(h, bool) else 1)
+    top = top if isinstance(top, int) and not isinstance(top, bool) else 0
     d = doc if isinstance(doc, remotedoc.Document) else remotedoc.decode(doc)
     body = remote_body(d, w)
-    rows = ([remote_header(host, age_s, w)] + list(banner))[:max(0, h - 1)]
+    if h == 1:  # no room for more than the marker: a frame without it would be unsafe
+        return [remote_header(host, age_s, w)]
+    rows = ([remote_header(host, age_s, w)] + [b if vlen(b) <= w else clip(b, w) for b in banner if isinstance(b, str)])[:h - 1]
     figures = d.kpis if kpis is None else kpis
     if kpi_on(h) and figures and len(rows) < h - 1:
         rows.append(kpi_line_of(figures, w))
     room = max(0, h - 1 - len(rows))
-    top = max(0, min(int(top), max(0, len(body) - room)))
+    top = max(0, min(top, max(0, len(body) - room)))
     shown = body[top:top + room]
     rows += [clip(x, w) for x in shown]
-    if foot is None:
+    if not isinstance(foot, str):
         foot = c(90, clip(f" remote host: lines {top + 1}-{top + len(shown)} of {len(body)}" if body else " remote host: nothing to show", w))
     rows += [""] * (h - 1 - len(rows)) + [foot if vlen(foot) <= w else clip(foot, w)]
     return rows[:h]

@@ -155,6 +155,7 @@ its keys are a later step.
 - **Text**: every string goes through `remotedoc.clean`: control characters (ESC, CSI, C1, DEL), bidi and other format characters, combining marks
   (after composing), lone surrogates and wide characters become `?` (the console cuts a line by counting characters, so one character must be one
   column). A `Raw` block loses its colours first. No link is read (`href` and its kin are always `None`).
+- **Never greener than the numbers**: a `Bar`'s `warn`/`err` are at most 1 and its `ok` tone counts only when its fraction is fine. A state a peer asserts (Kpi, Pill, Card, a Span's tone) is honoured as written; this class cannot be closed by the decoder, so the marker line (always first, even in a one-line frame) says whose claim it is.
 - **Compatibility**: unknown fields are ignored, missing ones have the constructor's default, an unknown tone is neutral, an unknown state is
   `unknown` (never green); `api` greater than `remotedoc.API` is an `incompatible` document (one line: update this console); any other view is
   `not available remotely`.

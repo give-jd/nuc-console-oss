@@ -51,8 +51,13 @@ class _Bad(Exception):
 _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
+_BLANKS = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u180e\u2800\u3164\uffa0")  # invisible fillers that are letters or marks to Unicode, not format characters
+
+
 @lru_cache(maxsize=8192)
 def _char(ch):
+    if ch in _BLANKS:
+        return "?"
     cat = unicodedata.category(ch)
     if cat == "Zs":
         return " " if unicodedata.east_asian_width(ch) not in ("W", "F") else "?"
@@ -293,8 +298,18 @@ reg(ui.Col, ("key", key, ""), ("label", tx, ""), ("align", enum(("l", "r", "c"),
     ("w", integer(0, 100, None), None), ("gap", integer(0, 8, 1), 1), ("clip", integer(0, 500, None), None), ("pad_in", boolean, False),
     ("hkey", short, ""), ("sort", enum(("asc", "desc", "mark"), None), None), ("wprio", integer(0, 99, None), None))
 reg(ui.Row, ("cells", seq(one_inline, fallback=_placeholder_inline), ()), ("tone", tone, None), ("key", opt_text(120), None))
-reg(ui.Bar, ("frac", real(0.0, 1.0), None), ("value_text", tx, ""), ("warn", real(0.0, 1000.0, 0.7), 0.7), ("err", real(0.0, 1000.0, 0.9), 0.9),
-    ("w", integer(1, 200, 10), 10), ("tone", tone, None), ("busy", boolean, False))
+def _bar(c, cls, kw):
+    """A remote bar is never greener than the local rules would draw its number: thresholds are at most 1 (a full bar is never 'ok'), and a
+    peer's 'ok' tone (it colours the fill whatever the fraction is) counts only when the fraction itself is fine."""
+    kw["warn"], kw["err"] = min(kw["warn"], 1.0), min(kw["err"], 1.0)
+    bar = cls(**kw)
+    if bar.tone in ("ok", "banner_ok") and bar.state != "ok":
+        bar.tone = None
+    return bar
+
+
+reg(ui.Bar, ("frac", real(0.0, 1.0), None), ("value_text", tx, ""), ("warn", real(0.0, 1.0, 0.7), 0.7), ("err", real(0.0, 1.0, 0.9), 0.9),
+    ("w", integer(1, 200, 10), 10), ("tone", tone, None), ("busy", boolean, False), build=_bar)
 reg(ui.Spark, ("values", seq(lambda c, v, d: number_or_none(c, v, d), drop=True, cap=2000), ()), ("w", integer(1, 200, 8), 8),
     ("floor", real(0.0, 1e18, 1024), 1024))
 reg(ui.Pill, ("text", tx, ""), ("state", state, "unknown"))
