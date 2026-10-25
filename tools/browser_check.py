@@ -36,14 +36,15 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-VIEWS = ("overview", "map", "map-graph", "cpu", "health", "events", "ai", "settings", "telegram", "setup", "layout")
+VIEWS = ("overview", "map", "map-graph", "cpu", "health", "events", "ai", "settings", "telegram", "setup", "layout", "hosts")
 APP_VIEWS = ("overview", "cpu", "health", "map", "ai", "events")  # the live app's screens (/app)
 THEMES = (("auto", "a"), ("dark", "d"), ("light", "l"), ("high-contrast", "h"))
 DENSITIES = (("wall", "w"), ("desk", "k"), ("compact", "c"))
 # the graph is paused: its script reloads the page when the refresh is due, and a reload inside --virtual-time-budget keeps some Chrome
 # builds (154 on the CI runner) from ever finishing the dump; paused, the same script runs (drawing, physics) and only the reload is off
 VIEW_QUERY = {"overview": "", "map": "&view=map", "map-graph": "&view=map&as=graph&pause=1", "cpu": "&view=cpu", "health": "&view=health", "events": "&view=events",
-              "ai": "&view=ai", "settings": "&view=settings", "telegram": "&view=telegram", "setup": "&view=setup&step=3", "layout": "&edit=1"}
+              "ai": "&view=ai", "settings": "&view=settings", "telegram": "&view=telegram", "setup": "&view=setup&step=3", "layout": "&edit=1",
+              "hosts": "&view=hosts"}
 WINDOW = "1440,900"
 VIRTUAL_TIME_MS = 4000  # the scripts fetch, poll and replace blocks: let the page run this long (virtual time, so it does not wait)
 
@@ -70,6 +71,7 @@ VIEW_LANDMARKS = {
     "telegram": (("the Telegram page", ('id="tg"',)), ("its pairing form", ('action="/telegram/pair"',))),
     "setup": (("the setup guide", ('class="settings wz"',)), ("its steps", ('class="wz-steps"',))),
     "layout": (("the layout editor", ("data-edit",)), ("a card", ('<article class="card',))),
+    "hosts": (("the hosts", ('class="fl-grid"',)), ("a host's card", ('<article class="fl-card',))),
     "wall": (("the key figures", ('class="kpis"',)), ("a card", ('<article class="card',))),
     # the live app: what its script drew from the documents (the server sends an empty <main id="app">)
     "app-overview": (("the key figures it drew", ('role="listitem"',)), ("a card it drew", ('<article class="card',))),
@@ -430,9 +432,24 @@ def free_port():
     return port
 
 
-def start_server(port):
+def fleet_fixture(folder):
+    """A config.ini with three peers and the cache the poller would have written for them, in `folder`: the Hosts page needs [hosts] to be there.
+    -> the environment the demo server runs with."""
+    for d in (os.path.join(ROOT, "src"), os.path.join(ROOT, "tests")):
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    import fleetfix
+    cache, now = os.path.join(folder, "peers-cache"), time.time()
+    with open(os.path.join(folder, "config.ini"), "w") as f:
+        f.write("[hosts]\nalpha = https://alpha.example.net\nbravo = https://bravo.example.net scope=full\ncharlie = https://charlie.example.net\n")
+    fleetfix.write(cache, [fleetfix.entry("alpha", now), fleetfix.entry("bravo", now, "warn", counts=(0, 2, 0), worst=("Disk almost full",), scope="full"),
+                           fleetfix.entry("charlie", now, "unreachable", age=300, error="connect")], now)
+    return dict(os.environ, NUC_CONSOLE_CONFIG=os.path.join(folder, "config.ini"), NUC_CONSOLE_PEERS_CACHE=cache)
+
+
+def start_server(port, env=None):
     proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "src", "web.py"), "--demo", "--port", str(port)],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env)
     base = "http://127.0.0.1:%d" % port
     for _ in range(100):
         if proc.poll() is not None:
@@ -469,8 +486,9 @@ def main(argv=None):
         return 2
     if a.out:
         os.makedirs(a.out, exist_ok=True)
-    proc, base = start_server(a.port or free_port())
     profile = tempfile.mkdtemp(prefix="nuc-browser-")
+    fleet = tempfile.mkdtemp(prefix="nuc-fleet-")
+    proc, base = start_server(a.port or free_port(), fleet_fixture(fleet))
     failed = 0
     noscript = None
     try:
@@ -503,6 +521,7 @@ def main(argv=None):
         except Exception:
             proc.kill()
         shutil.rmtree(profile, ignore_errors=True)
+        shutil.rmtree(fleet, ignore_errors=True)
     print("browser_check: %d pages, %d failed" % (len(pages), failed))
     return 1 if failed else 0
 

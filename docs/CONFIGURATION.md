@@ -48,6 +48,7 @@ their start. In a portable run and the desktop app the settings page turns them 
 | `cpu` | the **CPU** screen: per-core load and frequency, temperatures, top processes, like htop (console key `3`, web `cpu` link) | `/proc`, `/sys` (Linux); system calls and `ps` (macOS); Windows API. Temperatures on macOS/Windows: the collector (`powermetrics`; WMI, LibreHardwareMonitor/OpenHardwareMonitor if installed) |
 | `health` | the **HEALTH** screen: which apps, services and containers cause trouble over time (CPU, memory, crashes, restarts, OOM), disks filling up, hot hours (console key `4`, web `health` link) | the collector keeps `history.db` (SQLite): per-app CPU/memory per hour, events and log *templates* from `journalctl` (Linux), the Event Log (Windows), crash reports (macOS) |
 | `ai` | the **AI** screen: this machine's RAM and GPU, and for each model of its list whether it fits (fits the GPU, GPU+CPU, fits RAM, slows the PC, too big) and how fast it would be (console key `5`, web `ai` link; it is not a rotating page). It reads the hardware, and it is where you set a model up (choose one: it is downloaded, started and turned on; AI on/off; delete) unless `[ai] web_actions = no`; it shows with `[ai] enabled = no` too; `no`: no screen, no key, no link, the hardware is never probed. The advisor itself is `[ai]` below | — (unprivileged: `/proc`, `/sys`, the registry, Windows API; `nvidia-smi`, `sysctl`, `vm_stat`, `system_profiler` with fixed arguments and a time limit of 5 s at most) |
+| `fleet` | the **Hosts** screen (web tab `6`, `/?view=hosts`, `/api/v1/hosts`, a section in the settings page): the machines of `[hosts]` at a glance, from the poller's cache; it shows only while `[hosts]` has entries, and it opens no connection ([WEB.md](WEB.md#hosts)). `no`: no tab, no page, no document | — (reads the poller's cache folder; the poller itself is unprivileged) |
 | `map` | the **MAP** screen: who reaches what and what is behind it, navigable (console key `2`, web `map` link) | `docker inspect`, `ss`, `nsenter … ss` inside every running container (Linux); host sockets (macOS/Windows) |
 
 ## `[dashboard]` — layout
@@ -363,7 +364,7 @@ The bot **token** is never in `config.ini` (it is world-readable): it lives in t
 
 One line per peer: `name = URL [token=PATH] [pin=sha256:HEX] [scope=summary|views|full] [alert=yes] [insecure=yes]`. The separator is the **space**
 (`config.ini` reads `;` as the start of a comment). It is read by the fleet client, `peers.py`, which polls each peer with one `GET` and keeps what it saw in a
-cache (the poller as a service comes with the next step; today `nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
+cache. On Linux the installer runs it as the service `nuc-console-peers` (own account; started only when this section has a peer; [INSTALL.md](INSTALL.md#fleet-poller)); a portable run starts it with the launcher; on an installed macOS or Windows host it is not yet a service (`nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
 
 ```ini
 [hosts]
@@ -386,6 +387,7 @@ Rules that are not options: at most **16** peers; a row that is wrong is ignored
 `http://` is only for Tailscale addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) unless `insecure=yes`; a public address is `https://` only;
 link-local (169.254.0.0/16 with the cloud metadata address, `fe80::/10`), multicast, unspecified and reserved addresses are never contacted, and loopback is not either.
 `[hosts]` is **not** in the settings overlay and is never written by the settings page, not even in a portable run: edit `config.ini`.
+The web view shows the peers as the **Hosts** tab (`[features] fleet`, on by default; only while `[hosts]` is not empty): see [WEB.md](WEB.md#hosts). The settings page lists them read-only.
 The poll interval is 15 s (never under 5 s); a peer that fails is retried after 5 s, 10 s, 20 s ... up to 5 minutes. See [SECURITY.md](../SECURITY.md#the-peer-client) for what the client does and refuses.
 
 ## `[ai]` — optional local model for the HEALTH screen (off by default)
@@ -415,7 +417,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
-| `nuc-console-fleet list \| test NAME \| once \| forget NAME` | the `[hosts]` peers: `list` shows them and the last state in the cache, `test NAME` polls one now and says the state and the reason in words (never the token), `once` polls all and writes the cache, `forget NAME` drops the remembered `host_id` of a peer (the way to accept a replaced machine). The token files belong to the poller's account: `sudo -u nuc-console-peers nuc-console-fleet test NAME` |
+| `nuc-console-fleet list \| test NAME \| once \| forget NAME` | the `[hosts]` peers: `list` shows them and the last state in the cache, `test NAME` polls one now and says the state and the reason in words (never the token), `once` polls all and writes the cache, `forget NAME` drops the remembered `host_id` of a peer (the way to accept a replaced machine). The token files belong to the poller's account (`nuc-console-peers`, tokens `0600` owned by it): `sudo -u nuc-console-peers nuc-console-fleet test NAME`. `peers.py serve` is the service itself |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
 | `sudo nuc-console-accept` | accept the current set of exposed ports, and on Linux the accounts, SSH keys, cron files and enabled units, as the baseline (their alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |

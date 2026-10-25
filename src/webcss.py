@@ -127,7 +127,9 @@ span.lnk[aria-disabled="true"]{color:var(--muted);font-weight:400;opacity:.7}
 """
 
 TOPBAR = """
-.host{font:700 1em var(--mono);color:var(--fg-strong);padding-bottom:.4em}
+.host{font:700 1em var(--mono);color:var(--fg-strong);padding-bottom:.4em;overflow-wrap:anywhere}
+a.host{display:inline-flex;align-items:center;min-height:44px;padding:0 .2em;text-decoration:underline dotted;text-underline-offset:.25em}
+a.host:hover{color:var(--accent)}
 .topbar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:.3em .9em;padding:.4em var(--pad) 0;background:var(--surface);border-bottom:1px solid var(--line)}
 .status{font:700 .82em var(--mono);letter-spacing:.03em;padding:.22em .75em;border-radius:99px;background:var(--err-solid);color:var(--on-solid);margin-bottom:.4em;white-space:nowrap}
 .status.ok{background:var(--ok-bg);color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
@@ -671,6 +673,32 @@ EVENTS_VIEW = """
 }
 """
 
+# the HOSTS page (webhosts.py): mobile first. One column by default (a phone: no sideways scroll, every word wraps), two from 34em of window
+# (about 480 px), three from 64em; every control is at least 44 px high; a state is a symbol and a word besides its colour
+HOSTS_VIEW = """
+.fl{display:grid;gap:var(--gap);min-width:0}
+.fl-head{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .8em;padding:var(--pad);background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0}
+.fl-head .chip{margin-left:0}
+.fl-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--gap);min-width:0}
+@container app (min-width:34em){.fl-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container app (min-width:64em){.fl-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.fl-card{display:grid;gap:.5em;align-content:start;min-width:0;padding:var(--pad);background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.fl-card.st-err,.fl-card.st-down{border-color:color-mix(in srgb,var(--err) 55%,var(--line))}
+.fl-card.st-warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.fl-card.st-unknown{border-style:dashed;border-color:color-mix(in srgb,var(--warn) 60%,var(--line))}
+.fl-card p{margin:0;min-width:0;overflow-wrap:anywhere}
+.fl-top{display:flex;flex-wrap:wrap;align-items:center;gap:.3em .7em;min-width:0}
+.fl-top h3{margin:0;font:700 1em var(--mono);color:var(--fg-strong);overflow-wrap:anywhere;min-width:0}
+.fl-top .chip{margin-left:auto}
+.fl-count{display:flex;flex-wrap:wrap;gap:.2em .9em}
+.fl-worst{margin:0;padding-left:1.1em;overflow-wrap:anywhere}
+.fl-act{display:flex;flex-wrap:wrap;align-items:center;gap:.4em .9em;margin-top:.2em}
+.fl-act .btn{min-height:44px;justify-content:center;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:center}
+.fl-act .lnk{display:inline-flex;align-items:center;min-height:44px;padding:0 .4em}
+.fl-detail .about{margin:0}
+@container app (max-width:33.9em){.fl-act .btn{flex:1 1 100%}}
+"""
+
 MAP_VIEW = """
 .mapv>*{min-width:0}
 .mapv .st{display:flex;flex-wrap:wrap;align-items:center;gap:.4em 1.2em;padding-top:var(--pad)}
@@ -856,7 +884,7 @@ def graph_zoom_css():
 def build():
     """The whole sheet, once."""
     legacy = themed("".join(LEGACY_SOURCES))
-    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, WIZARD, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, EVENTS_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
+    return "".join((tokens(), density(), BASE, SHIFT, CONTROLS, TOPBAR, KPIS, GRID, TABLES, FOOTER, HELP, SETTINGS, WIZARD, EDITOR, COMPONENTS, CARDS, SCREENS, HEALTH_VIEW, EVENTS_VIEW, HOSTS_VIEW, MAP_VIEW, AI_VIEW, graph_zoom_css(), ANSI, legacy, LEGACY_FIX))
 
 
 CSS = build()

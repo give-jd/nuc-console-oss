@@ -75,6 +75,7 @@ A non-loopback listener shows up as a **new exposed port** in the dashboard's ow
 | `/?view=ai` | the **AI** page (the **ai** link in the bottom bar): the AI switch and what it is doing (a download with its progress, the model server starting), the chat, the hardware found (RAM, GPU memory) and, for each local model, whether it fits (GPU, GPU+CPU, RAM, slow, too big), a rough speed, the commands of the command line and a **use this model** button; `sel=<model id>` its details, `pause=1` no reload, `confirm=on\|delete\|delete-all\|clear` the question the page asks before it does that, `prompt=<id>` the whole prompt the model was sent for that answer of the chat. It has forms (below) unless `[ai] web_actions = no` locks it ([AI.md](AI.md)). It reloads by itself only while something runs (a download, a start, an answer), every 2 s, so that a question being typed is not lost. Off with `[features] ai = no` |
 | `/?refresh=5` | reload every 5 s (1–10, the **− / +** links in the bottom bar); default `[dashboard] refresh_seconds` |
 | `/?view=events` | the **EVENTS** page (the **events** link in the bottom bar): what happened and when, newest first, from the history the collector keeps: crashes, out-of-memory kills, restarts, failed services, unexpected shutdowns, hardware errors, throttling, low disks, failed logins, and **problems** that appeared or cleared (`problem`: the id of the alarm and `opened (error)` / `cleared (error)`, nothing else of it). Made for the morning after: the monitor went black and the box was restarted, what did it say, and when? `age=1h` / `24h` (default) / `7d`, `kind=` one of the kinds (the **kind** links; the key `f` moves to the next), `pause=1` no reload. Times are UTC. **download CSV** / **download JSON** (`?view=events&format=csv\|json`, the same filters, up to 500 events): a CSV cell that starts with `=`, `+`, `-` or `@` gets a quote in front of it, so a spreadsheet never takes it for a formula; a history that is off or missing gives a 404 with the reason, not an empty file. On a phone (600 px and less) each event is a block of its own, nothing scrolls sideways. With `[features] health = no` the page says the history is off ([HEALTH.md](HEALTH.md#events-the-timeline)) |
+| `/?view=hosts` | the **Hosts** page (tab `6`; [below](#hosts)), only while `[hosts]` has entries and `[features] fleet` is not `no`; otherwise it is an unknown view and the page is the overview. `host=<id>` one configured peer in detail (an id that is not configured: the list), `go=<id>` a redirect to that peer's own address (not a page) |
 | `/healthz` | `ok` (no data) |
 | `/api/v1/...` | the **data API**, with either interface: every screen as JSON, and as a stream of Server-Sent Events ([below](#the-data-api)) |
 | `/metrics` | **Prometheus text** of the overview's figures, same access as the API ([below](#metrics)); `[web] metrics = no` makes it a `404` |
@@ -266,6 +267,7 @@ and Telegram pages stay their forms (below), which a client posts as a page does
 | `/api/v1/ai?sel=&confirm=&prompt=` | the AI screen, `engine` (the state of the downloads, the server, the model (`model`: loaded, loading, not loaded...) and the chat, without the prompts: what the page shows) and `csrf`; `prompt=<id>` puts the whole prompt of that answer in the nodes (`Prompt`) |
 | `/api/v1/telegram` | `engine` (the pairing and the notifier's state: never the bot's token), `csrf` and the `actions` its buttons post to |
 | `/api/v1/summary` | what every page shows above its screen: `host`, `status`, `kpis`, `stale` (a collector's data is old or missing) with the `restart` command, the number of `problems` and the tabs' `badges` (`map`: its problems, `health`: errors and warnings, `ai`: on, down or unknown); since 2.6: `host_id` (16 hex digits from the collector's `host_id` file, `null` when there is none), `version`, `os` (`linux`, `darwin` or `windows`), `counts` (`{"err","warn","unknown"}`: the ATTENTION problems shown, by the status pill's rule: severity 2 or 3 is `err`, 1 is `warn`, any other is `unknown`; accepted and muted ones are not counted; the three add up to `problems`) and `worst` (up to 3 catalog titles, most severe first, never a problem's own text; titles only because the text can name containers, ports or addresses). `host` is `[host] name` when set. The new fields are additive (`api` stays 1): a 2.5.x server has none of them, so a client must treat each as optional and a missing one as unknown, never as fine |
+| `/api/v1/hosts` | only while the fleet is on ([below](#hosts)): `self` (`name`, `host_id`, `version`, `os`), `hosts` (per configured peer: `id`, `name`, `url`, `state`, `status`, `counts` (`err`, `warn`, `unknown`, or `null` when the peer does not say), `worst` (up to 3 titles), `age_s`, `skew_s`, `version`, `api`, `scope`, `insecure`, `identity`, `error`) and `fleet` (`state`: the worst; `poller`: `running`, `stale` or `absent`). Built from the poller's cache folder only. The viewer's token or cookie; a peer token is `403`. Off: `404` like any unknown view |
 | `/api/v1/stream?view=<view>&…` | Server-Sent Events: each message is that view's document (the same parameters). `view` may be given up to 3 times (a screen and the summary): each message is then one of them, its `view` says which |
 
 **A document** is `{"api": 1, "view": …, "rev": …, "at": …, …}`: `at` is when the data was read (seconds since the epoch), `rev` a hash of the
@@ -294,6 +296,30 @@ curl -s http://127.0.0.1:8787/api/v1/overview | python3 -m json.tool | head
 curl -sN http://127.0.0.1:8787/api/v1/stream?view=cpu         # one document per refresh, until you stop it
 curl -s -H "Authorization: Bearer $(sudo cat /etc/nuc-console/web.token)" http://box.example.ts.net:8787/api/v1/health
 ```
+
+## Hosts
+
+With `[hosts]` in `config.ini` (peers to watch, [CONFIGURATION.md](CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default)) and `[features] fleet = yes` (the default) the shell gets a sixth tab, **6 Hosts**, a page `/?view=hosts` and a document
+`/api/v1/hosts`; the host name in the top bar becomes a link to the page. With no `[hosts]`, or `fleet = no`, none of it exists: no tab, no link, no section in the settings, `/api/v1/hosts` is a `404` ("no such view") and `view=hosts` is an unknown view (the overview).
+
+**This web view never talks to another host.** It reads the folder the poller writes ([Fleet cache](#fleet-cache): files only, treated as another account's input) and nothing else: no connection, no name lookup, no token. The
+page and the document are as old as the poller's last round (15 s by default); when the poller does not run, or has stopped, the page says so and shows nothing as fine.
+
+**The page.** A header with the fleet's state and one **card per host, worst first**: the state as a symbol and a word (`✖ unreachable`, `✖ untrusted`, `! warn`, `? stale`, `✔ ok`: never the colour alone), the host's name and version, its `err`/`warn` counts
+(`? problems not reported` for a 2.5.x peer, which does not say), how old the data is ("5 min ago"), the connection (`answering`, or why not), the worst problem titles (three at most) and **Open on NAME**. The rank is: `unreachable`, `untrusted`, `unauthorized`,
+`incompatible`, `err` and `down`, then `warn`, then `stale` and `unknown`, then `ok`. The fleet's state is the worst of them, and is never `ok` while a host is old, unreachable or not known (or the poller is not running). Banners say what needs a word:
+a 2.5.x peer read through a token with full access (`scope=full`: update it); a clock more than 60 s from this one; a peer whose identity changed (`nuc-console-fleet forget NAME`); plain http on a local network (`insecure`); the poller not running
+(`sudo systemctl start nuc-console-peers`, or `python3 src/peers.py serve` in a portable run); two machines with the same display name (give each its own `[host] name`). `host=<id>` (the card's **details** link) shows one host with everything the cache holds, less the secrets
+(no token, pin or path is ever in the document or the page). The page refreshes with the shell's own poll of the fragment endpoint, like the other views; the live app (`/app`) does not list Hosts: the shell page is the one.
+
+**Switching host is a navigation.** **Open on NAME** is `/?view=hosts&go=<id>`: the server answers `302` to the address configured for that peer (rebuilt from its parsed parts: scheme, host, port, path; never userinfo, query or fragment), and the browser opens the other
+host's own origin, where its own pages ask for its own token (one cookie per origin). `id` must match `[a-z0-9][a-z0-9-]{0,31}` **and** be a configured peer; anything else (unknown, a URL, `..`, too long) is a `404` with no `Location`; a URL is never taken from the request, so it
+cannot be an open redirect. A link on another site (`Sec-Fetch-Site` not `same-origin`/`none`) goes back to the page instead. No proxy, no CORS, no cross-origin `fetch`, `connect-src 'self'` as ever. The desktop app opens the other address in the system browser (as for every address that is not its own).
+
+**Mobile first.** One column up to about 480 px, two from there, three from about 900 px; every control (the tab's host link, **Open on**, **details**) is at least 44 px high and the button spans the card on a phone; words wrap, nothing scrolls sideways;
+no table. It uses the shell's theme tokens (dark, light, high contrast), no inline style and no script of its own.
+
+The settings page has a read-only **Hosts** section: the configured peers, their address, the token scope, whether a pin is set, the last state and the command to try one (`nuc-console-fleet test NAME`). No form, not even in a portable run.
 
 ## Peer tokens
 
@@ -566,30 +592,32 @@ The Telegram page does not write `config.ini` either: it asks the notifier, an u
 
 ## Fleet cache
 
+On Linux the poller is the service `nuc-console-peers` (account `nuc-console-peers`, cache `/run/nuc-console-peers` readable by everybody, state `/var/lib/nuc-console-peers`; [INSTALL.md](INSTALL.md#fleet-poller)); it exists only while `[hosts]` has a peer. A portable run starts it with the launcher.
+
 The fleet client (`src/peers.py`, `nuc-console-fleet once`) writes what it saw of the `[hosts]` peers into a folder of its own: Linux `/run/nuc-console-peers`,
 macOS `/var/run/nuc-console-peers`, Windows `%ProgramData%\nuc-console\run\peers`, a portable run `<data>/peers-cache` (`NUC_CONSOLE_PEERS_CACHE` overrides it). The web view and the
-console only **read** this folder; they never open a socket to a peer and never hold a peer's token. One JSON file per peer, `<name>.json`, written atomically (a file aside, then rename), mode 0644:
+console only **read** this folder; they never open a socket to a peer and never hold a peer's token. Two JSON files per peer, written atomically (a file aside, then rename), mode 0644: `<name>.json`, the summary entry and a small index of its documents (what a page reads every few seconds), and `<name>.views.json`, the documents themselves (`{"v": 1, "views": {...}}`, only for scope `views`/`full`, written before `<name>.json` and removed when there are none). A name ending `.views.json` is never a peer. `<name>.json`:
 
 ```json
 {"v": 1, "name": "nuc-b", "url_display": "https://nuc-b.example.ts.net", "ts": 1792925628, "state": "ok", "error": "",
  "summary": {"host": "nuc-b", "host_id": "0123456789abcdef", "version": "2.6.0", "os": "linux", "api": 1, "state": "ok", "status_text": "ALL OK",
              "counts": {"err": 0, "warn": 0, "unknown": 0}, "worst": [], "stale": false, "at": 1792925627.4, "problems": 0},
- "views": {"overview": {"api": 1, "view": "overview", "...": "..."}},
+ "view_index": {"overview": {"size": 48213, "ts": 1792925628}},
  "scope": "summary", "warn": ["legacy-peer"], "insecure": false, "identity": "ok", "last_ok": 1792925628, "skew_s": 0, "age_s": 1}
 ```
 
 `state` is one of `ok`, `warn`, `err`, `down`, `unknown`, `info` (what the peer reports) or `unreachable`, `unauthorized` (401/403 or no usable token file), `incompatible` (an API newer than
 this client reads, or no such page), `untrusted` (pin or certificate not accepted, or the `host_id` changed), `stale` (the peer says its data is old, or its own `at` is more than 2 minutes behind its own `Date`).
 `error` is empty or a word of `peers.REASONS` (`timeout`, `connect`, `redirect`, `too-large`, `pin-mismatch`, ...): never text from the peer. `summary` holds only the fields the client whitelists, each with
-its type and length (strings at most 120 characters, no control character); `views` is present only for `scope=views` or `full`: the overview, cpu, health, map and events documents as opaque JSON, at most 2 MB each, nested at most 40 deep, keys named like `csrf` or `token` removed.
+its type and length (strings at most 120 characters, no control character); `view_index` names the documents in `<name>.views.json` (the overview, cpu, health, map and events documents, only for `scope=views` or `full`) with their size and time; the documents are opaque JSON, at most 2 MB each, nested at most 40 deep, keys named like `csrf` or `token` removed.
 `warn` is a list of words: `legacy-peer` (a 2.5.x peer: no `host_id` or `counts`), `full-scope-token`, `clock-skew` (the peer's `Date` differs from this clock by more than 60 s; `skew_s` is the difference, the age of the data is `Date` minus the peer's `at`, never this clock against `at`),
 `insecure-transport`, `showing-old-data` (the peer is unreachable: the last summary and documents are kept, `last_ok` says when), `view-failed:<name>`, `views-dropped`. `identity` is `changed` when the peer's `host_id`,
 remembered at the first contact in the file `known` of the persistent state folder (`/var/lib/nuc-console-peers`, Windows `%ProgramData%\\nuc-console\\peers-state`, portable `<data>/peers-state`; `NUC_CONSOLE_PEERS_STATE` overrides it; like `known_hosts`), is not the one that answered: the peer is then `untrusted` and its data is dropped.
 To accept a replaced machine, run `nuc-console-fleet forget NAME`. The cache folder holds a `.owner` marker: the poller refuses a non-empty folder without it and removes only the peers' files that `fleet.json` listed.
 
 `fleet.json` is the index: `{"v": 1, "ts": ..., "worst": "<state>", "peers": [{"name", "state"}]}`; the worst state orders `ok = info < warn < unknown = stale = incompatible < unauthorized = untrusted < unreachable = err < down`.
-A reader uses `peers.read_cache(folder, views=False)`, which treats the folder as another account's: no link, regular files only, not writable by group or others, owned by root, itself or the folder's owner, at most 12 MB (64 KB for `fleet.json`), every field rebuilt with its type,
-text cleaned again, and an `ok`, `info`, `warn` or `unknown` entry older than 2 minutes returned as `stale` (`cache-old`). Whether the poller runs at all is `fleet["age_s"]`. A peer that cannot be read is skipped and counted in `skipped`, never shown as ok.
+A reader uses `peers.read_cache(folder, views=False)`, which reads only the `<name>.json` files (the entry has no `views` key), and `peers.read_cache(folder, views=True)` or `peers.read_views(folder, name)` for the documents of one peer (`{document: tree}`, `{}` when there are none); both treat the folder as another account's: no link, regular files only, not writable by group or others, owned by root, itself or the folder's owner, at most 12 MB (64 KB for `fleet.json`), every field rebuilt with its type,
+text cleaned again, and an `ok`, `info`, `warn` or `unknown` entry older than 2 minutes returned as `stale` (`cache-old`). Whether the poller runs at all is `fleet["age_s"]` (the Hosts page says `running` up to 2 minutes, then `stale`; no `fleet.json` is `absent`). A peer that cannot be read is skipped and counted in `skipped`, never shown as ok.
 
 ## Threat model in one paragraph
 

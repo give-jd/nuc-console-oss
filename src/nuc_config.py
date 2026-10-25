@@ -19,7 +19,7 @@ import threading
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
 OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
-VERSION = "2.6.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
+VERSION = "2.7.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
 PORTABLE = os.environ.get("NUC_CONSOLE_HOME", "")  # portable run (run.sh / run.cmd): config, state and baseline in that folder
 if PORTABLE:
     BASE_DIR = os.path.abspath(PORTABLE)
@@ -68,7 +68,7 @@ HOST_ID_PATH = os.environ.get("NUC_CONSOLE_HOST_ID") or os.path.join(LIB_DIR, "h
 HOST_ID_RE = re.compile(r"[0-9a-f]{16}")
 HOST_LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")  # [host] name
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
-            "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health", "ai")
+            "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health", "ai", "fleet")
 MODES = ("overview", "rotate")
 REFRESH_MIN, REFRESH_MAX = 1, 10  # seconds between two redraws ([dashboard] refresh_seconds): every screen and page
 # macOS/Windows: how the dashboard is shown ([display] mode). 'kiosk' is accepted for the full-screen window.

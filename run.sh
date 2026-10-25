@@ -116,7 +116,7 @@ mkdir -p "$DATA/run" "$DATA/lib" "$LOGS"
 cp "$HERE/config/config.ini" "$DATA/config.ini.dist"  # always refreshed: diff it with config.ini to see new options
 NUC_CONSOLE_HOME=$DATA
 export NUC_CONSOLE_HOME
-unset NUC_CONSOLE_CONFIG NUC_CONSOLE_STATE NUC_CONSOLE_NET NUC_CONSOLE_BOOT NUC_CONSOLE_BASELINE NUC_CONSOLE_ACCEPTED
+unset NUC_CONSOLE_PEERS_CACHE NUC_CONSOLE_PEERS_STATE NUC_CONSOLE_CONFIG NUC_CONSOLE_STATE NUC_CONSOLE_NET NUC_CONSOLE_BOOT NUC_CONSOLE_BASELINE NUC_CONSOLE_ACCEPTED
 
 if [ "$ACCEPT" = 1 ]; then
     exec "$PY" -B "$HERE/src/render.py" --accept "$@"
@@ -155,6 +155,7 @@ rotate() {  # a log over 1 MB is kept once as .1
 rotate "$LOGS/collector.log"
 rotate "$LOGS/web.log"
 rotate "$LOGS/notify.log"
+rotate "$LOGS/peers.log"
 if [ "$(id -u)" -ne 0 ]; then
     echo "nuc-console: running without root: the sections that need it (firewall, containers, other users' processes) show less. sudo ./run.sh shows everything." >&2
 fi
@@ -166,6 +167,17 @@ WEBVIEW=0
 [ "$VIEW" != web ] || WEBVIEW=1
 NUC_CONSOLE_WEB=$WEBVIEW "$PY" -B "$HERE/src/notify.py" >>"$LOGS/notify.log" 2>&1 &
 PIDS="$PIDS $!"
+# the fleet poller (docs/CONFIGURATION.md, [hosts]): only when config.ini lists a peer; one account, so it reads the tokens in data/peers and
+# writes data/peers-cache and data/peers-state itself. A peer added later is picked up at the next start of this script.
+# --needed: 0 a peer is listed, 1 none, 2 unknown (unreadable config.ini, crash): then nothing starts and it says so
+peers_rc=0
+"$PY" -E -B "$HERE/src/peers.py" --needed || peers_rc=$?
+if [ "$peers_rc" -eq 0 ]; then
+    "$PY" -E -B "$HERE/src/peers.py" serve >>"$LOGS/peers.log" 2>&1 &
+    PIDS="$PIDS $!"
+elif [ "$peers_rc" -ne 1 ]; then
+    echo "nuc-console: the fleet poller was not started: could not tell whether [hosts] in $DATA/config.ini lists a peer (exit code $peers_rc)" >&2
+fi
 
 # the baseline of the port alarms: created once the collector has written its first complete snapshot (a normal user's one is
 # incomplete: it is tried for a few minutes, then ./run.sh --accept or sudo ./run.sh)
