@@ -102,6 +102,24 @@ def problems(pb):
             "muted": int(getattr(pb, "muted", 0) or 0), "muted_known": data(getattr(pb, "muted_known", None) or [])}
 
 
+def counts(pb):
+    """How many ATTENTION problems of a frame (the ones shown: accepted and muted are not in it) there are by severity word, as the status pill
+    judges them: err = severity 2 or 3, warn = 1; unknown = a severity that is none of those (never counted as fine). The three add up to
+    the summary's `problems`."""
+    out = {"err": 0, "warn": 0, "unknown": 0}
+    for sev, _text in pb or []:
+        out["err" if sev in (2, 3) else "warn" if sev == 1 else "unknown"] += 1
+    return out
+
+
+def worst(pb, n=3):
+    """The catalog titles (never the problem's own text, which can carry names and addresses) of up to n problems, the most severe first.
+    A problem the catalog has no title for is left out."""
+    info = getattr(pb, "info", None) or []
+    rows = [(-(sev if isinstance(sev, int) else 0), i, more[0]) for i, ((sev, _t), more) in enumerate(zip(pb or [], info)) if more and more[0]]
+    return [ui.safe(t) for _s, _i, t in sorted(rows)[:n]]
+
+
 def rev(body):
     """The hash of a view's fields (already plain data): 16 hex digits."""
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()[:16]

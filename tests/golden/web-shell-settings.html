@@ -560,6 +560,18 @@ hidden =
 </p>
 </div>
 </details>
+<details class="cfgs" id="cfg-host">
+<summary>
+<code>[host]</code> This machine&#x27;s name</summary>
+<p class="hintl">The label of this machine in the headers, the Telegram messages and the web summary. An installation reads it from config.ini only.</p>
+<div class="ck cko" id="k-host-name">
+<span class="cn">
+<code>name</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">The name this machine goes by (1-40 letters, digits, . _ -, starting with a letter or digit). Empty: the host name. Useful when several machines share one.</p>
+</div>
+</details>
 <details class="cfgs" id="cfg-web">
 <summary>
 <code>[web]</code> Web view (an installation&#x27;s service)</summary>
@@ -661,6 +673,14 @@ hidden =
 </span>
 <code class="cv">10</code>
 <p class="hintl">Memory pressure (the kernel&#x27;s PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises memory-pressure. 10 is already a machine that waits for memory. <span class="sm">1-100 · default 10</span>
+</p>
+</div>
+<div class="ck cko" id="k-thresholds-commit_pressure_pct">
+<span class="cn">
+<code>commit_pressure_pct</code>
+</span>
+<code class="cv">90</code>
+<p class="hintl">Windows: the commit charge (memory promised to processes) at or above this percent of the commit limit (RAM + page files) raises memory-pressure. At 100 the system refuses new allocations. <span class="sm">1-100 · default 90</span>
 </p>
 </div>
 </details>

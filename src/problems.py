@@ -255,12 +255,19 @@ def hygiene_problems(boot, now):
         out.append((1, plural(len(old), "backup") + " older than allowed: " + ", ".join(f"{n} ({d} d)" for n, d in old[:3]), "backup-stale"))
     rb = boot.get("reboot")
     if isinstance(rb, dict):
-        if rb.get("flag") is True:
+        if rb.get("flag") is True and isinstance(rb.get("sources"), list):  # Windows (collect_windows.reboot_pending): which signals, fixed words
+            out.append((1, "reboot required: Windows asked for one (" + ", ".join(safe(s)[:24] for s in rb["sources"][:3]) + ")", "reboot-required"))
+        elif rb.get("flag") is True:
             out.append((1, "reboot required: the system asked for one (/run/reboot-required)", "reboot-required"))
         elif rb.get("kernel_old") is True and isinstance(rb.get("running"), str) and isinstance(rb.get("newest"), str):
             out.append((1, f"reboot required: running kernel {safe(rb['running'])[:40]}, {safe(rb['newest'])[:40]} installed", "reboot-required"))
     up = boot.get("updates")
-    if isinstance(up, dict) and isinstance(num(up.get("security")), int) and up["security"] > 0:
+    if isinstance(up, dict) and up.get("os") == "darwin":  # macOS: counts from com.apple.SoftwareUpdate.plist (collector.collect_updates_darwin)
+        n, chk = up.get("pending"), num(up.get("checked"))
+        if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+            stale = int((now - chk) // 86400) if chk is not None and now - chk > 14 * 86400 else None
+            out.append((1, plural(n, "software update") + " pending" + (f"; the update check has not run for {stale} days" if stale else ""), "updates-pending"))
+    elif isinstance(up, dict) and isinstance(num(up.get("security")), int) and up["security"] > 0:
         out.append((1, plural(up["security"], "security update") + " pending" + (f" ({num(up.get('total'))} upgrades in all)" if num(up.get("total")) else ""), "updates-pending"))
     ck = boot.get("clock")
     if isinstance(ck, dict) and ck.get("synced") is False:
@@ -375,6 +382,12 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         psi, limit = thermal.get("psi"), (CFG.get("thresholds") or {}).get("memory_pressure_pct", 10)
         if isinstance(psi, (int, float)) and not isinstance(psi, bool) and psi > limit:  # no PSI on this OS/kernel: None, no problem
             out.append((1, f"memory pressure {psi:.1f} % (processes waited for memory; the limit is {limit} %)", "memory-pressure"))
+        mp = thermal.get("mac_pressure")  # macOS: kern.memorystatus_vm_pressure_level, 2 warning, 4 critical (1 and unknown: no problem)
+        if mp in (2, 4):
+            out.append((1 if mp == 2 else 2, "memory pressure " + ("warning" if mp == 2 else "critical") + " (macOS is compressing and swapping memory)", "memory-pressure"))
+        cm, climit = thermal.get("commit"), (CFG.get("thresholds") or {}).get("commit_pressure_pct", 90)
+        if isinstance(cm, (int, float)) and not isinstance(cm, bool) and cm >= climit:  # Windows only; the text has no figure that moves (notify keys by text)
+            out.append((1, f"Windows commit charge at or above {climit} % of its limit (RAM and page files nearly all promised)", "memory-pressure"))
     if not hostdata.on("boot"):
         pass
     elif boot is None:
@@ -604,6 +617,12 @@ OS_CATALOG = {
                         "publish the DB on 127.0.0.1 (compose: \"127.0.0.1:5432:5432\") or stop it if unused"),
         "firewall-off": ("Windows Firewall off", "every listening service is reachable from that network",
                          "Windows Security > Firewall & network protection: turn it on; or, as administrator: Set-NetFirewallProfile -All -Enabled True"),
+        "reboot-required": ("Reboot required", "an update or installer left work for the next start: the old files are still in use",
+                            "restart Windows when it suits you (Settings > Windows Update); the line names the signal: Windows Update, "
+                            "servicing, or files waiting to be replaced"),
+        "memory-pressure": ("Memory commit nearly at its limit", "processes were promised almost all of RAM plus the page files: new allocations will start to fail",
+                            "Task Manager > Details, sort by Commit size; close or restart the biggest app; check the page file is not capped "
+                            "(System Properties > Advanced > Performance > Virtual memory). The limit is [thresholds] commit_pressure_pct"),
         "baseline-missing": ("Port baseline missing", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
         "baseline-unreadable": ("Port baseline unreadable", "new ports cannot be detected", "nuc-console-accept (administrator prompt)"),
         "port-new": ("New exposed port", "something started listening where it did not before",
@@ -664,6 +683,12 @@ OS_CATALOG["windows"].update({
                 "survives restarts); check: nuc-console-ai.cmd status"),
 })
 BASE_CATALOG = dict(CATALOG)  # the advice in the words of an installed Linux, before this OS's and the portable run's (tests/golden.py renders with it)
+OS_CATALOG["darwin"].update({
+    "updates-pending": ("Software updates pending", "macOS lists updates it has not installed yet: known vulnerabilities may be among them",
+                        "softwareupdate -l (sudo softwareupdate -i -a installs them), or System Settings > General > Software Update"),
+    "memory-pressure": ("Memory pressure", "macOS reports memory pressure (warning or critical): it is compressing and swapping, and the machine is slow",
+                        "Activity Monitor > Memory (the graph colour is this level); quit or limit the biggest app; add RAM. Mute it with [alerts] mute if a busy Mac is normal"),
+})
 CATALOG.update(OS_CATALOG.get(nuc_config.OS_NAME, {}))
 if nuc_config.PORTABLE:
     CATALOG = {k: (t, w, re.sub(r"(?:sudo )?nuc-console-accept(?: \(administrator prompt\))?", ACCEPT_CMD, a)) for k, (t, w, a) in CATALOG.items()}

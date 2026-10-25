@@ -229,6 +229,15 @@ def memory():
     return {"total": ms.total_phys, "available": ms.avail_phys, "cache": cache}
 
 
+def commit_charge():
+    """(commit_total, commit_limit) of the system, in pages (only their ratio is used: GetPerformanceInfo)."""
+    k = _dll("kernel32")
+    pi = PerfInfo(cb=ctypes.sizeof(PerfInfo))
+    if not k.K32GetPerformanceInfo(ctypes.byref(pi), pi.cb):
+        raise _fail("GetPerformanceInfo")
+    return pi.commit_total, pi.commit_limit
+
+
 def uptime():
     k = _dll("kernel32")
     k.GetTickCount64.restype = c_uint64

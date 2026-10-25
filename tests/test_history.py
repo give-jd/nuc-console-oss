@@ -1346,6 +1346,7 @@ class FeatureSwitch(TmpDir):
         with mock.patch.object(collector, "OFF", set(off)), mock.patch.object(history, "PATH", db), \
                 mock.patch.object(collector, "threading", types.SimpleNamespace(Thread=FakeThread)), \
                 mock.patch.object(nuc_config, "RUN_DIR", os.path.join(self.dir, "run")), \
+                mock.patch.object(nuc_config, "ensure_host_id"), \
                 mock.patch.object(collector, "collect", return_value={}), mock.patch.object(collector, "write_atomic"), \
                 mock.patch.object(collector, "collect_net", return_value={}), mock.patch.object(collector, "collect_boot", return_value={}), \
                 mock.patch.object(collector.time, "sleep", side_effect=stop), mock.patch.object(sys, "argv", list(argv)), \

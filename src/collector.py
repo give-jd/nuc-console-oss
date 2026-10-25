@@ -46,8 +46,8 @@ BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "
                 "services": ("boot",), "sshd": ("boot",), "certs": ("boot",)}
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b", "users", "keys", "cron", "units", "smart")
-UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
-                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
+UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "clock", "services", "sshd"),
+                          "windows": ("blame", "kernlog", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
 UNSUPPORTED_BOOT = UNSUPPORTED_BOOT_BY_OS.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
@@ -704,8 +704,37 @@ def parse_apt_sim(text):
     return {"total": total, "security": sec}
 
 
+SOFTWAREUPDATE_PLIST = "/Library/Preferences/com.apple.SoftwareUpdate.plist"
+
+
+def collect_updates_darwin(path=None, now=None):
+    """macOS, no network and no command: the recommended-update count and the last check date macOS itself keeps in its plist
+    (LastRecommendedUpdatesAvailable, LastSuccessfulDate; key names from memory, a real Mac must confirm them). A missing file or key is Absent
+    or None (no problem, no green); an unreadable one (TCC, bad plist) is an error shown as unknown. {'os','pending','checked'}."""
+    import calendar
+    import plistlib
+    path = path or SOFTWAREUPDATE_PLIST  # looked up now: tests point the module's constant at a folder of their own
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(1 << 20)
+        d = plistlib.loads(raw)
+    except FileNotFoundError:
+        raise Absent("SoftwareUpdate.plist")
+    except Exception as e:  # noqa: BLE001 - PermissionError, bad plist, expat errors
+        raise RuntimeError("SoftwareUpdate.plist unreadable: " + type(e).__name__)
+    if not isinstance(d, dict):
+        raise RuntimeError("SoftwareUpdate.plist unreadable: not a dict")
+    n, when = d.get("LastRecommendedUpdatesAvailable"), d.get("LastSuccessfulDate")
+    n = n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
+    checked = calendar.timegm(when.utctimetuple()) if isinstance(when, datetime) else None
+    return {"os": "darwin", "pending": n, "checked": checked}
+
+
 def collect_updates(now=None):
-    """Pending upgrades from the simulation, at most once an hour (the answer, or the failure, is kept until then). Absent without apt-get."""
+    """Pending upgrades from the simulation, at most once an hour (the answer, or the failure, is kept until then). Absent without apt-get.
+    macOS: the plist above (a file read, no hourly cache needed)."""
+    if OS_NAME == "darwin":
+        return collect_updates_darwin()
     now = time.time() if now is None else now
     if now - _UPDATES["at"] >= UPDATES_EVERY_S:
         _UPDATES["at"], _UPDATES["value"], _UPDATES["error"] = now, None, None
@@ -952,7 +981,7 @@ def collect_boot():
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
                     ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
-                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
+                    ("reboot", cwin.reboot_pending if WINDOWS else collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
                     ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
         section(key, fn)
     return d
@@ -2261,6 +2290,7 @@ def main():
         print(json.dumps(once(), indent=1))
         return
     os.makedirs(nuc_config.RUN_DIR, exist_ok=True)  # systemd creates it (RuntimeDirectory); launchd and Task Scheduler do not
+    nuc_config.ensure_host_id()  # the installation's id, made once (LIB_DIR/host_id); without it the web view simply has none
     stamp = config_stamp()
     _THREADS.clear()  # this process's loops: none runs yet
     start_loops()

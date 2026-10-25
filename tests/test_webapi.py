@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["NUC_CONSOLE_CONFIG"] = "/nonexistent"
 import cards  # noqa: E402
+import nuc_config  # noqa: E402
 import prefs  # noqa: E402
 import render  # noqa: E402
 import problems  # noqa: E402
@@ -220,7 +221,8 @@ class Api(unittest.TestCase):
 
     def test_the_summary_is_what_every_page_shows_above_its_screen(self):
         _h, d = self.doc("/api/v1/summary")
-        self.assertEqual(set(d) - {"api", "view", "rev", "at"}, {"host", "status", "kpis", "stale", "restart", "problems", "badges"})
+        self.assertEqual(set(d) - {"api", "view", "rev", "at"}, {"host", "status", "kpis", "stale", "restart", "problems", "badges",
+                                                                  "host_id", "version", "os", "counts", "worst"})
         self.assertEqual([k["id"] for k in d["kpis"]], list(prefs.KPI_IDS))
         self.assertIsInstance(d["stale"], bool)
         self.assertGreater(d["problems"], 0, "the demo has problems")
@@ -229,6 +231,32 @@ class Api(unittest.TestCase):
         _h, o = self.doc("/api/v1/overview")
         self.assertEqual(o["badges"], d["badges"])
         self.assertEqual(o["status"], d["status"])
+
+    def test_the_summary_says_who_and_how_bad_on_every_demo_os_and_never_quotes_a_problem(self):
+        saved = (render.DEMO_OS, dict(render._HEALTH))
+        self.addCleanup(lambda: (setattr(render, "DEMO_OS", saved[0]), render._HEALTH.clear(), render._HEALTH.update(saved[1]), self.srv.cache.clear()))
+        for demo_os, want in ((None, "linux"), ("windows", "windows"), ("darwin", "darwin")):
+            render.DEMO_OS = demo_os
+            with self.srv.lock:
+                self.srv.cache.clear()
+            _h, d = self.doc("/api/v1/summary")
+            self.assertEqual(d["os"], want)
+            self.assertEqual(d["version"], nuc_config.VERSION)
+            self.assertIsNone(d["host_id"], "no host_id file in a test: none is invented")
+            self.assertEqual(sorted(d["counts"]), ["err", "unknown", "warn"])
+            self.assertEqual(sum(d["counts"].values()), d["problems"])
+            self.assertTrue(1 <= len(d["worst"]) <= 3, d["worst"])
+            _h, o = self.doc("/api/v1/overview")
+            texts = [p["text"] for p in o["problems"]["items"]]
+            self.assertFalse(set(d["worst"]) & set(texts), "titles of the catalog, not the problems' own words")
+
+    def test_counts_and_worst_are_plain_functions_of_the_problem_list(self):
+        pb = problems.ProblemList([(1, "w name 10.0.0.1"), (2, "e secret-container"), (3, "p"), (0, "u")])
+        pb.info = [("W title", "", "", ""), ("E title", "", "", ""), ("P title", "", "", ""), (None, "", "", "")]
+        self.assertEqual(webapi.counts(pb), {"err": 2, "warn": 1, "unknown": 1})
+        self.assertEqual(webapi.worst(pb), ["P title", "E title", "W title"])
+        self.assertEqual(webapi.worst([(2, "text only")]), [], "no catalog title: nothing")
+        self.assertEqual(webapi.counts(None), {"err": 0, "warn": 0, "unknown": 0})
 
     def test_the_views_take_the_pages_parameters_checked(self):
         self.assertEqual(self.doc("/api/v1/cpu?sort=mem&sel=999999999")[1]["sort"], "mem")

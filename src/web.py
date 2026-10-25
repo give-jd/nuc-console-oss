@@ -292,7 +292,7 @@ class Server(http.server.ThreadingHTTPServer):
                 print("nuc-console web: app %s error: %r" % (name, e), file=sys.stderr)
         top = first.get("summary") or first.get("overview") or {}
         state, text = (top.get("status") or {}).get("state", "unknown"), (top.get("status") or {}).get("text", "?")
-        host = socket.gethostname()
+        host = nuc_config.host_label(render.CFG)
         tabs = [htmlview.tab(digit, TAB_TITLES[name], APP_PATH if name == "overview" else APP_PATH + "?view=" + name, (name if name != "overview" else "") == view)
                 for digit, name in ui.screen_keys(feats)]
         here = app_url(dict(p, view=view))
@@ -393,7 +393,7 @@ class Server(http.server.ThreadingHTTPServer):
                 built.append(ui.Card(cid, entry.title if entry else cid, "could not be drawn (see the service log)", "unknown", []))
         state, text = self.shell_pill(ctx.problems)
         stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
-        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
+        return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
                 "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
                 "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
@@ -404,9 +404,11 @@ class Server(http.server.ThreadingHTTPServer):
         ctx = self.shell_frame(r)
         state, text = self.shell_pill(ctx.problems)
         stale = bool({pid for _s, pid in ctx.problem_ids()} & set(STALE_PROBLEMS))
-        return {"host": socket.gethostname(), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS),
+        return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "kpis": cards.kpis(ctx, prefs.KPI_IDS),
                 "stale": stale, "restart": render.CMD.get("restart", ""), "problems": len(ctx.problems or []),
-                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True))}
+                "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
+                "host_id": nuc_config.read_host_id(), "version": nuc_config.VERSION, "os": render.cpu_os(),
+                "counts": webapi.counts(ctx.problems), "worst": webapi.worst(ctx.problems)}
 
     def machine_state(self):
         """The machine as the pages show it now, for the AI's chat (advisor.machine_state: the model reads it with a question): the status, the
@@ -424,7 +426,7 @@ class Server(http.server.ThreadingHTTPServer):
                 rows = ((self.cpu_feed.read() or {}).get("procs") or {}).get("procs") or []
         report = (ctx.health or {}).get("report") if isinstance(ctx.health, dict) else None
         findings = report.get("findings") if isinstance(report, dict) and isinstance(report.get("findings"), list) else []
-        return advisor.machine_state(socket.gethostname(), render.cpu_os(), time.time(), text, pb, figures, rows, findings)
+        return advisor.machine_state(nuc_config.host_label(render.CFG), render.cpu_os(), time.time(), text, pb, figures, rows, findings)
 
     def api_cpu(self, here, sort, sel):
         nodes, sel = self.cpu_nodes(dict({"view": "cpu", "sort": "" if sort == "cpu" else sort, "sel": sel}, **here), sort, sel)
@@ -499,7 +501,7 @@ class Server(http.server.ThreadingHTTPServer):
         pause = bool(vhere.get("pause", pause))
         if pause:
             vhere["pause"] = True
-        host = socket.gethostname()
+        host = nuc_config.host_label(render.CFG)
         link = lambda text, **kw: f'<a href="{html.escape(page_url(vhere, **kw))}">{text}</a>'  # noqa: E731
         back = urlsplit(page_url(vhere)).query
         setlink = lambda field, text, cur, **data: set_link(field, back, text, cur, **data)  # noqa: E731
@@ -1067,7 +1069,7 @@ class Server(http.server.ThreadingHTTPServer):
             ids = sorted(v["ids"])
             w, h = canvas(len(ids))
             pos = self.layout(ids, sorted({(e["src"], e["dst"]) for e in v["edges"]}), w, h)
-            body = graph_body(G, pb, v, pos, w, h, gh, r, socket.gethostname())
+            body = graph_body(G, pb, v, pos, w, h, gh, r, nuc_config.host_label(render.CFG))
             tree = tree_url(G, v["sel"], only, pause, here)
             script = GRAPH_SCRIPT
         except Exception as e:  # noqa: BLE001 - a broken state must not take the page down
