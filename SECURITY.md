@@ -123,6 +123,10 @@ Things to be aware of (by design):
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
 
+## The host id
+
+`/var/lib/nuc-console/host_id` (Windows `%ProgramData%\nuc-console\lib\host_id`, a portable run: its `lib` folder) holds 16 random hex digits, made once by the root collector (`secrets.token_hex(8)`), written atomically with mode 0644 and never regenerated while it is valid. It tells two installations apart (it is in `/api/v1/summary`); it is **not a secret and not an authenticator**: anyone who can read the summary can read it, and nothing may trust a request because it names an id. The renderer and the web view read it as a foreign file (no link followed, no FIFO blocked, 64 bytes at most, strictly 16 lower-case hex digits) and show no id when it is absent or invalid; they never create one. `[host] name` is a label only.
+
 ## Verifying a release
 
 Releases are built by `.github/workflows/release.yml` when a tag `vX.Y.Z` is pushed, and by nothing else. On a fresh runner it:

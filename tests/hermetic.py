@@ -37,7 +37,7 @@ for _k in ("COLUMNS", "LINES", "NO_COLOR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", 
            "NUC_CONSOLE_WEB"):
     os.environ.pop(_k, None)
 os.environ["HOME"] = os.environ["USERPROFILE"] = os.path.join(SCRATCH, "home")
-for _k, _f in (("CONFIG", "config.ini"), ("BASELINE", "baseline.json"), ("ACCEPTED", "accepted.json"), ("NET", "net.json"),
+for _k, _f in (("CONFIG", "config.ini"), ("HOST_ID", "host_id"), ("BASELINE", "baseline.json"), ("ACCEPTED", "accepted.json"), ("NET", "net.json"),
                ("STATE", "containers.json"), ("SETTINGS", "settings.ini"), ("BOOT", "boot.json"), ("SENSORS", "sensors.json")):
     os.environ["NUC_CONSOLE_" + _k] = os.path.join(ABSENT, _f)
 os.environ["NUC_CONSOLE_NOTIFY_DIR"] = os.path.join(ABSENT, "notify")

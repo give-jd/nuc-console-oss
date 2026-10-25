@@ -648,6 +648,7 @@ class Switch(Quiet):
         with mock.patch.object(collector, "CFG", config), mock.patch.object(collector, "OFF", set()), \
                 mock.patch.object(collector, "threading", types.SimpleNamespace(Thread=FakeThread)), \
                 mock.patch.object(nuc_config, "RUN_DIR", os.path.join(self.tmp, "run")), \
+                mock.patch.object(nuc_config, "ensure_host_id"), \
                 mock.patch.object(collector, "collect", return_value={}), mock.patch.object(collector, "write_atomic"), \
                 mock.patch.object(collector, "collect_net", return_value={}), mock.patch.object(collector, "collect_boot", return_value={}), \
                 mock.patch.object(collector, "collect_sensors", return_value={}), \

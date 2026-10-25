@@ -10,6 +10,8 @@ import ipaddress
 import json
 import os
 import re
+import secrets
+import socket
 import stat
 import sys
 import threading
@@ -28,6 +30,9 @@ elif WINDOWS:  # one root for config, state and logs; install-windows.ps1 restri
 else:  # macOS uses the Linux paths, except the runtime directory (no /run there)
     ETC_DIR, RUN_DIR, LIB_DIR = "/etc/nuc-console", "/var/run/nuc-console" if MACOS else "/run/nuc-console", "/var/lib/nuc-console"
 DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
+HOST_ID_PATH = os.environ.get("NUC_CONSOLE_HOST_ID") or os.path.join(LIB_DIR, "host_id")  # the installation's id: written once by the root collector
+HOST_ID_RE = re.compile(r"[0-9a-f]{16}")
+HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")  # [host] name
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
             "network_traffic", "sessions", "disks", "thermal", "map", "cpu", "health", "ai")
 MODES = ("overview", "rotate")
@@ -118,6 +123,76 @@ def expose_port(key):
     return int(head), proto or "tcp"
 
 
+def host_id_file(path=None):
+    """The id in the host_id file: 16 lower-case hex digits. The file is written by the root collector but read by accounts that must not
+    trust it (a link is refused, a FIFO does not block, 64 bytes at most). Raises FileNotFoundError (not there), ValueError (not an id) or
+    another OSError (cannot be read)."""
+    fd = os.open(path or HOST_ID_PATH, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise ValueError("not a regular file")
+        raw = f.read(65)
+    text = raw.decode("ascii", "replace").strip()
+    if len(raw) > 64 or not HOST_ID_RE.fullmatch(text):
+        raise ValueError("not a host id")
+    return text
+
+
+def read_host_id(path=None):
+    """The host id, or None: absent, unreadable or invalid means no id (a reader never invents one)."""
+    try:
+        return host_id_file(path)
+    except (OSError, ValueError):
+        return None
+
+
+def ensure_host_id(path=None, log=None):
+    """The root collector's side: the id is made once (secrets.token_hex(8)) and kept; an invalid file is replaced (said once on `log`), a file
+    that cannot be read now is left alone. Written atomically, world-readable (it is not a secret). -> the id, or None if it cannot be had."""
+    path = path or HOST_ID_PATH
+    say = log or (lambda m: print(m, file=sys.stderr))
+    try:
+        return host_id_file(path)
+    except FileNotFoundError:
+        pass
+    except (ValueError, OSError) as e:
+        if os.path.islink(path):  # a link (ELOOP with O_NOFOLLOW): replaced by an id of our own, its target untouched
+            say("nuc-console: " + path + " is a link: replaced by a new host id")
+            try:
+                os.unlink(path)
+            except OSError:
+                return None
+        elif os.path.isdir(path):  # cannot be removed safely
+            say("nuc-console: " + path + " is a directory: no host id until it is removed")
+            return None
+        elif isinstance(e, ValueError):
+            say("nuc-console: " + path + " is not a host id: a new one is made")
+        else:
+            return None
+    new, tmp = secrets.token_hex(8), path + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o644)
+        with os.fdopen(fd, "w") as f:
+            if hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), 0o644)
+            f.write(new + "\n")
+        os.replace(tmp, path)
+    except OSError:
+        return None
+    return new
+
+
+def host_label(cfg=None, hostname=None):
+    """The name this machine goes by on the screens, the web view and Telegram: [host] name, else the host name."""
+    name = ((cfg or {}).get("host") or {}).get("name") or ""
+    return name if HOST_NAME_RE.fullmatch(name) else (hostname or socket.gethostname)()
+
+
 def load(path=None, warn=None, overlay=True):
     """-> {"features": {name: bool}, "mode": str, "rotate_seconds": int, ...}. warn: what to do with each complaint about the file (a line of
     text): printed to stderr unless given (the settings page collects them to refuse a value before it writes it).
@@ -141,6 +216,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["thresholds"] = {"memory_pressure_pct": 10, "commit_pressure_pct": 90}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
+    cfg["host"] = {"name": ""}  # [host] name: the label of this machine (default: the host name)
     cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
     cfg["tls"] = {"watch": [], "warn_days": 21}  # [tls] watch: ["name=host:port" | "name=/path"] as watch_entry reads them
     cfg["posture"] = {"enabled": False, "checks": []}  # [posture]: opt-in posture alarms; checks = names of POSTURE_ALL, empty = all of this OS
@@ -359,6 +435,12 @@ def load(path=None, warn=None, overlay=True):
             t["detail"] = detail
         else:
             say(f"nuc-console: {path}: [telegram] detail must be titles or full: kept {t['detail']}")
+    if cp.has_option("host", "name"):
+        hn = cp.get("host", "name", fallback="").strip()
+        if hn and HOST_NAME_RE.fullmatch(hn):
+            cfg["host"]["name"] = hn
+        elif hn:
+            say(f"nuc-console: {path}: [host] name must be 1-40 letters, digits, . _ - and start with a letter or digit: the host name is used")
     if cp.has_section("display"):  # Windows/macOS: the dashboard in a browser tab or a full-screen window
         b = cp.get("display", "browser", fallback="auto").strip()
         cfg["display"]["browser"] = b if b.lower() not in ("auto", "none", "") else (b.lower() or "auto")
@@ -574,7 +656,7 @@ def edit_lines(lines, section, items, drop=()):
 OVERLAY_FILE = "settings.ini"
 SECURITY_FEATURES = ("exposure", "firewall", "fail2ban", "databases", "tailscale")  # switching one off from the page raises a problem that cannot be accepted
 OVERLAY_MAX = 16384  # bytes; a bigger file counts for nothing
-OVERLAY_ALLOW = (("features", "*"), ("dashboard", "*"), ("ui", "*"), ("display", "zoom"))  # presentation and non-security switches, nothing else
+OVERLAY_ALLOW = (("features", "*"), ("dashboard", "*"), ("ui", "*"), ("display", "zoom"))  # presentation and non-security switches, nothing else; never [host] or [hosts] (root's config.ini only)
 _REPORTED = set()
 
 

@@ -135,6 +135,17 @@ settings page of the new web interface, which also shows where every value comes
 URL and no cookie: it reads this section, then the preset, then the default. The server never writes
 the browser's choices anywhere. The settings page has an **Export** button that gives you a `[ui]` block like the one above, to paste here.
 
+## `[host]` — this machine's name
+
+```ini
+[host]
+name = nuc-a
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | empty (the host name) | The label of this machine: the host name in the console and web headers, the `nuc-console · <name>` line of the Telegram messages and `host` in `/api/v1/summary`. `A-Z a-z 0-9 . _ -`, starting with a letter or digit, at most 40 characters. Anything else is ignored with one warning on stderr and the host name is used. Applies when the services restart. Read from `config.ini` only: the settings overlay never carries `[host]` (nor the future `[hosts]`), so the settings page shows it but an installation cannot change it from there. It is a label, not an identity: the machine's identity is the `host_id` file (`/var/lib/nuc-console/host_id`, made once by the collector; see SECURITY.md) |
+
 ## `[console]` — font and screen blanking of the Linux console (both off by default)
 
 Linux only (macOS and Windows ignore it). `src/ttyprep.py` applies it as root each time `nuc-console.service` starts (`ExecStartPre=-+`), on the terminal the dashboard draws on (`NUC_CONSOLE_VT`). Apply a change with `sudo systemctl restart nuc-console`. A missing `setfont` or `setterm`, an unknown font or an error never stops the dashboard: the step is skipped and the reason is in `journalctl -u nuc-console`.
@@ -242,7 +253,7 @@ Linux `/var/lib/nuc-console/ai/settings.ini`, macOS `/Library/Application Suppor
 | `[features]` | **off only.** `no` switches a section off; `yes` is ignored: a section that `config.ini` switches off stays off and only the administrator switches it on, so the overlay can make root's collector run less, never more |
 | `[dashboard]`, `[ui]`, `[display] zoom` | any value the dashboard takes; it wins over `config.ini` |
 
-Everything else in the file is ignored and logged once: `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
+Everything else in the file is ignored and logged once: `[host]`, `[hosts]`, `[web]`, `[telegram]`, `[ai]`, `[expose]`, `[webapps]`, `[backups]`, `[console]`, `[display] mode` and `browser`, and every lock. The page marks each
 overlaid value *set from this page* and has **Reset to config.ini** (a value equal to `config.ini`'s is not kept). A file that is a link, is over 16 KB, is writable by group or others,
 or belongs to someone other than root or the folder's owner counts for nothing. To undo everything as the administrator: `sudo rm /var/lib/nuc-console/ai/settings.ini` (the collector
 notices within 10 seconds); `[web] settings_actions = no` (the default) stops the page from using it at all. Switching `exposure`, `firewall`, `fail2ban`, `databases` or `tailscale` off through it raises the ATTENTION problem `feature-hidden`, which cannot be accepted.

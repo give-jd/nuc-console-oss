@@ -73,6 +73,8 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
      "How an installed nuc-console shows itself when you log in. The desktop app is its own window: of this section it uses zoom only."),
     ("console", "Linux text console (an installation's service)",
      "The font and the screen blanking of the monitor the dashboard draws on, applied when nuc-console.service starts; both off by default."),
+    ("host", "This machine's name",
+     "The label of this machine in the headers, the Telegram messages and the web summary. An installation reads it from config.ini only."),
     ("web", "Web view (an installation's service)",
      "The optional web service of an installation, the dashboard's only network listener. The desktop app and a portable run always "
      "serve 127.0.0.1 on a port of their own, without a token: they use the grid size and allowed_hosts only."),
@@ -210,6 +212,11 @@ KEYS = (
          "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
         ("wake_on_problem", BOOL, "yes", INSTALLED,
          "yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0."),
+    ))
+    + _k("host", (
+        ("name", TEXT, "", START,
+         "The name this machine goes by (1-40 letters, digits, . _ -, starting with a letter or digit). Empty: the host name. Useful when several "
+         "machines share one.", {"pattern": re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]{0,39})?")}),
     ))
     + _k("web", (
         ("enabled", BOOL, "no", INSTALLED, "yes: an installation runs the web view as a service (off by default)."),

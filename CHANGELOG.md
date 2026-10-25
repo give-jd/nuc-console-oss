@@ -7,6 +7,7 @@ Every configuration key named here is described in [docs/CONFIGURATION.md](docs/
 
 ### Added
 - **Opt-in posture alarms** (`[posture] enabled = no` by default, `checks =` empty = every check of the OS): one warning, `posture`, naming what is off. Windows: `secure-boot`, `rdp-nla` (RDP on without Network Level Authentication), `smb1`, read from the registry (no PowerShell). macOS: `filevault`, `sip`, `gatekeeper`, from Apple's `fdesetup`, `csrutil` and `spctl`. Linux: none yet. A check that cannot be read is unknown, never ok and never an alarm. It cannot be muted; accepting it is tied to the full list of failing checks. BitLocker is not checked (it cannot be read without PowerShell or localised text). Root-config only, applies after a collector restart. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#posture--security-posture-alarms-opt-in-off-by-default).
+- **Host identity (first step of the multi-host work; nothing changes without it)**: the collector makes a `host_id` once (`/var/lib/nuc-console/host_id`, 16 hex digits, world-readable, not a secret) and `GET /api/v1/summary` carries `host_id`, `version`, `os`, `counts` (`err`, `warn`, `unknown`) and `worst` (up to three catalog titles, never a problem text); `api` stays 1, an older server just lacks them. New optional `[host] name` labels this machine in the headers, Telegram and the summary (default: the host name; set in `config.ini` only, never from the settings page). `nuc-console-config migrate` keeps `[host]` and `[hosts]`. Restart the collector to create the id.
 
 ## [2.7.0] - 2026-10-25
 

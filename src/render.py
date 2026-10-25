@@ -795,7 +795,7 @@ def console_head(name, part, parts, w, text, code, shift, shown):
     rev_on, rev_off = ("\x1b[27m", "\x1b[7m") if bar_rev else ("\x1b[7m", "\x1b[27m")
     extra = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") if name != title else ""  # the footer counts the screens
     tail = extra + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "") + " "
-    host = socket.gethostname()
+    host = nuc_config.host_label(CFG, socket.gethostname)
     for short in (False, True, None):
         pre = shift + " "
         mid = " │ " + tab_bar(cur, shown, short, rev_on, rev_off) + tail
@@ -822,7 +822,7 @@ def frame(slide, idx, n, w, h, pb=None, keys=True, hint="", page=False, mapkey=N
     shown = lambda f: bool(keys if flags.get(f) is None else flags[f]) and on(f)  # noqa: E731
     if page:
         tail = f" │ {name}" + (f" {part}/{parts}" if parts > 1 else "") + f" │ {time.strftime('%H:%M:%S')}" + (" │ paused" if PAUSED else "")
-        host, room = socket.gethostname(), w - len(text) - 2 - len(shift) - 1 - len(tail)
+        host, room = nuc_config.host_label(CFG, socket.gethostname), w - len(text) - 2 - len(shift) - 1 - len(tail)
         if len(host) > room:  # a long host name (macOS: 'xyz-…-ABCD.local') must never push the status off the screen
             host = host[:max(room - 1, 1)] + "…"
         left = shift + f" {host}" + tail
@@ -1853,7 +1853,7 @@ def kiosk_file(argv, base, cols, rows):
             screen = frame(sl[idx], idx, len(sl), w, h,
                            problems.safe_problems(st["net"], st["cont"], boot=st["boot"], thermal=sm["thermal"], baseline=st["baseline"]),
                            keys=False, hint=display.KIOSK_HINT, page=True)
-            display.write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, socket.gethostname()))
+            display.write_text_atomic(path, htmlview.kiosk_page(screen, cols, rows, REFRESH_S, nuc_config.host_label(CFG, socket.gethostname)))
         except Exception as e:  # noqa: BLE001 - a broken frame must not close the kiosk: the next one may be fine
             print("kiosk frame error:", repr(e)[:200], file=sys.stderr, flush=True)
         if browser is None and "--no-browser" not in argv:
