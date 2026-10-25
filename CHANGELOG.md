@@ -3,7 +3,9 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.6.0] - 2026-10-25
+
+More things the monitor notices, and a way to read what happened. New ATTENTION alarms from the kernel log, the container restart policies, host hygiene (backups, pending updates, reboot, clock, inodes), expected services, the sshd settings, TLS certificate expiry and disk health; a wider integrity baseline (accounts, SSH keys, cron, enabled units); an **Events** timeline on the console and the web; `/metrics` for Prometheus; and a console that wakes itself when a new problem appears. A minor version: `config.ini` is kept and nothing breaks, but **after updating** do this once on an installation: `sudo nuc-console-accept` (it records the new baseline sections: look at the accounts, SSH keys, cron and units it lists first, because accepting blesses them as they are), `sudo apt install smartmontools` if you want disk health, and expect the collector unit to change (`ProtectHome=read-only`, see below; the installer reloads systemd itself). The collector must be restarted for the Events timeline to start recording (the update does it). Still Python 3.8+, standard library only.
 
 ### Added
 - **The AI's model server comes back after a restart.** It is a child of the web view, so every restart (an update, a reboot) ended it while `web.json` still said the AI was on: the page showed `ON` above `NOT RUNNING` and nothing noticed. Now the web view (service, desktop app, portable run; never the console) starts it again about 5 s after it starts, when the AI is on with a model chosen, with the page's own checks and never a second server if one answers; one attempt and one retry after 60 s, none after you turned the AI off in this run. New key `[ai] autostart` (default `yes`; applies at the next start). The page says `AI is on but the model server is not running` once instead of two contradictory badges.
