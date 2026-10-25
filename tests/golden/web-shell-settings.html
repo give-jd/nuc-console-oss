@@ -607,6 +607,13 @@ hidden =
 <span class="sm">not set</span>
 <p class="hintl">A file with a secret of 16 characters or more (mode 0600, readable by the nuc-console user): every request must carry it. Never write the token itself in config.ini.</p>
 </div>
+<div class="ck cko" id="k-web-peer_tokens_file">
+<span class="cn">
+<code>peer_tokens_file</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">A file (mode 0600, owned by the nuc-console user) of tokens that other nuc-console hosts use to watch this one, one per line: label scope token (scope summary or views). They read a few documents and can do nothing else. Empty = none.</p>
+</div>
 <div class="ck cko" id="k-web-allowed_hosts">
 <span class="cn">
 <code>allowed_hosts</code>

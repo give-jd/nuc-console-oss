@@ -295,6 +295,49 @@ curl -sN http://127.0.0.1:8787/api/v1/stream?view=cpu         # one document per
 curl -s -H "Authorization: Bearer $(sudo cat /etc/nuc-console/web.token)" http://box.example.ts.net:8787/api/v1/health
 ```
 
+## Peer tokens
+
+A peer token lets **another nuc-console host** watch this one (the multi-host view) without being able to use this one: the viewer token opens the whole
+view, AI buttons and Telegram pairing included, so it is never given to another host. A peer token reads a few documents and can do nothing else.
+
+```ini
+[web]
+token_file       = /etc/nuc-console/web.token
+peer_tokens_file = /etc/nuc-console/peer.tokens
+```
+
+`peer_tokens_file` (empty by default: off, nothing changes) is read as `token_file` is (mode 0600, owned by root or the service user; also refused when it is
+a link, not a regular file, over 16 KB or not UTF-8: then no peer token works). One entry per line, white space between the three fields, `#` starts a comment:
+
+```
+# label     scope     token (32+ characters of A-Z a-z 0-9 . _ ~ -)
+nuc-b       summary   9f2c...
+nas         views     71ab...
+```
+
+The label is `[a-z0-9][a-z0-9-]{0,31}`, the scope `summary` or `views`, at most 16 entries. A line that is not one (or repeats a label, a token or the viewer token) is
+ignored with one line in the service log that gives its number and why, never its text. The file is read again when it changes: **to revoke a token, delete its
+line**. It needs a viewer token (`token_file`); a portable run and the desktop app do not read it. The settings page lists each label, scope and when it was last
+used (read-only; there is no access log, by design). Make a token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+
+The peer sends `Authorization: Bearer <token>`: **only** that (a cookie or `?token=` with a peer token is `401`), **only** `GET` or `HEAD`, **only** these paths:
+
+| Path | `summary` | `views` |
+|---|---|---|
+| `/api/v1` (the index), `/api/v1/summary` | yes | yes |
+| `/api/v1/overview`, `/api/v1/cpu`, `/api/v1/health`, `/api/v1/map`, `/api/v1/events` | `403` | yes |
+| `/api/v1/ai`, `/api/v1/telegram` (they carry the forms' CSRF token) | `403` | `403` |
+| `/api/v1/stream`, `/api/v1/hosts`, any other or unknown `/api/v1/...` (also with a trailing or doubled `/`) | `403` | `403` |
+| `/metrics`, the pages (`/`, `/app`, `/setup`, `?view=...`, `?set=`, `/s/...`) | `403` | `403` |
+| `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS` anywhere | `403` | `403` |
+| `/healthz` (no token needed by anyone), a path the server has not (before any token) | as for everyone | as for everyone |
+
+Scope `views` exposes the topology of the machine as the viewer sees it: listening ports, firewall and session findings, container names, the restart command string and the problem titles. Give a `views` token only to hosts you trust with that picture; `summary` shows the status, the figures and the problem titles only.
+
+A refused request is `403` with a fixed text: no CSRF token, no cookie (a peer token never gets `Set-Cookie`, so it cannot become a viewer), no hint of what exists. The documents
+are the viewer's own (same builders, same rev and ETag), with the same parameters and the same `Sec-Fetch-Site` rule; answers carry `Cache-Control: no-store`. A wrong token is
+the `401` of a wrong viewer token (this server has no lockout or rate limit for either). Tokens are compared with `hmac.compare_digest` against every entry.
+
 ## Metrics
 
 `GET /metrics` (and `HEAD`) gives the figures of `/api/v1/overview` as Prometheus text exposition, version 0.0.4
@@ -528,7 +571,7 @@ With a token, anyone holding the token can. It cannot change the machine, with o
 (download the pinned files into the AI folder, start the model server on 127.0.0.1, turn the advisor on and off, delete those files) and ask it questions, as the
 unprivileged web account, within the unit's sandbox; `[ai] web_actions = no` removes that. And on the Telegram page whoever can open it can pair the
 notifier with their own bot, switch it on or off and send a test; the chat paired until then is told of a new pairing and of *off*, and
-`[telegram] web_actions = no` removes that too. Rendering is cached for half the refresh interval per layout size.
+`[telegram] web_actions = no` removes that too. A [peer token](#peer-tokens) opens none of that: it can only `GET` the few read-only documents of its scope. Rendering is cached for half the refresh interval per layout size.
 The graph view's script runs in your browser and cannot send anything anywhere (the CSP forbids connections). The shell's scripts may connect
 to this server only (`connect-src 'self'`), and the page's only way to put markup into the DOM is Trusted Types' one policy, whose input is checked against an allowlist first.
 
