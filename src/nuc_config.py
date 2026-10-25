@@ -89,7 +89,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
                   "reboot-required", "disk-inodes",
                   "container-no-restart", "containers-not-back",
-                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down")
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down", "peer-down", "fleet-poller-down")
 
 # [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
 # validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.

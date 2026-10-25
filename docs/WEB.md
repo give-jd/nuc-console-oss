@@ -321,6 +321,8 @@ no table. It uses the shell's theme tokens (dark, light, high contrast), no inli
 
 The settings page has a read-only **Hosts** section: the configured peers, their address, the token scope, whether a pin is set, the last state and the command to try one (`nuc-console-fleet test NAME`). No form, not even in a portable run.
 
+**Alarms about the peers.** ATTENTION carries `peer-down` (a peer with `alert=yes` silent for 3 polls and 60 s), `fleet-poller-down`, `peer-insecure` and `peer-identity`, built from the same cache; none of them is in the `/api/v1/hosts` document's fields (the Hosts page already shows each peer's state). Rules and what can be muted: [CONFIGURATION.md](CONFIGURATION.md#alarms-about-the-peers).
+
 ## Peer tokens
 
 A peer token lets **another nuc-console host** watch this one (the multi-host view) without being able to use this one: the viewer token opens the whole
