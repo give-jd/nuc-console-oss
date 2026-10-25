@@ -147,6 +147,79 @@ AI_DOWN_TEXT = {"no-runtime": "the model server is not installed: download a mod
                 "failed": "its model server could not be started: the AI page's note and the web view's log say why"}
 
 
+PEER_ROUNDS, PEER_DOWN_S = 3, 60  # peer-down: this many polls in a row failed AND this long since the last good answer (poller's clock)
+PEER_FAILED = ("unreachable", "unauthorized", "untrusted", "incompatible")  # the fixed words the problem text uses (peers.FAILED)
+
+
+def peer_state(now=None, hosts=None, folder=None, cache=None):
+    """What the peer alarms need, summarised from the poller's cache (peers.read_cache(views=False): files owned by the cache folder's owner
+    are accepted, everything else is skipped; the cache is foreign input) and [hosts]: None when no peer is configured, else
+    {"poller": "running" | "stale" | "absent", "watch": how many peers have alert=yes, "down": [(name, state)], "insecure": [name], "identity": [name]},
+    all sorted by name. Only configured names and fixed words come out: nothing a peer or the cache says as text. Never raises (no data = None).
+    The unprivileged side calls it (problems(), problem_records(): the console, the web, nuc-console-problems and the notifier); the root
+    collector calls problems_raw without it, so its history never records these."""
+    try:
+        import peers
+        if getattr(sys.modules.get("render"), "DEMO", False):
+            return None  # synthetic screens (--demo) never mix in the real machine's peers
+        hosts = CFG.get("hosts") if hosts is None else hosts
+        hosts = [h for h in hosts or () if isinstance(h, dict) and isinstance(h.get("name"), str) and nuc_config.HOST_NAME_RE.fullmatch(h["name"])]
+        if not hosts:
+            return None
+        now = time.time() if now is None else now
+        cache = cache if cache is not None else peers.read_cache(folder or nuc_config.peers_cache_dir(), now=now, views=False)
+        fleet = cache.get("fleet")
+        ts = fleet.get("ts") if isinstance(fleet, dict) else None
+        running = isinstance(ts, (int, float)) and not isinstance(ts, bool) and -peers.SKEW_WARN_S <= now - ts <= peers.CACHE_STALE_S
+        out = {"poller": "running" if running else "absent" if fleet is None else "stale", "watch": 0, "down": [], "insecure": [], "identity": []}
+        for h in sorted(hosts, key=lambda x: x["name"]):
+            name, e = h["name"], (cache.get("peers") or {}).get(h["name"])
+            watch = h.get("alert") is True
+            out["watch"] += watch
+            if not isinstance(e, dict):
+                continue  # not polled yet: nothing is known
+            if e.get("identity") == "changed":
+                out["identity"].append(name)  # not the machine remembered: its own alarm says it (no peer-down for the same cause)
+                continue
+            if e.get("insecure") is True and h.get("insecure") is True:
+                out["insecure"].append(name)
+            last, fails = e.get("last_ok"), e.get("fails")
+            if isinstance(last, (int, float)) and not isinstance(last, bool) and last > now + peers.SKEW_WARN_S:
+                last = None  # stamped in the future (the poller host's clock stepped back): not known, so the 3 rounds decide
+            if (watch and e.get("state") in PEER_FAILED and isinstance(fails, int) and not isinstance(fails, bool) and fails >= PEER_ROUNDS
+                    and (not isinstance(last, (int, float)) or isinstance(last, bool) or now - last >= PEER_DOWN_S)):
+                out["down"].append((name, e["state"]))
+        return out
+    except Exception:  # noqa: BLE001 - an unreadable cache must not take the main loop down
+        return None
+
+
+def peer_rows(ps):
+    """peer_state() -> [(severity, text, id)]. peer-down only while the poller runs (a stopped one writes nothing new, and its last words
+    would say 'fine' or 'down' for ever): then the quiet fleet-poller-down says it is not running instead. Names are the configured ones."""
+    out = []
+    if not isinstance(ps, dict):
+        return out
+
+    def names_text(lead, items, pid, sev, word=lambda x: x):
+        names = [i if isinstance(i, str) else i[0] for i in items]
+        text = lead + ", ".join(word(i) for i in items[:3]) + (f" … +{len(items) - 3}" if len(items) > 3 else "")
+        _names(pid, text, names, out, sev)
+    if ps.get("poller") != "running":
+        if ps.get("watch"):
+            out.append((1, "peers are configured with alert=yes but the poller is not running: " + ("no data" if ps.get("poller") == "absent" else "old data"), "fleet-poller-down"))
+    elif ps.get("down"):
+        words = {x[1] if x[1] in PEER_FAILED else "unreachable" for x in ps["down"]}
+        lead = ("host not answering: " if words == {"unreachable"} else "peer not readable: " if "unreachable" not in words
+                else "host not answering or not readable: ")  # unreachable = silent; the others answer, or cannot be read (token, identity, version)
+        names_text(lead, ps["down"], "peer-down", 2, lambda x: f"{x[0]} ({x[1] if x[1] in PEER_FAILED else 'unreachable'})")
+    if ps.get("identity"):
+        names_text("not the host remembered: ", ps["identity"], "peer-identity", 2)
+    if ps.get("insecure"):
+        names_text("token sent in clear over http: ", ps["insecure"], "peer-insecure", 1)
+    return out
+
+
 def ssh_exposed(net, cont):
     """True when sshd listens where the exposure data says it is reachable from the Internet (a Funnel) or further than [expose] allows.
     No exposure data (net missing, no port list) is False: the rule then stays at the lower severity."""
@@ -224,6 +297,17 @@ def host_checks(boot, net, cont, now):
             more.append("[tls] watch is set but the check failed")
         elif not isinstance(certs, list):
             more.append("[tls] watch is set but the check did not run")
+    post = boot.get("posture")
+    if (CFG.get("posture") or {}).get("enabled") and isinstance(post, dict):  # opt-in; a stale file after the switch went off says nothing
+        mine = nuc_config.POSTURE_CHECKS.get(boot.get("os") or nuc_config.OS_NAME, ())  # the checks of the host the data comes from: nothing foreign
+        states = {c: v for c, v in post.items() if c in mine and v in ("ok", "fail", "unknown")}
+        bad = [c for c in states if states[c] == "fail"]
+        if bad:
+            bad.sort()
+            _names("posture", "security posture: " + ", ".join(nuc_config.POSTURE_WORDS[c] for c in bad[:3]) + (f" … +{len(bad) - 3}" if len(bad) > 3 else ""),
+                   bad, out, 1)
+        elif states and set(states.values()) == {"unknown"}:  # a check that cannot be read must not look like a pass
+            out.append((1, "posture checks could not be read", "posture"))
     for m in more:
         out.append((1, m, "watch-config"))
     return out
@@ -341,8 +425,9 @@ def kernel_problems(k, now):
     return out
 
 
-def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
-    """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable."""
+def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False, peers=None):
+    """Every anomaly, by decreasing severity: [(3=port change | 2=error | 1=warning, text, problem id)]. Ids are stable. `peers`: peer_state()'s
+    summary of the poller's cache (the peer alarms); None adds nothing: the root collector never passes it."""
     now, out = now or time.time(), []
     hidden = [f for f in nuc_config.SECURITY_FEATURES if "features." + f in (CFG.get("overlaid") or {}) and not CFG["features"].get(f, True)]
     if hidden:  # a person at the settings page switched a security section off: config.ini has it on, and nothing may hide that
@@ -485,6 +570,7 @@ def problems_raw(net, cont, now=None, boot=False, thermal=None, baseline=False):
         state, model, reason = ai_state(now)
         if state == "down":
             out.append((1, f"AI is on{f' ({safe(model)[:40]})' if model else ''} but " + AI_DOWN_TEXT.get(reason, "its model server is not running: turn AI off and on again on the AI page"), "ai-down"))
+    out.extend(peer_rows(peers))  # after host_checks: FP_NAMES.clear() ran there
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -510,6 +596,9 @@ CATALOG = {
     "service-down": ("A service that must run is not running", "failed-units only sees units that FAILED: one that was stopped, never started or does not exist (fail2ban, sshd) is invisible there; "
                      "[services] must_run names the ones you expect",
                      "systemctl status <unit>; journalctl -u <unit>; sudo systemctl enable --now <unit>, or take it off [services] must_run if it is no longer expected"),
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection the OS offers is off: disk encryption, boot or system integrity, or remote access without network-level authentication. "
+                "On a kiosk this can be intended (auto-login needs FileVault off, an old board has no Secure Boot): accept it with a reason",
+                "[posture] in config.ini (enabled = no switches it off, checks = limits it); the check named in the text says what to change"),
     "ssh-root-login": ("sshd allows root to log in", "one password or key guessed or leaked is a full takeover, with no user name to find first",
                        "PermitRootLogin prohibit-password (or no) in /etc/ssh/sshd_config, then sudo systemctl reload ssh; or accept it with a reason if it is intended"),
     "ssh-password-auth": ("sshd accepts passwords", "passwords can be guessed, and the Internet tries them all day: keys cannot be; with port 22 reachable from the Internet or beyond [expose] it is an error",
@@ -657,6 +746,10 @@ CATALOG.update({  # notify.py (Telegram, docs/TELEGRAM.md); only when it is on (
                          "sudo systemctl restart nuc-console-notify"),
 })
 OS_CATALOG["windows"].update({
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection Windows offers is off. On a kiosk this can be intended (a board without UEFI, RDP kept open on purpose): accept it with a reason",
+                "Secure Boot off: enable it in the UEFI setup (needs a UEFI/GPT install); RDP without NLA: System Properties > Remote > tick 'Allow connections only from computers running "
+                "Remote Desktop with Network Level Authentication', or turn RDP off; SMB1: Turn Windows features on or off > untick 'SMB 1.0/CIFS File Sharing Support' "
+                "(or, as administrator: Set-ItemProperty HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanServer\\Parameters SMB1 0); or [posture] checks in config.ini"),
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
                           "the web view's Telegram page (settings), or nuc-console-telegram.cmd --setup (administrator prompt: the bot token from "
                           "@BotFather, your @username), then tap the link it shows and press Start"),
@@ -665,6 +758,9 @@ OS_CATALOG["windows"].update({
                          "restart: nuc-console-telegram.cmd --on (administrator prompt)"),
 })
 OS_CATALOG["darwin"].update({
+    "posture": ("Security posture check failed (opt-in [posture])", "a protection macOS offers is off. On a kiosk this can be intended (automatic login needs FileVault off): accept it with a reason",
+                "FileVault off: System Settings > Privacy & Security > FileVault (or sudo fdesetup enable); SIP off: boot to Recovery, Terminal, csrutil enable; Gatekeeper off: "
+                "sudo spctl --global-enable; or [posture] checks in config.ini"),
     "telegram-unpaired": ("Telegram notifications on, but not paired", "no alert can reach your phone: this machine does not know your chat",
                           "the web view's Telegram page (settings), or sudo nuc-console-telegram --setup (the bot token from @BotFather, your @username), "
                           "then tap the link it shows and press Start"),
@@ -681,6 +777,18 @@ OS_CATALOG["windows"].update({
     "ai-down": ("AI is on, but its model server is not running", "the advisor and the AI page's questions get no answer (shown here only: not recorded in Events, not sent to Telegram)",
                 "as the alarm says; if the model server is just not running: turn AI off and on again on the AI page, or: nuc-console-ai.cmd serve --install-service (administrator prompt: a service that "
                 "survives restarts); check: nuc-console-ai.cmd status"),
+})
+CATALOG.update({  # other nuc-console machines ([hosts], docs/WEB.md#hosts): read from the poller's cache by the console, the web and the notifier
+    "peer-down": ("A watched host is not answering or not readable", "a dead machine cannot report itself: this one is watching it (alert=yes in [hosts]), and has had no good answer for at least a minute (3 polls in a row); not readable = it answers but the token, the identity or the version is refused"
+                  " (shown on the console and the web, and sent to Telegram; not recorded in Events)",
+                  "nuc-console-fleet test NAME (the reason in words; as the poller's account: sudo -u nuc-console-peers nuc-console-fleet test NAME); then the host itself: power, network, "
+                  "its web view"),
+    "fleet-poller-down": ("The peer poller is not running", "[hosts] has peers with alert=yes, and nobody is polling them: a host going down would not be noticed",
+                          "sudo systemctl start nuc-console-peers (a portable run: python3 src/peers.py serve); journalctl -u nuc-console-peers"),
+    "peer-insecure": ("A peer is reached over plain http", "the token of that peer travels in clear on the LAN (insecure=yes in [hosts])",
+                      "use https with a CA certificate or pin=sha256:HEX for that peer, or reach it over Tailscale; then remove insecure=yes"),
+    "peer-identity": ("A peer is not the host that was remembered", "the machine behind that address has another host_id: a replaced machine, a reused address, or something else answering",
+                      "check the address and the machine; once you know why: sudo -u nuc-console-peers nuc-console-fleet forget NAME"),
 })
 BASE_CATALOG = dict(CATALOG)  # the advice in the words of an installed Linux, before this OS's and the portable run's (tests/golden.py renders with it)
 OS_CATALOG["darwin"].update({
@@ -704,6 +812,9 @@ if nuc_config.PORTABLE:
         "telegram-failing": "the web view's Telegram page says why and sends a test (settings > Phone alerts); log: "
                             + os.path.join(nuc_config.BASE_DIR, "logs", "notify.log"),
         "ai-down": "turn AI off and on again on the AI page (the run starts the server; [ai] autostart = yes does it at each start)",
+        "peer-down": "python3 src/peers.py once (the reason in words), then the host itself: power, network, its web view",
+        "fleet-poller-down": "the run starts the poller when [hosts] has peers: python3 src/peers.py serve; log: " + os.path.join(nuc_config.BASE_DIR, "logs"),
+        "peer-identity": "check the address and the machine; once you know why: nuc-console-fleet forget NAME",
     }.items()})
 
 
@@ -776,6 +887,8 @@ def problems(*a, **kw):
     out = ProblemList()
     out.pids, out.info, out.known, out.muted_known = [], [], [], []
     mute = muted_ids()
+    if "peers" not in kw:  # the peer alarms come from the poller's cache, read here (never by the root collector's problems_raw)
+        kw["peers"] = peer_state()
     for sev, text, pid in problems_raw(*a, **kw):
         if pid in mute:
             out.muted += 1
@@ -795,6 +908,8 @@ def problem_records(*a, **kw):
     """Every anomaly with its analysis, for `nuc-console-problems`: [{id, severity, text, accepted, muted, reason, title, why, fix, fingerprint}]."""
     acc, mute = load_accepted(), muted_ids()
     out = []
+    if "peers" not in kw:
+        kw["peers"] = peer_state()
     for sev, text, pid in problems_raw(*a, **kw):
         title, why, fix = CATALOG.get(pid, (pid, "", ""))
         fp = fingerprint(sev, text, pid)

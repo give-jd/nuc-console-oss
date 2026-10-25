@@ -54,6 +54,7 @@ def samples(key):
         ("ui", "kpis"): [("problems, cpu", "problems, cpu"), (confedit.NOTHING, confedit.NOTHING), ("", "")],
         ("host", "name"): [("nuc-a.lan_1", "nuc-a.lan_1"), ("", "")],
         ("alerts", "mute"): [("journal-errors, thermal", "journal-errors, thermal"), ("", "")],
+        ("posture", "checks"): [("sip, smb1", "sip, smb1"), ("", "")],
         ("ui", "layout"): [("attention:2, disks", "attention:2, disks"), ("", "")],
         ("ui", "hidden"): [("sessions", "sessions"), (confedit.NOTHING, confedit.NOTHING), ("", "")],
         ("display", "browser"): [("auto", "auto"), ("/opt/Example Browser/browser", "/opt/Example Browser/browser")],

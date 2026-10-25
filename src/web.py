@@ -280,7 +280,7 @@ class Server(http.server.ThreadingHTTPServer):
         shell. Without scripts the page says so and links to the shell. live=0: the page as it is now, no stream (data-static: a snapshot, a
         screenshot, the browser check)."""
         p = view_params(q)
-        feats = lambda f: render.CFG["features"].get(f, True)  # noqa: E731
+        feats = lambda f: render.CFG["features"].get(f, f != ui.CONSOLE_FLEET)  # noqa: E731 - the console's key 6 is not a web key
         view = p["view"] if p["view"] in APP_VIEWS and feats(p["view"]) else ""
         eff, src = prefs.effective(render.CFG.get("ui"), cookie, p["ui"])
         cookie = prefs.dump_cookie(prefs.parse_cookie(cookie))  # what the browser holds, as a valid string ('1' when nothing), as the shell reads it
@@ -514,7 +514,7 @@ class Server(http.server.ThreadingHTTPServer):
         gives the View of a Map, CPU, Health or AI page (the page's own builder, which then returns its body and its controls, not a document).
         edit: the overview as the layout editor (no refresh, its own script); custom: the layout in force is the reader's own (the cards keep their order)."""
         ctx = self.shell_frame(r)
-        feats = lambda f: render.CFG["features"].get(f, True)  # noqa: E731
+        feats = lambda f: render.CFG["features"].get(f, f != ui.CONSOLE_FLEET)  # noqa: E731 - the console's key 6 is not a web key
         visible = [c for c, _w in prefs.visible_cards(eff, [c for c in prefs.CARDS if cards.enabled(c, render.CFG)])]
         if view == "settings":
             v = self.settings_view(here, eff, cookie, r)

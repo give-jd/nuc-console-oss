@@ -117,7 +117,7 @@ PROBLEM_CARDS = {
     "collector-containers": ("containers",), "stale-containers": ("containers",), "unhealthy-container": ("containers",),
     "container-exited": ("containers",), "container-no-restart": ("containers",), "containers-not-back": ("containers",),
     "collector-boot": ("boot",), "failed-units": ("boot",), "journal-errors": ("boot",),
-    "service-down": ("boot",), "cert-expiring": ("boot",), "cert-expired": ("boot",), "cert-unreadable": ("boot",), "watch-config": (),
+    "service-down": ("boot",), "cert-expiring": ("boot",), "cert-expired": ("boot",), "cert-unreadable": ("boot",), "watch-config": (), "posture": ("boot",),
     "ssh-root-login": ("exposure",), "ssh-password-auth": ("exposure",), "ssh-empty-passwords": ("exposure",),
     "backup-stale": ("boot",), "backup-missing": ("boot",), "reboot-required": ("boot",), "updates-pending": ("boot",),
     "clock-unsynced": ("boot",), "disk-inodes": ("disks",),
@@ -134,7 +134,7 @@ PROBLEM_CARDS = {
     "ufw-missing": ("firewall",), "ufw-off": ("firewall",), "ufw-unreadable": ("firewall",),
     "config-unreadable": ("exposure", "webapps"),
     "feature-hidden": ("exposure", "firewall"),
-    "telegram-unpaired": (), "telegram-failing": (), "mute-ignored": (), "ai-down": (),  # (the ai KPI says "down" itself: there is no AI card)
+    "telegram-unpaired": (), "telegram-failing": (), "mute-ignored": (), "ai-down": (), "peer-down": (), "fleet-poller-down": (), "peer-insecure": (), "peer-identity": (),  # (the ai KPI says "down" itself: there is no AI card)
 }
 SEV_STATE = {3: "err", 2: "err", 1: "warn"}  # a port change (3) is as urgent as an error (2)
 

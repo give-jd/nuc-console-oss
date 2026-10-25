@@ -1,0 +1,24 @@
+[1;7;35m ⇄ bravo (remote 12s)                                                         [0m[K
+[36m──[0m[1;36m HEALTH [0m [90mmade-up data of bravo[0m [36m─────────────────────────────────────────────[0m[0m[0m[K
+   [90m·[0m the health screen of bravo as its web API serves it[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m health · lines 1-2 of 2  Esc: back  ?: help  [0m[1;31m! local problems[0m[90m[0m[0m

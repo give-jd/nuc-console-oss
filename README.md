@@ -198,6 +198,8 @@ everywhere, letters belong to one screen.
 | `d` `w` `m` | Health | the last 24 hours, 7 days, 30 days |
 | `e` · `h` `d` `w` · `f` | Overview · Events · Events | open the Events timeline (no digit) · the last hour, 24 hours, 7 days · filter by kind |
 | `e` `u` `x` `X` `c` · `y` `n` | AI | AI on or off · use the model · delete it · delete all · cancel · answer the question that waits |
+| `6` · `↑` `↓` (`j` `k`), `PgUp` `PgDn`, `Home` `End`, `Enter` · `Esc` `q` | everywhere (only with `[hosts]`) · Hosts | open the Hosts list (this machine first, the others worst first) · move, page, open the host's screens · back (to the local screen it came from) |
+| `1` `2` `3` `4` `e` · `Tab` / `Shift+Tab` · `↑` `↓` (`j` `k`), `PgUp` `PgDn`, `Home` `End` · `Esc` `q` | another host's screens | its overview, map, CPU, health, events (only those its token reads) · the next / previous of them · scroll · back to the list. Read-only, from the poller's cache; the first line is always `⇄ name (remote 12s)`; back on the local screen after `[console] remote_idle_seconds` (60) without a key |
 
 ## Configuration
 
