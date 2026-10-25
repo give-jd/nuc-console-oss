@@ -848,6 +848,27 @@ hidden =
 </p>
 </div>
 </details>
+<details class="cfgs" id="cfg-posture">
+<summary>
+<code>[posture]</code> Security posture alarms (off by default)</summary>
+<p class="hintl">Opt-in: Secure Boot, RDP without NLA and SMB1 on Windows; FileVault, SIP and Gatekeeper on macOS. Off because on a kiosk they are often intended and only noise; nothing on Linux yet. An administrator&#x27;s setting: only config.ini changes it.</p>
+<div class="ck cko" id="k-posture-enabled">
+<span class="cn">
+<code>enabled</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: the root collector reads the posture checks of this OS and ATTENTION raises the warning posture for the ones that fail. no (the default): nothing is read, nothing is raised. <span class="sm">yes or no · default no</span>
+</p>
+</div>
+<div class="ck cko" id="k-posture-checks">
+<span class="cn">
+<code>checks</code>
+</span>
+<span class="sm">not set</span>
+<p class="hintl">Comma-separated, of: secure-boot, rdp-nla, smb1, filevault, sip, gatekeeper. Empty: every check this OS has (Windows: secure-boot, rdp-nla, smb1; macOS: filevault, sip, gatekeeper; Linux: none). A check that cannot be read is unknown: never ok, never an alarm. <span class="sm">comma-separated: secure-boot, rdp-nla, smb1, filevault, sip, gatekeeper</span>
+</p>
+</div>
+</details>
 <details class="cfgs" id="cfg-webapps">
 <summary>
 <code>[webapps]</code> Web apps you expect</summary>
