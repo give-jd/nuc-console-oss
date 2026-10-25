@@ -21,4 +21,4 @@
 [K
 [K
 [K
-[90m overview · lines 1-13 of 13  ↑↓ PgUp/PgDn: scroll  Esc: back  ?: help[0m[0m
+[90m overview · lines 1-13 of 13  Esc: back  ?: help  [0m[1;31m! local problems[0m[90m[0m[0m

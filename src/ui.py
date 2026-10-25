@@ -1051,6 +1051,8 @@ def _all_but_console(f):
 
 def _local_only(scope, r):
     """A remote host's screen has no local screens to go to: the global digits, Tab and 6 are not its keys (its own rows say what they do)."""
+    if scope == "hosts":  # the list is where 6 leads: it has no use for the key
+        return r.scope == "global" and r.action == "hosts"
     return scope == "remote" and r.scope == "global" and r.action in ("screen", "next", "prev", "hosts")
 
 

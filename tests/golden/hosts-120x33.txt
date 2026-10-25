@@ -30,4 +30,4 @@
 [K
 [K
 [K
-[90m host 1/6  ↑↓: move  Enter: open  1-5: screens  Esc: back  ?: help  6: hosts[0m[0m[0m
+[90m host 1/6  ↑↓: move  Enter: open  1-5: screens  Esc: back  ?: help  [0m[1;31m! local problems[0m[90m[0m[0m[0m

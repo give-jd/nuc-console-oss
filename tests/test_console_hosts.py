@@ -5,6 +5,7 @@ The cache is a temporary folder written by the poller's own writer (tests/fleetf
 host serves (web.Server.api in tests/golden.FrozenWorld), so that what is drawn here is what a peer would really send. The loop runs on a fake
 terminal with an injected clock (tests/test_keymap.py's run_main), no sleep, no host state, no network."""
 import copy
+import io
 import json
 import os
 import re
@@ -444,6 +445,87 @@ class Never(Fleet):
             frames = self.run_main([b"6", b"\x1b"])
         self.assertIn("error on the Hosts screen", "\n".join(frames[1]))
         self.assertNotIn("Hosts screen", "\n".join(frames[2]))
+
+
+class Review(Fleet):
+    """The independent review's findings, one test each."""
+
+    def test_h1_six_works_on_a_screen_that_has_been_open_longer_than_the_idle_time(self):
+        frames = self.run_main([b"2"] + [20, b"j"] * 5 + [b"6", 1, 30, 31, 1])
+        n = 1 + 10
+        self.assertIn("HOSTS", "\n".join(frames[n + 1]))
+        self.assertIn("HOSTS", "\n".join(frames[n + 2]))
+        self.assertIn("HOSTS", "\n".join(frames[n + 3]))  # 31 s later: 61 s since the key
+        self.assertNotIn("HOSTS", "\n".join(frames[n + 4]))  # past the idle time since the last key
+        self.assertIn("MAP", "\n".join(frames[n + 4]))
+
+    def test_m1_help_over_a_remote_screen(self):
+        keys = [b"6"] + self.to("alpha")
+        n = len(keys)
+        frames = self.run_main(keys + [b"?", 61, 1])
+        self.assertIn("Keys", "\n".join(frames[n + 1]))
+        self.assertEqual(kind(frames[n + 2]), "local")
+        self.assertNotIn("Keys", "\n".join(frames[n + 2]), "the help of the screen just left is not left open")
+        self.assertNotIn("Keys", "\n".join(frames[n + 3]))
+        frames = self.run_main(keys + [b"?", 50, b"x", 50, 1])
+        self.assertEqual({kind(f) for f in frames[n + 2:]}, {"remote"}, "closing the help is a key")
+
+    def test_m2_the_rest_of_a_batch_follows_the_screen_the_first_key_led_to(self):
+        keys = [b"6"] + self.to("alpha")
+        n = len(keys)
+        orig = self.check_frame  # two keys of one batch can each clear the screen: the harness strips only one clear
+        self.check_frame = lambda screen, *a: orig(re.sub(r"(\x1b\[2J)+$", "", screen), *a)
+        self.addCleanup(delattr, self, "check_frame")
+        for batch, last in ((b"\x1b1", "overview"), (b"\x1b6", "list"), (b"\x1bq", "overview"), (b"\x1b\x1b", "overview")):
+            with self.subTest(batch=batch):
+                frames = self.run_main(keys + [batch])
+                text = "\n".join(frames[-1])
+                self.assertEqual("HOSTS" in text, last == "list", batch)
+                self.assertEqual(kind(frames[-1]), "local")
+        frames = self.run_main([b"6", b"q"])
+        self.assertNotIn("HOSTS", "\n".join(frames[-1]))
+
+    def test_l1_host_without_a_name_is_an_error(self):
+        for argv in (["--host"], ["--host", ""], ["--host", "--view", "map"]):
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err), mock.patch.object(render, "DEMO_HEALTH", ""):
+                code = render.once(["render.py", "--once", "--demo"] + argv)
+            self.assertEqual(code, 2, argv)
+            self.assertIn("--host needs", err.getvalue())
+
+    def test_l2_the_list_does_not_offer_the_key_that_leads_to_it(self):
+        self.assertNotIn("6", [k for _t, items in ui.help_rows("hosts", render.on) for k, _v in items])
+        lines, _ = self.once(["--view", "hosts"], 120, 33)
+        self.assertNotIn("6: hosts", lines[-1])
+        frames = self.run_main([])
+        self.assertIn("6: hosts", frames[0][-1])
+
+    def test_l3_a_local_error_is_marked_in_the_footer_of_the_list_and_of_a_remote_screen(self):
+        import problems
+        for pb, marked in (([(2, "a local error")], True), ([(1, "only a warning")], False), ([], False)):
+            with mock.patch.object(problems, "safe_problems", return_value=pb):
+                for cols, rows in ((80, 24), (120, 33)):
+                    for argv in (["--view", "hosts"], ["--host", "alpha"], ["--host", "delta"]):
+                        lines, raw = self.once(argv, cols, rows)
+                        self.assertEqual(render.LOCAL_ALERT in lines[-1], marked, (argv, cols, pb))
+                        if marked:
+                            self.assertNotIn("a local error", "".join(lines), "fixed words, no names")
+                            self.assertIn("Esc", lines[-1] if cols > 80 else "Esc")
+
+    def test_an_exception_in_a_key_of_the_hosts_screens_goes_back_to_the_local_screen(self):
+        keys = [b"6"] + self.to("alpha")
+        n = len(keys)
+        with mock.patch.object(hostsview, "remote_key", side_effect=RuntimeError("boom")):
+            frames = self.run_main(keys + [b"2", b"j"])
+        self.assertEqual(kind(frames[n]), "remote")
+        self.assertEqual(kind(frames[n + 1]), "local")
+        self.assertIn("hosts view failed", frames[n + 1][-1])
+        self.assertEqual(kind(frames[n + 2]), "local")
+        with mock.patch.object(hostsview, "hosts_key", side_effect=ValueError("boom")):
+            frames = self.run_main([b"6", b"j"])
+        self.assertEqual(kind(frames[2]), "local")
+        self.assertNotIn("HOSTS", "\n".join(frames[2]))
+        self.assertIn("hosts view failed", frames[2][-1])
 
 
 class Config(unittest.TestCase):

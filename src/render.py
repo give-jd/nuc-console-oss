@@ -1022,8 +1022,21 @@ def hosts_state(now):
     return cache, doc, rows, reader, pb
 
 
-def hosts_foot(hs, lead, w, skip=()):
-    return clip(c(90 if not hs.note else 33, ui.footer(hs.scope, lead, w, on, skip=skip)), w)
+LOCAL_ALERT = "! local problems"  # fixed text, no names: THIS machine has an error, whatever host the screen shows
+
+
+def local_alert(pb):
+    """Does the local problem list (accepted and muted ones are not in it) hold an error? (severity 2 or more, the status pill's red)"""
+    return any(isinstance(p, (tuple, list)) and p and isinstance(p[0], int) and p[0] >= 2 for p in pb or [])
+
+
+def hosts_foot(hs, lead, w, pb=(), note=False):
+    """The footer of the Hosts list and of a remote screen: the keys (ui.KEYMAP) and, in red, LOCAL_ALERT while this machine has an error."""
+    alert = local_alert(pb)
+    text = ui.footer(hs.scope, lead, w, on, extra=[(0.5, LOCAL_ALERT, LOCAL_ALERT)] if alert else [])
+    if alert and LOCAL_ALERT in text:
+        text = text.replace(LOCAL_ALERT, "\x1b[0m\x1b[1;31m" + LOCAL_ALERT + "\x1b[0m\x1b[" + ("33" if note else "90") + "m")
+    return clip(c(33 if note else 90, text), w)
 
 
 def hosts_list_screen(hs, state, w, h):
@@ -1031,7 +1044,7 @@ def hosts_list_screen(hs, state, w, h):
     import hostsview
     cache, doc, rows, _reader, pb = state
     body = hostsview.list_lines(doc, rows, hs, cache, w, body_rows(h))
-    return frame(("Hosts", 1, 1, body), 0, 1, w, h, pb, foot=hosts_foot(hs, f" {hostsview.list_footer_pos(hs, len(rows))}   ", w))
+    return frame(("Hosts", 1, 1, body), 0, 1, w, h, pb, foot=hosts_foot(hs, f" {hostsview.list_footer_pos(hs, len(rows))}   ", w, pb))
 
 
 def remote_screen(hs, state, w, h, now):
@@ -1063,8 +1076,7 @@ def remote_screen(hs, state, w, h, now):
 
     def foot(top, shown, total, room):
         where = f" {hostsview.VIEW_WORD.get(hs.view, hs.view)} · lines {top + 1}-{top + shown} of {total}   " if d is not None and total else " "
-        text = ui.footer("remote", where if not hs.note else f" {hs.note}   ", w, on)
-        return clip(c(33 if hs.note else 90, text), w)
+        return hosts_foot(hs, where if not hs.note else f" {hs.note}   ", w, state[4], bool(hs.note))
     rows = remote_view(name, d, w, h, age_s=age, banner=banner, top=hs.scroll, body=lines, state=st, foot=foot)
     hs.scroll, hs.room = st.get("top", 0), max(1, st.get("room", 1))
     return rows
@@ -1088,6 +1100,9 @@ def hosts_once(argv, w, h):
     now = time.time()
     hs = hostsview.HostsView(now=now)
     host, view = opt("--host"), opt("--view")
+    if "--host" in argv and (not host or host.startswith("--")):
+        print("--host needs the name of a host of [hosts]", file=sys.stderr)
+        return None
     if host:
         if host not in [p["name"] for p in CFG.get("hosts") or []]:
             print("--host: not a host of [hosts]", file=sys.stderr)
@@ -2299,8 +2314,9 @@ def main(argv):
 
         def close_hosts():
             """Back from the Hosts screens to the local screen they were opened from, as it was left (its view objects are put back)."""
-            nonlocal mv, cv, hv, av, ev, hs, t0, ov_cache, fresh, cpu_fresh, err, cpu_d
+            nonlocal mv, cv, hv, av, ev, hs, t0, ov_cache, fresh, cpu_fresh, err, cpu_d, help_open
             gone, hs = hs, None
+            help_open = False  # an overlay opened over the screens just left
             mv, cv, hv, av, ev = gone.stash
             stamp = time.time()
             for v in (mv, cv, hv, av, ev):
@@ -2312,6 +2328,16 @@ def main(argv):
             fresh = cpu_fresh = 0.0
             err, cpu_d = None, None
             out.write("\x1b[2J")
+
+        failed_until = [0.0]  # a key of the Hosts screens raised: until when the footer says so
+
+        def hosts_failed(exc):
+            """Whatever went wrong in a key of the Hosts screens: back to the local screen, a footer note, the type of the exception on stderr."""
+            print(f"nuc-console: hosts view failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+            if hs is not None:
+                close_hosts()
+            failed_until[0] = time.time() + 5
+            return "failed"
 
         def resume():
             """Z again (or another screen): the redraw goes on; a paused overview carries on with the slide it was at."""
@@ -2457,6 +2483,10 @@ def main(argv):
                 wait = REFRESH_S
             waker.feed(pb if (mv is not None or hv is not None or av is not None) else last_pb)
             scope = "map" if mv is not None else "cpu" if cv is not None else "health" if hv is not None else "ai" if av is not None else "events" if ev is not None else hs.scope if hs is not None else "overview"
+            if time.time() < failed_until[0]:
+                rows_ = screen.split("\x1b[K\r\n")
+                rows_[-1] = clip(c(33, " hosts view failed: back on the local screen"), w)
+                screen = "\x1b[K\r\n".join(rows_)
             if help_open:
                 screen = help_overlay(screen, scope, w, h, enabled, paused)
             if paused:  # nothing new to draw until a key: the frame, the clock and the data stay as they are
@@ -2479,14 +2509,21 @@ def main(argv):
                 dirty = True
                 if help_open:  # any key closes the help, and does nothing else
                     help_open = False
+                    if hs is not None:
+                        hs.touched = time.time()  # the key that closes the help is a key
                     continue
                 view = mv if mv is not None else cv if cv is not None else hv if hv is not None else av if av is not None else ev if ev is not None else hs
                 if view is not None:
                     view.touched = time.time()
                 if hs is not None and hs.mode == "remote":  # another host's screen: its keys first (the digits and Tab choose ITS views)
-                    res = hostsview.remote_key(hs, k, hostsview.entry_of(hstate[0], hs.name) if hstate else None)
+                    try:
+                        res = hostsview.remote_key(hs, k, hostsview.entry_of(hstate[0], hs.name) if hstate else None)
+                    except Exception as e:  # noqa: BLE001 - never a traceback out of the console
+                        hosts_failed(e)
+                        break
                     if res == "back":
                         hs.mode, hs.note, hs.body = "list", "", None
+                        scope = hs.scope  # the rest of this batch of keys is the list's
                         out.write("\x1b[2J")
                     if res is not None:
                         continue
@@ -2517,17 +2554,23 @@ def main(argv):
                 elif act == "hosts":  # 6: the Hosts list, from any local screen (only while [hosts] is set and [features] fleet is on)
                     if hs is None:
                         hs = hostsview.HostsView(scope, (mv, cv, hv, av, ev), view.opened if view is not None else time.time())
+                        hs.touched = time.time()  # opened now, whatever the screen it came from had been open for
                         resume()
                         mv = cv = hv = av = ev = None
                         cpu_d, hstate, fresh = None, None, 0.0
                         out.write("\x1b[2J")
                         break
                 elif hs is not None:  # the list: Esc/q back to the local screen, Enter on a host opens its screens, on this machine goes back too
-                    res = hostsview.hosts_key(hs, k, [hostsview.ME] + [r["id"] for r in hstate[2]] if hstate else [hostsview.ME])
+                    try:
+                        res = hostsview.hosts_key(hs, k, [hostsview.ME] + [r["id"] for r in hstate[2]] if hstate else [hostsview.ME])
+                    except Exception as e:  # noqa: BLE001 - never a traceback out of the console
+                        hosts_failed(e)
+                        break
                     if res in ("back", "local"):
                         close_hosts()
                         break
                     if res == "open":
+                        scope = hs.scope
                         out.write("\x1b[2J")
                 elif scope == "overview":
                     if act == "back" and k == "q" and nuc_config.PORTABLE:  # run.sh in a terminal: q quits (on the monitor of an install it must not)
