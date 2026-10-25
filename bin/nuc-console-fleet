@@ -3,8 +3,9 @@
 #   nuc-console-fleet list           the configured peers and the last state the poller cached
 #   nuc-console-fleet test NAME      one poll of that peer, now, in this terminal: the state and the reason in words (never the token)
 #   nuc-console-fleet once           poll every peer and write the cache (what the poller will do on its own)
+#   nuc-console-fleet forget NAME    forget the host_id remembered for that peer (the way to accept a replaced machine)
 # The token files are read by the account that owns them: sudo -u nuc-console-peers nuc-console-fleet test NAME
 # not installed here (an extracted folder, the portable run)? NUC_CONSOLE_HOME=./data python3 src/peers.py list does the same there
 [ -f /opt/nuc-console/peers.py ] || { echo "nuc-console is not installed here. In an extracted (portable) folder use: NUC_CONSOLE_HOME=./data python3 src/peers.py list | test NAME | once" >&2; exit 1; }
 # env -u and -E: NUC_CONSOLE_* variables (and PYTHON*) must not be able to point the client at another configuration, cache or token folder (sudo -E)
-exec env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG -u NUC_CONSOLE_PEERS_CACHE -u NUC_CONSOLE_SETTINGS -u NUC_CONSOLE_NOTIFY_DIR -u NUC_CONSOLE_HOST_ID /usr/bin/python3 -E -B /opt/nuc-console/peers.py "$@"
+exec env -u NUC_CONSOLE_HOME -u NUC_CONSOLE_CONFIG -u NUC_CONSOLE_PEERS_CACHE -u NUC_CONSOLE_SETTINGS -u NUC_CONSOLE_NOTIFY_DIR -u NUC_CONSOLE_HOST_ID -u NUC_CONSOLE_PEERS_STATE -u SSL_CERT_FILE -u SSL_CERT_DIR /usr/bin/python3 -E -B /opt/nuc-console/peers.py "$@"

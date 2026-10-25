@@ -5,6 +5,7 @@ The peers are tests/fakepeer.py on 127.0.0.1 (port 0): programmable, misbehaving
 the machine, no host state is read (tests/hermetic.py)."""
 import ast
 import hashlib
+import io
 import json
 import os
 import re
@@ -59,6 +60,7 @@ class Base(unittest.TestCase):
             os.chmod(self.dir, 0o700)
         self.token = self.write_token(TOKEN)
         self.cache = os.path.join(self.dir, "cache")
+        self.state = os.path.join(self.dir, "state")
 
     def write_token(self, text, name="b.token"):
         path = os.path.join(self.dir, name)
@@ -745,7 +747,7 @@ class Secrets(Base):
     def test_nothing_in_the_cache_the_output_or_the_files_holds_the_token(self):
         p = self.fake()
         folder = os.path.join(self.dir, "cache")
-        poller = peers.Poller([self.peer(p.url, scope="views")], folder, allow_loopback=True, limits=FAST)
+        poller = peers.Poller([self.peer(p.url, scope="views")], folder, state=self.state, allow_loopback=True, limits=FAST)
         self.addCleanup(poller.pool.shutdown, False)
         poller.run_once()
         for fn in os.listdir(folder):
@@ -782,7 +784,7 @@ class Cache(Base):
         self.assertEqual((got["peers"]["b"]["state"], got["peers"]["b"]["warn"], got["fleet"]["worst"], got["skipped"]), ("warn", ["legacy-peer"], "warn", 0))
         for key in ("v", "name", "url_display", "ts", "state", "error", "summary", "views", "scope", "warn", "insecure", "identity"):
             self.assertIn(key, got["peers"]["a"])
-        self.assertEqual(sorted(os.listdir(self.cache)), ["a.json", "b.json", "fleet.json"])  # no temporary file left
+        self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "b.json", "fleet.json"])  # no temporary file left
         if POSIX:
             for fn in os.listdir(self.cache):
                 self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.cache, fn)).st_mode), 0o644)
@@ -792,11 +794,17 @@ class Cache(Base):
                               (["warn", "untrusted"], "untrusted"), (["ok", "down"], "down"), ([], "unknown"), (["ok", "stale"], "stale")):
             self.assertEqual(peers.fleet_doc([self.entry(str(i), state=s) for i, s in enumerate(states)], 1)["worst"], worst, states)
 
-    def test_the_files_of_a_peer_that_is_no_longer_configured_go(self):
+    def test_the_file_of_a_peer_no_longer_configured_goes_and_foreign_files_stay(self):
         self.write([self.entry("a"), self.entry("b")])
-        os.symlink("/etc/passwd", os.path.join(self.cache, "link.json")) if POSIX else None
+        for fn in ("package.json", "x.json", "b2.json"):  # not ours: a name that looks like a peer's file is not enough
+            spit(os.path.join(self.cache, fn), "{}")
+        if POSIX:
+            os.symlink("/etc/passwd", os.path.join(self.cache, "link.json"))
         peers.write_cache(self.cache, [self.entry("a")], time.time(), keep={"a"})
-        self.assertEqual(sorted(x for x in os.listdir(self.cache) if x != "link.json"), ["a.json", "fleet.json"])
+        left = set(os.listdir(self.cache))
+        self.assertNotIn("b.json", left)
+        self.assertLessEqual({"a.json", "fleet.json", ".owner", "package.json", "x.json", "b2.json"}, left)
+        self.assertEqual(slurp(os.path.join(self.cache, "package.json")), "{}")
 
     def test_the_atomic_write_never_leaves_half_a_file(self):
         self.write([self.entry("a")])
@@ -805,7 +813,7 @@ class Cache(Base):
             with self.assertRaises(OSError):
                 peers.write_json(self.cache, "a.json", {"x": 1})
         self.assertEqual(slurp(os.path.join(self.cache, "a.json")), before)
-        self.assertEqual(sorted(os.listdir(self.cache)), ["a.json", "fleet.json"])
+        self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "fleet.json"])
 
     def test_too_big_with_its_documents_keeps_the_summary(self):
         big = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 100}})
@@ -882,12 +890,11 @@ class Cache(Base):
             os.chmod(self.cache, 0o755)
 
     def test_identity_is_remembered_at_the_first_contact_and_a_change_is_flagged(self):
-        os.makedirs(self.cache)
-        known = peers.Known(self.cache)
+        known = peers.Known(self.state)
         first = self.entry(summary={"host_id": "a" * 16, "host": "h"})
         self.assertTrue(known.check(first))
-        known.save(self.cache)
-        again = peers.Known(self.cache)
+        known.save(self.state)
+        again = peers.Known(self.state)
         same = self.entry(summary={"host_id": "a" * 16})
         self.assertEqual((again.check(same), same["identity"], same["state"]), (False, "ok", "ok"))
         other = self.entry(summary={"host_id": "b" * 16, "host": "evil"}, views={"cpu": {}})
@@ -900,7 +907,7 @@ class Cache(Base):
         self.assertEqual((again.check(down), down["identity"]), (False, "ok"))
         legacy = self.entry("old", summary={"host": "x"})  # first contact without an id: nothing to remember
         self.assertEqual((again.check(legacy), "old" in again.ids), (False, False))
-        self.assertEqual(json.loads(slurp(os.path.join(self.cache, "known"))), {"v": 1, "ids": {"b": "a" * 16}})
+        self.assertEqual(json.loads(slurp(os.path.join(self.state, "known"))), {"v": 1, "ids": {"b": "a" * 16}})
 
     def test_unreachable_keeps_the_last_data_with_its_age_and_is_never_ok(self):
         p = self.fake()
@@ -919,7 +926,7 @@ class Failure(Base):
         good = [self.fake() for _ in range(4)]
         dead = self.fake(mode="silent")
         cfg = [self.peer(g.url, name="g%d" % i) for i, g in enumerate(good)] + [self.peer(dead.url, name="dead")]
-        poller = peers.Poller(cfg, self.cache, allow_loopback=True, limits=FAST)
+        poller = peers.Poller(cfg, self.cache, state=self.state, allow_loopback=True, limits=FAST)
         self.addCleanup(poller.pool.shutdown, False)
         t = time.monotonic()
         entries = poller.run_once()
@@ -942,7 +949,7 @@ class Failure(Base):
                 state["now"] -= 1
             return dict(peers.new_entry(peer, 1), state="ok")
         cfg = [{"name": "p%d" % i, "url": "http://100.64.0.1", "scope": "summary"} for i in range(10)]
-        poller = peers.Poller(cfg, self.cache, poll=slow)
+        poller = peers.Poller(cfg, self.cache, state=self.state, poll=slow)
         self.addCleanup(poller.pool.shutdown, False)
         poller.run_once()
         self.assertEqual(state["max"], 4)
@@ -954,7 +961,7 @@ class Failure(Base):
 
         def poll(peer, prev, wall, **net):
             return dict(peers.new_entry(peer, 1), state=next(it))
-        poller = peers.Poller(cfg, self.cache, poll=poll, clock=lambda: t[0], jitter=lambda: 1.0)
+        poller = peers.Poller(cfg, self.cache, state=self.state, poll=poll, clock=lambda: t[0], jitter=lambda: 1.0)
         self.addCleanup(poller.pool.shutdown, False)
         return poller
 
@@ -989,11 +996,11 @@ class Failure(Base):
         t[0] = 15.0
         poller.step()
         self.assertEqual(list(poller.running), ["p"])
-        self.assertEqual(peers.Poller([], self.cache, interval=1).interval, peers.INTERVAL_MIN)
-        self.assertEqual(peers.Poller([], self.cache, interval=40).interval, 40)
+        self.assertEqual(peers.Poller([], self.cache, state=self.state, interval=1).interval, peers.INTERVAL_MIN)
+        self.assertEqual(peers.Poller([], self.cache, state=self.state, interval=40).interval, 40)
 
     def test_the_jitter_is_applied(self):
-        poller = peers.Poller([{"name": "p"}], self.cache, jitter=lambda: 1.2)
+        poller = peers.Poller([{"name": "p"}], self.cache, state=self.state, jitter=lambda: 1.2)
         self.addCleanup(poller.pool.shutdown, False)
         self.assertAlmostEqual(poller.delay("p", {"state": "unreachable"}), 6.0)
         self.assertAlmostEqual(poller.delay("p", {"state": "ok"}), peers.INTERVAL * 1.2)
@@ -1004,7 +1011,7 @@ class Failure(Base):
 
         def boom(peer, prev, wall, **net):
             raise RuntimeError("secret " + TOKEN)
-        poller = peers.Poller(cfg, self.cache, poll=boom, clock=lambda: t[0], jitter=lambda: 1.0)
+        poller = peers.Poller(cfg, self.cache, state=self.state, poll=boom, clock=lambda: t[0], jitter=lambda: 1.0)
         self.addCleanup(poller.pool.shutdown, False)
         poller.step()
         self.settle(poller)
@@ -1016,11 +1023,11 @@ class Failure(Base):
     def test_identity_change_is_written_to_the_cache_by_the_poller(self):
         p = self.fake()
         cfg = [self.peer(p.url)]
-        poller = peers.Poller(cfg, self.cache, allow_loopback=True, limits=FAST)
+        poller = peers.Poller(cfg, self.cache, state=self.state, allow_loopback=True, limits=FAST)
         self.addCleanup(poller.pool.shutdown, False)
         self.assertEqual(poller.run_once()[0]["state"], "ok")
         p.docs["summary"] = fakepeer.summary(host_id="f" * 16)
-        again = peers.Poller(cfg, self.cache, allow_loopback=True, limits=FAST)  # a new process: it reads the known file
+        again = peers.Poller(cfg, self.cache, state=self.state, allow_loopback=True, limits=FAST)  # a new process: it reads the known file
         self.addCleanup(again.pool.shutdown, False)
         e = again.run_once()[0]
         self.assertEqual((e["state"], e["identity"], e["summary"]), ("untrusted", "changed", {}))
@@ -1033,12 +1040,12 @@ class Command(Base):
 
     def cli(self, argv, hosts):
         out = []
-        with mock.patch.object(nuc_config, "peers_cache_dir", lambda: self.cache):
+        with mock.patch.object(nuc_config, "peers_cache_dir", lambda: self.cache), mock.patch.object(nuc_config, "peers_state_dir", lambda: self.state):
             code = peers.main(argv, out=out.append, cfg={"hosts": hosts}, net=self.NET)
         return code, "\n".join(out)
 
     def test_usage(self):
-        for argv in ([], ["nope"], ["test"], ["list", "x"], ["once", "x"], ["test", "a", "b"], ["pair"], ["forget", "b"]):
+        for argv in ([], ["nope"], ["test"], ["list", "x"], ["once", "x"], ["test", "a", "b"], ["pair"], ["forget"], ["forget", "a", "b"]):
             self.assertEqual(self.cli(argv, [self.peer("http://100.64.0.1")])[0], 2, argv)
 
     def test_no_peers(self):
@@ -1089,10 +1096,9 @@ class Command(Base):
 
     def test_an_identity_change_shows_in_test_without_being_remembered(self):
         p = self.fake()
-        os.makedirs(self.cache)
-        known = peers.Known(self.cache)
+        known = peers.Known(self.state)
         known.ids["b"] = "e" * 16
-        known.save(self.cache)
+        known.save(self.state)
         code, text = self.cli(["test", "b"], [self.peer(p.url)])
         self.assertEqual(code, 1)
         self.assertIn("host_id changed", text)
@@ -1111,14 +1117,15 @@ class Files(unittest.TestCase):
         self.assertIn("python.exe", cmd)
         if POSIX:
             self.assertTrue(os.stat(os.path.join(ROOT, "bin", "nuc-console-fleet")).st_mode & stat.S_IXUSR)
-        names = ("NUC_CONSOLE_HOME", "NUC_CONSOLE_CONFIG", "NUC_CONSOLE_PEERS_CACHE", "NUC_CONSOLE_SETTINGS", "NUC_CONSOLE_NOTIFY_DIR", "NUC_CONSOLE_HOST_ID")
+        names = ("NUC_CONSOLE_HOME", "NUC_CONSOLE_CONFIG", "NUC_CONSOLE_PEERS_CACHE", "NUC_CONSOLE_PEERS_STATE", "NUC_CONSOLE_SETTINGS",
+                 "NUC_CONSOLE_NOTIFY_DIR", "NUC_CONSOLE_HOST_ID", "SSL_CERT_FILE", "SSL_CERT_DIR")
         self.assertIn("/usr/bin/python3 -E -B /opt/nuc-console/peers.py", sh)
         for n in names:  # the wrapper clears what could redirect it, like nuc-console-config
             self.assertIn("-u " + n + " ", sh)
             self.assertIn("set " + n + "=\r\n", cmd)
         self.assertIn("python.exe\" -E -B ", cmd)
         used = set(re.findall(r"NUC_CONSOLE_[A-Z_]+", self.read("src/nuc_config.py") + self.read("src/peers.py")))
-        self.assertLessEqual(used - {"NUC_CONSOLE_"}, set(names))  # every variable the client reads is cleared
+        self.assertLessEqual({u for u in used if u.startswith("NUC_CONSOLE_")} - {"NUC_CONSOLE_"}, set(names))  # every variable the client reads is cleared
         self.assertIn("bin/nuc-console-fleet text eol=lf", self.read(".gitattributes"))
         self.assertNotIn(TOKEN, sh + cmd)
 
@@ -1138,6 +1145,229 @@ class Files(unittest.TestCase):
         self.assertIn("The peer client", self.read("SECURITY.md"))
         self.assertIn("nuc-console-fleet", self.read("README.md"))
         self.assertIn("nuc-console-fleet", self.read("CHANGELOG.md").split("## [2.5.2]")[0])
+
+
+# ---- The findings of the independent review ----------------------------------------------------------------------------------------------
+class Review(Base):
+    def test_m1_an_ipv6_that_embeds_a_tailnet_address_is_https_only(self):
+        for a in ("64:ff9b::6440:101", "2002:6440:101::", "2002:6440:101:1::7"):
+            self.assertEqual(peers.classify(ip(a)), "public", a)  # the range of the address the socket goes to
+            self.assertEqual(peers.judge("http", [peers.classify(ip(a))]), (False, "plain-http", False), a)
+            self.assertEqual(peers.judge("http", [peers.classify(ip(a))], insecure=True), (False, "plain-http", False), a)
+            self.assertEqual(peers.judge("https", [peers.classify(ip(a))])[0], True, a)
+        for a in ("64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::", "64:ff9b::7f00:1"):
+            self.assertEqual(peers.classify(ip(a)), "forbidden", a)  # what it embeds can still forbid it
+        for a, kind in (("100.64.1.2", "tailnet"), ("fd7a:115c:a1e0::7", "tailnet"), ("::ffff:100.64.1.2", "tailnet"), ("::ffff:10.0.0.1", "private")):
+            self.assertEqual(peers.classify(ip(a)), kind, a)
+            self.assertEqual(peers.judge("http", [kind])[0], kind == "tailnet")
+        self.no_connection()
+        for url in ("http://[64:ff9b::6440:101]", "http://[2002:6440:101::]"):
+            e = peers.poll_peer(self.peer(url), limits=FAST)
+            self.assertEqual((e["state"], e["error"]), ("unreachable", "plain-http"), url)
+
+    def test_m2_the_poller_deletes_only_what_it_made(self):
+        os.makedirs(self.cache)
+        spit(os.path.join(self.cache, "package.json"), "{}")
+        with self.assertRaises(OSError) as c:  # a folder with files and no marker is not ours: nothing is written or removed
+            peers.write_cache(self.cache, [], time.time(), keep=set())
+        self.assertIn("not ours", str(c.exception))
+        self.assertEqual(os.listdir(self.cache), ["package.json"])
+        # a folder that is empty is taken (the service manager made it), and a marker that is not ours is refused
+        empty = os.path.join(self.dir, "empty")
+        os.makedirs(empty)
+        peers.write_cache(empty, [], time.time(), keep=set())
+        self.assertIn(peers.OWNER, os.listdir(empty))
+        spit(os.path.join(empty, peers.OWNER), "something else")
+        with self.assertRaises(OSError):
+            peers.write_cache(empty, [], time.time(), keep=set())
+
+    @unittest.skipUnless(POSIX, "links")
+    def test_m2_a_cache_folder_that_is_a_link_is_refused(self):
+        real = os.path.join(self.dir, "real")
+        os.makedirs(real)
+        os.symlink(real, self.cache)
+        with self.assertRaises(OSError):
+            peers.write_cache(self.cache, [], time.time(), keep=set())
+        self.assertEqual(os.listdir(real), [])
+
+    def test_l1_a_failing_cache_does_not_stop_the_poller_and_is_said_once(self):
+        t = [0.0]
+        cfg = [{"name": "p", "url": "http://100.64.0.1", "scope": "summary"}]
+        poller = peers.Poller(cfg, self.cache, state=self.state, poll=lambda peer, prev, wall, **n: dict(peers.new_entry(peer, 1), state="ok"),
+                              clock=lambda: t[0], jitter=lambda: 1.0)
+        self.addCleanup(poller.pool.shutdown, False)
+        err = io.StringIO()
+        with mock.patch.object(peers, "write_cache", side_effect=OSError(28, "No space left on device /secret/path")), \
+                mock.patch.object(sys, "stderr", err):
+            for _ in range(3):
+                poller.step()
+                for f in list(poller.running.values()):
+                    f.exception()
+                poller.step()
+                t[0] += 100
+        self.assertEqual(err.getvalue().count("cannot write the cache"), 1)  # once per kind
+        self.assertNotIn("/secret/path", err.getvalue())
+        self.assertEqual(poller.entries["p"]["state"], "ok")  # it kept going
+        stop = threading.Event()
+        stop.set()
+        poller.run_forever(stop)
+
+    def test_l1_write_json_survives_an_unremovable_temporary_file(self):
+        os.makedirs(self.cache)
+        real = os.remove
+
+        def remove(path):
+            if path.endswith(".tmp"):
+                raise PermissionError(13, "no")
+            return real(path)
+        with mock.patch.object(os, "remove", remove):
+            peers.write_json(self.cache, "a.json", {"x": 1})
+        self.assertEqual(json.loads(slurp(os.path.join(self.cache, "a.json"))), {"x": 1})
+
+    def test_l2_a_pin_on_an_http_url_is_a_config_error(self):
+        c = Config()
+        c.addCleanup = self.addCleanup
+        cfg, said = c.load("[hosts]\nbad = http://100.64.0.1 pin=sha256:%s\ngood = https://x.test pin=sha256:%s\n" % ("ab" * 32, "cd" * 32))
+        self.assertEqual([h["name"] for h in cfg["hosts"]], ["good"])
+        self.assertEqual(len(said), 1)
+        self.assertIn("bad:", said[0])
+        self.assertNotIn("ab" * 8, said[0])
+        self.no_connection()  # and the client refuses it too if it is handed one
+        e = peers.poll_peer(self.peer("http://100.64.0.1", pin="sha256:" + "ab" * 32), limits=FAST)
+        self.assertEqual((e["state"], e["error"]), ("unreachable", "bad-url"))
+
+    def test_l3_fewer_bytes_than_announced_is_an_error(self):
+        p = self.fake()
+
+        class Short(fakepeer.Handler):
+            def m_normal(self):
+                body = b'{"api":1,"view":"summary"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body) + 50))
+                self.end_headers()
+                self.wfile.write(body)
+        p.server.RequestHandlerClass = Short
+        e = self.poll(p)
+        self.assertEqual((e["state"], e["error"]), ("unreachable", "truncated"))
+
+    def test_l3_a_content_length_that_is_not_a_number_is_a_bad_shape(self):
+        for value in ("abc", "\u00b2", "-5", "1e3", "12 34", ""):
+            p = self.fake()
+
+            class Odd(fakepeer.Handler):
+                def m_normal(self, value=value):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", value)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+            p.server.RequestHandlerClass = Odd
+            e = self.poll(p)
+            self.assertEqual(e["state"], "unreachable", value)
+            self.assertIn(e["error"], ("bad-shape", "bad-json"), value)
+            self.assertNotEqual(e["error"], "connect", value)
+
+    def test_l4_lookups_outstanding_are_bounded(self):
+        stuck = threading.Event()
+        self.addCleanup(stuck.set)
+        block = lambda h, port: (stuck.wait(5), ["100.64.0.1"])[1]  # noqa: E731
+        for _ in range(4):
+            with self.assertRaises(peers.PeerError):
+                peers._resolve("x.test", 80, block, 0.05)  # times out, the thread stays
+        t = time.monotonic()
+        with self.assertRaises(peers.PeerError) as c:
+            peers._resolve("y.test", 80, block, 2.0)
+        self.assertEqual(c.exception.reason, "resolve")  # no fifth thread: refused at once
+        self.assertLess(time.monotonic() - t, 0.5)
+        stuck.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                self.assertEqual(peers._resolve("z.test", 80, lambda h, port: ["100.64.0.1"], 1.0), ["100.64.0.1"])
+                break
+            except peers.PeerError:
+                time.sleep(0.02)
+        else:
+            self.fail("the lookups never came back")
+
+    def test_l5_the_trust_anchors_do_not_come_from_the_environment(self):
+        with mock.patch.dict(os.environ, {"SSL_CERT_FILE": "/evil/ca.pem", "SSL_CERT_DIR": "/evil"}):
+            peers.main(["list"], out=lambda s: None, cfg={"hosts": []})
+            self.assertNotIn("SSL_CERT_FILE", os.environ)
+            self.assertNotIn("SSL_CERT_DIR", os.environ)
+        # and an explicit cafile still works (the tests' own)
+        self.assertEqual(self.poll(self.fake(tls=True), lim=TLS, cafile=PEM)["state"], "ok")
+
+    def test_l6_the_windows_note_is_in_the_security_page(self):
+        text = slurp(os.path.join(ROOT, "SECURITY.md"))
+        self.assertIn("folder ACLs", text.split("## The peer client")[1].split("\n## ")[0])
+
+    def test_l8_more_secret_looking_keys_are_stripped_from_documents(self):
+        doc = {"api": 1, "view": "cpu", "ok": 1, "Secret": 1, "dbPassword": 2, "passwd": 3, "Set-Cookie": 4, "Authorization": 5, "api_key": 6, "apiKey": 7,
+               "api-key": 8, "x": {"csrfToken": 1, "client_secret": 2, "keep": 3}, "list": [{"password": 1, "n": 1}]}
+        got = peers.parse_view("cpu", json.dumps(doc).encode())
+        self.assertEqual(got, {"api": 1, "view": "cpu", "ok": 1, "x": {"keep": 3}, "list": [{"n": 1}]})
+
+    def test_l7_the_known_file_lives_in_its_own_persistent_state_folder(self):
+        with mock.patch.dict(os.environ, {"NUC_CONSOLE_PEERS_STATE": ""}):
+            with mock.patch.object(nuc_config, "PORTABLE", "/data"), mock.patch.object(nuc_config, "BASE_DIR", "/data", create=True):
+                self.assertEqual(nuc_config.peers_state_dir(), os.path.join("/data", "peers-state"))
+            with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", False):
+                self.assertEqual(nuc_config.peers_state_dir(), "/var/lib/nuc-console-peers")
+            with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", True), \
+                    mock.patch.object(nuc_config, "BASE_DIR", os.path.join("C:", "nc"), create=True):
+                self.assertEqual(nuc_config.peers_state_dir(), os.path.join("C:", "nc", "peers-state"))
+        self.assertNotEqual(nuc_config.peers_state_dir(), nuc_config.peers_cache_dir())
+        p = self.fake()
+        poller = peers.Poller([self.peer(p.url)], self.cache, state=self.state, allow_loopback=True, limits=FAST)
+        self.addCleanup(poller.pool.shutdown, False)
+        poller.run_once()
+        self.assertTrue(os.path.isfile(os.path.join(self.state, "known")))
+        self.assertNotIn("known", os.listdir(self.cache))  # a cache wiped at reboot no longer forgets who answered first
+
+    def test_l7_forget_removes_one_identity_and_nothing_else(self):
+        known = peers.Known(self.state)
+        known.ids.update(b="a" * 16, c="c" * 16)
+        known.save(self.state)
+        with mock.patch.object(nuc_config, "peers_cache_dir", lambda: self.cache), mock.patch.object(nuc_config, "peers_state_dir", lambda: self.state):
+            out = []
+            self.assertEqual(peers.main(["forget", "b"], out=out.append, cfg={"hosts": []}), 0)
+            self.assertIn("forgotten", out[0])
+            self.assertEqual(peers.Known(self.state).ids, {"c": "c" * 16})
+            self.assertIn("no identity", self.cli_out(["forget", "b"]))
+            self.assertEqual(peers.main(["forget", "../x"], out=out.append, cfg={"hosts": []}), 2)
+        # the replaced machine is accepted after the forget: the next poll remembers the new id
+        p = self.fake()
+        p.docs["summary"] = fakepeer.summary(host_id="e" * 16)
+        known = peers.Known(self.state)
+        known.ids["b"] = "a" * 16
+        known.save(self.state)
+        poller = peers.Poller([self.peer(p.url)], self.cache, state=self.state, allow_loopback=True, limits=FAST)
+        self.addCleanup(poller.pool.shutdown, False)
+        self.assertEqual(poller.run_once()[0]["state"], "untrusted")
+        known = peers.Known(self.state)
+        known.forget("b")
+        known.save(self.state)
+        again = peers.Poller([self.peer(p.url)], self.cache, state=self.state, allow_loopback=True, limits=FAST)
+        self.addCleanup(again.pool.shutdown, False)
+        self.assertEqual(again.run_once()[0]["state"], "ok")
+        self.assertEqual(peers.Known(self.state).ids["b"], "e" * 16)
+
+    def cli_out(self, argv):
+        out = []
+        peers.main(argv, out=out.append, cfg={"hosts": []})
+        return "\n".join(out)
+
+    def test_m2_main_says_the_folder_is_not_ours(self):
+        os.makedirs(self.cache)
+        spit(os.path.join(self.cache, "package.json"), "{}")
+        out = []
+        with mock.patch.object(nuc_config, "peers_cache_dir", lambda: self.cache), mock.patch.object(nuc_config, "peers_state_dir", lambda: self.state):
+            code = peers.main(["once"], out=out.append, cfg={"hosts": [self.peer("http://100.64.0.1")]}, net=dict(limits=FAST))
+        self.assertEqual(code, 1)
+        self.assertIn("not ours", "\n".join(out))
+        self.assertEqual(os.listdir(self.cache), ["package.json"])
 
 
 if __name__ == "__main__":

@@ -86,6 +86,7 @@ REASONS = {
     "encoding": "the peer sent a compressed or transformed body",
     "content-type": "the answer is not application/json",
     "too-large": "the answer is larger than allowed",
+    "truncated": "the answer ended before the length the peer announced",
     "bad-json": "the answer is not valid JSON",
     "bad-shape": "the answer is not a nuc-console document",
     "api-newer": "the peer speaks a newer API than this client understands",
@@ -112,7 +113,7 @@ class Limits(object):
 
 # ---- Text from a peer --------------------------------------------------------------------------------------------------------------------
 _ODD = frozenset(("Cf", "Zl", "Zp", "Co", "Cs", "Cn"))  # format controls (bidi overrides), line and paragraph separators, unassigned
-_SECRET_KEY = re.compile(r"csrf|token", re.I)
+_SECRET_KEY = re.compile(r"csrf|token|secret|passw|cookie|authorization|api[_-]?key", re.I)
 
 
 def clean(value, n):
@@ -163,6 +164,7 @@ _PORT = re.compile(r"[0-9]{1,5}")
 TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 PRIVATE = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 # addresses of cloud metadata services outside link-local (AWS IPv6, Alibaba): reached from a private or CGNAT range otherwise
+NAT64, SIX2FOUR = ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("2002::/16")
 METADATA = tuple(ipaddress.ip_network(n) for n in ("fd00:ec2::/32", "100.100.100.200/32"))
 
 
@@ -189,16 +191,26 @@ def norm(ip):
     if ip.version == 6:
         if ip.ipv4_mapped is not None:
             return ip.ipv4_mapped
-        if ip in ipaddress.ip_network("64:ff9b::/96"):
+        if ip in NAT64:
             return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
-        if ip in ipaddress.ip_network("2002::/16"):
+        if ip in SIX2FOUR:
             return ipaddress.IPv4Address((int(ip) >> 80) & 0xFFFFFFFF)
     return ip
 
 
 def classify(ip, allow_loopback=False):
-    """-> 'forbidden' | 'loopback' | 'tailnet' | 'private' | 'public'."""
-    ip = norm(ip)
+    """-> 'forbidden' | 'loopback' | 'tailnet' | 'private' | 'public'. What an address EMBEDS (NAT64, 6to4) can only make it forbidden; the
+    range it is in is the range of the address the socket goes to (only ::ffff:a.b.c.d is that IPv4 address), so an IPv6 address that
+    embeds a Tailscale IPv4 address is 'public': https only."""
+    if _kind(norm(ip), allow_loopback) == "forbidden":
+        return "forbidden"
+    actual = reach(ip)
+    if actual.version == 6 and any(actual in n for n in (NAT64, SIX2FOUR)):
+        return "public"
+    return _kind(actual, allow_loopback)
+
+
+def _kind(ip, allow_loopback):
     if ip.is_unspecified or ip.is_multicast or ip.is_link_local or getattr(ip, "is_site_local", False) or ip == ipaddress.IPv4Address("255.255.255.255"):
         return "forbidden"
     if ip.is_loopback:  # before is_reserved: ::1 is inside the reserved ::/8
@@ -313,17 +325,28 @@ def read_secret(path, limit=512):
 
 
 # ---- One request ----------------------------------------------------------------------------------------------------------------------------
+_LOOKUPS = threading.BoundedSemaphore(4)  # at most four name lookups outstanding at once (a stuck getaddrinfo cannot be interrupted)
+
+
 def _resolve(host, port, resolver, timeout):
     """Every address of `host` (text), in the order the system gives them. A resolver that hangs costs `timeout`, not more (a thread)."""
     out = {}
+    if not _LOOKUPS.acquire(False):  # four lookups are already stuck: another thread would only pile up behind a dead resolver
+        raise PeerError("unreachable", "resolve")
 
     def work():
         try:
             out["r"] = [r for r in (resolver or _system_resolver)(host, port)]
         except Exception:  # noqa: BLE001  (any resolver failure is "does not resolve")
             out["r"] = None
+        finally:
+            _LOOKUPS.release()
     th = threading.Thread(target=work, daemon=True)
-    th.start()
+    try:
+        th.start()
+    except RuntimeError:
+        _LOOKUPS.release()
+        raise PeerError("unreachable", "resolve") from None
     th.join(max(0.0, timeout))
     if th.is_alive() or not out.get("r"):
         raise PeerError("unreachable", "timeout" if th.is_alive() else "resolve")
@@ -344,6 +367,13 @@ def _connect(ip, port, timeout):
         s.close()
         raise
     return s
+
+
+def scrub_env():
+    """OpenSSL reads SSL_CERT_FILE and SSL_CERT_DIR for the system's CAs (ssl.create_default_context cannot be told not to): a service that
+    follows the network must not take its trust anchors from its environment. Called by main() before any context exists."""
+    for name in ("SSL_CERT_FILE", "SSL_CERT_DIR"):
+        os.environ.pop(name, None)
 
 
 def _context(pin, cafile):
@@ -458,8 +488,11 @@ def get(t, path, token, cap, limits=None, pin="", insecure=False, allow_loopback
         if (resp.getheader("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             raise PeerError("unreachable", "content-type")
         length = resp.getheader("Content-Length")
-        if length is not None and (not length.strip().isdigit() or int(length) > cap):
-            raise PeerError("unreachable", "too-large")
+        if length is not None:
+            if not re.fullmatch(r"[0-9]{1,15}", length.strip()):
+                raise PeerError("unreachable", "bad-shape")
+            if int(length) > cap:
+                raise PeerError("unreachable", "too-large")
         chunks, got = [], 0
         while True:
             left = end - clock()
@@ -473,6 +506,8 @@ def get(t, path, token, cap, limits=None, pin="", insecure=False, allow_loopback
             got += len(data)
             if got > cap:
                 raise PeerError("unreachable", "too-large")
+        if length is not None and not resp.chunked and got < int(length):
+            raise PeerError("unreachable", "truncated")  # fewer bytes than announced: not the document the peer meant
         date = None
         try:
             date = parsedate_to_datetime(resp.getheader("Date") or "").timestamp()
@@ -600,6 +635,8 @@ def poll_peer(peer, prev=None, wall=time.time, **net):
             t = parse_url(peer["url"])
         except ValueError:
             raise PeerError("unreachable", "bad-url") from None
+        if peer.get("pin") and t.scheme != "https":
+            raise PeerError("unreachable", "bad-url")  # a pin belongs to a certificate: there is none on http
         token = read_secret(peer["token"])
         lim = net.get("limits") or Limits()
         kw = dict(net, pin=peer.get("pin", ""), insecure=bool(peer.get("insecure")), info=info)
@@ -645,7 +682,8 @@ def poll_peer(peer, prev=None, wall=time.time, **net):
 
 
 class Known(object):
-    """host_id of each peer, remembered at the first contact (like an SSH known_hosts): the file `known` in the cache folder."""
+    """host_id of each peer, remembered at the first contact (like an SSH known_hosts): the file `known` in the state folder
+    (nuc_config.peers_state_dir(), which survives a reboot, unlike the cache)."""
     NAME = "known"
 
     def __init__(self, folder):
@@ -667,6 +705,10 @@ class Known(object):
             return True
         return False
 
+    def forget(self, name):
+        """The only way to accept a replaced machine: True when something was remembered."""
+        return self.ids.pop(name, None) is not None
+
     def save(self, folder):
         os.makedirs(folder, 0o755, exist_ok=True)
         write_json(folder, self.NAME, {"v": 1, "ids": self.ids})
@@ -684,7 +726,7 @@ def write_json(folder, name, obj, limit=None):
     tmp = os.path.join(folder, ".%s.tmp" % name)
     try:
         os.remove(tmp)
-    except FileNotFoundError:
+    except OSError:  # nothing there, or not ours to remove: the exclusive open below decides
         pass
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o644)
     try:
@@ -737,27 +779,45 @@ def fleet_doc(entries, now):
     return {"v": 1, "ts": int(now), "worst": worst, "peers": [{"name": e["name"], "state": e["state"]} for e in entries]}
 
 
+OWNER = ".owner"  # the marker of a cache folder this poller made or was given empty
+
+
+def own_folder(folder):
+    """Makes sure `folder` is a real directory (not a link) that this poller may fill and clean: owned by this account (POSIX; Windows relies
+    on the installer's ACLs), and either carrying our marker or empty. OSError('cache folder is not ours') and nothing touched otherwise."""
+    if not os.path.lexists(folder):
+        os.makedirs(folder, 0o755)
+    st = os.lstat(folder)
+    if not stat.S_ISDIR(st.st_mode) or (POSIX and st.st_uid != os.geteuid()):
+        raise OSError("cache folder is not ours")
+    marker = os.path.join(folder, OWNER)
+    if not os.path.lexists(marker):
+        if os.listdir(folder):
+            raise OSError("cache folder is not ours")
+        write_json(folder, OWNER, {"v": 1})
+    elif read_json(marker, 1024) != {"v": 1}:
+        raise OSError("cache folder is not ours")
+
+
 def write_cache(folder, entries, now, keep=None):
-    """Writes one file per entry and fleet.json; removes the files of peers that are no longer configured (`keep`: the names configured)."""
-    os.makedirs(folder, 0o755, exist_ok=True)
+    """Writes one file per entry and fleet.json; removes the file of a peer that fleet.json listed before and `keep` (the names configured)
+    no longer has, and nothing else: foreign files in the folder are never touched (OSError, and nothing written, if the folder is not ours)."""
+    own_folder(folder)
+    before = read_json(os.path.join(folder, "fleet.json"), FLEET_MAX)
+    listed = [p.get("name") for p in before.get("peers", []) if isinstance(p, dict)] if isinstance(before, dict) and isinstance(before.get("peers"), list) else []
     for e in entries:
         try:
             write_json(folder, e["name"] + ".json", e)
         except ValueError:  # too big with its documents: the summary still counts
             write_json(folder, e["name"] + ".json", dict(e, views={}, warn=e["warn"] + ["views-dropped"]))
-    if keep is not None:
-        try:
-            names = os.listdir(folder)
-        except OSError:
-            names = []
-        for fn in names:
-            m = NAME_FILE.fullmatch(fn)
-            if m and m.group(1) not in keep and m.group(1) != "fleet":
-                try:
-                    if stat.S_ISREG(os.lstat(os.path.join(folder, fn)).st_mode):
-                        os.remove(os.path.join(folder, fn))
-                except OSError:
-                    pass
+    for name in listed:
+        if keep is not None and isinstance(name, str) and name not in keep and nuc_config.HOST_NAME_RE.fullmatch(name):
+            path = os.path.join(folder, name + ".json")
+            try:
+                if stat.S_ISREG(os.lstat(path).st_mode):
+                    os.remove(path)
+            except OSError:
+                pass
     write_json(folder, "fleet.json", fleet_doc(entries, now), FLEET_MAX)
 
 
@@ -837,8 +897,10 @@ class Poller(object):
     step(now) does what is due, run_once() everything, run_forever() steps until `stop` is set."""
 
     def __init__(self, peers, folder, interval=INTERVAL, poll=poll_peer, clock=time.monotonic, wall=time.time,
-                 jitter=lambda: random.uniform(0.8, 1.2), workers=WORKERS, **net):
+                 jitter=lambda: random.uniform(0.8, 1.2), workers=WORKERS, state=None, **net):
         self.peers, self.folder = peers, folder
+        self.state = state or nuc_config.peers_state_dir()  # where `known` lives: it survives a reboot, the cache does not
+        self.reported = set()
         self.interval = max(INTERVAL_MIN, interval)
         self.poll, self.clock, self.wall, self.jitter, self.net = poll, clock, wall, jitter, net
         self.pool = ThreadPoolExecutor(max_workers=workers)
@@ -846,7 +908,7 @@ class Poller(object):
         self.fails = {p["name"]: 0 for p in peers}
         self.running = {}
         self.entries = {}
-        self.known = Known(folder)
+        self.known = Known(self.state)
 
     def delay(self, name, entry):
         if entry["state"] in FAILED:
@@ -866,7 +928,7 @@ class Poller(object):
                 entry["state"], entry["error"] = "unreachable", "internal"
             if self.known.check(entry):
                 try:
-                    self.known.save(self.folder)
+                    self.known.save(self.state)
                 except OSError:
                     pass
             self.entries[name] = entry
@@ -882,8 +944,17 @@ class Poller(object):
             if name not in self.running and self.next[name] <= now:
                 self.running[name] = self.pool.submit(self.poll, p, self.entries.get(name) or self.last(name), self.wall, **self.net)
         if changed:
-            self.write()
+            try:
+                self.write()
+            except OSError as e:  # a full disk or a folder that is not ours must not stop the polling: say it once per kind
+                self.complain(e)
         return changed
+
+    def complain(self, e):
+        kind = e.errno or str(e)
+        if kind not in self.reported:
+            self.reported.add(kind)
+            print("nuc-console-peers: cannot write the cache: %s" % (os.strerror(e.errno) if e.errno else e), file=sys.stderr)
 
     def last(self, name):
         return read_cache(self.folder, views=True)["peers"].get(name)
@@ -936,15 +1007,32 @@ def say_entry(e, out):
 
 
 def main(argv=None, out=print, cfg=None, net=None):
+    scrub_env()
     net = net or {}  # the tests': limits, allow_loopback, resolver, cafile (never from the command line or the configuration)
     argv = list(sys.argv[1:] if argv is None else argv)
-    usage = "usage: nuc-console-fleet list | test NAME | once"
+    usage = "usage: nuc-console-fleet list | test NAME | once | forget NAME"
     cfg = cfg or nuc_config.load()
     peers = cfg["hosts"]
-    folder = nuc_config.peers_cache_dir()
-    if not argv or argv[0] not in ("list", "test", "once") or (argv[0] == "test") != (len(argv) == 2) or (argv[0] != "test" and len(argv) != 1):
+    folder, state = nuc_config.peers_cache_dir(), nuc_config.peers_state_dir()
+    if not argv or argv[0] not in ("list", "test", "once", "forget") or (argv[0] in ("test", "forget")) != (len(argv) == 2) or \
+            (argv[0] in ("list", "once") and len(argv) != 1):
         out(usage)
         return 2
+    if argv[0] == "forget":  # the only way to accept a replaced machine; works for a peer no longer in [hosts] too
+        if not nuc_config.HOST_NAME_RE.fullmatch(argv[1]):
+            out("not a peer name: %s" % re.sub(r"[^a-z0-9-]", "?", argv[1][:32]))
+            return 2
+        known = Known(state)
+        if not known.forget(argv[1]):
+            out("%s: no identity is remembered" % argv[1])
+            return 0
+        try:
+            known.save(state)
+        except OSError as err:
+            out("cannot write the state in %s: %s" % (state, os.strerror(err.errno) if err.errno else "error"))
+            return 1
+        out("%s: identity forgotten; the next poll remembers whoever answers first" % argv[1])
+        return 0
     if not peers:
         out("no peers: add some under [hosts] in config.ini (docs/CONFIGURATION.md)")
         return 0 if argv[0] == "list" else 1
@@ -967,14 +1055,14 @@ def main(argv=None, out=print, cfg=None, net=None):
             out("no such peer: %s (see: nuc-console-fleet list)" % re.sub(r"[^a-z0-9-]", "?", argv[1][:32]))
             return 2
         e = poll_peer(peer, **net)
-        Known(folder).check(e, remember=False)
+        Known(state).check(e, remember=False)
         say_entry(e, out)
         return 0 if e["state"] in SUMMARY_STATES + ("stale",) else 1
-    poller = Poller(peers, folder, **net)
+    poller = Poller(peers, folder, state=state, **net)
     try:
         entries = poller.run_once()
     except OSError as err:
-        out("cannot write the cache in %s: %s" % (folder, os.strerror(err.errno) if err.errno else "error"))
+        out("cannot write the cache in %s: %s" % (folder, os.strerror(err.errno) if err.errno else err))
         return 1
     finally:
         poller.pool.shutdown(wait=False)

@@ -46,6 +46,16 @@ def peers_cache_dir():
     return os.path.join(RUN_DIR, "peers") if WINDOWS else RUN_DIR + "-peers"
 
 
+def peers_state_dir():
+    """What the peer poller must remember across reboots (the `known` file: the host_id seen at the first contact): Linux and macOS
+    /var/lib/nuc-console-peers, Windows <ProgramData>\\nuc-console\\peers-state, a portable run <data>/peers-state. $NUC_CONSOLE_PEERS_STATE overrides it."""
+    if os.environ.get("NUC_CONSOLE_PEERS_STATE"):
+        return os.environ["NUC_CONSOLE_PEERS_STATE"]
+    if PORTABLE or WINDOWS:
+        return os.path.join(BASE_DIR, "peers-state")
+    return "/var/lib/nuc-console-peers"
+
+
 HOSTS_MAX = 16  # entries under [hosts]
 HOST_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 HOST_RESERVED = ("fleet",)  # fleet.json is the cache's index
@@ -149,7 +159,9 @@ def parse_hosts(rows, say):
             why = "the value starts with an http:// or https:// URL without spaces or quotes"
         else:
             host["url"] = words[0]
-        for w in words[1:]:
+        if not why and host["url"].lower().startswith("http://") and any(w.lower().startswith("pin=") for w in words[1:]):
+            why = "pin= belongs to an https:// URL (there is no certificate on http)"
+        for w in (words[1:] if not why else []):
             key, eq, val = w.partition("=")
             key = key.lower()
             if not eq or not val:
