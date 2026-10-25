@@ -25,7 +25,9 @@ LOW = ("stale", "unknown")  # not known to be fine
 LOOK = {"ok": "ok", "info": "info", "warn": "warn", "stale": "unknown", "unknown": "unknown", "err": "err", "down": "down",
         "unreachable": "down", "unauthorized": "err", "untrusted": "err", "incompatible": "err"}
 NO_DATA = "no-data"
-TEXT = dict(peers.REASONS, **{NO_DATA: "the poller has no data about this host yet"})
+CLOCK = "clock"
+TEXT = dict(peers.REASONS, **{NO_DATA: "the poller has no data about this host yet",
+                              CLOCK: "the poller's clock is ahead of this machine's: its data cannot be trusted to be fresh"})
 SKEW_S = peers.SKEW_WARN_S  # a clock this far from ours is said
 POLLER_FIX = "sudo systemctl start nuc-console-peers"  # a portable run: python3 src/peers.py serve
 STATE_RE = re.compile(r"[a-z]{2,16}")
@@ -65,8 +67,14 @@ def host_doc(peer, entry, now):
     if state not in peers.STATES or (state in ("ok", "info", "warn") and "state" not in s):
         state = "unknown"  # a word the poller does not use, or a good one with no summary behind it: not known
     err = e.get("error") if e.get("error") in TEXT else ""
+    if state in ("ok", "info", "warn") and (err or e.get("error")):
+        state = "unknown"  # the poller never writes a good state with an error: not known
     if not entry:
         err = NO_DATA
+    elif any(isinstance(e.get(k), (int, float)) and not isinstance(e.get(k), bool) and e[k] - now > SKEW_S for k in ("ts", "last_ok")):
+        if tier(state) < 3:
+            state = "stale"  # stamped in the future (a clock stepped back, a leftover file): that is not fresh data
+        err = CLOCK
     counts = s.get("counts")
     counts = {k: _int(counts.get(k)) or 0 for k in ("err", "warn", "unknown")} if isinstance(counts, dict) else None
     last = _int(e.get("last_ok")) if e else None
@@ -81,18 +89,21 @@ def host_doc(peer, entry, now):
             "insecure": bool(e.get("insecure")), "identity": identity, "error": err}
 
 
-def poller_state(cache):
+def poller_state(cache, now):
     """running | stale | absent, from fleet.json (the poller writes it at every round)."""
     if cache.get("fleet") is None:
         return "absent"
-    return "running" if cache.get("age_s") is not None and cache["age_s"] <= peers.CACHE_STALE_S else "stale"
+    ts = cache["fleet"].get("ts")
+    if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not -SKEW_S <= now - ts <= peers.CACHE_STALE_S:
+        return "stale"  # old, or stamped in the future beyond the tolerance
+    return "running"
 
 
 def build(hosts, folder, me, now, cache=None):
     """The hosts document: {"self": {...}, "hosts": [...], "fleet": {"state", "poller"}}, in the order of [hosts]. Only the cache (views=False)."""
     cache = cache if cache is not None else peers.read_cache(folder, now=now, views=False)
     rows = [host_doc(p, cache["peers"].get(p["name"]), now) for p in hosts]
-    poller = poller_state(cache)
+    poller = poller_state(cache, now)
     states = [r["state"] for r in rows] + ([] if poller == "running" else ["stale"])  # a poller that does not run: nothing is known to be fine
     return {"self": me, "hosts": rows, "fleet": {"state": max(states, key=severity, default="unknown"), "poller": poller}}
 
@@ -189,6 +200,8 @@ def banners(doc):
                     f"start it: {code(POLLER_FIX)} (a portable run: {code('python3 src/peers.py serve')})"))
     for r in doc["hosts"]:
         n = r["name"]
+        if r["error"] == CLOCK:
+            out.append(("!", f"{n}: the poller's clock is ahead of this machine's.", "its data is not taken as fresh; check the time on the machine that runs the poller"))
         if r["identity"] != "ok":
             out.append(("✖", f"{n}: this is not the host that answered first (its identity changed).",
                         f"check the address in [hosts], then {code('nuc-console-fleet forget ' + r['id'])}"))

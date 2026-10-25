@@ -349,6 +349,51 @@ class Fleet(unittest.TestCase):
         self.assertNotIn('data-key="6"', off)
         self.assertIn('<span class="host">', off)
 
+    # ---- the review's findings --------------------------------------------------------------------------------------------------------------
+
+    def test_a_future_stamp_is_not_fresh(self):
+        """ts or last_ok ahead of this clock by more than 60 s: stale with the error word clock, a banner, the fleet follows; 30 s is tolerated."""
+        n = self.now
+        for ahead, fresh in ((30 * 86400, False), (61, False), (30, True)):
+            self.fill([fleetfix.entry("alpha", n, ts=n + ahead)] + [fleetfix.entry(x, n) for x in NAMES[1:]])
+            d = self.doc()
+            a = d["hosts"][0]
+            self.assertEqual((a["state"], a["error"]) == ("ok", ""), fresh, (ahead, a))
+            if not fresh:
+                self.assertEqual((a["state"], a["error"]), ("stale", "clock"))
+                self.assertNotEqual(d["fleet"]["state"], "ok")
+                self.assertIn("poller's clock is ahead", self.page()[2])
+            else:
+                self.assertNotIn("poller's clock is ahead", self.page()[2])
+        self.fill([fleetfix.entry("alpha", n, last_ok=int(n) + 3600)] + [fleetfix.entry(x, n) for x in NAMES[1:]])
+        self.assertEqual(self.doc()["hosts"][0]["error"], "clock")
+
+    def test_a_fleet_stamped_in_the_future_is_a_stale_poller(self):
+        self.fill([fleetfix.entry(x, self.now) for x in NAMES])
+        path = os.path.join(self.cache, "fleet.json")
+        for ahead, want in ((30 * 86400, "stale"), (61, "stale"), (30, "running")):
+            with open(path) as f:
+                doc = json.load(f)
+            doc["ts"] = self.now + ahead
+            os.remove(path)
+            peers.write_json(self.cache, "fleet.json", doc, peers.FLEET_MAX)
+            self.srv.cache.clear()
+            d = self.doc()
+            self.assertEqual(d["fleet"]["poller"], want, ahead)
+            if want == "stale":
+                self.assertNotEqual(d["fleet"]["state"], "ok")
+
+    def test_a_good_state_with_an_error_is_not_known(self):
+        self.fill([fleetfix.entry("alpha", self.now, "ok", error="connect")] + [fleetfix.entry(x, self.now) for x in NAMES[1:]])
+        self.assertEqual(self.doc()["hosts"][0]["state"], "unknown")
+
+    def test_the_settings_row_of_the_fleet_says_when_there_are_no_hosts(self):
+        self.assertIn("\u2714 on</span>", re.search(r'data-feature="fleet".*?</li>', self.page("view=settings")[2], re.S).group(0))
+        render.CFG["hosts"] = []
+        self.srv.cache.clear()
+        row = re.search(r'data-feature="fleet".*?</li>', self.page("view=settings")[2], re.S).group(0)
+        self.assertIn("on (no [hosts])", row)
+
     # ---- the page -------------------------------------------------------------------------------------------------------------------------
 
     def test_the_page_orders_the_cards_worst_first_with_symbol_and_word(self):

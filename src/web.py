@@ -801,7 +801,7 @@ class Server(http.server.ThreadingHTTPServer):
         rows = []
         for key, title, what in FEATURE_WORDS:
             on = bool(feats.get(key, True))
-            state = f'<span class="fs-st {"on" if on else "off"}">{"✔ on" if on else "○ off"}</span>'
+            state = f'<span class="fs-st {"on" if on else "off"}">{("✔ on" if key != "fleet" or render.CFG.get("hosts") else "✔ on (no [hosts])") if on else "○ off"}</span>'
             ctl = (f'<form class="f" method="post" action="/settings/feature">{hidden}<input type="hidden" name="name" value="{key}">'
                    f'<input type="hidden" name="on" value="{"no" if on else "yes"}"><button class="btn{"" if on else " pri"}" type="submit">'
                    f'{"Turn off" if on else "Turn on"}</button></form>' if ok else "")
