@@ -54,7 +54,7 @@ import webmetrics
 import webcss
 import webjs
 import wizard
-from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, check_bind, is_loopback, local_token, page_csp, read_token
+from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, PeerTokens, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
 from webpages import ai_asked, ai_native, ai_nodes, events_here, events_native, events_nodes, health_native, health_nodes, telegram_html
 from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
@@ -159,6 +159,7 @@ class Server(http.server.ThreadingHTTPServer):
 
     def __init__(self, addr, cfg, token="", demo=False, zoom=100):
         self.cfg, self.token, self.zoom = cfg, token, zoom
+        self.peers = PeerTokens(cfg.get("peer_tokens_file", "") if token else "", token)  # other hosts' read-only tokens ([web] peer_tokens_file; needs a token)
         self.allowed = {"localhost", "127.0.0.1", "::1", addr[0].lower(), socket.gethostname().lower()} | set(cfg.get("allowed_hosts", []))
         self.slots = threading.BoundedSemaphore(MAX_CONN)
         self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
@@ -953,6 +954,8 @@ class Server(http.server.ThreadingHTTPServer):
         loop = is_loopback(bind)
         rows.append(("web access", ("loopback only (" + esc(bind) + ")" if loop else esc(bind)) + (", a token is required" if self.token else
                                                                                                ", no token" if loop else "")))
+        if self.peers.path:  # read-only: the labels and when each was last used (a token is never shown; there is no access log by design)
+            rows.append(("peer tokens", self.peers_text()))
         d = cfg.get("display") or {}
         rows.append(("display", f'mode {esc(d.get("mode", "browser"))} · zoom {int(self.zoom)}%'))
         rows.append(("Telegram", esc(self.telegram_text()) + ' · <a class="lnk" href="%s">Telegram page</a>' % esc(page_url(dict(here, view="telegram")))))
@@ -963,6 +966,16 @@ class Server(http.server.ThreadingHTTPServer):
         dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows)
         return (f'<section class="sec" aria-labelledby="sec-about"><h3 class="sech" id="sec-about">About this machine</h3>'
                 f'<p class="sm">Read-only: this page changes nothing on the machine.</p><dl class="about">{dl}</dl></section>')
+
+    def peers_text(self):
+        """The settings page's line about [web] peer_tokens_file: label, scope and last use of each token (HTML, escaped); never a token."""
+        items = []
+        for label, scope, age, wall in self.peers.last():
+            used = "never used" if age is None else "last used %s ago (%s)" % (ui.fmt_ago(age), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(wall)))
+            items.append("<b>%s</b> · %s · %s" % (html.escape(label), html.escape(scope), html.escape(used)))
+        note = "" if self.peers.ignored == 0 else " (the file is refused: see the service log)" if self.peers.ignored < 0 else \
+            " (%d line%s ignored: see the service log)" % (self.peers.ignored, "" if self.peers.ignored == 1 else "s")
+        return ("<br>".join(items) or "none") + html.escape(note)
 
     @staticmethod
     def telegram_text():
@@ -1300,7 +1313,8 @@ def main(argv):
         # macOS/Windows display: the dashboard for this machine's own browser, on loopback only, whatever [web] bind says.
         # A portable run (run.sh / run.ps1, NUC_CONSOLE_HOME) is always like that: nothing listens beyond 127.0.0.1, and [web] token_file is
         # ignored. An installation (macOS/Windows) keeps the token_file the user set.
-        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="" if nuc_config.PORTABLE else cfg["token_file"])
+        cfg = dict(cfg, enabled=True, bind="127.0.0.1", token_file="" if nuc_config.PORTABLE else cfg["token_file"],
+                   peer_tokens_file="" if nuc_config.PORTABLE else cfg["peer_tokens_file"])
     if not cfg["enabled"] and not demo:
         print("nuc-console web view is disabled ([web] enabled = no in config.ini)")
         return 0
