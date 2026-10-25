@@ -196,6 +196,29 @@ thermal = no
 `nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
 Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, user `nuc-console-notify`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
 
+### Fleet poller
+
+The installer also installs `nuc-console-peers.service` (user `nuc-console-peers`, no login, no home), the one process that polls the other nuc-console machines of `[hosts]`
+([CONFIGURATION.md](CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default)). It is **enabled and started only if `config.ini` lists at least one peer** when the
+installer (or `nuc-console-update`) runs; with an empty `[hosts]` it is installed and left disabled, and the installer says so. After adding the first peer:
+
+```sh
+sudo install -o nuc-console-peers -g nuc-console-peers -m 0600 /dev/stdin /etc/nuc-console/peers/lab.token   # paste the token, end with Ctrl+D
+sudo systemctl enable --now nuc-console-peers
+sudo -u nuc-console-peers nuc-console-fleet test lab      # one poll now, in words, as the account that owns the token
+```
+
+- The token folder `/etc/nuc-console/peers` is `0750 root:nuc-console-peers` (made by the installer, set again on every run) and each `NAME.token` is `0600` **owned by `nuc-console-peers`**: the
+  client refuses a token that is group- or world-readable or owned by anybody else (`unauthorized`, `token-file`). A root-owned `0600` file is *not* readable by the service: `chown nuc-console-peers`.
+- Edit `[hosts]` while it runs: the service rereads `config.ini` when it changes (and on `sudo systemctl reload nuc-console-peers`); no restart. Emptying the list clears the cache; the service stays up and idle.
+- `sudo -u nuc-console-peers nuc-console-fleet once|list|forget NAME` keep the cache (`/run/nuc-console-peers`) and the state (`/var/lib/nuc-console-peers`, the remembered `host_id`s) owned by the poller's
+  account; plain `sudo nuc-console-fleet ...` would leave root-owned files there. `journalctl -u nuc-console-peers` shows its few lines (words from a closed list, never a token or a path).
+- Uninstall (`sudo ./install.sh --uninstall`) stops and removes the unit; the account, `/var/lib/nuc-console-peers` and the tokens stay, like `/etc/nuc-console`.
+- A **portable** run (`./run.sh`, `run.cmd`) starts the same poller as a child, only if `[hosts]` has a peer when it starts (a peer added later: restart the launcher), with its tokens in
+  `data/peers/NAME.token` (0600), its cache in `data/peers-cache` and its state in `data/peers-state`; it ends with the launcher. One account: there is no privilege separation there.
+- On macOS and Windows installed hosts the poller is **not yet installed as a service** (the launchd job and the Windows service come with a later step); `nuc-console-fleet once` and a portable run work there.
+- It is outbound only, no listener: `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` (AF_UNIX only because name resolution through systemd-resolved's nss-resolve, nscd or sssd talks to a local socket; the program opens none itself). The unit's comments list each hardening line. Stopping it (SIGTERM) drops the polls not started and waits for the one in flight, which ends by its own 5 s limit: it is gone within about 10 s.
+
 ### Port baseline
 
 The first install stores the set of ports reachable from outside as the *expected* state. Afterwards a new, changed

@@ -40,6 +40,7 @@ with open(PEM) as _f:
     LEAF = _f.read().split("-----BEGIN PRIVATE")[0]
 PIN = "sha256:" + hashlib.sha256(ssl.PEM_cert_to_DER_cert(LEAF)).hexdigest()
 ip = peers.ipaddress.ip_address
+ABS_TOKEN = os.path.join(os.path.abspath(os.sep), "etc", "nuc-console", "peers", "b.token")  # absolute on every OS (a bare "/x" is not on Windows from Python 3.13)
 
 
 def slurp(path):
@@ -111,12 +112,12 @@ class Config(unittest.TestCase):
         return nuc_config.load(path, warn=said.append, overlay=False, **kw), said
 
     def test_the_grammar(self):
-        cfg, said = self.load("[hosts]\nnuc-b = https://nuc-b.example.net token=/x/b.token pin=sha256:%s scope=views alert=yes\n"
-                              "nas = http://100.64.1.7:8787 insecure=no   # a comment\n" % ("AB" * 32))
+        cfg, said = self.load("[hosts]\nnuc-b = https://nuc-b.example.net token=%s pin=sha256:%s scope=views alert=yes\n"
+                              "nas = http://100.64.1.7:8787 insecure=no   # a comment\n" % (ABS_TOKEN, "AB" * 32))
         self.assertEqual(said, [])
         b, nas = cfg["hosts"]
         self.assertEqual((b["name"], b["url"], b["token"], b["pin"], b["scope"], b["alert"], b["insecure"]),
-                         ("nuc-b", "https://nuc-b.example.net", "/x/b.token", "sha256:" + "ab" * 32, "views", True, False))
+                         ("nuc-b", "https://nuc-b.example.net", ABS_TOKEN, "sha256:" + "ab" * 32, "views", True, False))
         self.assertEqual((nas["url"], nas["scope"], nas["alert"]), ("http://100.64.1.7:8787", "summary", False))
         self.assertEqual(nas["token"], os.path.join(nuc_config.peers_token_dir(), "nas.token"))  # the default token path
 
@@ -206,9 +207,9 @@ class Config(unittest.TestCase):
         self.assertIn("hosts", confmigrate.KEEP)
         with open(os.path.join(ROOT, "config", "config.ini"), encoding="utf-8") as f:
             dist = f.read()
-        old = "[web]\nenabled = yes\n\n[hosts]\nnuc-b = https://nuc-b.example.net token=/x/b.token alert=yes\n"
+        old = "[web]\nenabled = yes\n\n[hosts]\nnuc-b = https://nuc-b.example.net token=%s alert=yes\n" % ABS_TOKEN
         new, _lost = confmigrate.build(old, dist)
-        self.assertIn("nuc-b = https://nuc-b.example.net token=/x/b.token alert=yes", new)
+        self.assertIn("nuc-b = https://nuc-b.example.net token=%s alert=yes" % ABS_TOKEN, new)
         self.assertNotIn("legacy", new.split("[hosts]")[-1].split("\n[")[0])
 
     def test_config_ini_documents_the_section(self):
@@ -253,6 +254,31 @@ class Addresses(unittest.TestCase):
                   "240.0.0.1", "255.255.255.255", "192.0.2.1", "198.51.100.7", "203.0.113.9", "198.18.0.1", "2001:db8::1", "::ffff:169.254.169.254",
                   "fec0::1", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1", "fd00:ec2::254", "100.100.100.200", "192.0.0.192"):
             self.assertEqual(peers.classify(ip(a), allow_loopback=True), "forbidden", a)
+
+    def test_the_classes_are_the_same_on_every_python(self):
+        """A fixed table, answered by the explicit networks of peers.py (the stdlib's is_private/is_global/is_reserved changed between versions)."""
+        table = (
+            ("0.0.0.0", "forbidden"), ("0.255.255.255", "forbidden"), ("169.254.169.254", "forbidden"), ("224.0.0.1", "forbidden"),
+            ("240.0.0.1", "forbidden"), ("255.255.255.255", "forbidden"), ("192.0.0.0", "forbidden"), ("192.0.0.192", "forbidden"),
+            ("192.0.2.1", "forbidden"), ("198.51.100.1", "forbidden"), ("203.0.113.1", "forbidden"), ("198.18.0.1", "forbidden"),
+            ("198.19.255.254", "forbidden"), ("192.88.99.1", "forbidden"), ("100.100.100.200", "forbidden"),
+            ("::", "forbidden"), ("::2", "forbidden"), ("::1.2.3.4", "forbidden"), ("fe80::1", "forbidden"), ("ff02::1", "forbidden"),
+            ("fec0::1", "forbidden"), ("2001:db8::1", "forbidden"), ("2001::1", "forbidden"), ("64:ff9b:1::1", "forbidden"), ("100::1", "forbidden"),
+            ("fd00:ec2::254", "forbidden"), ("4000::1", "forbidden"), ("8000::1", "forbidden"), ("5f00::1", "forbidden"),
+            ("10.0.0.1", "private"), ("172.16.0.1", "private"), ("172.31.255.255", "private"), ("192.168.0.1", "private"),
+            ("fc00::1", "private"), ("fd12:3456::1", "private"),
+            ("100.64.0.1", "tailnet"), ("100.127.255.255", "tailnet"), ("fd7a:115c:a1e0::1", "tailnet"),
+            ("1.1.1.1", "public"), ("8.8.8.8", "public"), ("93.184.216.34", "public"), ("172.15.0.1", "public"), ("172.32.0.1", "public"),
+            ("100.63.255.255", "public"), ("100.128.0.1", "public"), ("192.0.1.1", "public"), ("198.17.255.255", "public"), ("198.20.0.1", "public"),
+            ("2606:4700::1111", "public"), ("2001:4860:4860::8888", "public"), ("2a00:1450::1", "public"),
+        )
+        for addr, kind in table:
+            self.assertEqual(peers.classify(ip(addr)), kind, addr)
+        for addr in ("127.0.0.1", "127.255.255.255", "::1"):
+            self.assertEqual((peers.classify(ip(addr)), peers.classify(ip(addr), allow_loopback=True)), ("forbidden", "loopback"), addr)
+        for addr, kind in (("::ffff:10.0.0.1", "private"), ("::ffff:169.254.169.254", "forbidden"), ("::ffff:8.8.8.8", "public"),
+                           ("::ffff:100.64.0.1", "tailnet"), ("64:ff9b::808:808", "public"), ("2002:808:808::", "public")):
+            self.assertEqual(peers.classify(ip(addr)), kind, addr)
 
     def test_loopback_only_for_the_tests(self):
         for a in ("127.0.0.1", "127.8.8.8", "::1", "::ffff:127.0.0.1"):
@@ -453,6 +479,16 @@ class Limits(Base):
 
 # ---- Parsing -------------------------------------------------------------------------------------------------------------------------
 class Parsing(Base):
+    def test_a_nest_the_interpreter_may_or_may_not_survive_is_one_answer(self):
+        for depth in (65, 200, 5000, 100000):  # RecursionError on some Pythons, a parsed list on others: bad-json on all
+            for open_, close in ((b"[", b"]"), (b'{"a":', b"}")):
+                with self.assertRaises(peers.PeerError, msg=depth) as c:
+                    peers.parse_summary(open_ * depth + b"1" + close * depth)
+                self.assertEqual(c.exception.reason, "bad-json", depth)
+        ok = peers.parse_summary(b'{"api":1,"view":"summary","host":"h","x":' + b"[" * 63 + b"]" * 63 + b"}")  # under the limit it is a document
+        self.assertEqual(ok["host"], "h")
+        self.assertEqual(peers.loads(b"[" * 63 + b"]" * 63), eval("[" * 63 + "]" * 63))
+
     def test_bad_documents(self):
         for mode, error in (("empty", "bad-json"), ("not-json", "bad-json"), ("nested", "bad-json"), ("types", "bad-shape")):
             e = self.poll(self.fake(mode=mode))
@@ -782,7 +818,7 @@ class Cache(Base):
         got = peers.read_cache(self.cache)
         self.assertEqual(sorted(got["peers"]), ["a", "b"])
         self.assertEqual((got["peers"]["b"]["state"], got["peers"]["b"]["warn"], got["fleet"]["worst"], got["skipped"]), ("warn", ["legacy-peer"], "warn", 0))
-        for key in ("v", "name", "url_display", "ts", "state", "error", "summary", "views", "scope", "warn", "insecure", "identity"):
+        for key in ("v", "name", "url_display", "ts", "state", "error", "summary", "view_index", "scope", "warn", "insecure", "identity"):
             self.assertIn(key, got["peers"]["a"])
         self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "b.json", "fleet.json"])  # no temporary file left
         if POSIX:
@@ -816,11 +852,12 @@ class Cache(Base):
         self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "fleet.json"])
 
     def test_too_big_with_its_documents_keeps_the_summary(self):
-        big = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 100}})
-        with mock.patch.object(peers, "CACHE_MAX", len(json.dumps(dict(big, views={}), separators=(",", ":"))) + 40):
+        big = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 2000}})
+        with mock.patch.object(peers, "CACHE_MAX", len(json.dumps(dict(big, views={}), separators=(",", ":"))) + 300):
             self.write([big])
-        got = peers.read_cache(self.cache)["peers"]["a"]
-        self.assertEqual((got["views"], got["summary"]["host"], "views-dropped" in got["warn"]), ({}, "nuc-b", True))
+        got = peers.read_cache(self.cache, views=True)["peers"]["a"]
+        self.assertEqual((got["views"], got["view_index"], got["summary"]["host"], "views-dropped" in got["warn"]), ({}, {}, "nuc-b", True))
+        self.assertFalse(os.path.exists(os.path.join(self.cache, "a.views.json")))
 
     def test_the_reader_skips_what_it_cannot_trust(self):
         self.write([self.entry("a")])
@@ -846,16 +883,75 @@ class Cache(Base):
         self.write([self.entry("a")])
         path = os.path.join(self.cache, "a.json")
         doc = json.loads(slurp(path))
-        doc.update(url_display="http://\x1b[31mevil\n", summary={"host": "\x1b]0;x\x07h", "counts": {"err": "9", "warn": 2}, "worst": [1, "w"], "state": "weird",
-                                                                   "api": "1", "extra": 1}, warn=["ok", 5, "\x1b"], skew_s="x", last_ok=-4, age_s=True,
-                   views={"cpu": {"view": "cpu", "csrf": "z", "x": "\x1b[0m"}, "ai": {"view": "ai"}, "map": {"view": "cpu"}})
+        views = {"cpu": {"view": "cpu", "csrf": "z", "x": "\x1b[0m"}, "ai": {"view": "ai"}, "map": {"view": "cpu"}}
+        spit(os.path.join(self.cache, "a.views.json"), json.dumps({"v": 1, "views": views}))
+        doc.update(view_index={"cpu": {"size": 5, "ts": 1}, "ai": {"size": 1, "ts": 1}, "map": {"size": "x", "ts": 1}}, url_display="http://\x1b[31mevil\n", summary={"host": "\x1b]0;x\x07h", "counts": {"err": "9", "warn": 2}, "worst": [1, "w"], "state": "weird",
+                                                                   "api": "1", "extra": 1}, warn=["ok", 5, "\x1b"], skew_s="x", last_ok=-4, age_s=True)
         spit(path, json.dumps(doc))
         got = peers.read_cache(self.cache, views=True)["peers"]["a"]
         self.assertEqual(got["summary"], {"host": "?]0;x?h", "counts": {"warn": 2}, "worst": ["w"]})
         self.assertEqual((got["warn"], got["skew_s"], got["last_ok"], got["age_s"]), (["ok", "?"], None, None, None))
         self.assertNotIn("\x1b", got["url_display"])
         self.assertEqual(got["views"], {"cpu": {"view": "cpu", "x": "?[0m"}})
-        self.assertEqual(peers.read_cache(self.cache)["peers"]["a"]["views"], {})  # not unless asked
+        cheap = peers.read_cache(self.cache)["peers"]["a"]
+        self.assertNotIn("views", cheap)  # not unless asked
+        self.assertEqual(cheap["view_index"], {"cpu": {"size": 5, "ts": 1}})  # only the names of the known documents, typed
+        self.assertEqual(peers.read_views(self.cache, "a"), {"cpu": {"view": "cpu", "x": "?[0m"}})
+
+    def test_the_documents_live_in_their_own_file_and_the_cheap_read_never_opens_it(self):
+        e = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 5000}, "map": {"api": 1, "view": "map"}})
+        self.write([e])
+        self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "a.views.json", "fleet.json"])
+        main = slurp(os.path.join(self.cache, "a.json"))
+        self.assertNotIn("yyyy", main)
+        self.assertLess(len(main), 1500)
+        self.assertEqual(sorted(json.loads(main)["view_index"]), ["cpu", "map"])
+        self.assertGreater(json.loads(main)["view_index"]["cpu"]["size"], 5000)
+        opened = []
+        real = peers.read_json
+        with mock.patch.object(peers, "read_json", lambda path, limit: opened.append(os.path.basename(path)) or real(path, limit)):
+            cheap = peers.read_cache(self.cache)
+            self.assertNotIn("a.views.json", opened)
+            self.assertEqual((sorted(cheap["peers"]["a"]["view_index"]), "views" in cheap["peers"]["a"], cheap["skipped"]), (["cpu", "map"], False, 0))
+            full = peers.read_cache(self.cache, views=True)["peers"]["a"]
+        self.assertIn("a.views.json", opened)
+        self.assertEqual(sorted(full["views"]), ["cpu", "map"])
+        self.assertEqual(peers.read_views(self.cache, "a")["map"], {"api": 1, "view": "map"})
+        self.assertEqual(peers.read_views(self.cache, "nobody"), {})
+        self.assertEqual(peers.read_views(self.cache, "../a"), {})
+        if POSIX:
+            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.cache, "a.views.json")).st_mode), 0o644)
+
+    def test_a_peer_without_documents_any_more_loses_its_views_file_and_a_views_file_is_not_a_peer(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}})])
+        self.assertTrue(os.path.exists(os.path.join(self.cache, "a.views.json")))
+        self.write([self.entry("a")])
+        self.assertFalse(os.path.exists(os.path.join(self.cache, "a.views.json")))
+        spit(os.path.join(self.cache, "zz.views.json"), "{}")
+        got = peers.read_cache(self.cache)
+        self.assertEqual((sorted(got["peers"]), got["skipped"]), (["a"], 0))
+
+    def test_the_views_files_of_a_peer_no_longer_configured_go_and_foreign_ones_stay(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}}), self.entry("b", views={"cpu": {"view": "cpu"}})])
+        spit(os.path.join(self.cache, "x.views.json"), "{}")  # not ours: fleet.json never listed x
+        peers.write_cache(self.cache, [self.entry("a", views={"cpu": {"view": "cpu"}})], time.time(), keep={"a"})
+        left = set(os.listdir(self.cache))
+        self.assertNotIn("b.json", left)
+        self.assertNotIn("b.views.json", left)
+        self.assertLessEqual({"a.json", "a.views.json", "x.views.json"}, left)
+
+    @unittest.skipUnless(POSIX, "links")
+    def test_a_views_file_that_is_a_link_or_writable_by_others_is_not_read(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}})])
+        path = os.path.join(self.cache, "a.views.json")
+        os.chmod(path, 0o666)
+        self.assertEqual(peers.read_views(self.cache, "a"), {})
+        os.chmod(path, 0o644)
+        self.assertEqual(sorted(peers.read_views(self.cache, "a")), ["cpu"])
+        os.rename(path, path + ".real")
+        os.symlink(path + ".real", path)
+        self.assertEqual(peers.read_views(self.cache, "a"), {})
+        self.assertEqual(sorted(peers.read_cache(self.cache, views=True)["peers"]["a"]["views"]), [])
 
     def test_an_old_entry_is_stale_never_ok(self):
         self.write([self.entry("a", ts=int(time.time()) - 500), self.entry("b", state="err", ts=int(time.time()) - 500),

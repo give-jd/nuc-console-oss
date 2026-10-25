@@ -85,8 +85,8 @@ class Peer(unittest.TestCase):
         if os.path.lexists(cls.path):
             os.remove(cls.path)
         fd = os.open(cls.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
+        with os.fdopen(fd, "wb") as f:  # bytes: the file is UTF-8 whatever the platform's text encoding (Windows: cp1252) or newline translation
+            f.write(text.encode("utf-8"))
         if POSIX:
             os.chmod(cls.path, mode)
 

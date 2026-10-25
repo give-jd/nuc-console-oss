@@ -364,7 +364,7 @@ The bot **token** is never in `config.ini` (it is world-readable): it lives in t
 
 One line per peer: `name = URL [token=PATH] [pin=sha256:HEX] [scope=summary|views|full] [alert=yes] [insecure=yes]`. The separator is the **space**
 (`config.ini` reads `;` as the start of a comment). It is read by the fleet client, `peers.py`, which polls each peer with one `GET` and keeps what it saw in a
-cache (the poller as a service comes with the next step; today `nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
+cache. On Linux the installer runs it as the service `nuc-console-peers` (own account; started only when this section has a peer; [INSTALL.md](INSTALL.md#fleet-poller)); a portable run starts it with the launcher; on an installed macOS or Windows host it is not yet a service (`nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
 
 ```ini
 [hosts]
@@ -417,7 +417,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
-| `nuc-console-fleet list \| test NAME \| once \| forget NAME` | the `[hosts]` peers: `list` shows them and the last state in the cache, `test NAME` polls one now and says the state and the reason in words (never the token), `once` polls all and writes the cache, `forget NAME` drops the remembered `host_id` of a peer (the way to accept a replaced machine). The token files belong to the poller's account: `sudo -u nuc-console-peers nuc-console-fleet test NAME` |
+| `nuc-console-fleet list \| test NAME \| once \| forget NAME` | the `[hosts]` peers: `list` shows them and the last state in the cache, `test NAME` polls one now and says the state and the reason in words (never the token), `once` polls all and writes the cache, `forget NAME` drops the remembered `host_id` of a peer (the way to accept a replaced machine). The token files belong to the poller's account (`nuc-console-peers`, tokens `0600` owned by it): `sudo -u nuc-console-peers nuc-console-fleet test NAME`. `peers.py serve` is the service itself |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
 | `sudo nuc-console-accept` | accept the current set of exposed ports, and on Linux the accounts, SSH keys, cron files and enabled units, as the baseline (their alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |

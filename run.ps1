@@ -301,6 +301,15 @@ try {
     # token in data\notify (the children inherit NUC_CONSOLE_WEB)
     $env:NUC_CONSOLE_WEB = '1'
     [void](Start-Child (Join-Path $Src 'notify.py') @('--log', (Join-Path $Logs 'notify.log')))
+    # the fleet poller (docs/CONFIGURATION.md, [hosts]): only when config.ini lists a peer; one account, so it reads data\peers and writes
+    # data\peers-cache and data\peers-state itself. A peer added later is picked up at the next start of this script.
+    $old, $needed = $ErrorActionPreference, $false
+    $ErrorActionPreference = 'Continue'  # a native command's stderr must not stop the script
+    $rc = 2
+    try { & $python -B (Join-Path $Src 'peers.py') --needed; $rc = $LASTEXITCODE } finally { $ErrorActionPreference = $old }
+    $needed = ($rc -eq 0)
+    if ($rc -ne 0 -and $rc -ne 1) { Say "the fleet poller was not started: could not tell whether [hosts] in config.ini lists a peer (exit code $rc)" }
+    if ($needed) { [void](Start-Child (Join-Path $Src 'peers.py') @('serve', '--log', (Join-Path $Logs 'peers.log'))) }
     $webLog = Join-Path $Logs 'web.log'
     if (Test-Path -LiteralPath $webLog) { Remove-Item -LiteralPath $webLog -Force }
     $web = Start-Child (Join-Path $Src 'web.py') @('--local', '--port', "$Port", '--log', $webLog)
