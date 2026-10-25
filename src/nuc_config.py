@@ -110,7 +110,7 @@ def load(path=None, warn=None, overlay=True):
     path = path or os.environ.get("NUC_CONSOLE_CONFIG", DEFAULT_PATH)
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
-           "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "",
+           "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "peer_tokens_file": "",
                    "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
@@ -297,6 +297,7 @@ def load(path=None, warn=None, overlay=True):
             say(f"nuc-console: {path}: [web] metrics is not a boolean: kept yes")
         w["bind"] = cp.get("web", "bind", fallback=w["bind"]).strip() or w["bind"]
         w["token_file"] = cp.get("web", "token_file", fallback="").strip()
+        w["peer_tokens_file"] = cp.get("web", "peer_tokens_file", fallback="").strip()  # root's config only: not in OVERLAY_ALLOW
         w["allowed_hosts"] = [h.strip().lower() for h in cp.get("web", "allowed_hosts", fallback="").split(",") if h.strip()]
         try:
             w["port"] = max(1, min(65535, cp.getint("web", "port", fallback=w["port"])))

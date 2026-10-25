@@ -217,6 +217,10 @@ KEYS = (
         ("token_file", TEXT, "", INSTALLED,
          "A file with a secret of 16 characters or more (mode 0600, readable by the nuc-console user): every request must carry it. "
          "Never write the token itself in config.ini.", {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
+        ("peer_tokens_file", TEXT, "", INSTALLED,
+         "A file (mode 0600, owned by the nuc-console user) of tokens that other nuc-console hosts use to watch this one, one per line: "
+         "label scope token (scope summary or views). They read a few documents and can do nothing else. Empty = none.",
+         {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
         ("allowed_hosts", TEXT, "", START,
          "Extra names in the Host header accepted when no token is set, comma-separated (a guard against DNS rebinding): localhost, "
          "127.0.0.1, the bind address, the hostname and *.ts.net always are.",
