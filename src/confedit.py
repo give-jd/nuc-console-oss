@@ -210,6 +210,9 @@ KEYS = (
          "Minutes without a key before the screen goes black and the monitor sleeps; 0 = never.", {"lo": 0, "hi": 60}),
         ("wake_on_problem", BOOL, "yes", INSTALLED,
          "yes: a new problem (or a worse one) wakes a blanked console screen. Only matters with blank_minutes above 0."),
+        ("remote_idle_seconds", INT, "60", START,
+         "Seconds without a key before a remote host's screen (or the Hosts list) goes back to the local screen it was opened from; 0 = never.",
+         {"lo": 0, "hi": 86400}),
     ))
     + _k("host", (
         ("name", TEXT, "", START,

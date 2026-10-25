@@ -968,7 +968,8 @@ def _k(keys, scope, action, label, prio, show="", short=None, feat=""):
 
 # scopes: global (every screen), overview, list (map cpu health ai), then one per screen; editor is the web layout editor (documented
 # only: the console never dispatches it)
-SCOPES = ("global", "overview", "list", "map", "cpu", "health", "ai", "events", "editor")
+SCOPES = ("global", "overview", "list", "map", "cpu", "health", "ai", "events", "hosts", "remote", "editor")
+CONSOLE_FLEET = "console-fleet"  # the console's key 6 (the Hosts screen): a `feat` that only the console switches on (render: [hosts] set and [features] fleet not no)
 LIST_SCREENS = ("map", "cpu", "health", "ai", "events")
 # the screens 1-5 open: (name, [features] switch that has to be on or "", the title in the help)
 SCREENS = (("overview", "", "Overview"), ("map", "map", "Map"), ("cpu", "cpu", "CPU"), ("health", "health", "Health"), ("ai", "ai", "AI"))
@@ -982,6 +983,7 @@ KEYMAP = (
     _k("?", "global", "help", "help", 1, "?"),
     _k("r", "global", "redraw", "redraw now", None, "r"),
     _k("Z", "global", "pause", "pause/resume the redraw", None, "Z"),
+    _k("6", "global", "hosts", "hosts", 6.5, "6", feat=CONSOLE_FLEET),
     _k("tab", "global", "next", "next screen", None, "Tab"),
     _k("btab", "global", "prev", "previous screen", None, "Shift+Tab"),
     # -- the overview
@@ -1016,6 +1018,14 @@ KEYMAP = (
     _k("X", "ai", "delete-all", "delete all", 6, "X", short="all"),
     _k("c", "ai", "cancel", "cancel", 5.1, "c"),
     _k("y n", "ai", "answer", "answer a question", None, "y/n"),
+    # -- the Hosts list (key 6; the other machines of [hosts], worst first; this machine on the first line)
+    _k("up down j k", "hosts", "move", "move", 2, "↑↓"),
+    _k("pgup pgdn home end", "hosts", "page", "page", 9, "PgUp/PgDn/Home/End", short=""),
+    _k("enter space", "hosts", "pick", "open its screens", 4, "Enter", short="open"),
+    # -- one remote host (read-only; its screens come from the poller's cache; the digits and Tab choose ITS views, never a local screen)
+    _k("1 2 3 4 e", "remote", "rview", "its overview, map, CPU, health, events", 3, "1-4 e", short="views"),
+    _k("up down j k pgup pgdn home end", "remote", "scroll", "scroll", 2, "↑↓ PgUp/PgDn", short="scroll"),
+    _k("tab btab", "remote", "rnext", "next/previous view of that host", None, "Tab"),
     # -- the web layout editor (?edit=1): documented here, drawn by the page
     _k("space", "editor", "grab", "grab or drop a card", None, "Space"),
     _k("up down left right", "editor", "nudge", "move it", None, "←↑↓→"),
@@ -1034,12 +1044,22 @@ def chain(scope):
     return [scope] + (["list"] if scope in LIST_SCREENS else []) + ["global"]
 
 
+def _all_but_console(f):
+    """The default `enabled`: every feature on, but not the console's key 6 (only render, which knows [hosts], says it is there)."""
+    return f != CONSOLE_FLEET
+
+
+def _local_only(scope, r):
+    """A remote host's screen has no local screens to go to: the global digits, Tab and 6 are not its keys (its own rows say what they do)."""
+    return scope == "remote" and r.scope == "global" and r.action in ("screen", "next", "prev", "hosts")
+
+
 def rows(scope, enabled=None):
     """The rows in force on a screen, in the order a footer shows them (its list's, its own, the global ones; table order within each). enabled: a function
     (feature name) -> bool that gates the rows with a `feat` (default: all on)."""
-    ok = enabled or (lambda f: True)
+    ok = enabled or _all_but_console
     order = (["list"] if scope in LIST_SCREENS else []) + chain(scope)[:1] + (["global"] if scope not in ("global", "editor") else [])
-    return [r for s in order for r in KEYMAP if r.scope == s and (not r.feat or r.feat == "portable" or ok(r.feat))]
+    return [r for s in order for r in KEYMAP if r.scope == s and (not r.feat or r.feat == "portable" or ok(r.feat)) and not _local_only(scope, r)]
 
 
 def lookup(scope, key):
@@ -1054,14 +1074,14 @@ def lookup(scope, key):
 def action(scope, key, enabled=None):
     """The action a key does on a screen ('' = none). A row whose feature is off does nothing, as if it was not there."""
     r = lookup(scope, key)
-    if r is None or (r.feat and r.feat != "portable" and enabled and not enabled(r.feat)):
+    if r is None or (r.feat and r.feat != "portable" and not (enabled or _all_but_console)(r.feat)):
         return ""
     return r.action
 
 
 def screen_keys(enabled=None):
     """[(digit, screen name)] of the screens a digit opens now: a disabled feature has no digit's action and is not shown."""
-    ok = enabled or (lambda f: True)
+    ok = enabled or _all_but_console
     return [(str(i + 1), name) for i, (name, feat, _t) in enumerate(SCREENS) if not feat or ok(feat)]
 
 
@@ -1131,13 +1151,13 @@ GROUP_TITLE = {"global": "Everywhere", "list": "Lists", "ai": "AI", "cpu": "CPU"
 
 def help_rows(scope, enabled=None, portable=False, paused=False):
     """[(group title, [(keys shown, what it does)])] for the `?` overlay: the screen's own keys first, then the global ones."""
-    ok = enabled or (lambda f: True)
+    ok = enabled or _all_but_console
     names = {n: t for n, _f, t in SCREENS}
     groups = []
     for s in chain(scope):
         items = []
         for r in KEYMAP:
-            if r.scope != s or (r.feat and r.feat != "portable" and not ok(r.feat)):
+            if r.scope != s or (r.feat and r.feat != "portable" and not ok(r.feat)) or _local_only(scope, r):
                 continue
             show, what = r.show, r.label
             if r.action in HELP_MERGED:  # one line for a pair of keys that do the opposite
@@ -1159,6 +1179,8 @@ def help_rows(scope, enabled=None, portable=False, paused=False):
                 what = "resume the redraw" if paused else "pause the redraw"
             elif r.action == "help":
                 what = "this help"
+            elif r.action == "hosts":
+                what = "the other machines of [hosts]"
             elif r.action.startswith("open-"):
                 if r.keys[0] in "mcha":  # the letters that are also a digit
                     what += " (as " + {"m": "2", "c": "3", "h": "4", "a": "5"}[r.keys[0]] + ")"

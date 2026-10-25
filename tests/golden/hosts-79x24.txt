@@ -1,0 +1,24 @@
+[1;41;37m  demo-host │ 1·Ov 2·Map 3·CPU 4·Hlth 5·AI │ Hosts │ 14:13:20  ✖ 15 PROBLEMS  [0m[0m[K
+[36m──[0m[1;36m HOSTS [0m [90mthis host and 5 others[0m[90m · [0m[90mpoller running[0m [36m────────────────────────────[0m[0m[0m[0m[K
+ [1;36mSTATE         [0m [1;36mHOST     [0m [1;36mPROBLEMS        [0m [1;36mDATA    [0m [1;36mVERSION [0m [1;36mTOKEN   [0m [1;36mVIEWS[0m[0m[0m[0m[K
+[7m · this host    demo-host                  live     0.0.0    -        all     [0m[0m[0m[K
+ [31m✖ unreachable[0m  charlie   [32mnone[0m             [90m5 min[0m    2.6.0    [90msummary[0m  [90m0/5[0m[0m[0m[0m[K
+ [31m✖ untrusted[0m    echo      [32mnone[0m             [90m10 s[0m     2.6.0    [90msummary[0m  [90m0/5[0m[0m[0m[0m[K
+ [33m! warn[0m         bravo     [33m2 warn[0m           [90m10 s[0m     2.6.0    [90mviews[0m    [90m4/5[0m[0m[0m[0m[K
+ [32m✔ ok[0m           alpha     [32mnone[0m             [90m10 s[0m     2.6.0    [90mviews[0m    [90m5/5[0m[0m[0m[0m[K
+ [32m✔ ok[0m           delta     [32mnone[0m             [90m10 s[0m     2.6.0    [90mfull[0m     [90m0/5[0m[0m[0m[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m host 1/6  ↑↓: move  Enter: open  1-5: screens  Esc: back  ?: help  6: hosts[0m[0m[0m

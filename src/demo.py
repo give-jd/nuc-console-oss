@@ -957,3 +957,46 @@ def ai_status(os_name=None):
     """What the STATUS section reads: [ai] as that machine's config has it and the last probe of its model server."""
     st = _AI_STATE[os_name if os_name in AI_OSES else "linux"]
     return {"enabled": st["enabled"], "endpoint": st["endpoint"], "model": st["active"] or "", "probe": dict(st["probe"])}
+
+
+# ---- the fleet: peers for the Hosts screen without a poller (only when the demo's config has [hosts]) ----------------------------------------
+_FLEET_STATES = (("ok", "views", 12, (0, 0, 0)), ("warn", "views", 20, (0, 2, 1)), ("unreachable", "views", 300, (1, 0, 0)), ("ok", "summary", 8, (0, 0, 0)),
+                 ("err", "summary", 14, (3, 1, 0)))  # the state, the token scope, the age of the reading, the problem counts, of the 1st, 2nd... peer
+
+
+def _fleet_docs(name, now):
+    """The documents a peer with a views token would have served: a few made-up components of each of the five views, as the web API writes
+    them (webapi.document), read back as the poller keeps them (parsed JSON)."""
+    import json
+    import ui
+    import webapi
+    out = {}
+    cards = [ui.Card("system", "SYSTEM", "", "ok", [ui.KV([("host", name + "-box"), ("load", "0.42 0.38 0.31"), ("uptime", "12d 4h")])]),
+             ui.Card("attention", "ATTENTION", "", "warn", [ui.Msg("warn", "1 container exited with an error")]),
+             ui.Card("exposure", "EXPOSURE", "", "ok", [ui.Msg("ok", "nothing new on the network")])]
+    out["overview"] = {"host": name + "-box", "status": {"state": "warn", "text": "1 PROBLEM"}, "stale": False, "kpis": [
+        ui.Kpi("problems", "problems", "1", "", "warn"), ui.Kpi("cpu", "CPU", "12", "%", "ok")], "cards": cards,
+        "layout": [{"id": x.id, "w": 1} for x in cards]}
+    for view, title in (("map", "MAP"), ("cpu", "CPU"), ("health", "HEALTH"), ("events", "EVENTS")):
+        out[view] = {"nodes": [ui.Title(title, [ui.Span("made-up data of " + name, "muted")]), ui.Msg("info", "the %s screen of %s as its web API serves it" % (view, name))]}
+    return {k: json.loads(bytes(webapi.document(k, v, now))) for k, v in out.items()}
+
+
+def fleet(hosts, now):
+    """(the poller's cache as peers.read_cache returns it, {peer: {view: document}}) for the configured peers: states, ages and counts cycle through
+    _FLEET_STATES, so the Hosts list shows every kind of line; the peers with a views token have documents. Made up; nothing is read or fetched."""
+    entries, docs = {}, {}
+    for i, p in enumerate(hosts):
+        state, scope, age, counts = _FLEET_STATES[i % len(_FLEET_STATES)]
+        name = p["name"]
+        err = "connect" if state == "unreachable" else ""
+        summary = {"host": name + "-box", "status_text": "ALL OK" if state == "ok" else "PROBLEMS", "host_id": ("%02x" % i) * 8, "version": "2.7.0", "os": "linux",
+                   "api": 1, "state": state if state in ("ok", "warn", "err") else "ok", "problems": counts[0] + counts[1],
+                   "counts": {"err": counts[0], "warn": counts[1], "unknown": counts[2]},
+                   "worst": ["Disk almost full", "A container exited"][:counts[0] + counts[1]], "at": now - age}
+        if scope == "views":
+            docs[name] = _fleet_docs(name, now)
+        entries[name] = {"v": 1, "name": name, "url_display": "https://%s.example.net" % name, "ts": int(now - (0 if state != "unreachable" else 300)), "state": state,
+                         "error": err, "scope": scope, "identity": "ok", "insecure": False, "warn": [], "summary": summary, "last_ok": int(now - age),
+                         "skew_s": 0, "age_s": age, "view_index": {k: {"size": 1000, "ts": int(now)} for k in docs.get(name, {})}}
+    return {"peers": entries, "fleet": {"ts": now, "worst": "ok"}, "age_s": 0, "skipped": 0}, docs

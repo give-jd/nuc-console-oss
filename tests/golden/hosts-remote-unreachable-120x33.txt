@@ -1,0 +1,33 @@
+[1;7;35m ⇄ charlie (remote 5m)                                                                                                 [0m[K
+[1;41;37m ✖ UNREACHABLE: this host does not answer; what follows is its last reading                                            [0m[0m[K
+   [90m·[0m not available for this peer: its token has scope summary[0m[K
+   [90m·[0m give that peer's [hosts] line scope=views, with a token the peer accepts for it (docs/WEB.md)[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m 1-4 e: its overview, map, CPU, health, events   ↑↓ PgUp/PgDn: scroll   Esc: back   ?: help[0m[0m
