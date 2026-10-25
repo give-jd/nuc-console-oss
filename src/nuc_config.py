@@ -65,6 +65,9 @@ POSTURE_WORDS = {"secure-boot": "Secure Boot off", "rdp-nla": "RDP without NLA",
                  "filevault": "FileVault off", "sip": "SIP off", "gatekeeper": "Gatekeeper off"}  # fixed words of the alarm text
 
 
+_CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # what ui.safe() strips (nuc_config cannot import ui): a name from the file reaches the journal
+
+
 def posture_wanted(checks, os_name):
     """The checks to run on this OS: the ones asked (an empty list = every check this OS has) that exist here, in the closed set's order."""
     mine = POSTURE_CHECKS.get(os_name, ())
@@ -285,7 +288,7 @@ def load(path=None, warn=None, overlay=True):
                 cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")
     if cp.has_section("posture"):  # enabled = no (default), checks = names of POSTURE_ALL: an unknown name is said and skipped
         for key in [k for k in cp.options("posture") if k not in cp.defaults() and k not in ("enabled", "checks")]:
-            say(f"nuc-console: {path}: [posture] unknown key '{key[:40]}' ignored (known: enabled, checks)")
+            say(f"nuc-console: {path}: [posture] unknown key '{_CTRL.sub('?', key[:40])}' ignored (known: enabled, checks)")
         try:
             cfg["posture"]["enabled"] = cp.getboolean("posture", "enabled", fallback=False)
         except ValueError:
@@ -297,7 +300,7 @@ def load(path=None, warn=None, overlay=True):
             else:
                 why = ("not implemented (it cannot be read without PowerShell or localised text)" if x == "bitlocker"
                        else "unknown (known: %s)" % ", ".join(POSTURE_ALL))
-                say(f"nuc-console: {path}: [posture] checks: '{x[:40]}' is {why}: skipped")
+                say(f"nuc-console: {path}: [posture] checks: '{_CTRL.sub('?', x[:40])}' is {why}: skipped")
     if cp.has_section("containers"):  # restart_ignore = name, *-glob-*: containers that are meant to stay down after a reboot
         for key in [k for k in cp.options("containers") if k not in cp.defaults() and k != "restart_ignore"]:
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")

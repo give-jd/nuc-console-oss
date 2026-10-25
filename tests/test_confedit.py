@@ -62,7 +62,7 @@ def samples(key):
         ("web", "allowed_hosts"): [("Nuc.Example.lan,b.example.ts.net", "nuc.example.lan, b.example.ts.net"), ("", "")],
         ("services", "must_run"): [("docker, ssh, NetworkManager.service", "docker, ssh, NetworkManager.service"), ("", "")],
         ("tls", "watch"): [("nas=192.168.1.20:443, f=" + A_PEM, "nas=192.168.1.20:443, f=" + A_PEM), ("", "")],
-                ("containers", "restart_ignore"): [("Job-1, *-test-*", "job-1, *-test-*"), ("", "")],
+        ("containers", "restart_ignore"): [("Job-1, *-test-*", "job-1, *-test-*"), ("", "")],
         ("telegram", "username"): [("@Some_User", "some_user"), ("", "")],
         ("ai", "endpoint"): [("http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1")],
         ("ai", "model"): [("qwen3-8b", "qwen3-8b"), ("hf.co/example/repo:Q4_K_M", "hf.co/example/repo:Q4_K_M"), ("", "")],

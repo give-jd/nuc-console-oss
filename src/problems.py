@@ -202,7 +202,8 @@ def host_checks(boot, net, cont, now):
             more.append("[tls] watch is set but the check did not run")
     post = boot.get("posture")
     if (CFG.get("posture") or {}).get("enabled") and isinstance(post, dict):  # opt-in; a stale file after the switch went off says nothing
-        states = {c: v for c, v in post.items() if c in nuc_config.POSTURE_WORDS and v in ("ok", "fail", "unknown")}
+        mine = nuc_config.POSTURE_CHECKS.get(boot.get("os") or nuc_config.OS_NAME, ())  # the checks of the host the data comes from: nothing foreign
+        states = {c: v for c, v in post.items() if c in mine and v in ("ok", "fail", "unknown")}
         bad = [c for c in states if states[c] == "fail"]
         if bad:
             bad.sort()

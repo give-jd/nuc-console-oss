@@ -25,9 +25,14 @@ class FakeWinreg:
 
     def __init__(self, values):
         self.values, self.opened = values, []
+        self.keys = {k for k, _ in values}
 
     def OpenKey(self, root, key, reserved, access):
         self.opened.append((root, key, access))
+        if key not in self.keys:
+            raise FileNotFoundError(key)
+        if isinstance(self.values.get((key, "")), Exception):
+            raise self.values[(key, "")]
         return mock.MagicMock(__enter__=lambda s: key, __exit__=lambda *a: False)
 
     def QueryValueEx(self, key, name):
@@ -37,9 +42,12 @@ class FakeWinreg:
         return v if isinstance(v, tuple) else (v, self.REG_DWORD)
 
 
-def reg(**kw):
+def reg(keys=(), **kw):
+    """keys: extra HKLM keys that exist with no value (or, with ("path", ""): an Exception makes the key itself unreadable)."""
     ks = collect_windows.POSTURE_KEYS
-    return FakeWinreg({ks[k]: v for k, v in kw.items()})
+    w = FakeWinreg({ks[k]: v for k, v in kw.items()})
+    w.keys |= {ks[k][0] for k in keys}
+    return w
 
 
 class Windows(unittest.TestCase):
@@ -54,6 +62,41 @@ class Windows(unittest.TestCase):
         w = reg(**{"secure-boot": PermissionError(), "rdp-deny": 0, "rdp-nla": ("x", 1), "smb1": 7})
         self.assertEqual(collect_windows.posture(w, ("secure-boot", "rdp-nla", "smb1")), {"secure-boot": "unknown", "rdp-nla": "unknown", "smb1": "unknown"})
         self.assertEqual(collect_windows.posture(reg(**{"rdp-nla": 0}), ("rdp-nla",)), {"rdp-nla": "unknown"})  # RDP setting missing: nothing to judge
+
+    def test_rdp_policy_and_local_every_combination(self):
+        P = collect_windows.POSTURE_KEYS
+        R = lambda **kw: collect_windows.posture(reg(**kw), ("rdp-nla",))["rdp-nla"]   # noqa: E731
+        # policy absent: the local keys decide
+        self.assertEqual([R(), R(**{"rdp-deny": 1}), R(**{"rdp-deny": 0}), R(**{"rdp-deny": 0, "rdp-nla": 0}), R(**{"rdp-deny": 0, "rdp-nla": 1})],
+                         ["unknown", "ok", "unknown", "fail", "ok"])
+        # policy present wins, per value, over a local value that says the opposite
+        self.assertEqual(R(**{"rdp-deny-policy": 1, "rdp-deny": 0, "rdp-nla": 0}), "ok")              # policy denies RDP
+        self.assertEqual(R(**{"rdp-deny-policy": 0, "rdp-deny": 1, "rdp-nla": 0}), "fail")            # policy enables it, local NLA 0
+        self.assertEqual(R(**{"rdp-deny-policy": 0, "rdp-nla-policy": 1, "rdp-deny": 1, "rdp-nla": 0}), "ok")
+        self.assertEqual(R(**{"rdp-deny-policy": 0, "rdp-nla-policy": 0, "rdp-nla": 1}), "fail")      # policy NLA 0 beats local 1
+        self.assertEqual(R(**{"rdp-deny-policy": 0, "rdp-nla-policy": 0}), "fail")                    # policy only, no local keys
+        self.assertEqual(R(**{"rdp-deny-policy": 0}), "unknown")                                       # enabled, NLA unknown
+        self.assertEqual(R(**{"rdp-nla-policy": 0}), "unknown")                                        # only NLA from the policy, deny unknown
+        self.assertEqual(R(**{"rdp-nla-policy": 0, "rdp-deny": 0}), "fail")                           # mixed sources, both readable
+        # policy key unreadable (access denied on the key or on a value): unknown, whatever the local keys say
+        w = reg(**{"rdp-deny": 1})
+        w.keys.add(P["rdp-deny-policy"][0])
+        w.values[(P["rdp-deny-policy"][0], "")] = PermissionError()
+        self.assertEqual(collect_windows.posture(w, ("rdp-nla",)), {"rdp-nla": "unknown"})
+        self.assertEqual(R(**{"rdp-deny-policy": PermissionError(), "rdp-deny": 1}), "unknown")
+        self.assertEqual(R(**{"rdp-deny-policy": 0, "rdp-nla-policy": PermissionError(), "rdp-nla": 1}), "unknown")
+
+    def test_smb1_value_then_driver(self):
+        S = lambda keys=(), **kw: collect_windows.posture(reg(keys=keys, **kw), ("smb1",))["smb1"]   # noqa: E731
+        self.assertEqual([S(smb1=0), S(smb1=1), S(smb1=5)], ["ok", "fail", "unknown"])
+        self.assertEqual(S(**{"smb1": 0, "smb1-driver": 3}), "ok")                  # an explicit 0 wins over the driver
+        self.assertEqual(S(), "ok")                                                  # no value, no mrxsmb10 key: no SMB1 server
+        self.assertEqual([S(**{"smb1-driver": n}) for n in (0, 1, 2, 3, 4)], ["fail", "fail", "fail", "fail", "ok"])
+        self.assertEqual(S(**{"smb1-driver": 9}), "unknown")
+        self.assertEqual(S(keys=("smb1-driver",)), "unknown")                       # key there, Start missing: ambiguous
+        self.assertEqual(S(**{"smb1-driver": ("x", 1)}), "unknown")                 # not a DWORD
+        self.assertEqual(S(**{"smb1-driver": PermissionError()}), "unknown")
+        self.assertEqual(S(smb1=PermissionError()), "unknown")
 
     def test_64_bit_view_and_only_the_asked_keys(self):
         w = reg(**{"secure-boot": 1})
@@ -111,6 +154,21 @@ class Config(unittest.TestCase):
         got = self.load("[posture]\nenabled = yes\nchecks = SIP, smb1, bitlocker, nonsense, sip; filevault\n")
         self.assertEqual(got, {"enabled": True, "checks": ["sip", "smb1", "filevault"]})
         self.assertEqual(self.load("[posture]\nenabled = maybe\n")["enabled"], False)
+
+    def test_a_bad_name_is_sanitised_in_the_message(self):
+        import tempfile, shutil
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        path = os.path.join(d, "config.ini")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("[posture]\nchecks = bad\x1b[2Jname\n")
+        said = []
+        with mock.patch("sys.stderr") as err:
+            err.write.side_effect = said.append
+            nuc_config.load(path)
+        text = "".join(said)
+        self.assertIn("[posture] checks", text)
+        self.assertNotIn("\x1b", text)
 
     def test_which_checks_run_where(self):
         W = nuc_config.posture_wanted
@@ -187,15 +245,23 @@ class Problem(unittest.TestCase):
 
     def test_text_and_unknown(self):
         with golden.FrozenWorld(cfg=ON):
-            self.assertEqual(raw(boot(posture={"filevault": "ok", "sip": "ok"})), {})
-            self.assertEqual(raw(boot(posture={"sip": "fail", "filevault": "fail"}))["posture"], (1, "security posture: FileVault off, SIP off"))
-            self.assertEqual(raw(boot(posture={"sip": "fail", "filevault": "unknown"}))["posture"], (1, "security posture: SIP off"))   # one unknown among others: quiet
-            self.assertEqual(raw(boot(posture={"sip": "unknown", "filevault": "unknown"}))["posture"], (1, "posture checks could not be read"))
-            self.assertEqual(raw(boot(posture={"bogus": "fail", "sip": "weird"})), {})
-            self.assertEqual(raw(boot(posture={})), {})
-            self.assertEqual(raw(boot(posture="x")), {})
-            names = ("secure-boot", "rdp-nla", "smb1", "filevault", "sip")
-            self.assertEqual(raw(boot(posture={c: "fail" for c in names}))["posture"][1], "security posture: FileVault off, RDP without NLA, Secure Boot off … +2")
+            M = lambda **p: boot(os="darwin", posture=p)   # noqa: E731
+            self.assertEqual(raw(M(filevault="ok", sip="ok")), {})
+            self.assertEqual(raw(M(sip="fail", filevault="fail"))["posture"], (1, "security posture: FileVault off, SIP off"))
+            self.assertEqual(raw(M(sip="fail", filevault="unknown"))["posture"], (1, "security posture: SIP off"))   # one unknown among others: quiet
+            self.assertEqual(raw(M(sip="unknown", filevault="unknown"))["posture"], (1, "posture checks could not be read"))
+            self.assertEqual(raw(M(bogus="fail", sip="weird")), {})
+            self.assertEqual(raw(M()), {})
+            self.assertEqual(raw(boot(os="darwin", posture="x")), {})
+            self.assertEqual(raw(boot(os="windows", posture={"smb1": "fail", "secure-boot": "fail", "rdp-nla": "fail"}))["posture"][1],
+                             "security posture: RDP without NLA, Secure Boot off, SMB1 enabled")
+
+    def test_only_the_checks_of_the_hosts_own_os(self):
+        with golden.FrozenWorld(cfg=ON):
+            self.assertEqual(raw(boot(os="windows", posture={"filevault": "fail", "sip": "fail"})), {})      # a foreign shape says nothing
+            self.assertEqual(raw(boot(os="darwin", posture={"smb1": "fail"})), {})
+            self.assertEqual(raw(boot(os="linux", posture={"sip": "fail", "smb1": "fail"})), {})
+            self.assertEqual(raw(boot(os="windows", posture={"smb1": "fail", "sip": "fail"}))["posture"], (1, "security posture: SMB1 enabled"))
 
     def test_the_decisions(self):
         self.assertNotIn("posture", nuc_config.MUTABLE_ALERTS)
