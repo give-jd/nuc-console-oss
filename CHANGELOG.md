@@ -3,7 +3,9 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.8.0] - 2026-10-25
+
+One console can now watch other nuc-console machines. Nothing changes until `[hosts]` lists a peer: a host identity, per-watcher peer tokens, a poller that runs as a service on every OS, a Hosts tab in the web view and a Hosts screen on the console (key `6`) that shows a peer's full read-only views, and alarms for a peer that is down, insecure or replaced. Also opt-in posture alarms (Secure Boot, RDP without NLA, SMB1; FileVault, SIP, Gatekeeper) and a fix for the connection reset a refused form could cause on Windows.
 
 ### Fixed
 - **A refused form no longer resets the connection**: a `POST` answered with an error before its body was read (`403`, `413`, `415`, `421`...) now swallows and drops at most 64 KB of the body (0.25 s at most, and not at all when nothing follows the headers) before closing, so the client reads the refusal instead of a TCP reset (seen as intermittent `ConnectionResetError` on Windows). The body is still never read into memory.
