@@ -24,7 +24,6 @@ import json
 import os
 import re
 import secrets
-import socket
 import ssl
 import stat
 import subprocess
@@ -122,8 +121,10 @@ def redact(text, *hide):
     return TOKEN_ANY.sub("<redacted>", BOT_URL.sub("bot<redacted>", s))
 
 
-def hostname():
-    return clean(socket.gethostname(), 60) or "this machine"
+def hostname(cfg=None):
+    """The name in every message: [host] name, else the host name."""
+    cfg = cfg or nuc_config.load(warn=lambda _line: None)  # a bad [host] name is said by the services that load the file for their own use
+    return clean(nuc_config.host_label(cfg), 60) or "this machine"
 
 
 class TelegramError(Exception):
