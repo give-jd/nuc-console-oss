@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- nuc-console fleet poller, as the unprivileged user _nuc-console-peers (its own: nobody else reads the tokens of the peers). install-macos.sh
+     writes this file always but loads it only when [hosts] in config.ini lists a peer (peers.py: needed). Outbound only: one GET per peer over
+     http/https; no listener, no socket. Tokens: /etc/nuc-console/peers (0750 root:_nuc-console-peers, each NAME.token 0600 owned by the poller);
+     state: /var/lib/nuc-console-peers (0750); what it saw: /var/lib/nuc-console-peers-cache (0755, read by the web view and the console).
+     -E: no PYTHON* variable from the environment; -B: no bytecode written. It rereads [hosts] when config.ini changes. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.nuc-console.peers</string>
+    <key>ProgramArguments</key>
+    <array><string>@PYTHON@</string><string>-E</string><string>-B</string><string>@DEST@/peers.py</string><string>serve</string></array>
+    <key>UserName</key><string>_nuc-console-peers</string>
+    <key>GroupName</key><string>_nuc-console-peers</string>
+    <!-- 0022: the cache files are meant to be read by the web view's account -->
+    <key>Umask</key><integer>18</integer>
+    <key>RunAtLoad</key><true/>
+    <!-- exit 0 (SIGTERM) = stopped on purpose: no restart; a crash comes back after 30 s -->
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+    <key>ThrottleInterval</key><integer>30</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>StandardOutPath</key><string>/var/log/nuc-console/peers.log</string>
+    <key>StandardErrorPath</key><string>/var/log/nuc-console/peers.log</string>
+</dict>
+</plist>

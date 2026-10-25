@@ -127,10 +127,13 @@ class Config(unittest.TestCase):
             with mock.patch.object(nuc_config, "PORTABLE", "/data"), mock.patch.object(nuc_config, "BASE_DIR", "/data", create=True):
                 self.assertEqual(nuc_config.peers_cache_dir(), os.path.join("/data", "peers-cache"))
             with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", False), \
-                    mock.patch.object(nuc_config, "RUN_DIR", "/run/nuc-console"):
+                    mock.patch.object(nuc_config, "MACOS", False), mock.patch.object(nuc_config, "RUN_DIR", "/run/nuc-console"):
                 self.assertEqual(nuc_config.peers_cache_dir(), "/run/nuc-console-peers")
+            with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", False), \
+                    mock.patch.object(nuc_config, "MACOS", True), mock.patch.object(nuc_config, "RUN_DIR", "/var/run/nuc-console"):
+                self.assertEqual(nuc_config.peers_cache_dir(), "/var/lib/nuc-console-peers-cache")  # the folder install-macos.sh makes
             with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", True), \
-                    mock.patch.object(nuc_config, "RUN_DIR", os.path.join("C:", "nc", "run")):
+                    mock.patch.object(nuc_config, "MACOS", False), mock.patch.object(nuc_config, "RUN_DIR", os.path.join("C:", "nc", "run")):
                 self.assertEqual(nuc_config.peers_cache_dir(), os.path.join("C:", "nc", "run", "peers"))
 
     def test_a_semicolon_is_a_comment_so_the_separator_is_a_space(self):
@@ -952,6 +955,15 @@ class Cache(Base):
         os.symlink(path + ".real", path)
         self.assertEqual(peers.read_views(self.cache, "a"), {})
         self.assertEqual(sorted(peers.read_cache(self.cache, views=True)["peers"]["a"]["views"]), [])
+
+    def test_a_day_old_cache_left_across_a_reboot_is_stale_and_the_poller_not_running(self):
+        """macOS keeps its cache in /var/lib (not a tmpfs): after a reboot with the poller off, the old files show as no data, not as a green host."""
+        import webhosts
+        self.write([self.entry("a"), self.entry("b", state="warn")])
+        now = time.time() + 86400
+        got = peers.read_cache(self.cache, now=now)
+        self.assertEqual({n: (e["state"], e["error"]) for n, e in got["peers"].items()}, {"a": ("stale", "cache-old"), "b": ("stale", "cache-old")})
+        self.assertEqual(webhosts.poller_state(got, now), "stale")
 
     def test_an_old_entry_is_stale_never_ok(self):
         self.write([self.entry("a", ts=int(time.time()) - 500), self.entry("b", state="err", ts=int(time.time()) - 500),

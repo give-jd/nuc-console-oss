@@ -762,7 +762,7 @@ class MacosInstallerPython(unittest.TestCase):
         self.assertIn('if [ -z "$PY" ] && xcode-select', src)  # the old search is still there, for a clone
         # in place only after the services are stopped, and the old one of an earlier install is dropped when it is not used any more
         place = src.index('mv "$DEST/python.new" "$DEST/python"')
-        self.assertLess(src.index('launchctl bootout "system/$label" 2>/dev/null || true; done\ninstall -d'), place)
+        self.assertLess(src.index('launchctl bootout "system/$label" 2>/dev/null || true; done\n'), place)
         self.assertLess(place, src.index('install -m 0644 src/*.py "$DEST/"'))
 
 

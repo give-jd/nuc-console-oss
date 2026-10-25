@@ -46,6 +46,7 @@ system warns the first time:
   ([WEB.md](WEB.md#the-settings-pages-configini)).
 - **Phone alerts**: ⚙ settings › *Phone alerts* › *Set up Telegram alerts* walks you through a Telegram bot of your own (create it, pair it,
   press Start, send a test); the app starts the notifier itself ([TELEGRAM.md](TELEGRAM.md#in-the-desktop-app-and-a-portable-run)).
+- **Other hosts** (`[hosts]` in the app's `config.ini`): the app starts the core through `core/run.sh` (`core\run.ps1`), and that starts the fleet poller too, only if `[hosts]` has a peer when the app starts; tokens in `data/peers/NAME.token`. The app is an observer: it listens on 127.0.0.1 only and ignores `[web]`, so other hosts cannot poll it ([INSTALL.md](INSTALL.md#fleet-poller)).
 
 On GNOME without the AppIndicator extension (Fedora's default) there is no tray icon: start the app again to show the window, and
 quit it with `nuc-console --quit`. Ubuntu, KDE, Xfce, Cinnamon and the others show it.

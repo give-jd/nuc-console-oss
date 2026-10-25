@@ -39,12 +39,14 @@ def peers_token_dir():
 
 
 def peers_cache_dir():
-    """Where the peer poller (peers.py) writes what it saw: Linux /run/nuc-console-peers, macOS /var/run/nuc-console-peers, Windows
+    """Where the peer poller (peers.py) writes what it saw: Linux /run/nuc-console-peers, macOS /var/lib/nuc-console-peers-cache, Windows
     <ProgramData>\\nuc-console\\run\\peers, a portable run <data>/peers-cache. $NUC_CONSOLE_PEERS_CACHE overrides it."""
     if os.environ.get("NUC_CONSOLE_PEERS_CACHE"):
         return os.environ["NUC_CONSOLE_PEERS_CACHE"]
     if PORTABLE:
         return os.path.join(BASE_DIR, "peers-cache")
+    if MACOS:  # /var/run is root's (and emptied at boot): the installer makes this folder for the poller's account instead
+        return "/var/lib/nuc-console-peers-cache"
     return os.path.join(RUN_DIR, "peers") if WINDOWS else RUN_DIR + "-peers"
 
 

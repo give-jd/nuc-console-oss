@@ -13,7 +13,8 @@
 #      the baseline to /var/lib/nuc-console, logs to /var/log/nuc-console (rotated by newsyslog);
 #   3. starts the collector as a LaunchDaemon (root) and the web view (read-only; only the AI page has buttons) as user _nuc-console, on 127.0.0.1 only
 #      (as configured in [web] if enabled there): it shows the dashboard to this Mac's browser; and the optional Telegram
-#      notifier (outbound HTTPS to api.telegram.org only, idle until switched on: docs/TELEGRAM.md) as the same user;
+#      notifier (outbound HTTPS to api.telegram.org only, idle until switched on: docs/TELEGRAM.md) as the same user; and, only while
+#      [hosts] in config.ini lists a peer, the fleet poller (outbound only) as its own user _nuc-console-peers (docs/INSTALL.md, "Fleet poller");
 #   4. a LaunchAgent opens the dashboard at every desktop login, and now: [display] mode = browser (default) in a normal
 #      window of your browser; fullscreen: full screen (a Chrome/Edge/Brave window if installed, else Safari: press
 #      Ctrl+Cmd+F once; Cmd+Q closes it); none: never. /Applications/nuc-console.webloc opens it again any time.
@@ -27,6 +28,10 @@ DEST=/opt/nuc-console
 ETC=/etc/nuc-console
 LIB=/var/lib/nuc-console
 NOTIFY_LIB=/var/lib/nuc-console-notify  # the Telegram notifier's own folder: bot token, paired chat
+PEERS_USER=_nuc-console-peers  # the fleet poller's own account: the only one that reads the tokens of the peers
+PEERS_LABEL=com.nuc-console.peers
+PEERS_LIB=/var/lib/nuc-console-peers  # its state (the `known` file); nuc_config.peers_state_dir()
+PEERS_CACHE=/var/lib/nuc-console-peers-cache  # what it saw, readable by everybody; nuc_config.peers_cache_dir() (not /var/run: that is root's and is emptied at boot)
 LOG=/var/log/nuc-console
 LD=/Library/LaunchDaemons
 LA=/Library/LaunchAgents
@@ -41,14 +46,14 @@ CONSOLE_UID="$(stat -f %u /dev/console)"  # the user at the screen (0 at the log
 
 if [ "${1:-}" = "--uninstall" ]; then
     # com.nuc-console.ai: the local AI model server, there only after `nuc-console-ai serve --install-service`
-    for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify com.nuc-console.ai; do launchctl bootout "system/$label" 2>/dev/null || true; done
+    for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify com.nuc-console.peers com.nuc-console.ai; do launchctl bootout "system/$label" 2>/dev/null || true; done
     [ "$CONSOLE_UID" = 0 ] || launchctl bootout "gui/$CONSOLE_UID/com.nuc-console.display" 2>/dev/null || true
     rm -f "$LD"/com.nuc-console.*.plist "$LA/com.nuc-console.display.plist" /etc/newsyslog.d/nuc-console.conf /etc/newsyslog.d/nuc-console-ai.conf /Applications/nuc-console.webloc
     for link in /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask /usr/local/bin/nuc-console-telegram /usr/local/bin/nuc-console-fleet /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai /usr/local/sbin/nuc-console-config; do
         if [ -L "$link" ]; then rm -f "$link"; fi
     done
-    rm -rf "$DEST" "$NOTIFY_LIB"  # the Telegram bot token is in the notifier's folder: it must not outlive the installation
-    echo "removed ($ETC, $LIB, $LOG, the download cache $CACHE and the user $SVC_USER are left in place; so are the AI runtime and models in \"/Library/Application Support/nuc-console/ai\": delete that folder to free the disk)"
+    rm -rf "$DEST" "$NOTIFY_LIB" "$PEERS_CACHE"  # the Telegram bot token is in the notifier's folder: it must not outlive the installation
+    echo "removed ($ETC, with the tokens of the peers in $ETC/peers, $LIB, $PEERS_LIB, $LOG, the download cache $CACHE and the users $SVC_USER and $PEERS_USER are left in place; so are the AI runtime and models in \"/Library/Application Support/nuc-console/ai\": delete that folder to free the disk)"
     exit 0
 fi
 
@@ -146,7 +151,8 @@ load() {  # right after a bootout launchd may still be unloading the job: retry 
     for _ in 1 2 3 4 5; do launchctl bootstrap "$1" "$2" 2>/dev/null && return 0; sleep 1; done
     launchctl bootstrap "$1" "$2"
 }
-ensure_service_user() {  # the web view and the Telegram notifier run as this account, never as root
+ensure_service_user() {  # $1: the account (default: the web view's and the Telegram notifier's, never root), $2: its description
+    local SVC_USER="${1:-$SVC_USER}" DESCR="${2:-nuc-console web view}"
     if ! dscl . -read "/Users/$SVC_USER" >/dev/null 2>&1; then  # a hidden service account, like Apple's _www
         id=""
         for i in $(seq 400 499); do
@@ -154,17 +160,23 @@ ensure_service_user() {  # the web view and the Telegram notifier run as this ac
         done
         [ -n "$id" ] || { echo "no free id for $SVC_USER" >&2; exit 1; }
         dscl . -create "/Groups/$SVC_USER" PrimaryGroupID "$id"
-        dscl . -create "/Groups/$SVC_USER" RealName "nuc-console web view"
+        dscl . -create "/Groups/$SVC_USER" RealName "$DESCR"
         dscl . -create "/Users/$SVC_USER" UniqueID "$id"
         dscl . -create "/Users/$SVC_USER" PrimaryGroupID "$id"
         dscl . -create "/Users/$SVC_USER" UserShell /usr/bin/false
         dscl . -create "/Users/$SVC_USER" NFSHomeDirectory /var/empty
-        dscl . -create "/Users/$SVC_USER" RealName "nuc-console web view"
+        dscl . -create "/Users/$SVC_USER" RealName "$DESCR"
         dscl . -create "/Users/$SVC_USER" IsHidden 1
         dscl . -create "/Users/$SVC_USER" Password '*'
     fi
 }
 for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify; do launchctl bootout "system/$label" 2>/dev/null || true; done
+# the fleet poller (docs/INSTALL.md, "Fleet poller"): decided now, from this release's own peers.py, so a running poller is stopped BEFORE the files
+# under it are replaced (it must never import from a half-replaced tree) and loaded again at the end. peers.py --needed: 0 a peer is listed,
+# 1 none, anything else (2: unreadable config.ini, or it did not run) unknown: then a running poller is left as it is.
+peers_rc=0
+"${PY_CHECK:-$PY}" -E -B src/peers.py --needed || peers_rc=$?
+if [ "$peers_rc" -eq 0 ] || [ "$peers_rc" -eq 1 ]; then launchctl bootout "system/$PEERS_LABEL" 2>/dev/null || true; fi
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
 if [ -d "$DEST/python.new" ]; then  # the archive's Python, checked in section 1, now in place (the services are stopped)
     rm -rf "$DEST/python.old"
@@ -236,6 +248,29 @@ echo "$LOG/notify.log  $SVC_USER:$SVC_USER  644  5  1024  *  NJ" >> /etc/newsysl
 fill launchd/com.nuc-console.notify.plist > "$LD/com.nuc-console.notify.plist"
 chown root:wheel "$LD/com.nuc-console.notify.plist" && chmod 0644 "$LD/com.nuc-console.notify.plist"
 load system "$LD/com.nuc-console.notify.plist"
+
+# the fleet poller: outbound only, its own account, so neither the web view nor the notifier can read the tokens. The job is written and loaded only
+# if [hosts] has a peer; with none it is written and disabled. If that is unknown (rc 2) nothing is written or changed: a first install gets no job (it would
+# start at boot without a decision), an upgrade keeps the one it has. launchctl enable/disable keeps a disabled job from starting at boot (RunAtLoad).
+ensure_service_user "$PEERS_USER" "nuc-console fleet poller"
+install -d -m 0750 -o root -g "$PEERS_USER" "$ETC/peers"  # NAME.token: 0600, owned by the poller (what peers.read_secret accepts)
+install -d -m 0750 -o "$PEERS_USER" -g "$PEERS_USER" "$PEERS_LIB"
+install -d -m 0755 -o "$PEERS_USER" -g "$PEERS_USER" "$PEERS_CACHE"
+touch "$LOG/peers.log" && chown "$PEERS_USER:$PEERS_USER" "$LOG/peers.log"
+echo "$LOG/peers.log  $PEERS_USER:$PEERS_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
+if [ "$peers_rc" -eq 0 ] || [ "$peers_rc" -eq 1 ]; then
+    fill "launchd/$PEERS_LABEL.plist" > "$LD/$PEERS_LABEL.plist"
+    chown root:wheel "$LD/$PEERS_LABEL.plist" && chmod 0644 "$LD/$PEERS_LABEL.plist"
+fi
+if [ "$peers_rc" -eq 0 ]; then
+    launchctl enable "system/$PEERS_LABEL" 2>/dev/null || true
+    load system "$LD/$PEERS_LABEL.plist" || echo "warning: the fleet poller did not start: sudo launchctl print system/$PEERS_LABEL" >&2
+elif [ "$peers_rc" -eq 1 ]; then
+    launchctl disable "system/$PEERS_LABEL" 2>/dev/null || true
+    echo "nuc-console: the fleet poller is installed but off ([hosts] is empty): after adding a peer, run sudo nuc-console-update or this installer again (docs/INSTALL.md, Fleet poller)"
+else
+    echo "warning: could not tell whether [hosts] in $ETC/config.ini lists a peer (exit code $peers_rc): the fleet poller is left as it is (not installed, if it was not)" >&2
+fi
 
 # ---- 4. first snapshot, baseline, dashboard ---------------------------------------------------------------------------
 # wait for a net.json written AFTER the collector start: an older one would be stale
