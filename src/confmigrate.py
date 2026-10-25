@@ -25,7 +25,7 @@ LAYOUT_RE = re.compile(r"^#\s*config-layout:\s*(\d+)\s*$", re.M)  # the line of 
 KEY_RE = re.compile(r"^([^\s=:#;\[][^=:]*?)\s*[=:]")
 COMMENT_RE = re.compile(r"\s+([#;].*)$")
 UI_DEFAULT_RE = re.compile(r"^#\s*([a-z_]+)\s*=")  # [ui] keys are listed commented out in the dist: a key set there is meant
-KEEP = ("ui", "webapps", "expose", "backups", "host", "hosts")  # ([host], [hosts]: this machine's own, whatever the layout) carried as the person wrote them: [ui] counts only the keys that are set, the others are free-form lines
+KEEP = ("ui", "webapps", "expose", "backups", "host", "hosts")  # carried as the person wrote them: [ui] counts only the keys that are set, the others are free-form lines
 LEGACY = "# legacy: not in the current layout, kept as it was"
 
 

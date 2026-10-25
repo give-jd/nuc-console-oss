@@ -374,6 +374,35 @@ New and resolved ATTENTION problems, sent to **one** Telegram user by a bot you 
 
 The bot **token** is never in `config.ini` (it is world-readable): it lives in the notifier's own folder (`/var/lib/nuc-console-notify`, Windows `%ProgramData%\nuc-console\notify\private`), readable only by the notifier's own account (Linux `nuc-console-notify`, macOS `_nuc-console`, Windows NETWORK SERVICE), never by the web view's.
 
+## `[hosts]` — other nuc-console machines to watch (none by default)
+
+One line per peer: `name = URL [token=PATH] [pin=sha256:HEX] [scope=summary|views|full] [alert=yes] [insecure=yes]`. The separator is the **space**
+(`config.ini` reads `;` as the start of a comment). It is read by the fleet client, `peers.py`, which polls each peer with one `GET` and keeps what it saw in a
+cache (the poller as a service comes with the next step; today `nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
+
+```ini
+[hosts]
+nuc-b = https://nuc-b.example.ts.net
+nas   = http://100.64.1.7:8787 scope=views alert=yes
+lab   = https://192.168.1.20:8443 pin=sha256:3f1c...e9 token=/etc/nuc-console/peers/lab.token
+```
+
+| Part | Meaning |
+|---|---|
+| name | `a-z`, `0-9`, `-`; 1 to 32 characters, starting with a letter or digit (`fleet` is taken). The name of the cache file and of the token file |
+| URL | `http://` or `https://`, a DNS name or an IP address in its plain spelling (`127.1`, `2130706433`, `0x7f.1` are refused), an optional port 1-65535 and an optional path prefix. No user name, no query, no fragment, no spaces or quotes |
+| `token=PATH` | the file with the token the peer gave this host (`[web] peer_tokens_file` on the peer). Absolute path. Default `/etc/nuc-console/peers/<name>.token` (Windows `%ProgramData%\nuc-console\peers`, a portable run `<data>/peers`). 0600, owned by the account that polls (or root), not a link, in a folder others cannot write to |
+| `pin=sha256:HEX` | only on an `https://` URL (on `http://` the row is refused). For `https://` with a certificate no CA signed: the SHA-256 of the peer's certificate (the DER of the leaf), 64 hex digits. It is checked **instead of** the chain and the name; a different certificate makes the peer `untrusted`, there is no fallback to the CAs |
+| `scope=` | `summary` (default): the status line only. `views`: also the overview, cpu, health, map and events documents, for the screens that show a peer in full (read-only, opaque, size-capped). `full`: the same, for a 2.5.x peer that has no scope tokens yet and is read with its ordinary viewer token (marked with a warning) |
+| `alert=yes` | this peer is meant to raise an alarm when it goes silent (used by the alarm step; no effect yet) |
+| `insecure=yes` | allow plain `http://` to a private (RFC 1918 / ULA) address that is not a Tailscale one. The cache marks the peer `insecure` so that the dashboard can say the token travels in the clear. Never allows plain http to a public address |
+
+Rules that are not options: at most **16** peers; a row that is wrong is ignored and a line on standard error says which (the token's path never is printed with its content);
+`http://` is only for Tailscale addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) unless `insecure=yes`; a public address is `https://` only;
+link-local (169.254.0.0/16 with the cloud metadata address, `fe80::/10`), multicast, unspecified and reserved addresses are never contacted, and loopback is not either.
+`[hosts]` is **not** in the settings overlay and is never written by the settings page, not even in a portable run: edit `config.ini`.
+The poll interval is 15 s (never under 5 s); a peer that fails is retried after 5 s, 10 s, 20 s ... up to 5 minutes. See [SECURITY.md](../SECURITY.md#the-peer-client) for what the client does and refuses.
+
 ## `[ai]` — optional local model for the HEALTH screen (off by default)
 
 What it is, how to choose a model for your hardware, the commands and the security rules: **[AI.md](AI.md)**.
@@ -401,6 +430,7 @@ Windows: the same commands without `sudo`, from an **administrator** prompt for 
 | `nuc-console-update [--check] [--yes] [--installed]` | update to the latest GitHub release when you run it (`sudo` for an installed one; Windows: `-Check` `-Yes` `-Installed`; a portable folder: its own `bin/nuc-console-update`). Never automatic; keeps `config.ini`: [INSTALL.md](INSTALL.md#update) |
 | `./run.sh [--console \| --web] [--port N] [--no-open]`, `run.cmd [-Port N] [-NoOpen]` | run the dashboard from the extracted folder without installing it; `./run.sh --accept [--problem <id> --reason "…" \| --forget <id>]` (`run.cmd -Accept`) accepts like `nuc-console-accept`: [PORTABLE.md](PORTABLE.md) |
 | `sudo nuc-console-config migrate [--dry-run] [--yes]` | bring an old, long `config.ini` to the shipped layout, keeping your settings (a copy is kept): [Upgrading config.ini](#upgrading-configini) |
+| `nuc-console-fleet list \| test NAME \| once \| forget NAME` | the `[hosts]` peers: `list` shows them and the last state in the cache, `test NAME` polls one now and says the state and the reason in words (never the token), `once` polls all and writes the cache, `forget NAME` drops the remembered `host_id` of a peer (the way to accept a replaced machine). The token files belong to the poller's account: `sudo -u nuc-console-peers nuc-console-fleet test NAME` |
 | `nuc-console-problems [--json]` | every current ATTENTION item with id, why it matters and how to fix it (no root); the ones silenced by `[alerts] mute` come last, under `muted` |
 | `sudo nuc-console-accept` | accept the current set of exposed ports, and on Linux the accounts, SSH keys, cron files and enabled units, as the baseline (their alarms) |
 | `sudo nuc-console-accept --problem <id> --reason "…"` | mark a known ATTENTION item as accepted: hidden from the list, counted as "N accepted"; tied to its current severity and text, so a worse situation reappears. Port changes are not accepted this way |
