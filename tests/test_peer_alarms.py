@@ -205,7 +205,7 @@ class Accepting(Base):
         self.assertIn("peer-down", pb.pids)
         i = pb.pids.index("peer-down")
         self.assertEqual(pb[i][0], 2)
-        self.assertEqual(pb.info[i][3], 'sudo nuc-console-accept --problem peer-down --reason "..."' if not nuc_config.PORTABLE else pb.info[i][3])
+        self.assertTrue(pb.info[i][3].endswith('nuc-console-accept --problem peer-down --reason "..."'), pb.info[i][3])  # 'sudo ' on Linux and macOS, none on Windows
         acc = {"peer-down": {"fp": self.fp(problems.peer_rows(ps)), "reason": "r"}}
         with mock.patch.object(problems, "load_accepted", return_value=acc):
             self.assertNotIn("peer-down", problems.problems(net, cont, now=NOW, peers=ps).pids)
