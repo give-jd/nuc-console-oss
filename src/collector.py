@@ -47,7 +47,7 @@ BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b", "users", "keys", "cron", "units", "smart")
 UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "clock", "services", "sshd"),
-                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
+                          "windows": ("blame", "kernlog", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
 UNSUPPORTED_BOOT = UNSUPPORTED_BOOT_BY_OS.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
@@ -981,7 +981,7 @@ def collect_boot():
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
                     ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
-                    ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
+                    ("reboot", cwin.reboot_pending if WINDOWS else collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
                     ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
         section(key, fn)
     return d

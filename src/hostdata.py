@@ -84,7 +84,7 @@ def mac_pressure(sysctl=None):
 
 
 def read_thermal():
-    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None, 'psi': memory some avg60 %|None}.
+    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None, 'psi': memory some avg60 %|None, 'commit': Windows commit charge %|None}.
 
     The maximum is the sensor's own (temp1_max: CPU package, NVMe composite), not a constant of ours.
     """
@@ -107,6 +107,7 @@ def read_thermal():
     out["clk"] = (sum(cur) / len(cur) / 1e6, int(mx) / 1e6) if cur and mx and mx.isdigit() else None
     out["mac_pressure"] = mac_pressure()  # macOS: the level (problems.py judges it, like psi)
     out["psi"] = read_psi()  # memory pressure rides with the sensors (same sampler, same switch); problems.py judges it
+    out["commit"] = None if LINUX else hostinfo.commit_pct()  # Windows: commit charge in % of its limit (the PSI of that system)
     return out
 
 

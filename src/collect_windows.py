@@ -388,6 +388,8 @@ def events_script(cursors=None, first_s=HISTORY_FIRST_S):
 # What each event means. ProviderName is the registered source name: it is not translated, unlike the message.
 SERVICE_CRASH = {7031, 7034}                         # Service Control Manager: a service terminated unexpectedly
 SERVICE_FAILED = {7000, 7001, 7009, 7023, 7024}      # ... failed to start / a dependency failed / timeout / error
+DISK_IDS = {7, 11, 51, 153}                          # disk: bad block, controller error, paging error, I/O retried
+NTFS_IDS = {55, 140}                                 # Ntfs: file system structure corrupt, log flush failed
 LEVEL_ERR = (1, 2)                                   # Critical, Error: also kept as a log template
 
 
@@ -418,9 +420,49 @@ def classify_event(e):
         return "unexpected_shutdown", "system", "Kernel-Power 41"
     if "WHEA-Logger" in prov:
         return "hw_error", "WHEA", "%s %d" % (prov[:48], eid)
+    low = prov.lower()
+    if eid == 4101 and low == "display":  # the display driver stopped responding and was reset (TDR)
+        return "hw_error", "display", "Display 4101"
+    if (low == "disk" and eid in DISK_IDS) or ((low == "ntfs" or low.endswith("-ntfs")) and eid in NTFS_IDS):
+        return "hw_error", "disk", "%s %d" % (prov[:48], eid)
+    if eid == 6008 and low == "eventlog":  # the previous shutdown was unexpected
+        return "unexpected_shutdown", "system", "EventLog 6008"
+    if eid == 1001 and low in ("bugcheck", "microsoft-windows-wer-systemerrorreporting"):  # the machine restarted after a blue screen
+        return "unexpected_shutdown", "system", "BugCheck 1001"
     if eid == 2004 and prov.endswith("Resource-Exhaustion-Detector"):
         return "oom", "low virtual memory", "Resource-Exhaustion-Detector 2004"
     return None
+
+
+# Restart pending (registry only: no PowerShell). Each signal is (name shown, HKLM key, value | None = the key's existence).
+REBOOT_SIGNALS = (
+    ("Windows Update", r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired", None),
+    ("servicing", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending", None),
+    ("files to replace", r"SYSTEM\CurrentControlSet\Control\Session Manager", "PendingFileRenameOperations"),
+)
+
+
+def reboot_pending(reg=None):
+    """{'flag': True | False | None, 'sources': [names of the signals that say yes]} from the registry (`reg` = the winreg module, injected
+    by tests). A signal that cannot be read (access denied, odd type) is unknown, never a no: flag is None when none says yes and one
+    could not be read. Key names and the value's emptiness only: no value content is kept."""
+    if reg is None:
+        import winreg as reg
+    yes, unknown = [], False
+    for name, path, value in REBOOT_SIGNALS:
+        try:
+            with reg.OpenKey(reg.HKEY_LOCAL_MACHINE, path, 0, reg.KEY_READ | reg.KEY_WOW64_64KEY) as k:
+                if value is None:
+                    yes.append(name)
+                else:
+                    data = reg.QueryValueEx(k, value)[0]  # REG_MULTI_SZ: a list of strings
+                    if any(isinstance(s, str) and s for s in data) if isinstance(data, (list, tuple)) else bool(data):
+                        yes.append(name)
+        except FileNotFoundError:  # no key / no value: that signal is off
+            continue
+        except (OSError, ValueError):
+            unknown = True
+    return {"flag": True if yes else None if unknown else False, "sources": yes}
 
 
 def parse_events(data, now=None):

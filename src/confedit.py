@@ -258,6 +258,9 @@ KEYS = (
         ("memory_pressure_pct", INT, "10", NOW,
          "Memory pressure (the kernel's PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises "
          "memory-pressure. 10 is already a machine that waits for memory.", {"lo": 1, "hi": 100}),
+        ("commit_pressure_pct", INT, "90", NOW,
+         "Windows: the commit charge (memory promised to processes) at or above this percent of the commit limit (RAM + page files) "
+         "raises memory-pressure. At 100 the system refuses new allocations.", {"lo": 1, "hi": 100}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,
@@ -290,6 +293,9 @@ KEYS = (
         ("web_actions", BOOL, "yes", LOCK,
          "yes: the AI page and the AI screen may set a model up, switch the AI on and off, delete models and ask; no: they only show (an "
          "administrator's lock)."),
+        ("autostart", BOOL, "yes", START,
+         "yes: when the web view starts (after an update or a reboot) and the AI is on with a model chosen, it starts the model server again "
+         "unless one already answers. no: only the AI page's buttons start it. Applies at the next start of the web view."),
         ("daily", BOOL, "no", START,
          "yes: the collector asks for one digest of the last 7 days a day (at low priority), shown on the HEALTH screen. It needs "
          "enabled = yes and the Health screen."),
