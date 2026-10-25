@@ -37,7 +37,7 @@ import render  # noqa: E402
 # Every alarm id, on one side: the ones a person may silence (how the machine runs) and the ones never (an attack surface, or what its
 # judgement reads, or the alerting itself). MUTABLE_ALERTS must be exactly the first set.
 OPERATIONAL = {"journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot", "reboot-required", "disk-inodes",
-               "container-no-restart", "containers-not-back", "display-stuck", "oom-killed", "memory-pressure", "nic-resets"}
+               "container-no-restart", "containers-not-back", "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down"}
 SECURITY = {
     "ufw-off", "ufw-missing", "ufw-unreadable", "firewall-off", "firewall-unreadable", "firewall-policy",                   # the firewall
     "docker-bypass", "db-open-lan", "funnel-public", "over-exposed", "expose-unmatched",                                     # exposure

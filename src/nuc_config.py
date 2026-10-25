@@ -50,7 +50,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
                   "reboot-required", "disk-inodes",
                   "container-no-restart", "containers-not-back",
-                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets")
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down")
 
 # [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
 # validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
@@ -130,7 +130,7 @@ def load(path=None, warn=None, overlay=True):
                    "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
-                  "daily": False, "gpu": "auto", "web_actions": True},
+                  "daily": False, "gpu": "auto", "web_actions": True, "autostart": True},
            "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["backups"] = {}  # [backups]: name -> {"path": absolute path or glob, "max_age_days": int}; read by the root collector only
@@ -138,7 +138,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
     cfg["containers"] = {"restart_ignore": []}  # [containers] restart_ignore: names or globs (lower case) that container-no-restart skips
-    cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
+    cfg["thresholds"] = {"memory_pressure_pct": 10, "commit_pressure_pct": 90}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
@@ -306,13 +306,14 @@ def load(path=None, warn=None, overlay=True):
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")
         cfg["containers"]["restart_ignore"] = [x for x in re.split(r"[,;\s]+", cp.get("containers", "restart_ignore", fallback="").lower()) if x][:100]
     if cp.has_section("thresholds"):
-        try:
-            pct = cp.getint("thresholds", "memory_pressure_pct", fallback=10)
-            if not 1 <= pct <= 100:
-                raise ValueError
-            cfg["thresholds"]["memory_pressure_pct"] = pct
-        except ValueError:
-            say(f"nuc-console: {path}: [thresholds] memory_pressure_pct must be an integer (1-100): kept at 10")
+        for key, default in (("memory_pressure_pct", 10), ("commit_pressure_pct", 90)):
+            try:
+                pct = cp.getint("thresholds", key, fallback=default)
+                if not 1 <= pct <= 100:
+                    raise ValueError
+                cfg["thresholds"][key] = pct
+            except ValueError:
+                say(f"nuc-console: {path}: [thresholds] {key} must be an integer (1-100): kept at {default}")
     if cp.has_section("web"):
         w = cfg["web"]
         try:
@@ -372,7 +373,7 @@ def load(path=None, warn=None, overlay=True):
             say(f"nuc-console: {path}: [display] zoom must be an integer (percent)")
     if cp.has_section("ai"):  # the optional local model of the HEALTH screen (docs/HEALTH.md): off unless asked for
         ai = cfg["ai"]
-        for key in ("enabled", "allow_remote", "daily", "web_actions"):  # web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
+        for key in ("enabled", "allow_remote", "daily", "web_actions", "autostart"):  # autostart: the web view starts the model server again when it starts; web_actions: the AI screens may download, start and ask (docs/AI.md); no = read-only
             try:
                 ai[key] = cp.getboolean("ai", key, fallback=ai[key])
             except ValueError:

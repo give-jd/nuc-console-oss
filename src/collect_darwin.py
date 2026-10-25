@@ -259,18 +259,19 @@ def daemons(run, plist_dir="/Library/LaunchDaemons"):
 # file that is not a plain file (a link) is never opened.
 
 DIAG_DIRS = ("/Library/Logs/DiagnosticReports", "/Users/*/Library/Logs/DiagnosticReports")
-DIAG_SUFFIXES = (".ips", ".crash", ".hang")
+DIAG_SUFFIXES = (".ips", ".crash", ".hang", ".panic")
 DIAG_HEAD = 4096        # bytes read from a report
 DIAG_CAP = 200          # files per pass; the rest comes next pass
 DIAG_FIRST_S = 30 * 86400
-CRASH_TYPES, HANG_TYPES = {"309"}, {"298", "211"}
+CRASH_TYPES, HANG_TYPES, PANIC_TYPES = {"309"}, {"298", "211"}, {"210"}
 PROCESS_LINE = re.compile(r"^Process:\s+(.+?)\s+\[\d+\]\s*$")
 
 
 def parse_report_head(head, filename):
     """The first bytes of a report + its file name -> (kind, subject, detail), or None for what is not a crash, hang or
     memory-pressure report. JetsamEvent -> oom ('memory pressure'); .hang, bug_type 298/211 -> hang; .crash, bug_type 309 ->
-    crash. Anything else (stackshots, panics...) is not an app trouble report."""
+    crash. A kernel panic (a .panic file, bug_type 210, or Kernel*/panic* .ips) -> unexpected_shutdown ('kernel panic'): the file's date is the
+    event, nothing of the panic string is kept. Anything else (stackshots...) is not a trouble report."""
     import history
     text = head.decode("utf-8", "replace") if isinstance(head, (bytes, bytearray)) else str(head)
     lines = text.splitlines()
@@ -288,6 +289,8 @@ def parse_report_head(head, filename):
             jetsam = jetsam or "JetsamEvent" in (str(h.get("name")), str(h.get("app_name")))
     if jetsam:
         return "oom", "memory pressure", "Jetsam report"
+    if base.endswith(".panic") or bug in PANIC_TYPES or (base.endswith(".ips") and base.startswith(("Kernel", "panic"))):
+        return "unexpected_shutdown", "kernel panic", "panic report"  # before the name test: the head of a panic names no app
     if not name:  # the old format: a "Process:  name [pid]" line near the top
         name = next((history.clean(m.group(1)) for m in (PROCESS_LINE.match(ln) for ln in lines[:40]) if m), "")
     if not name:

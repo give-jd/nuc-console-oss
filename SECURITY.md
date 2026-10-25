@@ -83,7 +83,7 @@ Design rules you can audit in the code:
   `journalctl -o json` with fixed fields (Linux; the cursor it passes back is validated), `docker ps` / `docker inspect` with
   validated ids, a fixed PowerShell script over the System and Application event logs that reads event ids and names, never
   the message text (Windows), and reads the first 4 KB of crash reports in `DiagnosticReports`, regular files only, no links
-  followed (macOS, including the users' folders). The IP addresses and user names of failed logins are never stored.
+  followed (macOS, including the users' folders; kernel panic reports are recorded by file date only), and the root collector reads one plist, `/Library/Preferences/com.apple.SoftwareUpdate.plist` (macOS, a bounded read, counts and a date only). The IP addresses and user names of failed logins are never stored.
 - **The optional local model analyses and never acts.** Off by default (`[ai] enabled = no`; the AI screen, `[features] ai`, reads
   the hardware with fixed commands and no shell, as the unprivileged user, and sets the model up when you click: see the bullet above). The advisor talks only to an endpoint on this machine
   (it refuses any other unless `[ai] allow_remote = yes`, and connects only to the addresses it checked); the model server that
