@@ -1321,6 +1321,8 @@ def main(argv):
     acts = render.CFG["features"].get("ai", True) and advisor.web_actions_on(render.CFG)
     print(f"nuc-console web view on http://{'[' + cfg['bind'] + ']' if ':' in cfg['bind'] else cfg['bind']}:{srv.server_address[1]} "
           f"({'read-only except the buttons of the AI page' if acts else 'read-only'}{', token required' if token else ''})", flush=True)
+    if not demo:
+        render.ai_engine().service_begin()  # only here: the model server is this process's child, so it is started again here after a restart (the console never does)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # a stop is an exit: the model server this process started ends with it (aiweb.shutdown)
     try:
         srv.serve_forever()
