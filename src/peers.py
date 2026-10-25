@@ -799,25 +799,48 @@ def own_folder(folder):
         raise OSError("cache folder is not ours")
 
 
-def write_cache(folder, entries, now, keep=None):
+VIEWS_SUFFIX = ".views.json"  # NAME.views.json: the documents of a peer, apart from NAME.json (summary entry + index): the cheap read stays cheap
+
+
+def _remove_regular(path):
+    try:
+        if stat.S_ISREG(os.lstat(path).st_mode):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def write_entry(folder, e):
+    """One peer's two files: NAME.views.json (the documents, written first, or removed when there are none) and NAME.json (the summary entry
+    and `view_index` {document: {size, ts}}, never the documents). Too big with the documents -> without them (the summary still counts).
+    -> the view index written."""
+    name, views, warn = e["name"], e.get("views") or {}, list(e["warn"])
+    index = {}
+    if views:
+        try:
+            write_json(folder, name + VIEWS_SUFFIX, {"v": 1, "views": views})
+            index = {k: {"size": len(json.dumps(v, separators=(",", ":"))), "ts": int(e["ts"])} for k, v in views.items()}
+        except ValueError:
+            warn.append("views-dropped")
+    if not index:
+        _remove_regular(os.path.join(folder, name + VIEWS_SUFFIX))
+    body = {k: v for k, v in e.items() if k not in ("views", "view_index")}
+    write_json(folder, name + ".json", dict(body, warn=warn, view_index=index))
+    return index
+
+
+def write_cache(folder, entries, now, keep=None, files=True):
     """Writes one file per entry and fleet.json; removes the file of a peer that fleet.json listed before and `keep` (the names configured)
     no longer has, and nothing else: foreign files in the folder are never touched (OSError, and nothing written, if the folder is not ours)."""
     own_folder(folder)
     before = read_json(os.path.join(folder, "fleet.json"), FLEET_MAX)
     listed = [p.get("name") for p in before.get("peers", []) if isinstance(p, dict)] if isinstance(before, dict) and isinstance(before.get("peers"), list) else []
-    for e in entries:
-        try:
-            write_json(folder, e["name"] + ".json", e)
-        except ValueError:  # too big with its documents: the summary still counts
-            write_json(folder, e["name"] + ".json", dict(e, views={}, warn=e["warn"] + ["views-dropped"]))
+    for e in entries if files else ():
+        write_entry(folder, e)
     for name in listed:
         if keep is not None and isinstance(name, str) and name not in keep and nuc_config.HOST_NAME_RE.fullmatch(name):
-            path = os.path.join(folder, name + ".json")
-            try:
-                if stat.S_ISREG(os.lstat(path).st_mode):
-                    os.remove(path)
-            except OSError:
-                pass
+            _remove_regular(os.path.join(folder, name + ".json"))
+            _remove_regular(os.path.join(folder, name + VIEWS_SUFFIX))
     write_json(folder, "fleet.json", fleet_doc(entries, now), FLEET_MAX)
 
 
@@ -840,14 +863,29 @@ def valid_entry(obj, name):
            "ts": ts, "state": obj["state"], "error": err, "scope": obj["scope"], "identity": obj["identity"], "insecure": obj["insecure"],
            "warn": [clean(w, 40) for w in warn if isinstance(w, str)], "summary": flat_summary(obj.get("summary")),
            "last_ok": _int(obj.get("last_ok"), 4102444800), "skew_s": obj["skew_s"] if isinstance(obj.get("skew_s"), int) and not isinstance(obj.get("skew_s"), bool) else None,
-           "age_s": _int(obj.get("age_s"), 10 ** 9), "views": {}}
-    views = obj.get("views")
+           "age_s": _int(obj.get("age_s"), 10 ** 9), "views": {}, "view_index": {}}
+    index = obj.get("view_index")
+    if isinstance(index, dict):
+        for vname in VIEWS:
+            v = index.get(vname)
+            if isinstance(v, dict) and _int(v.get("size"), CACHE_MAX) is not None and _int(v.get("ts"), 4102444800) is not None:
+                out["view_index"][vname] = {"size": _int(v["size"], CACHE_MAX), "ts": _int(v["ts"], 4102444800)}
+    return out
+
+
+def read_views(folder, name):
+    """The documents of one peer from NAME.views.json (foreign input, read like every cache file) -> {document: tree}, {} when there are none."""
+    out = {}
+    if not NAME_FILE.fullmatch(name + ".json"):
+        return out
+    obj = read_json(os.path.join(folder, name + VIEWS_SUFFIX), CACHE_MAX)
+    views = obj.get("views") if isinstance(obj, dict) and obj.get("v") == 1 else None
     if isinstance(views, dict):
         for vname in VIEWS:
             doc = views.get(vname)
             if isinstance(doc, dict) and doc.get("view") == vname:
                 try:
-                    out["views"][vname] = tree(doc)
+                    out[vname] = tree(doc)
                 except ValueError:
                     pass
     return out
@@ -877,17 +915,28 @@ def read_cache(folder, now=None, views=False):
             else:
                 out["skipped"] += 1
             continue
-        raw = read_json(os.path.join(folder, fn), CACHE_MAX)
-        entry = valid_entry(raw, m.group(1)) if raw is not None else None
+        entry = read_entry(folder, m.group(1), now, views)
         if entry is None:
             out["skipped"] += 1
             continue
-        if not views:
-            entry["views"] = {}
-        if now - entry["ts"] > CACHE_STALE_S and entry["state"] in ("ok", "info", "warn", "unknown"):
-            entry["state"], entry["error"] = "stale", "cache-old"
         out["peers"][m.group(1)] = entry
     return out
+
+
+def read_entry(folder, name, now=None, views=False):
+    """ONE peer's file of the cache as read_cache returns it, or None (missing, foreign, malformed)."""
+    now = time.time() if now is None else now
+    raw = read_json(os.path.join(folder, name + ".json"), CACHE_MAX)
+    entry = valid_entry(raw, name) if raw is not None else None
+    if entry is None:
+        return None
+    if views:
+        entry["views"] = read_views(folder, name) if entry["view_index"] else {}
+    else:
+        del entry["views"]  # present only when asked for
+    if now - entry["ts"] > CACHE_STALE_S and entry["state"] in ("ok", "info", "warn", "unknown"):
+        entry["state"], entry["error"] = "stale", "cache-old"
+    return entry
 
 
 # ---- The poller ------------------------------------------------------------------------------------------------------------------------
@@ -931,9 +980,21 @@ class Poller(object):
                     self.known.save(self.state)
                 except OSError:
                     pass
+            self.persist(entry)
             self.entries[name] = entry
             self.next[name] = self.clock() + self.delay(name, entry)
         return bool(done)
+
+    def persist(self, entry):
+        """The peer's file with its documents goes to the cache now; the entry kept in memory has only the names of the documents (16 peers x
+        five documents parsed are tens of MB, and nobody needs them here: last() reads one file when a poll fails)."""
+        try:
+            own_folder(self.folder)
+            index = write_entry(self.folder, entry)
+        except OSError as e:
+            self.complain(e)
+            index = {k: {"size": 0, "ts": int(entry["ts"])} for k in entry["views"]}
+        entry["view_index"], entry["views"] = index, {}
 
     def step(self, now=None):
         """Collect the polls that finished, start the ones due; -> True when something was written."""
@@ -942,7 +1003,7 @@ class Poller(object):
         for p in self.peers:
             name = p["name"]
             if name not in self.running and self.next[name] <= now:
-                self.running[name] = self.pool.submit(self.poll, p, self.entries.get(name) or self.last(name), self.wall, **self.net)
+                self.running[name] = self.pool.submit(self.poll, p, self.last(name), self.wall, **self.net)
         if changed:
             try:
                 self.write()
@@ -957,11 +1018,11 @@ class Poller(object):
             print("nuc-console-peers: cannot write the cache: %s" % (os.strerror(e.errno) if e.errno else e), file=sys.stderr)
 
     def last(self, name):
-        return read_cache(self.folder, views=True)["peers"].get(name)
+        return read_entry(self.folder, name, views=True) if nuc_config.HOST_NAME_RE.fullmatch(name) else None
 
     def write(self):
         write_cache(self.folder, [self.entries[p["name"]] for p in self.peers if p["name"] in self.entries], self.wall(),
-                    keep={p["name"] for p in self.peers})
+                    keep={p["name"] for p in self.peers}, files=False)
 
     def run_once(self):
         """Every peer, now; -> the entries in the order of the configuration."""
@@ -1002,15 +1063,33 @@ def say_entry(e, out):
         out("  WARNING: plain http outside Tailscale (insecure=yes): the token travels in the clear")
     if e["identity"] == "changed":
         out("  WARNING: the host_id changed since the first contact")
-    if e["views"]:
-        out("  documents: " + ", ".join(sorted(e["views"])))
+    if e.get("view_index") or e["views"]:
+        out("  documents: " + ", ".join(sorted(e.get("view_index") or e["views"])))
 
 
 def main(argv=None, out=print, cfg=None, net=None):
     scrub_env()
     net = net or {}  # the tests': limits, allow_loopback, resolver, cafile (never from the command line or the configuration)
     argv = list(sys.argv[1:] if argv is None else argv)
-    usage = "usage: nuc-console-fleet list | test NAME | once | forget NAME"
+    if argv == ["--needed"]:  # for the installers: exit 0 when [hosts] has a peer (start the service), 1 when it has none
+        try:  # 0 a peer is configured, 1 none, 2 the answer is unknown (unreadable config, crash): the callers leave things as they are
+            c = cfg or nuc_config.load()
+            if c.get("config_error"):
+                print("nuc-console-peers: config unreadable", file=sys.stderr)
+                return 2
+            return 0 if c["hosts"] else 1
+        except Exception:  # noqa: BLE001
+            print("nuc-console-peers: config unreadable", file=sys.stderr)
+            return 2
+    if argv[:1] == ["serve"] and (len(argv) == 1 or (len(argv) == 3 and argv[1] == "--log")):  # the service; --log FILE: Windows, no console
+        if len(argv) == 3:
+            try:
+                _log_to(argv[2])
+            except OSError:
+                print("nuc-console-peers: cannot open the log", file=sys.stderr)
+                return 1
+        return serve_main(net)  # allow_loopback and the rest only through `net`: not reachable from the command line
+    usage = "usage: nuc-console-fleet list | test NAME | once | forget NAME  (the service: peers.py serve [--log FILE])"
     cfg = cfg or nuc_config.load()
     peers = cfg["hosts"]
     folder, state = nuc_config.peers_cache_dir(), nuc_config.peers_state_dir()
@@ -1069,6 +1148,105 @@ def main(argv=None, out=print, cfg=None, net=None):
     for e in entries:
         say_entry(e, out)
     return 0
+
+
+# ---- The service (systemd unit nuc-console-peers, run.sh / run.ps1) ---------------------------------------------------------------------
+def _cfg_stamp(path):
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _log(kind, seen):
+    """One line per kind, once: a word of a closed list, never an exception text, a path, a URL or a token."""
+    if kind not in seen:
+        seen.add(kind)
+        print("nuc-console-peers: %s" % kind, file=sys.stderr, flush=True)
+
+
+def _log_to(path, max_bytes=1 << 20):
+    """stdout and stderr to `path` (Windows has no journal): the folder is made only if its parent exists, a link in the way is refused
+    (O_NOFOLLOW; Windows has none and its folder is the installer's), a new file is 0600, a log over 1 MB is kept once as .1."""
+    path = os.path.abspath(path)
+    folder = os.path.dirname(path)
+    if not os.path.isdir(folder):
+        os.mkdir(folder, 0o700)  # not makedirs: a missing parent is an error, not something to create
+    try:
+        if os.path.getsize(path) > max_bytes and not os.path.islink(path):
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o600)
+    sys.stdout = sys.stderr = os.fdopen(fd, "a", buffering=1, encoding="utf-8", errors="replace")
+
+
+def _close(poller):
+    """Drops the polls not started yet (Future.cancel: Python 3.8 has no shutdown(cancel_futures)) and lets the one in flight end by itself."""
+    for fut in list(getattr(poller, "running", {}).values()):
+        fut.cancel()
+    poller.pool.shutdown(wait=False)
+
+
+def serve(stop, reload_flag, load=None, path=None, tick=1.0, make=None, **net):
+    """The foreground loop of the service: one Poller for the peers of [hosts], rebuilt when config.ini changes (mtime/size) or when
+    `reload_flag` (SIGHUP) is set; no peers = no Poller and no work, only the wait (an idle service costs a stat per tick). Whatever one
+    round raises is logged once per kind and the loop goes on; `stop` (SIGTERM) ends it. -> 0."""
+    load = load or (lambda: nuc_config.load(overlay=False, warn=lambda _line: None))
+    
+    path = path or nuc_config.config_path()
+    make = make or Poller
+    folder, state = nuc_config.peers_cache_dir(), nuc_config.peers_state_dir()
+    seen, poller, current, stamp = set(), None, None, "unset"  # ponytail: a loader that raises is retried every tick (stamp not moved)
+    while not stop.is_set():
+        try:
+            now_stamp = _cfg_stamp(path)
+            if reload_flag.is_set() or now_stamp != stamp:
+                reload_flag.clear()
+                cfg = load()
+                if cfg.get("config_error"):  # the file cannot be read or parsed now: keep what runs, cache included, and look again next tick
+                    _log("config unreadable", seen)
+                    hosts = current
+                else:
+                    stamp = now_stamp
+                    hosts = cfg.get("hosts") or []
+                if hosts != current:
+                    if poller is not None:
+                        _close(poller)
+                    poller, current = None, hosts
+                    if hosts:
+                        poller = make(hosts, folder, state=state, **net)
+                    else:
+                        _log("idle: no peers in [hosts]", seen)
+                        try:  # what the cache says of peers that are gone must not outlive them
+                            write_cache(folder, [], time.time(), keep=set())
+                        except OSError:
+                            pass
+            if poller is not None:
+                poller.step()
+        except Exception:  # noqa: BLE001  one bad round (or a broken file) must not stop the service
+            _log("round failed", seen)
+        stop.wait(tick)
+    if poller is not None:
+        _close(poller)  # a poll in flight ends by its own 5 s limit: the process leaves within ~10 s
+    return 0
+
+
+def serve_main(net=None, tick=1.0):
+    """`peers.py serve`: signals (SIGTERM/SIGINT stop; SIGHUP, where the OS has it, reloads [hosts])."""
+    import signal
+    scrub_env()
+    stop, reload_flag = threading.Event(), threading.Event()
+    for name, fn in (("SIGTERM", lambda *_: stop.set()), ("SIGINT", lambda *_: stop.set()), ("SIGBREAK", lambda *_: stop.set()),
+                     ("SIGHUP", lambda *_: reload_flag.set())):
+        sig = getattr(signal, name, None)  # SIGHUP and friends do not exist on Windows
+        if sig is not None:
+            try:
+                signal.signal(sig, fn)
+            except (OSError, ValueError):
+                pass
+    return serve(stop, reload_flag, tick=tick, **(net or {}))
 
 
 if __name__ == "__main__":

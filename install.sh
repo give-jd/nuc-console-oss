@@ -26,13 +26,13 @@ TZ_VAL="${NUC_CONSOLE_TZ:-$OLD_TZ}"
 VT="${NUC_CONSOLE_VT:-${OLD_VT:-1}}"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    for u in nuc-console.service nuc-console-collector.service nuc-console-web.service nuc-console-notify.service; do
+    for u in nuc-console.service nuc-console-collector.service nuc-console-web.service nuc-console-peers.service nuc-console-notify.service; do
         systemctl disable --now "$u" 2>/dev/null || true  # one by one: a unit an older version did not have must not stop the others
     done
     # the AI model server exists only after `nuc-console-ai serve --install-service`; it runs code from $DEST, so it goes too
     systemctl disable --now nuc-console-ai.service 2>/dev/null || true
     rm -f /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service /etc/systemd/system/nuc-console-ai.service
-    rm -f /usr/local/bin/nuc-console-telegram /usr/local/bin/nuc-console-fleet /etc/systemd/system/nuc-console-notify.service
+    rm -f /usr/local/bin/nuc-console-telegram /usr/local/bin/nuc-console-fleet /etc/systemd/system/nuc-console-notify.service /etc/systemd/system/nuc-console-peers.service
     rm -rf /var/lib/nuc-console-notify  # the Telegram bot token is in there: it must not outlive the installation
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai /usr/local/sbin/nuc-console-config
@@ -40,7 +40,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -rf "$UNITD"
     systemctl unmask "getty@tty$VT.service"
     systemctl start "getty@tty$VT.service"
-    echo "removed: login on tty$VT restored (user nuc-console, /var/lib/nuc-console and /etc/nuc-console left in place; so are the AI runtime and models in /var/lib/nuc-console/ai: delete that folder to free the disk)"
+    echo "removed: login on tty$VT restored (users nuc-console, nuc-console-notify, nuc-console-peers, /var/lib/nuc-console, /var/lib/nuc-console-peers and /etc/nuc-console, tokens of the peers included, left in place; so are the AI runtime and models in /var/lib/nuc-console/ai: delete that folder to free the disk)"
     exit 0
 fi
 
@@ -61,6 +61,8 @@ fi
 id nuc-console >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console
 # the Telegram notifier has a user of its own: the web view (user nuc-console, maybe reachable on the LAN) cannot read the bot token
 id nuc-console-notify >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-notify
+# the fleet poller (docs/INSTALL.md, "Fleet poller") has one too: the web view and the console cannot read the tokens of the peers it watches
+id nuc-console-peers >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin nuc-console-peers
 install -d "$DEST"
 rm -f "$DEST"/*.py  # a module dropped from src/ must not linger
 if [ "$PY" != "$SYS_PY" ]; then
@@ -111,6 +113,9 @@ install -d -m 0711 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-cons
 # files and nothing else (no read, no list), and the setgid bit gives them the group, so only the notifier reads them (docs/TELEGRAM.md)
 install -d -m 2730 -o nuc-console-notify -g nuc-console-notify /var/lib/nuc-console-notify/inbox
 chmod 2730 /var/lib/nuc-console-notify/inbox
+# the peers' tokens (NAME.token, 0600, owned by nuc-console-peers: what peers.read_secret accepts) and the poller's persistent state (`known`)
+install -d -m 0750 -o root -g nuc-console-peers /etc/nuc-console/peers
+install -d -m 0750 -o nuc-console-peers -g nuc-console-peers /var/lib/nuc-console-peers
 systemctl daemon-reload
 systemctl enable nuc-console-collector.service
 # restart, not --now: on an upgrade the service is already running and would keep the old code
@@ -132,5 +137,17 @@ else systemctl disable --now nuc-console-web.service 2>/dev/null || true; fi
 systemctl enable nuc-console-notify.service
 if "$PY" "$DEST/notify.py" --needed; then systemctl restart nuc-console-notify.service
 else systemctl stop nuc-console-notify.service 2>/dev/null || true; fi
+# optional fleet poller (outbound only): enabled and (re)started only when [hosts] has a peer; otherwise installed and left disabled
+# --needed: 0 a peer is listed, 1 none, 2 unknown (unreadable config.ini, crash): then the service is left as it is
+peers_rc=0
+"$PY" -E "$DEST/peers.py" --needed || peers_rc=$?
+if [ "$peers_rc" -eq 0 ]; then
+    { systemctl enable nuc-console-peers.service && systemctl restart nuc-console-peers.service; } || echo "warning: the fleet poller did not start: systemctl status nuc-console-peers" >&2
+elif [ "$peers_rc" -eq 1 ]; then
+    systemctl disable --now nuc-console-peers.service 2>/dev/null || true
+    echo "nuc-console: the fleet poller is installed but off ([hosts] is empty): after adding a peer, sudo systemctl enable --now nuc-console-peers (docs/INSTALL.md, Fleet poller)"
+else
+    echo "warning: could not tell whether [hosts] in /etc/nuc-console/config.ini lists a peer (exit code $peers_rc): the fleet poller is left as it is" >&2
+fi
 systemctl restart nuc-console.service
 echo "ok: dashboard on tty$VT${TZ_VAL:+ (time zone $TZ_VAL)}. Logs: journalctl -u nuc-console -u nuc-console-collector"

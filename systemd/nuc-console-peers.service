@@ -1,0 +1,71 @@
+[Unit]
+Description=nuc-console fleet poller (reads the other nuc-console machines of [hosts]; does nothing while the list is empty)
+After=network-online.target
+Wants=network-online.target
+# install.sh enables and starts it only when [hosts] in /etc/nuc-console/config.ini has a peer; without one it stays installed and disabled
+# (sudo systemctl enable --now nuc-console-peers after adding the first peer; SIGHUP / editing config.ini makes it reread the list)
+
+[Service]
+# Outbound only: one GET per peer over http/https, no listener, no socket activation. Nobody else reads the peers' tokens: its own account.
+Type=simple
+User=nuc-console-peers
+Group=nuc-console-peers
+UMask=0022
+# -E: no PYTHON* variable from the environment; -B: no bytecode written. `serve` reloads [hosts] on SIGHUP and when config.ini changes.
+ExecStart=/usr/bin/python3 -E -B /opt/nuc-console/peers.py serve
+ExecReload=/bin/kill -HUP $MAINPID
+# exits 0 on SIGTERM; a crash comes back after 30 s (an idle service, [hosts] empty, just waits: it never exits by itself)
+Restart=on-failure
+RestartSec=30
+# /run/nuc-console-peers: what the poller saw (0755: the web view and the console read it, one file per peer, written atomically); kept across
+# a restart so an update does not blank the Hosts views, removed when the service is stopped for good
+RuntimeDirectory=nuc-console-peers
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=restart
+# /var/lib/nuc-console-peers: the `known` file (the host_id seen at the first contact, like known_hosts). Only this account lists or writes it.
+StateDirectory=nuc-console-peers
+StateDirectoryMode=0750
+# the tokens: /etc/nuc-console/peers (0750 root:nuc-console-peers, each NAME.token 0600 owned by nuc-console-peers: what peers.read_secret accepts)
+# is the only place outside its two folders it reads; config.ini (0644) is read-only for everybody
+ReadWritePaths=/run/nuc-console-peers /var/lib/nuc-console-peers
+ReadOnlyPaths=/etc/nuc-console
+# Hardening: expected to score no worse than nuc-console-notify.service in `systemd-analyze security` (not measured in CI: no systemd there).
+# Each line and what it closes:
+NoNewPrivileges=yes
+# the whole file system read-only except the two folders above; no home, no /tmp shared, no devices
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# no kernel tunables, modules, logs, control groups, clock, host name; no other process's /proc entries
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+# IPv4/IPv6 for the peers, AF_UNIX only because name resolution may need it (nss-resolve -> systemd-resolved, nscd, sssd talk to a local socket);
+# no netlink, no packet sockets. The program itself opens no unix socket; with no capabilities and a read-only /run and /etc it can only
+# connect to sockets that already exist, and none of its folders holds one.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# Python needs no writable+executable memory
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+TasksMax=32
+# 16 peers x five documents (up to 2 MB each) parsed into Python objects take about 5.7 times their size: ~900 MB at the very worst, a few MB
+# in practice (the poller keeps no documents in memory between polls, it writes them to the cache and forgets them). 1G is the ceiling, not the use.
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

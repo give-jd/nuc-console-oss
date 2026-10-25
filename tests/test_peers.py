@@ -782,7 +782,7 @@ class Cache(Base):
         got = peers.read_cache(self.cache)
         self.assertEqual(sorted(got["peers"]), ["a", "b"])
         self.assertEqual((got["peers"]["b"]["state"], got["peers"]["b"]["warn"], got["fleet"]["worst"], got["skipped"]), ("warn", ["legacy-peer"], "warn", 0))
-        for key in ("v", "name", "url_display", "ts", "state", "error", "summary", "views", "scope", "warn", "insecure", "identity"):
+        for key in ("v", "name", "url_display", "ts", "state", "error", "summary", "view_index", "scope", "warn", "insecure", "identity"):
             self.assertIn(key, got["peers"]["a"])
         self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "b.json", "fleet.json"])  # no temporary file left
         if POSIX:
@@ -816,11 +816,12 @@ class Cache(Base):
         self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "fleet.json"])
 
     def test_too_big_with_its_documents_keeps_the_summary(self):
-        big = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 100}})
-        with mock.patch.object(peers, "CACHE_MAX", len(json.dumps(dict(big, views={}), separators=(",", ":"))) + 40):
+        big = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 2000}})
+        with mock.patch.object(peers, "CACHE_MAX", len(json.dumps(dict(big, views={}), separators=(",", ":"))) + 300):
             self.write([big])
-        got = peers.read_cache(self.cache)["peers"]["a"]
-        self.assertEqual((got["views"], got["summary"]["host"], "views-dropped" in got["warn"]), ({}, "nuc-b", True))
+        got = peers.read_cache(self.cache, views=True)["peers"]["a"]
+        self.assertEqual((got["views"], got["view_index"], got["summary"]["host"], "views-dropped" in got["warn"]), ({}, {}, "nuc-b", True))
+        self.assertFalse(os.path.exists(os.path.join(self.cache, "a.views.json")))
 
     def test_the_reader_skips_what_it_cannot_trust(self):
         self.write([self.entry("a")])
@@ -846,16 +847,75 @@ class Cache(Base):
         self.write([self.entry("a")])
         path = os.path.join(self.cache, "a.json")
         doc = json.loads(slurp(path))
-        doc.update(url_display="http://\x1b[31mevil\n", summary={"host": "\x1b]0;x\x07h", "counts": {"err": "9", "warn": 2}, "worst": [1, "w"], "state": "weird",
-                                                                   "api": "1", "extra": 1}, warn=["ok", 5, "\x1b"], skew_s="x", last_ok=-4, age_s=True,
-                   views={"cpu": {"view": "cpu", "csrf": "z", "x": "\x1b[0m"}, "ai": {"view": "ai"}, "map": {"view": "cpu"}})
+        views = {"cpu": {"view": "cpu", "csrf": "z", "x": "\x1b[0m"}, "ai": {"view": "ai"}, "map": {"view": "cpu"}}
+        spit(os.path.join(self.cache, "a.views.json"), json.dumps({"v": 1, "views": views}))
+        doc.update(view_index={"cpu": {"size": 5, "ts": 1}, "ai": {"size": 1, "ts": 1}, "map": {"size": "x", "ts": 1}}, url_display="http://\x1b[31mevil\n", summary={"host": "\x1b]0;x\x07h", "counts": {"err": "9", "warn": 2}, "worst": [1, "w"], "state": "weird",
+                                                                   "api": "1", "extra": 1}, warn=["ok", 5, "\x1b"], skew_s="x", last_ok=-4, age_s=True)
         spit(path, json.dumps(doc))
         got = peers.read_cache(self.cache, views=True)["peers"]["a"]
         self.assertEqual(got["summary"], {"host": "?]0;x?h", "counts": {"warn": 2}, "worst": ["w"]})
         self.assertEqual((got["warn"], got["skew_s"], got["last_ok"], got["age_s"]), (["ok", "?"], None, None, None))
         self.assertNotIn("\x1b", got["url_display"])
         self.assertEqual(got["views"], {"cpu": {"view": "cpu", "x": "?[0m"}})
-        self.assertEqual(peers.read_cache(self.cache)["peers"]["a"]["views"], {})  # not unless asked
+        cheap = peers.read_cache(self.cache)["peers"]["a"]
+        self.assertNotIn("views", cheap)  # not unless asked
+        self.assertEqual(cheap["view_index"], {"cpu": {"size": 5, "ts": 1}})  # only the names of the known documents, typed
+        self.assertEqual(peers.read_views(self.cache, "a"), {"cpu": {"view": "cpu", "x": "?[0m"}})
+
+    def test_the_documents_live_in_their_own_file_and_the_cheap_read_never_opens_it(self):
+        e = self.entry("a", views={"cpu": {"api": 1, "view": "cpu", "x": "y" * 5000}, "map": {"api": 1, "view": "map"}})
+        self.write([e])
+        self.assertEqual(sorted(os.listdir(self.cache)), [".owner", "a.json", "a.views.json", "fleet.json"])
+        main = slurp(os.path.join(self.cache, "a.json"))
+        self.assertNotIn("yyyy", main)
+        self.assertLess(len(main), 1500)
+        self.assertEqual(sorted(json.loads(main)["view_index"]), ["cpu", "map"])
+        self.assertGreater(json.loads(main)["view_index"]["cpu"]["size"], 5000)
+        opened = []
+        real = peers.read_json
+        with mock.patch.object(peers, "read_json", lambda path, limit: opened.append(os.path.basename(path)) or real(path, limit)):
+            cheap = peers.read_cache(self.cache)
+            self.assertNotIn("a.views.json", opened)
+            self.assertEqual((sorted(cheap["peers"]["a"]["view_index"]), "views" in cheap["peers"]["a"], cheap["skipped"]), (["cpu", "map"], False, 0))
+            full = peers.read_cache(self.cache, views=True)["peers"]["a"]
+        self.assertIn("a.views.json", opened)
+        self.assertEqual(sorted(full["views"]), ["cpu", "map"])
+        self.assertEqual(peers.read_views(self.cache, "a")["map"], {"api": 1, "view": "map"})
+        self.assertEqual(peers.read_views(self.cache, "nobody"), {})
+        self.assertEqual(peers.read_views(self.cache, "../a"), {})
+        if POSIX:
+            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.cache, "a.views.json")).st_mode), 0o644)
+
+    def test_a_peer_without_documents_any_more_loses_its_views_file_and_a_views_file_is_not_a_peer(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}})])
+        self.assertTrue(os.path.exists(os.path.join(self.cache, "a.views.json")))
+        self.write([self.entry("a")])
+        self.assertFalse(os.path.exists(os.path.join(self.cache, "a.views.json")))
+        spit(os.path.join(self.cache, "zz.views.json"), "{}")
+        got = peers.read_cache(self.cache)
+        self.assertEqual((sorted(got["peers"]), got["skipped"]), (["a"], 0))
+
+    def test_the_views_files_of_a_peer_no_longer_configured_go_and_foreign_ones_stay(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}}), self.entry("b", views={"cpu": {"view": "cpu"}})])
+        spit(os.path.join(self.cache, "x.views.json"), "{}")  # not ours: fleet.json never listed x
+        peers.write_cache(self.cache, [self.entry("a", views={"cpu": {"view": "cpu"}})], time.time(), keep={"a"})
+        left = set(os.listdir(self.cache))
+        self.assertNotIn("b.json", left)
+        self.assertNotIn("b.views.json", left)
+        self.assertLessEqual({"a.json", "a.views.json", "x.views.json"}, left)
+
+    @unittest.skipUnless(POSIX, "links")
+    def test_a_views_file_that_is_a_link_or_writable_by_others_is_not_read(self):
+        self.write([self.entry("a", views={"cpu": {"view": "cpu"}})])
+        path = os.path.join(self.cache, "a.views.json")
+        os.chmod(path, 0o666)
+        self.assertEqual(peers.read_views(self.cache, "a"), {})
+        os.chmod(path, 0o644)
+        self.assertEqual(sorted(peers.read_views(self.cache, "a")), ["cpu"])
+        os.rename(path, path + ".real")
+        os.symlink(path + ".real", path)
+        self.assertEqual(peers.read_views(self.cache, "a"), {})
+        self.assertEqual(sorted(peers.read_cache(self.cache, views=True)["peers"]["a"]["views"]), [])
 
     def test_an_old_entry_is_stale_never_ok(self):
         self.write([self.entry("a", ts=int(time.time()) - 500), self.entry("b", state="err", ts=int(time.time()) - 500),
