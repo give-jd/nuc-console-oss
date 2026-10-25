@@ -9,7 +9,11 @@ if not exist "%~dp0..\app\peers.py" (
     exit /b 1
 )
 setlocal
+set NUC_CONSOLE_HOME=
 set NUC_CONSOLE_CONFIG=
 set NUC_CONSOLE_PEERS_CACHE=
-"%~dp0..\python\python.exe" -B "%~dp0..\app\peers.py" %*
+set NUC_CONSOLE_SETTINGS=
+set NUC_CONSOLE_NOTIFY_DIR=
+set NUC_CONSOLE_HOST_ID=
+"%~dp0..\python\python.exe" -E -B "%~dp0..\app\peers.py" %*
 exit /b %errorlevel%

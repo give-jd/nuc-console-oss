@@ -1101,17 +1101,24 @@ class Command(Base):
 # ---- The files around it -------------------------------------------------------------------------------------------------------------
 class Files(unittest.TestCase):
     def read(self, rel):
-        with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        with open(os.path.join(ROOT, rel), encoding="utf-8", newline="") as f:
             return f.read()
 
     def test_the_command_and_its_cmd(self):
         sh, cmd = self.read("bin/nuc-console-fleet"), self.read("bin/nuc-console-fleet.cmd")
         self.assertTrue(sh.startswith("#!/bin/sh\n"))
-        self.assertIn("/usr/bin/python3 /opt/nuc-console/peers.py", sh)
         self.assertIn(r"app\peers.py", cmd)
         self.assertIn("python.exe", cmd)
         if POSIX:
             self.assertTrue(os.stat(os.path.join(ROOT, "bin", "nuc-console-fleet")).st_mode & stat.S_IXUSR)
+        names = ("NUC_CONSOLE_HOME", "NUC_CONSOLE_CONFIG", "NUC_CONSOLE_PEERS_CACHE", "NUC_CONSOLE_SETTINGS", "NUC_CONSOLE_NOTIFY_DIR", "NUC_CONSOLE_HOST_ID")
+        self.assertIn("/usr/bin/python3 -E -B /opt/nuc-console/peers.py", sh)
+        for n in names:  # the wrapper clears what could redirect it, like nuc-console-config
+            self.assertIn("-u " + n + " ", sh)
+            self.assertIn("set " + n + "=\r\n", cmd)
+        self.assertIn("python.exe\" -E -B ", cmd)
+        used = set(re.findall(r"NUC_CONSOLE_[A-Z_]+", self.read("src/nuc_config.py") + self.read("src/peers.py")))
+        self.assertLessEqual(used - {"NUC_CONSOLE_"}, set(names))  # every variable the client reads is cleared
         self.assertIn("bin/nuc-console-fleet text eol=lf", self.read(".gitattributes"))
         self.assertNotIn(TOKEN, sh + cmd)
 
