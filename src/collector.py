@@ -2290,6 +2290,7 @@ def main():
         print(json.dumps(once(), indent=1))
         return
     os.makedirs(nuc_config.RUN_DIR, exist_ok=True)  # systemd creates it (RuntimeDirectory); launchd and Task Scheduler do not
+    nuc_config.ensure_host_id()  # the installation's id, made once (LIB_DIR/host_id); without it the web view simply has none
     stamp = config_stamp()
     _THREADS.clear()  # this process's loops: none runs yet
     start_loops()

@@ -3,6 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- **Host identity (first step of the multi-host work; nothing changes without it)**: the collector makes a `host_id` once (`/var/lib/nuc-console/host_id`, 16 hex digits, world-readable, not a secret) and `GET /api/v1/summary` carries `host_id`, `version`, `os`, `counts` (`err`, `warn`, `unknown`) and `worst` (up to three catalog titles, never a problem text); `api` stays 1, an older server just lacks them. New optional `[host] name` labels this machine in the headers, Telegram and the summary (default: the host name; set in `config.ini` only, never from the settings page). `nuc-console-config migrate` keeps `[host]` and `[hosts]`. Restart the collector to create the id.
+
 ## [2.7.0] - 2026-10-25
 
 The AI comes back by itself after a restart, and the first Windows and macOS checks. **The AI's model server is started again when the web service restarts** (`[ai] autostart = yes`), with an `ai-down` alarm when the AI is on and nothing answers; Windows gains `reboot-required` from the registry, a commit-charge `memory-pressure` and the disk, display and BugCheck event ids, all without a new PowerShell script; macOS gains kernel panics in the history, `memory-pressure` and `updates-pending` from the Software Update plist. A minor version: `config.ini` is kept and nothing needs doing after the update except what 2.6.0 already asked (`sudo nuc-console-accept` once). The Windows and macOS facts (registry paths, event ids, plist keys, panic file names) come from the vendors' documentation and have not yet been run on a real Windows or Mac: a wrong name shows "unknown", never a false green. Still Python 3.8+, standard library only.
