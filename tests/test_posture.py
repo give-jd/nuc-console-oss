@@ -276,12 +276,12 @@ class Problem(unittest.TestCase):
 
     def test_accepting_one_name_does_not_hide_another(self):
         def left(post, acc):
-            b = boot(posture=post)
+            b = boot(os="windows", posture=post)
             with mock.patch.object(problems, "load_accepted", lambda: acc):
                 pb = problems.problems(None, None, NOW, boot=b, baseline=False)
                 return [t for (s, t), p in zip(pb, pb.pids) if p == "posture"]
         with golden.FrozenWorld(cfg=ON):
-            (rec,) = [r for r in problems.problem_records(None, None, NOW, boot=boot(posture={"secure-boot": "fail"}), baseline=False) if r["id"] == "posture"]
+            (rec,) = [r for r in problems.problem_records(None, None, NOW, boot=boot(os="windows", posture={"secure-boot": "fail"}), baseline=False) if r["id"] == "posture"]
             acc = {"posture": {"fp": rec["fingerprint"], "reason": "kiosk"}}
             self.assertEqual(left({"secure-boot": "fail"}, acc), [])
             self.assertEqual(left({"secure-boot": "ok"}, acc), [])
