@@ -197,7 +197,7 @@ class Updates(unittest.TestCase):
 
     def test_run_once_an_hour_with_a_fixed_command(self):
         fake = mock.Mock(return_value=(0, APT, ""))
-        with mock.patch.object(collector, "run", fake):
+        with mock.patch.object(collector, "run", fake), mock.patch.object(collector, "OS_NAME", "linux"):
             first = collector.collect_updates(NOW)
             collector.collect_updates(NOW + 3599)
             self.assertEqual(fake.call_count, 1)
@@ -207,12 +207,13 @@ class Updates(unittest.TestCase):
         self.assertEqual((first["security"], first["total"], first["at"]), (1, 3, NOW))
 
     def test_no_apt_is_absent_and_a_failure_is_kept_for_the_hour(self):
-        with mock.patch.object(collector, "run", return_value=(127, "", "env: 'apt-get': No such file or directory")):
+        with mock.patch.object(collector, "run", return_value=(127, "", "env: 'apt-get': No such file or directory")), \
+                mock.patch.object(collector, "OS_NAME", "linux"):
             with self.assertRaises(collector.Absent):
                 collector.collect_updates(NOW)
         collector._UPDATES.update(at=0.0, value=None, error=None)
         fake = mock.Mock(return_value=(100, "", "E: Could not get lock"))
-        with mock.patch.object(collector, "run", fake):
+        with mock.patch.object(collector, "run", fake), mock.patch.object(collector, "OS_NAME", "linux"):
             for t in (NOW, NOW + 600):
                 with self.assertRaises(RuntimeError):
                     collector.collect_updates(t)

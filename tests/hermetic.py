@@ -50,6 +50,9 @@ with open(os.environ["NUC_CONSOLE_SETUP"], "w") as _f:
 
 import nuc_config  # noqa: E402  (after the environment: it reads NUC_CONSOLE_HOME and NUC_CONSOLE_NOTIFY_DIR when imported)
 
+import collector  # noqa: E402
+collector.SOFTWAREUPDATE_PLIST = os.path.join(ABSENT, "SoftwareUpdate.plist")  # a macOS runner's own plist is not a test's input
+
 # what the installed console owns: where nuc_config says it lives on this OS (the temporary folder of a portable run is not the host)
 HOST_DIRS = tuple(os.path.normcase(os.path.abspath(d)) for d in (nuc_config.ETC_DIR, nuc_config.RUN_DIR, nuc_config.LIB_DIR)
                   if not os.path.abspath(d).startswith(SCRATCH)) + (

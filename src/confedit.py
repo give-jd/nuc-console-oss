@@ -265,6 +265,9 @@ KEYS = (
         ("memory_pressure_pct", INT, "10", NOW,
          "Memory pressure (the kernel's PSI, `some avg60` of /proc/pressure/memory, Linux 4.20+) above this percent raises "
          "memory-pressure. 10 is already a machine that waits for memory.", {"lo": 1, "hi": 100}),
+        ("commit_pressure_pct", INT, "90", NOW,
+         "Windows: the commit charge (memory promised to processes) at or above this percent of the commit limit (RAM + page files) "
+         "raises memory-pressure. At 100 the system refuses new allocations.", {"lo": 1, "hi": 100}),
     ))
     + _k("telegram", (
         ("enabled", BOOL, "no", NOTIFIER,

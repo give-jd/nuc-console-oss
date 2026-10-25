@@ -72,8 +72,19 @@ def read_psi(path="/proc/pressure/memory"):
     return parse_psi(read_file(path)) if LINUX else None
 
 
+def mac_pressure(sysctl=None):
+    """macOS memory pressure: kern.memorystatus_vm_pressure_level (1 normal, 2 warning, 4 critical), unprivileged. None elsewhere or when unreadable."""
+    if not nuc_config.MACOS and sysctl is None:
+        return None
+    try:
+        v = (sysctl or hostinfo._sysctl_int)("kern.memorystatus_vm_pressure_level")
+    except Exception:  # noqa: BLE001 - no such sysctl on this macOS: unknown, not an error
+        return None
+    return v if v in (1, 2, 4) else None
+
+
 def read_thermal():
-    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None, 'psi': memory some avg60 %|None}.
+    """{'cpu': (C, max), 'nvme': (C, max), 'throttle': events_since_boot|None, 'clk': (cur_GHz, max_GHz)|None, 'psi': memory some avg60 %|None, 'commit': Windows commit charge %|None}.
 
     The maximum is the sensor's own (temp1_max: CPU package, NVMe composite), not a constant of ours.
     """
@@ -94,7 +105,9 @@ def read_thermal():
     mx = read_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
     cur = [int(x) for x in cur if x and x.isdigit()]
     out["clk"] = (sum(cur) / len(cur) / 1e6, int(mx) / 1e6) if cur and mx and mx.isdigit() else None
+    out["mac_pressure"] = mac_pressure()  # macOS: the level (problems.py judges it, like psi)
     out["psi"] = read_psi()  # memory pressure rides with the sensors (same sampler, same switch); problems.py judges it
+    out["commit"] = None if LINUX else hostinfo.commit_pct()  # Windows: commit charge in % of its limit (the PSI of that system)
     return out
 
 

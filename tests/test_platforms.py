@@ -362,6 +362,7 @@ class NativeCollector(unittest.TestCase):
             fw_summary = staticmethod(cwin.fw_summary)
             boot_sections = staticmethod(cwin.boot_sections)
             listeners = staticmethod(ls_fn)
+            reboot_pending = staticmethod(lambda: {"flag": False, "sources": []})
         return Fake
 
     def test_windows_net_sections(self):
@@ -398,6 +399,7 @@ class NativeCollector(unittest.TestCase):
         b = collector.collect_boot()
         self.assertEqual((b["os"], b["failed"], b["errors"]), ("windows", ["Spooler"], {}))
         self.assertIn("blame", b["unsupported"])
+        self.assertEqual(b["reboot"], {"flag": False, "sources": []})                              # the registry reader, not Linux's file check
         self.assertIn("analyze", b["notes"])                                                        # boot time not recorded: info
         self.assertIn("not recorded", TEXT(render.boot_block_avvio(b, 100, 90)))
         self.assertIn("not available on this OS", TEXT(render.boot_block_lente(b, 90, 3)))
