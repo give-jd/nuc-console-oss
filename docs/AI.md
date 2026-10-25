@@ -232,7 +232,7 @@ service, the desktop app, a portable run: the console never does this) and `web.
 first) and starts that model's server in the background, with the page's own checks: the server and the model installed, the model not marked "too big", 127.0.0.1
 only, low priority, and **no second server** if something already answers at the endpoint (a service of yours, `nuc-console-ai serve`). One automatic attempt, and
 one more 60 s after a failure; never in a loop. If you pressed *Turn AI off* in this run, it does not start again until the next start. A failure never stops the web view:
-it is written to its log (stderr) and shown as the page's last note ("starting the model server by itself failed: ..."). `[ai] autostart = no` switches it off
+it is written to its log (stderr) and shown as the page's last note ("starting the model server by itself failed: ..."). `[ai] autostart = no` switches it off (do it when you run the model server as a service: the two would compete for the port, and `serve --install-service` refuses while another server holds it)
 ([CONFIGURATION.md](CONFIGURATION.md#ai--optional-local-model-for-the-health-screen-off-by-default)); `[ai] web_actions = no` too.
 
 If it cannot work (the server or the model is gone from the folder), the page says what to run. While nothing answers, the page shows one line, **NOT RUNNING: AI is on

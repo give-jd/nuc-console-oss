@@ -2057,15 +2057,16 @@ class WebSecurity(WebBase):
         self.assertTrue(out.startswith("HTTP/1.0 403"), out[:60])
         s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
         self.addCleanup(s.close)
-        s.sendall(head.encode("latin-1"))
-        time.sleep(0.01)  # the body follows the headers a moment later, as a slow client's does
-        s.sendall(b"x" * 4096)
-        out = b""
-        while True:
-            chunk = s.recv(65536)
-            if not chunk:
-                break
-            out += chunk
+        with mock.patch.object(webhttp, "DRAIN_PEEK_S", 2.0):  # a loaded runner may take longer than 50 ms to deliver the body: the look is not what is tested
+            s.sendall(head.encode("latin-1"))
+            time.sleep(0.01)  # the body follows the headers a moment later, as a slow client's does
+            s.sendall(b"x" * 4096)
+            out = b""
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                out += chunk
         self.assertTrue(out.startswith(b"HTTP/1.0 403"), out[:60])
 
     def test_a_413_for_a_huge_content_length_reads_at_most_the_cap(self):

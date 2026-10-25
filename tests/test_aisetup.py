@@ -2007,11 +2007,17 @@ class UseTests(unittest.TestCase):
         self.assertIn("model = mid", str(cm.exception))
         self.assertNotIn("\n", str(cm.exception))
 
+REAL_PORT_BUSY = aisetup.port_busy
+
+
 class ServeGpuTests(unittest.TestCase):
     """serve: Ollama uses the GPU when it finds one that holds the model (it decides how many layers fit); [ai] gpu = no or --cpu hide the
     GPUs from it, and the service carries that decision in its command."""
 
     def setUp(self):
+        p = mock.patch.object(aisetup, "port_busy", return_value=False)  # the port 8080 of the machine that runs the suite is not ours to look at
+        p.start()
+        self.addCleanup(p.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = os.path.join(self.tmp.name, "ai")
@@ -2121,6 +2127,11 @@ class ServeGpuTests(unittest.TestCase):
 
 
 class ServiceTemplateTests(unittest.TestCase):
+    def setUp(self):
+        p = mock.patch.object(aisetup, "port_busy", return_value=False)  # the port 8080 of the machine that runs the suite is not ours to look at
+        p.start()
+        self.addCleanup(p.stop)
+
     def test_systemd_unit(self):
         argv = ["/usr/bin/python3", "-B", "/opt/nuc-console/aisetup.py", "serve", "--dir", "/var/lib/nuc-console/ai", "--model", "qwen3-4b", "--port", "8080"]
         unit = aisetup.systemd_unit(argv, 3600)
@@ -2227,6 +2238,44 @@ class ServiceTemplateTests(unittest.TestCase):
         with mock.patch.object(aisetup, "is_root", return_value=False), self.assertRaises(aisetup.SetupError):
             aisetup.remove_service("linux")
 
+    def test_the_unit_gives_up_after_ten_failures_in_a_row(self):
+        """A taken port made the service restart 500 times in a day; now systemd leaves it failed after ten."""
+        unit = aisetup.systemd_unit(["/usr/bin/python3", "serve"], 3600)
+        for line in ("StartLimitIntervalSec=600", "StartLimitBurst=10"):
+            self.assertIn(line + "\n", unit.split("[Service]")[0], "in [Unit], where systemd reads it")
+        self.assertIn("RestartSec=10\n", unit)
+
+    def test_port_busy_sees_a_listener_and_only_a_listener(self):
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+            self.assertTrue(REAL_PORT_BUSY(port), "a listener that speaks no HTTP counts too")
+        self.assertFalse(REAL_PORT_BUSY(port), "closed again")
+        self.assertFalse(REAL_PORT_BUSY("not a port"))
+
+    def test_install_refuses_a_taken_port_before_it_installs_anything(self):
+        for plat, is_win, is_mac in (("linux", False, False), ("darwin", False, True), ("win32", True, False)):
+            with self.subTest(plat), socket.socket() as s:
+                s.bind(("127.0.0.1", 0))
+                s.listen(1)
+                port, wrote, ran = s.getsockname()[1], [], []
+                with mock.patch.object(aisetup, "port_busy", REAL_PORT_BUSY), mock.patch.object(aisetup, "is_root", return_value=True), \
+                        mock.patch.object(aisetup, "_is_win", return_value=is_win), mock.patch.object(aisetup, "_is_mac", return_value=is_mac), \
+                        mock.patch.object(aisetup, "_readable_by_all", return_value=True), mock.patch.object(aisetup, "_linux_user"), \
+                        mock.patch.object(aisetup, "_mac_user"), mock.patch.object(aisetup, "_write_root_file", side_effect=lambda *a, **k: wrote.append(a)), \
+                        mock.patch.object(aisetup, "tool", side_effect=lambda n, plat=None: n), mock.patch.object(os, "makedirs"), \
+                        mock.patch.object(shutil, "chown"), mock.patch.object(os, "chmod"), mock.patch("builtins.open", mock.mock_open()), \
+                        mock.patch.object(subprocess, "run", side_effect=lambda argv, *a, **k: ran.append(list(argv))), \
+                        mock.patch.object(aisetup, "run", side_effect=lambda argv, check=True: ran.append(list(argv))), \
+                        self.assertRaises(aisetup.SetupError) as cm:
+                    aisetup.install_service("/var/lib/nuc-console/ai", aisetup.MODELS[0], port, 4096, plat)
+                self.assertIn("already taken", str(cm.exception))
+                self.assertIn("autostart = no", str(cm.exception), "it says how to free the port")
+                self.assertEqual(wrote, [], "nothing was written")
+                started = [a for a in ran if set(a[1:2]) & {"enable", "restart", "/Create", "/Run", "bootstrap"}]
+                self.assertEqual(started, [], "nothing was started")
+
     @unittest.skipUnless(os.name == "posix", "Unix permissions")
     def test_install_linux_steps(self):
         """The Linux path end to end with every system call replaced: what would be written and run."""
@@ -2248,7 +2297,8 @@ class ServiceTemplateTests(unittest.TestCase):
         user.assert_called_once_with()
         self.assertEqual(list(wrote), ["/etc/systemd/system/nuc-console-ai.service"])
         self.assertIn("ExecStart=%s -B %s serve --dir %s" % (argv[0], argv[2], d), wrote["/etc/systemd/system/nuc-console-ai.service"])
-        self.assertEqual(ran, [["/usr/bin/systemctl", "daemon-reload"], ["/usr/bin/systemctl", "enable", "nuc-console-ai.service"],
+        self.assertEqual(ran, [["/usr/bin/systemctl", "stop", "nuc-console-ai.service"], ["/usr/bin/systemctl", "daemon-reload"],
+                               ["/usr/bin/systemctl", "enable", "nuc-console-ai.service"],
                                ["/usr/bin/systemctl", "restart", "nuc-console-ai.service"]])
         self.assertIn("127.0.0.1", out)
 

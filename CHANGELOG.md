@@ -3,6 +3,15 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [2.8.1] - 2026-10-25
+
+A patch release: the AI service no longer restarts for ever when its port is taken.
+
+### Fixed
+- **`sudo nuc-console-ai serve --install-service` checks the port first.** After stopping the service's own instance, it looks for anything listening on the port and, if something does, says so before installing anything: usually the model server the web view started by itself, freed with the AI page's Stop button or with `[ai] autostart = no` and a restart of the web view. Before, the service was installed, failed at once with "address already in use" and was restarted every 10 seconds (hundreds of times a day, each a `Service failed` entry in the alarms).
+- **The service's systemd unit gives up after ten failures in a row** (`StartLimitIntervalSec=600`, `StartLimitBurst=10`) and stays failed, in the open, instead of looping. A unit installed by 2.8.0 picks this up with `sudo nuc-console-ai serve --install-service` again.
+- docs/AI.md says that `[ai] autostart = no` goes with running the model server as a service.
+
 ## [2.8.0] - 2026-10-25
 
 One console can now watch other nuc-console machines. Nothing changes until `[hosts]` lists a peer: a host identity, per-watcher peer tokens, a poller that runs as a service on every OS, a Hosts tab in the web view and a Hosts screen on the console (key `6`) that shows a peer's full read-only views, and alarms for a peer that is down, insecure or replaced. Also opt-in posture alarms (Secure Boot, RDP without NLA, SMB1; FileVault, SIP, Gatekeeper) and a fix for the connection reset a refused form could cause on Windows.
