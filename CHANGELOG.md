@@ -3,7 +3,7 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [2.6.0] - 2026-10-24
+## [2.6.0] - 2026-10-25
 
 More things the monitor notices, and a way to read what happened. New ATTENTION alarms from the kernel log, the container restart policies, host hygiene (backups, pending updates, reboot, clock, inodes), expected services, the sshd settings, TLS certificate expiry and disk health; a wider integrity baseline (accounts, SSH keys, cron, enabled units); an **Events** timeline on the console and the web; `/metrics` for Prometheus; and a console that wakes itself when a new problem appears. A minor version: `config.ini` is kept and nothing breaks, but **after updating** do this once on an installation: `sudo nuc-console-accept` (it records the new baseline sections: look at the accounts, SSH keys, cron and units it lists first, because accepting blesses them as they are), `sudo apt install smartmontools` if you want disk health, and expect the collector unit to change (`ProtectHome=read-only`, see below; the installer reloads systemd itself). The collector must be restarted for the Events timeline to start recording (the update does it). Still Python 3.8+, standard library only.
 
