@@ -1493,6 +1493,23 @@ def cmd_serve(args, runtime=None, models=None, hw=None):
 # ---------------------------------------------------------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------------------------------------------------------
+def answers(endpoint, timeout=1):
+    """Does anything speak HTTP at this endpoint? Any HTTP answer counts, a 401 or 403 from a server that wants a key included: it is there. Only a
+    refused connection, a timeout or a non-http(s) address is no. Never through a proxy."""
+    if urllib.parse.urlsplit(endpoint).scheme not in ("http", "https"):
+        return False
+    req = urllib.request.Request(endpoint.rstrip("/") + "/models", headers={"User-Agent": UA, "Accept": "application/json"})
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout) as r:
+            r.read(1024)
+    except urllib.error.HTTPError as e:
+        e.close()
+        return True
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+        return False
+    return True
+
+
 def probe(endpoint, timeout=3):
     """GET <endpoint>/models -> (ok, [model ids], why). Never through a proxy; http(s) only."""
     if urllib.parse.urlsplit(endpoint).scheme not in ("http", "https"):
