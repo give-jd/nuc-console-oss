@@ -4,6 +4,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hermetic  # noqa: E402,F401  (first: the host's state stays out of the tests)
 
@@ -62,17 +63,35 @@ class HostId(unittest.TestCase):
         self.assertIsNone(nuc_config.read_host_id(self.path))
 
     @unittest.skipIf(os.name != "posix", "symbolic links: POSIX")
-    def test_a_link_is_not_followed(self):
+    def test_a_link_is_replaced_and_its_target_left_alone(self):
         target = os.path.join(self.dir, "other")
         with open(target, "w") as f:
             f.write(GOOD)
         os.makedirs(os.path.dirname(self.path))
         os.symlink(target, self.path)
-        self.assertIsNone(nuc_config.read_host_id(self.path))
+        self.assertIsNone(nuc_config.read_host_id(self.path), "a reader never follows it")
         new = nuc_config.ensure_host_id(self.path, self.said.append)
+        self.assertRegex(new or "", r"^[0-9a-f]{16}$")
         self.assertNotEqual(new, GOOD)
+        self.assertFalse(os.path.islink(self.path))
+        self.assertEqual(nuc_config.read_host_id(self.path), new)
+        self.assertEqual(len(self.said), 1)
         with open(target) as f:
             self.assertEqual(f.read(), GOOD, "the link's target is left alone")
+
+    def test_a_directory_in_place_is_said_once_and_left(self):
+        os.makedirs(self.path)
+        self.assertIsNone(nuc_config.ensure_host_id(self.path, self.said.append))
+        self.assertTrue(os.path.isdir(self.path))
+        self.assertEqual(len(self.said), 1)
+
+    def test_an_empty_environment_variable_means_the_default(self):
+        import subprocess
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+        env = dict(os.environ, NUC_CONSOLE_HOST_ID="", NUC_CONSOLE_HOME="")
+        out = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import nuc_config as n; print(n.HOST_ID_PATH == n.os.path.join(n.LIB_DIR, 'host_id'))", src],
+                             env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.stdout.strip(), "True", out.stderr)
 
     @unittest.skipIf(not hasattr(os, "mkfifo"), "FIFOs: POSIX")
     def test_a_fifo_does_not_block(self):
@@ -112,6 +131,14 @@ class HostName(unittest.TestCase):
             self.assertEqual(cfg["host"]["name"], "", bad)
             self.assertEqual(len(said), 1, bad)
         self.assertEqual(nuc_config.host_label({"host": {"name": "bad name"}}), nuc_config.socket.gethostname())
+
+    def test_a_message_uses_the_configured_name_and_the_service_reads_it_once(self):
+        cfg = {"host": {"name": "nuc-a"}}
+        with unittest.mock.patch.object(nuc_config, "load", return_value=cfg) as load:
+            svc = notify.Service(os.path.join(tempfile.gettempdir(), "nc-none"), log=lambda _t: None)
+            self.assertEqual((svc.label(), svc.label(), svc.label()), ("nuc-a",) * 3)
+            self.assertEqual(load.call_count, 1)
+        self.assertEqual(notify.format_message("nuc-a", [], started=0).splitlines()[0], "nuc-console \u00b7 nuc-a")
 
     def test_the_key_is_documented_and_not_for_the_overlay(self):
         key = confedit.KEY[("host", "name")]

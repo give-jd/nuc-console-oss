@@ -30,7 +30,7 @@ elif WINDOWS:  # one root for config, state and logs; install-windows.ps1 restri
 else:  # macOS uses the Linux paths, except the runtime directory (no /run there)
     ETC_DIR, RUN_DIR, LIB_DIR = "/etc/nuc-console", "/var/run/nuc-console" if MACOS else "/run/nuc-console", "/var/lib/nuc-console"
 DEFAULT_PATH = os.path.join(ETC_DIR, "config.ini")
-HOST_ID_PATH = os.environ.get("NUC_CONSOLE_HOST_ID", os.path.join(LIB_DIR, "host_id"))  # the installation's id: written once by the root collector
+HOST_ID_PATH = os.environ.get("NUC_CONSOLE_HOST_ID") or os.path.join(LIB_DIR, "host_id")  # the installation's id: written once by the root collector
 HOST_ID_RE = re.compile(r"[0-9a-f]{16}")
 HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")  # [host] name
 FEATURES = ("containers", "databases", "exposure", "webapps", "firewall", "fail2ban", "tailscale", "boot", "docker_disk",
@@ -134,14 +134,25 @@ def ensure_host_id(path=None, log=None):
     """The root collector's side: the id is made once (secrets.token_hex(8)) and kept; an invalid file is replaced (said once on `log`), a file
     that cannot be read now is left alone. Written atomically, world-readable (it is not a secret). -> the id, or None if it cannot be had."""
     path = path or HOST_ID_PATH
+    say = log or (lambda m: print(m, file=sys.stderr))
     try:
         return host_id_file(path)
     except FileNotFoundError:
         pass
-    except ValueError:
-        (log or (lambda m: print(m, file=sys.stderr)))("nuc-console: " + path + " is not a host id: a new one is made")
-    except OSError:
-        return None
+    except (ValueError, OSError) as e:
+        if os.path.islink(path):  # a link (ELOOP with O_NOFOLLOW): replaced by an id of our own, its target untouched
+            say("nuc-console: " + path + " is a link: replaced by a new host id")
+            try:
+                os.unlink(path)
+            except OSError:
+                return None
+        elif os.path.isdir(path):  # cannot be removed safely
+            say("nuc-console: " + path + " is a directory: no host id until it is removed")
+            return None
+        elif isinstance(e, ValueError):
+            say("nuc-console: " + path + " is not a host id: a new one is made")
+        else:
+            return None
     new, tmp = secrets.token_hex(8), path + ".tmp"
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -151,8 +162,9 @@ def ensure_host_id(path=None, log=None):
             pass
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o644)
         with os.fdopen(fd, "w") as f:
+            if hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), 0o644)
             f.write(new + "\n")
-        os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except OSError:
         return None

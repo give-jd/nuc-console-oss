@@ -756,6 +756,7 @@ class Service:
         self.d, self.clock, self.sleep = d, clock, sleep
         self.make = make_transport or HttpsTransport
         self.log = log or (lambda text: print(text, flush=True))
+        self._label = None
         self.thermal = ThermalHistory()
         self.records = records or (lambda: current_records(self.thermal))
         self.nt = self.key = self.said = self.answer = None  # the notifier of the paired chat, its (token, chat id), the last log line, the last request
@@ -833,6 +834,12 @@ class Service:
     def send(self, token, chat_id, text, attempts=ATTEMPTS):
         call(SendOnly(self.make(token)), "sendMessage", message_payload(chat_id, text), self.sleep, attempts=attempts)
 
+    def label(self):
+        """This machine's name in a message, read once per service ([host] name applies at restart)."""
+        if self._label is None:
+            self._label = hostname()
+        return self._label
+
     def tell_old(self, t, text):
         """One message to the chat paired now (best effort): what the web page changed reaches the person who had the alerts until then."""
         token, chat, problem = load_credentials(self.d, t["username"])
@@ -851,7 +858,7 @@ class Service:
             if problem:
                 return False, problem
             try:
-                self.send(token, chat["chat_id"], f"nuc-console {hostname()}: test message, from the web view. If you read this, the notifications work.")
+                self.send(token, chat["chat_id"], f"nuc-console {self.label()}: test message, from the web view. If you read this, the notifications work.")
             except TelegramError as e:
                 return False, "not sent: " + str(e)
             return True, f"test message sent to @{chat['username']}"
@@ -888,7 +895,7 @@ class Service:
         put(sd, "chat.json", json.dumps({"chat_id": cid, "username": user, "bot": req["bot"], "paired_ts": int(self.clock())}) + "\n", 0o600)
         write_web(self.d, enabled=True, username=user)
         try:
-            self.send(token, cid, f"nuc-console {hostname()}: paired from the web view. You will receive the ATTENTION changes of this machine; "
+            self.send(token, cid, f"nuc-console {self.label()}: paired from the web view. You will receive the ATTENTION changes of this machine; "
                                   "it never reads your messages.")
         except TelegramError as e:
             return True, f"paired with @{user}, but the greeting could not be sent: {e}"
