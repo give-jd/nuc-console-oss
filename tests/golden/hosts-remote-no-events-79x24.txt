@@ -1,0 +1,24 @@
+[1;7;35m ⇄ bravo (remote 12s)                                                         [0m[K
+   [90m·[0m not available for this peer: it served no events document[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m  1-4 e: views  ↑↓ PgUp/PgDn: scroll  Esc: back  ?: help  [0m[1;31m! local problems[0m[90m[0m[0m

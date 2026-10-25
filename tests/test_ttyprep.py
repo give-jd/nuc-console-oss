@@ -143,7 +143,7 @@ class Wiring(unittest.TestCase):
     def test_the_shipped_config_leaves_both_off(self):
         with mock.patch.dict(os.environ, {}):
             cfg = nuc_config.load(os.path.join(ROOT, "config", "config.ini"), warn=lambda l: self.fail(l))
-        self.assertEqual(cfg["console"], {"font": "", "blank_minutes": 0, "wake_on_problem": True})
+        self.assertEqual(cfg["console"], {"font": "", "blank_minutes": 0, "wake_on_problem": True, "remote_idle_seconds": 60})
 
 
 if __name__ == "__main__":

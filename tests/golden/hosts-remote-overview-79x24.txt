@@ -1,0 +1,24 @@
+[1;7;35m ⇄ alpha (remote 12s)                                                         [0m[K
+[36m──[0m[1;36m SYSTEM [0m[36m──────────────────────────────────────────────────────────────────[0m[0m[K
+[0m[K
+   [90mhost         [0malpha-box[0m[K
+   [90mload         [0m0.42 0.38 0.31[0m[K
+   [90muptime       [0m12d 4h[0m[K
+[0m[K
+[36m──[0m[1;36m [0m[33m![0m[1;36m ATTENTION [0m[36m─────────────────────────────────────────────────────────────[0m[0m[K
+[0m[K
+   [33m![0m 1 container exited with an error[0m[K
+[0m[K
+[36m──[0m[1;36m EXPOSURE [0m[36m────────────────────────────────────────────────────────────────[0m[0m[K
+[0m[K
+   [32m✔[0m nothing new on the network[0m[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[90m overview · lines 1-13 of 13  Esc: back  ?: help  [0m[1;31m! local problems[0m[90m[0m[0m

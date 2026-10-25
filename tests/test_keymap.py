@@ -49,14 +49,14 @@ class KeyTable(unittest.TestCase):
             self.assertTrue(r.keys and all(isinstance(k, str) and k for k in r.keys), r)
             self.assertTrue(r.action and r.label and r.show, r)
             self.assertTrue(r.prio is None or isinstance(r.prio, (int, float)), r)
-            self.assertIn(r.feat, ("", "portable", "map", "cpu", "health", "ai"), r)
+            self.assertIn(r.feat, ("", "portable", "map", "cpu", "health", "ai", ui.CONSOLE_FLEET), r)
 
     def test_no_key_is_bound_twice_in_a_scope_or_with_the_global_ones(self):
         for scope in ui.SCOPES:
             seen = {}
             for s in ui.chain(scope):
                 for r in ui.KEYMAP:
-                    if r.scope == s:
+                    if r.scope == s and not ui._local_only(scope, r):  # a remote host's screen has its own digits and Tab
                         for k in r.keys:
                             self.assertNotIn(k, seen, f"{k!r} is bound in {s} and in {seen.get(k)} (screen {scope})")
                             seen[k] = s
@@ -68,7 +68,7 @@ class KeyTable(unittest.TestCase):
             for k in r.keys:
                 if r.scope == "global" and len(k) == 1:
                     self.assertFalse(k.isalpha() and k not in "qrZ", r)  # the global letters: q r Z
-                if len(k) == 1 and k in "12345?":
+                if len(k) == 1 and k in "12345?" and r.scope != "remote":  # a remote host's screen: the digits choose ITS views
                     self.assertEqual(r.scope, "global", r)
 
     def test_lookup_finds_the_screen_row_then_the_list_row_then_the_global_one(self):

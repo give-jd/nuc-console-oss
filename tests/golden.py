@@ -398,6 +398,16 @@ def FLEET(now):
             f.entry("delta", now, "ok", scope="full", skew_s=90, insecure=True), f.entry("echo", now, "ok", identity="changed", error="identity-changed")]
 
 
+def FLEET_VIEWS(now):
+    """FLEET, and the documents of two of the peers (a views token): alpha has all five views, bravo all but events."""
+    import demo
+    out = FLEET(now)
+    for e in out[:2]:
+        e["views"], e["scope"] = demo._fleet_docs(e["name"], now), "views"
+    out[1]["views"].pop("events")
+    return out
+
+
 def NO_POLLER(now):
     """Entries nobody refreshed and no fleet.json: written without the poller's index, so a different folder state (see FrozenWorld)."""
     return [_fleetfix().entry(n, now - 3000, ts=now - 3000) for n in ("alpha", "bravo", "charlie", "delta", "echo")]
@@ -530,6 +540,17 @@ def _cases():
                                ("hosts-settings", "view=settings", FLEET), ("hosts-overview", "", FLEET)):
         add("web-shell-" + name, query=query, cfg=peers_cfg, fleet=fleet)
     add("web-shell-hosts-off", query="view=hosts", cfg=dict(peers_cfg, features={"fleet": False}), fleet=FLEET)  # the feature off: the overview, no tab
+    # the console's Hosts screens (key 6): the list at two sizes with the cursor elsewhere, a remote overview, a view the cache holds, a peer whose token
+    # has scope summary, one that is unreachable, a view the peer does not hold. (Feature off: no key, nothing to draw; tests/test_console_hosts.py)
+    for w, h in ((79, 24), (120, 33)):
+        add(f"hosts-{w}x{h}", ("--view", "hosts") + _size(w, h), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-select-echo-79x24", ("--view", "hosts", "--select", "echo") + _size(79, 24), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-overview-120x33", ("--host", "alpha") + _size(120, 33), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-overview-79x24", ("--host", "alpha") + _size(79, 24), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-health-79x24", ("--host", "bravo", "--view", "health") + _size(79, 24), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-summary-79x24", ("--host", "delta") + _size(79, 24), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-unreachable-120x33", ("--host", "charlie") + _size(120, 33), cfg=peers_cfg, fleet=FLEET_VIEWS)
+    add("hosts-remote-no-events-79x24", ("--host", "bravo", "--view", "events") + _size(79, 24), cfg=peers_cfg, fleet=FLEET_VIEWS)
     return out
 
 

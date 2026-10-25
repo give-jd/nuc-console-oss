@@ -289,7 +289,7 @@ def load(path=None, warn=None, overlay=True):
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True, "autostart": True},
-           "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True}}
+           "console": {"font": "", "blank_minutes": 0, "wake_on_problem": True, "remote_idle_seconds": 60}}
     cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=("#", ";"), strict=False)
     cfg["backups"] = {}  # [backups]: name -> {"path": absolute path or glob, "max_age_days": int}; read by the root collector only
     cfg["expose"] = {}  # [expose]: key -> the widest reach intended (the group names of exposure.GROUPS); here so the early returns have it
@@ -578,6 +578,13 @@ def load(path=None, warn=None, overlay=True):
             cfg["console"]["wake_on_problem"] = cp.getboolean("console", "wake_on_problem", fallback=True)
         except ValueError:
             say(f"nuc-console: {path}: [console] wake_on_problem must be yes or no: kept yes")
+        try:
+            secs = cp.getint("console", "remote_idle_seconds", fallback=60)
+            if not 0 <= secs <= 86400:
+                raise ValueError
+            cfg["console"]["remote_idle_seconds"] = secs
+        except ValueError:
+            say(f"nuc-console: {path}: [console] remote_idle_seconds must be an integer (0-86400): kept 60")
     try:  # the preferences of the new interface (prefs.py, docs/CONFIGURATION.md): a bad value costs that key only, and nothing here stops the dashboard
         import prefs  # here, not at the top: prefs reads SECTIONS from this module
         keys = {k: cp.get("ui", k) for k in cp.options("ui") if k not in cp.defaults()} if cp.has_section("ui") else {}  # a [DEFAULT] key is not ours
