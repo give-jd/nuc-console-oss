@@ -254,6 +254,18 @@ def meminfo():
     raise OSError("no memory information on this OS")
 
 
+def commit_pct():
+    """Windows: the commit charge (memory promised to processes) as a percent of the commit limit (RAM + page files); None where
+    it cannot be read, and on the other systems. Unprivileged."""
+    if not WINDOWS:
+        return None
+    try:
+        used, limit = winapi.commit_charge()
+    except (OSError, AttributeError, ValueError):
+        return None
+    return 100.0 * used / limit if limit else None
+
+
 def loadavg():
     try:
         return [f"{x:.2f}" for x in os.getloadavg()]
