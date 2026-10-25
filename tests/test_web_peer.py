@@ -261,6 +261,14 @@ class Peer(unittest.TestCase):
             self.assertEqual(self.get("/api/v1/summary", VIEWS)[0], 401, "a missing file: no peer token")
         self.assertNotIn(VIEWS, err.getvalue())
 
+    def test_a_revoked_and_re_added_label_forgets_its_last_use(self):
+        self.get("/api/v1/summary")
+        self.assertIsNotNone(self.srv.peers.last()[0][2])
+        self.write("view-host views %s\n" % VIEWS)
+        self.assertEqual([e[0] for e in self.srv.peers.last()], ["view-host"])
+        self.write(FILE)
+        self.assertEqual({e[0]: e[2] for e in self.srv.peers.last()}["sum-host"], None, "never used again since it came back")
+
     def test_malformed_lines_are_ignored_with_a_message_that_has_no_token(self):
         secret = "z" * 40
         lines = ["good summary %s" % SUM, "BAD summary %s" % secret, "bad-scope admin %s" % secret + "1", "short summary abc", "two-parts only",

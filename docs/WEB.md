@@ -332,6 +332,8 @@ The peer sends `Authorization: Bearer <token>`: **only** that (a cookie or `?tok
 | `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS` anywhere | `403` | `403` |
 | `/healthz` (no token needed by anyone), a path the server has not (before any token) | as for everyone | as for everyone |
 
+Scope `views` exposes the topology of the machine as the viewer sees it: listening ports, firewall and session findings, container names, the restart command string and the problem titles. Give a `views` token only to hosts you trust with that picture; `summary` shows the status, the figures and the problem titles only.
+
 A refused request is `403` with a fixed text: no CSRF token, no cookie (a peer token never gets `Set-Cookie`, so it cannot become a viewer), no hint of what exists. The documents
 are the viewer's own (same builders, same rev and ETag), with the same parameters and the same `Sec-Fetch-Site` rule; answers carry `Cache-Control: no-store`. A wrong token is
 the `401` of a wrong viewer token (this server has no lockout or rate limit for either). Tokens are compared with `hmac.compare_digest` against every entry.

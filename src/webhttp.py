@@ -181,6 +181,7 @@ class PeerTokens:
                 self._say("the file cannot be found: no peer token is accepted")
             else:
                 self.entries, self.ignored = self._read()
+            self._seen = {k: v for k, v in self._seen.items() if k in {e[0] for e in self.entries}}  # a revoked label forgets its last use
             self._key = key  # last: a thread with the same stat must not skip the read and use the old list
 
     def _read(self):
