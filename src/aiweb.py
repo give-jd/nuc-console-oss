@@ -9,6 +9,9 @@
   server      the model server is a CHILD of this process (aisetup.serve_argv and serve_env: 127.0.0.1 only, low priority, the models in the AI
               folder, the GPU unless [ai] gpu = no); it serves every installed model, keeps the one in use loaded, ends with the process, and there
               is only ever one
+  restart     the server ends with this process, so the web service (and only it: service_begin(), called by web.py; the console's engine never
+              starts a server by itself) starts it again after a restart when the AI is on with a model chosen and `[ai] autostart = yes`
+              (default), once and once more if that failed; and it writes ai-status.json every 30 s for the `ai-down` alarm (problems.py)
   chat        a question (advisor.ask, with the machine's state now: the program that owns the process binds it) or "advice now"
               (advisor.advise), answered in the background, each kept with the whole prompt the model was sent; the last HISTORY_MAX are
               kept in CHAT_FILE in the AI folder (this account's only), so that a restart does not lose them, until the chat is cleared
@@ -66,6 +69,9 @@ DEMO_STEPS, DEMO_STEP_S = 16, 0.15   # a simulated download: this many steps of 
 DEMO_FREE = 412 * 10 ** 9
 USAGE_S = 3.0             # the model's usage is measured this often ...
 USAGE_IDLE_S = 30.0       # ... while a page has asked for the snapshot within this long (nobody looking: nothing is measured)
+AUTOSTART_DELAY_S = 5.0   # the web service has served its first page before it starts the model server
+AUTOSTART_RETRY_S = 60.0  # one more attempt this long after a failed one; there is no other
+STATUS_EVERY_S = 30.0     # ai-status.json is written this often (problems.py: older than 3 minutes = unknown)
 SERVER_NAMES = ("ollama", "ollama.exe", "ollama_llama_server", "ollama_llama_se", "ollama_llama_server.exe")  # a server this process did not start
 
 VERB = {"use": "setting up", "download": "downloading", "delete": "deleting", "delete-all": "deleting everything", "start": "starting the server",
@@ -106,6 +112,10 @@ class Engine(object):
         self.stop_lock = threading.Lock()
         self._lock_path, self._beat, self._atexit, self._windows_job = None, None, False, None
         self._demo_os, self.demo_state, self._demo_booted = None, {}, False
+        self.autostart_delay, self.autostart_retry, self.status_every = AUTOSTART_DELAY_S, AUTOSTART_RETRY_S, STATUS_EVERY_S  # tests shorten them
+        self.answers_fn = None                 # tests: endpoint -> does a server answer there
+        self._svc, self._svc_thread, self._svc_stop, self._user_stopped, self._st, self._st_warned = None, None, threading.Event(), False, None, False
+        self._reason = ""                       # why the last automatic start did not happen (advisor.AI_REASONS), for ai-status.json
 
     # ---------------------------------------------------------------------------------------------------------------- places and settings
     @property
@@ -183,8 +193,16 @@ class Engine(object):
         except (OSError, ValueError) as e:
             return False, "config.ini could not be written: %s" % aisetup.safe(getattr(e, "strerror", None) or e, 120)
 
+    def _stop_autostart(self):
+        """The user said stop: no automatic start from now on, and one that is under way is cancelled (under the lock the start takes)."""
+        with self.lock:
+            self._user_stopped = True
+            if self.job and self.job["state"] == "running" and self.job.get("auto"):
+                self._cancel.set()
+
     def turn_off(self):
         """AI off: the advisor is turned off and the model server this process started is stopped."""
+        self._stop_autostart()                 # no automatic start again in this process
         ok, text = self.set_enabled(False)
         if not ok:
             return ok, text
@@ -258,7 +276,7 @@ class Engine(object):
         return aisetup.recommend_id(self.models, self.hw_fn())
 
     # ------------------------------------------------------------------------------------------------------------------------ the jobs
-    def _start_job(self, kind, model_id, work):
+    def _start_job(self, kind, model_id, work, auto=False):
         blocked = self._refuse()
         if blocked:
             return blocked
@@ -267,7 +285,7 @@ class Engine(object):
                 return self._result(False, "busy: %s. Wait for it, or cancel it" % job_text(self.job, False))
             now = time.time()
             self.job = {"kind": kind, "model": model_id or "", "state": "running", "phase": "starting", "step": "", "done": 0, "total": 0, "rate": 0.0,
-                        "error": "", "note": "", "started": now, "ended": None, "mark": (now, 0), "phase_at": now}
+                        "error": "", "note": "", "started": now, "ended": None, "mark": (now, 0), "phase_at": now, "auto": auto}
             self._cancel = threading.Event()
             job = self.job
             self._job_thread = threading.Thread(target=self._run_job, args=(job, work), daemon=True)
@@ -569,15 +587,17 @@ class Engine(object):
         with self.lock:
             return (self.child_info["model"] or None) if self._child_alive() else None
 
-    def start_server(self, model_id=None):
+    def start_server(self, model_id=None, auto=False):
         """Start the model server as a child of this process: 127.0.0.1 only, low priority. One at a time; it ends with this process."""
         try:
             m = self._model(model_id) if model_id else None
         except aisetup.SetupError as e:
             return self._result(False, str(e))
-        return self._start_job("start", m["id"] if m else "", lambda job: (self._demo_start if self.demo else self._work_start)(job, m))
+        return self._start_job("start", m["id"] if m else "", lambda job: (self._demo_start if self.demo else self._work_start)(job, m), auto=auto)
 
     def _work_start(self, job, wanted):
+        if job.get("auto") and self._wanted_off():  # an automatic start: the user's stop, or the end of the service, came first
+            raise aisetup.Cancelled()
         d = self.directory
         have = aisetup.installed_models(d, self.models, self.runtime)
         if not have:
@@ -816,6 +836,7 @@ class Engine(object):
         blocked = self._refuse()
         if blocked:
             return blocked
+        self._stop_autostart()
         if self.demo:
             had = self._dstate().get("server")
             self.demo_state["server"] = None
@@ -875,9 +896,169 @@ class Engine(object):
     def shutdown(self):
         """The process is ending: the server it started ends with it, and a download in the way is stopped."""
         self._cancel.set()
+        self._svc_stop.set()
         self.stop_usage()
         self._stop_child()
         self._unclaim()
+
+    # ---------------------------------------------------------------------------------------------------------------- after a restart
+    def _feature_on(self):
+        """[features] ai = no: there is no AI here, so nothing is started and no status is written."""
+        return bool((self.cfg().get("features") or {}).get("ai", True))
+
+    def service_begin(self):
+        """The web service (web.py, the desktop app and a portable run included) calls this once: a thread that, a few seconds later, starts the
+        model server again if the AI is on (autostart_plan), and writes ai-status.json every status_every seconds. The console never calls it: its
+        engine starts a server only when a key is pressed. Not in the demo, not with [features] ai = no. -> False when it was not begun."""
+        if self.demo or self._svc_thread is not None or not self._feature_on():
+            return False
+        self._svc_stop.clear()
+        self._svc_thread = threading.Thread(target=self._service_loop, daemon=True)
+        self._svc_thread.start()
+        return True
+
+    def _service_loop(self):
+        while not self._svc_stop.is_set():
+            try:
+                self.service_tick()
+            except Exception as e:  # noqa: BLE001 - this thread must outlive any bug in it: the web service goes on
+                print("nuc-console ai: service tick: %r" % (e,), file=sys.stderr)
+            self._svc_stop.wait(1.0)
+
+    def service_tick(self, now=None, wall=None):
+        """One step of the loop (tests call it with their own clocks). `now` is a MONOTONIC time: the 5 s, the 60 s and how long nothing has
+        answered are counted with it, so that a clock that steps (boot, NTP) fires nothing; `wall` is the time of day, written as `ts` only."""
+        now = time.monotonic() if now is None else now
+        if not self._feature_on():
+            return
+        s = self._svc
+        if s is None:
+            s = self._svc = {"t0": now, "next": now + self.autostart_delay, "tries": 0, "job": None, "status": None}
+        job = s["job"]
+        if job is not None and job["state"] != "running":
+            s["job"] = None
+            if job["state"] == "failed":
+                self._autostart_failed(s, now, job["error"])
+        if s["next"] is not None and now >= s["next"] and not self._svc_stop.is_set():
+            s["next"] = None
+            self._autostart(s, now)
+        if s["status"] is None or now - s["status"] >= self.status_every:
+            s["status"] = now
+            self.write_status(now, wall)
+
+    def autostart_plan(self):
+        """What the start of the web service does about the model server -> ("start", model id) | ("skip", why: nothing to do, silently) |
+        ("note", what is wrong, advisor.AI_REASONS' word for it), said as the page's last note and in the log. Starts nothing itself."""
+        ai = self.cfg().get("ai") or {}
+        if not self._feature_on():
+            return "skip", "[features] ai = no"
+        if not ai.get("autostart", True):
+            return "skip", "[ai] autostart = no"
+        if self.locked():
+            return "skip", "[ai] web_actions = no"
+        if self._wanted_off():
+            return "skip", "stopped from the page in this run"
+        web = advisor.read_web_state(self.web_path())
+        mid = web.get("model")
+        if not (web.get("enabled") and mid):
+            return "skip", "the AI is off"
+        if self._child_alive():
+            return "skip", "the model server started here is running"
+        endpoint = self.ecfg()["ai"].get("endpoint") or ""
+        if not aisetup.is_loopback_endpoint(endpoint):
+            return "skip", "the endpoint is not on this machine"
+        if self._answers(endpoint):
+            return "skip", "a model server already answers at %s" % endpoint
+        m = next((x for x in self.models if x["id"] == mid), None)
+        if m is None:
+            return "note", "AI is on with %s, which this version does not list: choose a model on the AI page" % aisetup.safe(mid, 60), "no-model"
+        d = self.directory
+        if not aisetup.runtime_ready(d, self.runtime):
+            return "note", "AI is on but the model server is not installed in %s: %s" % (aisetup.safe(d, 120), self._cmd("install", mid)), "no-runtime"
+        if not aisetup.model_ready(d, m):
+            return "note", "AI is on but %s is not installed in %s: %s" % (mid, aisetup.safe(d, 120), self._cmd("install", mid)), "no-model"
+        a = aisetup.assess_model(m, self.hw_fn())
+        if a and a["verdict"] == "no":
+            return "note", "AI is on with %s, which will not work on this machine: %s" % (mid, aisetup.safe(a["why"], 160)), "refused"
+        return "start", mid
+
+    def _wanted_off(self):
+        """Something says no automatic start (any more): the user turned the AI off or stopped the server in this run, or the service is ending."""
+        return self._user_stopped or self._svc_stop.is_set()
+
+    def _answers(self, endpoint):
+        """Does anything answer HTTP at this endpoint (a loopback probe of one second; a 401 is an answer)? Never raises."""
+        try:
+            return bool(self.answers_fn(endpoint) if self.answers_fn else aisetup.answers(endpoint, 1))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _autostart(self, s, now):
+        try:
+            plan = self.autostart_plan()
+        except Exception as e:  # noqa: BLE001 - a bug here must not stop the web service
+            plan = ("note", "automatic start of the model server failed: unexpected error %s" % type(e).__name__, "failed")
+        what, arg = plan[0], plan[1]
+        if what == "skip":
+            return                      # not an attempt: nothing was tried
+        if what == "note":
+            self._reason = plan[2]
+            print("nuc-console ai: autostart: %s" % arg, file=sys.stderr)
+            self._result(False, arg)
+            return
+        with self.lock:                 # the buttons (turn off, stop) and the end of the service take the same lock: the last word is theirs
+            if self._wanted_off():
+                return
+            s["tries"] += 1
+            print("nuc-console ai: autostart: starting the model server (%s)" % arg, file=sys.stderr)
+            ok, text = self.start_server(arg, auto=True)
+            if ok:
+                s["job"] = self.job if self.job and self.job["kind"] == "start" else None
+        if not ok:
+            self._autostart_failed(s, now, text)
+        elif self._svc_stop.is_set():
+            self._cancel.set()          # the service ended meanwhile: nothing may be left running
+
+    def _autostart_failed(self, s, now, why):
+        why = aisetup.safe(why, 300)
+        self._reason = "failed"
+        print("nuc-console ai: autostart failed: %s" % why, file=sys.stderr)
+        self._result(False, "starting the model server by itself failed: %s" % why)
+        if s["tries"] < 2 and not self._wanted_off():
+            s["next"] = now + self.autostart_retry
+
+    def _status_reason(self):
+        s = self._svc
+        if (s and (s["next"] is not None or s["job"] is not None)) or (self.job and self.job["state"] == "running" and self.job["kind"] in WORKING):
+            return "starting"
+        return self._reason or "unknown"
+
+    def write_status(self, now=None, wall=None):
+        """ai-status.json (advisor.write_ai_status) from what this engine sees now: is the AI on with a model (on this machine: an endpoint elsewhere
+        is not ours to fix), does something answer at its endpoint, for how many seconds that has been so (monotonic: `now`), and why not.
+        Never raises. -> what was written, or None (also with [features] ai = no)."""
+        now = time.monotonic() if now is None else now
+        try:
+            if not self._feature_on():
+                return None
+            ai = self.ecfg()["ai"]
+            model, endpoint = ai.get("model") or "", ai.get("endpoint") or ""
+            enabled = bool(ai.get("enabled") and model and aisetup.is_loopback_endpoint(endpoint))
+            answering = bool(enabled and self._answers(endpoint))
+            if self._st is None:
+                changed = (self._svc or {}).get("t0", now)
+            else:
+                changed = self._st[2] if self._st[:2] == (enabled, answering) else now
+            self._st = (enabled, answering, changed)
+            out = advisor.write_ai_status(enabled, answering, now - changed, model, wall, os.path.join(self.directory, advisor.AI_STATUS_FILE),
+                                          self._status_reason())
+            self._st_warned = False
+            return out
+        except Exception as e:  # noqa: BLE001
+            if not self._st_warned:
+                self._st_warned = True
+                print("nuc-console ai: cannot write %s: %s" % (advisor.AI_STATUS_FILE, aisetup.safe(getattr(e, "strerror", None) or e, 160)), file=sys.stderr)
+            return None
 
     # ------------------------------------------------------------------------------------------------------------------------- the chat
     def ask(self, text):
@@ -1065,6 +1246,7 @@ class Engine(object):
             ai = self.ecfg()["ai"] if not self.demo else {}
             snap = {"job": job, "server": server, "chat": chat, "notice": notice, "busy": running or chat["busy"] or server["starting"] or server["stopping"],
                     "version": self.version, "locked": self.locked(), "switch": self.switch(), "demo": self.demo,
+                    "autostart": bool(self._svc and self._svc["next"] is not None),
                     "ai": {"endpoint": ai.get("endpoint") or "", "model": ai.get("model") or ""}}
             if self.demo:
                 web = self._dstate().get("web") or {}
