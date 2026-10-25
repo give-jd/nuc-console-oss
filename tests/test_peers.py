@@ -127,10 +127,13 @@ class Config(unittest.TestCase):
             with mock.patch.object(nuc_config, "PORTABLE", "/data"), mock.patch.object(nuc_config, "BASE_DIR", "/data", create=True):
                 self.assertEqual(nuc_config.peers_cache_dir(), os.path.join("/data", "peers-cache"))
             with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", False), \
-                    mock.patch.object(nuc_config, "RUN_DIR", "/run/nuc-console"):
+                    mock.patch.object(nuc_config, "MACOS", False), mock.patch.object(nuc_config, "RUN_DIR", "/run/nuc-console"):
                 self.assertEqual(nuc_config.peers_cache_dir(), "/run/nuc-console-peers")
+            with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", False), \
+                    mock.patch.object(nuc_config, "MACOS", True), mock.patch.object(nuc_config, "RUN_DIR", "/var/run/nuc-console"):
+                self.assertEqual(nuc_config.peers_cache_dir(), "/var/lib/nuc-console-peers-cache")  # the folder install-macos.sh makes
             with mock.patch.object(nuc_config, "PORTABLE", ""), mock.patch.object(nuc_config, "WINDOWS", True), \
-                    mock.patch.object(nuc_config, "RUN_DIR", os.path.join("C:", "nc", "run")):
+                    mock.patch.object(nuc_config, "MACOS", False), mock.patch.object(nuc_config, "RUN_DIR", os.path.join("C:", "nc", "run")):
                 self.assertEqual(nuc_config.peers_cache_dir(), os.path.join("C:", "nc", "run", "peers"))
 
     def test_a_semicolon_is_a_comment_so_the_separator_is_a_space(self):

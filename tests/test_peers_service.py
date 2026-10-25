@@ -737,7 +737,8 @@ class LaunchersAndDocs(unittest.TestCase):
         install = slurp("docs", "INSTALL.md")
         self.assertIn("## Fleet poller", install)
         self.assertRegex(install, r"sudo -u nuc-console-peers nuc-console-fleet test \w+")
-        self.assertIn("not yet installed as a service", install)  # macOS and Windows: step 8
+        self.assertIn("com.nuc-console.peers", install)  # macOS and Windows: tests/test_peers_os_services.py
+        self.assertIn("NETWORK SERVICE", install)
         for doc in ("README.md", "docs/CONFIGURATION.md", "docs/WEB.md"):
             self.assertIn("nuc-console-peers", slurp(*doc.split("/")), doc)
         self.assertIn("nuc-console-peers", slurp("SECURITY.md"))

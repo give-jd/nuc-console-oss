@@ -364,7 +364,7 @@ The bot **token** is never in `config.ini` (it is world-readable): it lives in t
 
 One line per peer: `name = URL [token=PATH] [pin=sha256:HEX] [scope=summary|views|full] [alert=yes] [insecure=yes]`. The separator is the **space**
 (`config.ini` reads `;` as the start of a comment). It is read by the fleet client, `peers.py`, which polls each peer with one `GET` and keeps what it saw in a
-cache. On Linux the installer runs it as the service `nuc-console-peers` (own account; started only when this section has a peer; [INSTALL.md](INSTALL.md#fleet-poller)); a portable run starts it with the launcher; on an installed macOS or Windows host it is not yet a service (`nuc-console-fleet once` does one round). Nothing here changes what the host itself shows.
+cache. On Linux the installer runs it as the service `nuc-console-peers` (own account; started only when this section has a peer; [INSTALL.md](INSTALL.md#fleet-poller)); a portable run starts it with the launcher; on an installed macOS host it is the LaunchDaemon `com.nuc-console.peers`, on Windows the scheduled task `\nuc-console\peers` (NETWORK SERVICE), both only while this section has a peer; the desktop app has it through the portable launcher. Nothing here changes what the host itself shows.
 
 ```ini
 [hosts]

@@ -216,7 +216,36 @@ sudo -u nuc-console-peers nuc-console-fleet test lab      # one poll now, in wor
 - Uninstall (`sudo ./install.sh --uninstall`) stops and removes the unit; the account, `/var/lib/nuc-console-peers` and the tokens stay, like `/etc/nuc-console`.
 - A **portable** run (`./run.sh`, `run.cmd`) starts the same poller as a child, only if `[hosts]` has a peer when it starts (a peer added later: restart the launcher), with its tokens in
   `data/peers/NAME.token` (0600), its cache in `data/peers-cache` and its state in `data/peers-state`; it ends with the launcher. One account: there is no privilege separation there.
-- On macOS and Windows installed hosts the poller is **not yet installed as a service** (the launchd job and the Windows service come with a later step); `nuc-console-fleet once` and a portable run work there.
+
+**macOS** (installed): `install-macos.sh` (also run by `nuc-console-update`) writes the LaunchDaemon `/Library/LaunchDaemons/com.nuc-console.peers.plist` (label `com.nuc-console.peers`, runs `python3 -E -B /opt/nuc-console/peers.py serve` as the hidden account `_nuc-console-peers`, made like `_nuc-console`: no login shell, no home, a free uid in 400-499; `KeepAlive` on failure, `ThrottleInterval` 30) and loads it **only if `[hosts]` has a peer** (`peers.py --needed`: 0 loads it again with the new code, 1 turns it off and says so, anything else leaves it as it is and warns). Folders: `/etc/nuc-console/peers` `0750 root:_nuc-console-peers` (tokens), `/var/lib/nuc-console-peers` `0750` (state), `/var/lib/nuc-console-peers-cache` `0755` (what it saw, read by the web view; not `/var/run`, which is root's and emptied at boot); log `/var/log/nuc-console/peers.log` (rotated like the others).
+
+```sh
+sudo sh -c 'umask 077; cat > /etc/nuc-console/peers/lab.token'          # paste the token, end with Ctrl+D
+sudo chown _nuc-console-peers:_nuc-console-peers /etc/nuc-console/peers/lab.token
+sudo nuc-console-update --installed        # or sudo ./install.sh from the extracted release: loads the job now that [hosts] has a peer
+sudo -u _nuc-console-peers nuc-console-fleet test lab                    # one poll, in words, as the account that owns the token
+```
+
+Without a new release: `sudo launchctl enable system/com.nuc-console.peers && sudo launchctl bootstrap system /Library/LaunchDaemons/com.nuc-console.peers.plist`. Off again: empty `[hosts]` and run the installer, or `sudo launchctl bootout system/com.nuc-console.peers && sudo launchctl disable system/com.nuc-console.peers`. Uninstalling removes the job and the cache; the account, the state and the tokens stay.
+
+**Windows** (installed): `install-windows.ps1` (also run by `nuc-console-update`) registers the scheduled task `\nuc-console\peers` **only if `[hosts]` has a peer**, with the notifier's settings: account NETWORK SERVICE, at startup and every 5 minutes, restarted a minute after a failure, one instance. It runs `pythonw.exe -E -B "%ProgramFiles%\nuc-console\app\peers.py" serve --log "%ProgramData%\nuc-console\logs\peers.log"` (`pythonw` has no stderr; the log keeps 1 MB and one older file, words from a closed list only). `--needed` as on macOS: 0 registers it again with the new code, 1 leaves it unregistered and says so, anything else keeps a task an earlier install had and warns. The installer sets these ACLs on every run (`icacls`, inheritance removed):
+
+| Folder | Who |
+|---|---|
+| `%ProgramData%\nuc-console\peers` (tokens) | SYSTEM and Administrators full; NETWORK SERVICE read. Nobody else: not Users, not the web view's LOCAL SERVICE |
+| `%ProgramData%\nuc-console\peers-state` | SYSTEM, Administrators and NETWORK SERVICE modify. Nobody else |
+| `%ProgramData%\nuc-console\run\peers` (cache) | SYSTEM and Administrators full; NETWORK SERVICE modify; LOCAL SERVICE (web view) and Users read |
+
+```powershell
+# as Administrator. A file made inside the folder inherits its ACL; one copied or moved in keeps its own: icacls FILE /reset
+$t = Read-Host 'token'; Set-Content -Encoding ascii -NoNewline -Path "$env:ProgramData\nuc-console\peers\lab.token" -Value $t
+nuc-console-update                         # or install-windows.ps1 again: registers the task now that [hosts] has a peer
+nuc-console-fleet test lab                 # one poll, in words
+```
+
+The notifier also runs as NETWORK SERVICE, and so does anything else Windows runs under that account: they can read the tokens. To stop the poller: `Stop-ScheduledTask -TaskPath '\nuc-console\' -TaskName peers` (until the next installer run or restart), or empty `[hosts]` and run the installer. Uninstalling removes the task; `%ProgramData%\nuc-console\peers` (the tokens), the state and `config.ini` stay.
+
+**Portable and desktop: observers only.** Both force the web view onto 127.0.0.1 and ignore `[web]`, so other hosts cannot poll them (the peer-token scope needs `[web]`); they poll others. `run.sh`, `run.ps1` and `run.cmd` start the poller as a child when `[hosts]` has a peer, and the desktop app starts the core through those scripts (`core/run.sh --web --no-open`, `core\run.ps1 -NoOpen`), so it has the poller too and stops it on quit; tokens in `data/peers/NAME.token` (`0600`; Windows: your own account's ACL on the data folder). A peer added later is picked up at the next start of the app or launcher. A Mac or Windows PC that is to be watched by others is an installed host with `[web] enabled = yes`, a non-loopback `bind` and a token ([WEB.md](WEB.md)).
 - It is outbound only, no listener: `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` (AF_UNIX only because name resolution through systemd-resolved's nss-resolve, nscd or sssd talks to a local socket; the program opens none itself). The unit's comments list each hardening line. Stopping it (SIGTERM) drops the polls not started and waits for the one in flight, which ends by its own 5 s limit: it is gone within about 10 s.
 
 ### Port baseline

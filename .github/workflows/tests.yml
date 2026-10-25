@@ -122,13 +122,31 @@ jobs:
           [ "$(sudo stat -f '%Lp %Su' /var/lib/nuc-console-notify/inbox)" = "700 _nuc-console" ]   # the web page's requests (the same account)
           rc=0; python3 /opt/nuc-console/notify.py --enabled || rc=$?; [ "$rc" = 1 ]
           /opt/nuc-console/bin/nuc-console-telegram --status --json | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['enabled'] is False, d"
+      # the fleet poller: [hosts] is empty, so the account, the job and the folders are there and nothing runs; the tokens' folder is its group's only
+      - run: |
+          test -f /Library/LaunchDaemons/com.nuc-console.peers.plist
+          [ "$(stat -f '%Lp %Su %Sg' /etc/nuc-console/peers)" = "750 root _nuc-console-peers" ]
+          [ "$(sudo stat -f '%Lp %Su' /var/lib/nuc-console-peers)" = "750 _nuc-console-peers" ]
+          [ "$(stat -f '%Lp %Su' /var/lib/nuc-console-peers-cache)" = "755 _nuc-console-peers" ]
+          rc=0; python3 /opt/nuc-console/peers.py --needed || rc=$?; [ "$rc" = 1 ]
+          if sudo launchctl print system/com.nuc-console.peers > /dev/null 2>&1; then echo "the fleet poller runs with [hosts] empty"; exit 1; fi
+      # a peer in [hosts] and the installer again (what nuc-console-update does): the job is loaded and, as its own account, makes the cache folder its own
+      - run: |
+          sudo sh -c 'printf "\n[hosts]\nlab = http://100.64.0.9:8787\n" >> /etc/nuc-console/config.ini'
+          sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
+          sudo launchctl print system/com.nuc-console.peers > /dev/null
+          for _ in $(seq 1 40); do [ -e /var/lib/nuc-console-peers-cache/.owner ] && break; sleep 1; done
+          sudo cat /var/log/nuc-console/peers.log || true
+          [ "$(stat -f %Su /var/lib/nuc-console-peers-cache/.owner)" = _nuc-console-peers ]
       - run: sudo ./install.sh --uninstall
       - run: |
-          for p in /var/lib/nuc-console-notify /Library/LaunchDaemons/com.nuc-console.notify.plist /usr/local/bin/nuc-console-telegram; do
+          for p in /var/lib/nuc-console-notify /Library/LaunchDaemons/com.nuc-console.notify.plist /Library/LaunchDaemons/com.nuc-console.peers.plist /usr/local/bin/nuc-console-telegram; do
             [ ! -e "$p" ] && [ ! -L "$p" ] || { echo "left behind by the uninstall: $p"; exit 1; }
           done
           test ! -e /opt/nuc-console/bin/nuc-console-ai
           if sudo launchctl print system/com.nuc-console.notify > /dev/null 2>&1; then echo "com.nuc-console.notify still loaded"; exit 1; fi
+          if sudo launchctl print system/com.nuc-console.peers > /dev/null 2>&1; then echo "com.nuc-console.peers still loaded"; exit 1; fi
+          [ -d /etc/nuc-console/peers ]   # the tokens of the peers stay, like the configuration
 
   install-windows:
     runs-on: windows-latest
@@ -174,10 +192,38 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "nuc-console-telegram --status failed: $out" }
           if (($out | ConvertFrom-Json).enabled -ne $false) { throw "the notifier is not disabled by default: $out" }
           $global:LASTEXITCODE = 0  # the step's exit code is the last native command's: the expected 1 above must not fail it
+      # the fleet poller: [hosts] is empty, so no task is made; its folders are there, and only the poller (NETWORK SERVICE), SYSTEM and Administrators are in the tokens' and the state's ACL
+      - shell: powershell
+        run: |
+          if (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'peers' -ErrorAction SilentlyContinue) { throw "a peers task exists with [hosts] empty" }
+          foreach ($f in 'peers', 'peers-state') {
+              $acl = (& icacls.exe "$env:ProgramData\nuc-console\$f") -join "`n"
+              if ($acl -match 'BUILTIN\\Users|Everyone|Authenticated Users|LOCAL SERVICE') { throw "the fleet poller's $f folder is open to others: $acl" }
+              if ($acl -notmatch 'NETWORK SERVICE') { throw "the fleet poller (NETWORK SERVICE) cannot use its $f folder: $acl" }
+          }
+          $acl = (& icacls.exe "$env:ProgramData\nuc-console\run\peers") -join "`n"   # the cache: everybody reads, the poller writes
+          if ($acl -notmatch 'NETWORK SERVICE:\(OI\)\(CI\)\(M\)' -or $acl -notmatch 'LOCAL SERVICE:\(OI\)\(CI\)\(RX\)') { throw "unexpected ACL on the fleet cache: $acl" }
+          $global:LASTEXITCODE = 0
+      # a peer in [hosts] and the installer again (what nuc-console-update does): the task exists, runs as NETWORK SERVICE with --log, and makes the cache folder its own
+      - shell: powershell
+        run: |
+          Add-Content -LiteralPath "$env:ProgramData\nuc-console\config.ini" -Value "`n[hosts]`nlab = http://100.64.0.9:8787"
+          powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Display browser
+          if ($LASTEXITCODE -ne 0) { throw "the second install failed" }
+          $t = Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'peers' -ErrorAction SilentlyContinue
+          if (-not $t) { throw "no peers task with a peer in [hosts]" }
+          if ($t.Principal.UserId -notmatch 'NETWORK SERVICE') { throw "the peers task runs as $($t.Principal.UserId), not NETWORK SERVICE" }
+          $arg = $t.Actions[0].Arguments
+          if ($arg -notmatch '^-E -B ".*peers\.py" serve --log ".*peers\.log"') { throw "unexpected command line: $arg" }
+          for ($i = 0; $i -lt 40; $i++) { if (Test-Path "$env:ProgramData\nuc-console\run\peers\.owner") { break }; Start-Sleep -Seconds 1 }
+          Get-Content "$env:ProgramData\nuc-console\logs\peers.log" -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$env:ProgramData\nuc-console\run\peers\.owner")) { throw "the fleet poller wrote nothing in its cache folder" }
       - shell: powershell
         run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Uninstall
       - shell: powershell
         run: |
           if (Test-Path "$env:ProgramData\nuc-console\notify") { throw "the notifier's folder (bot token) survived the uninstall" }
           if (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'notify' -ErrorAction SilentlyContinue) { throw "the notify task survived the uninstall" }
+          if (Get-ScheduledTask -TaskPath '\nuc-console\' -TaskName 'peers' -ErrorAction SilentlyContinue) { throw "the peers task survived the uninstall" }
+          if (-not (Test-Path "$env:ProgramData\nuc-console\peers")) { throw "the tokens of the peers must stay, like config.ini" }
           if (Test-Path "$env:ProgramFiles\nuc-console\bin\nuc-console-ai.cmd") { throw "nuc-console-ai.cmd is still there" }

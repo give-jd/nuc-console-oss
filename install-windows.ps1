@@ -20,7 +20,8 @@
        and the web view (LOCAL SERVICE) on 127.0.0.1 only, which shows the dashboard to this machine's browser (read-only; only the AI page has buttons);
        at every logon the dashboard opens: in a normal browser window ([display] mode = browser, the default) or full screen
        (mode = fullscreen: Alt+F4 closes it, F11 leaves full screen); and the optional Telegram notifier (LOCAL SERVICE,
-       outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md);
+       outbound HTTPS to api.telegram.org only, idle until you switch it on: docs\TELEGRAM.md); and, only while [hosts] in
+       config.ini lists a peer, the fleet poller (NETWORK SERVICE, outbound only: docs\INSTALL.md, "Fleet poller");
     4. adds a "nuc-console" shortcut to the Start menu (the dashboard in your normal browser) and
        %ProgramFiles%\nuc-console\bin to the system PATH (nuc-console-problems, nuc-console-accept and, for the optional
        local AI model, nuc-console-ai and nuc-console-ask: nothing is downloaded or started until you run them);
@@ -29,7 +30,8 @@
 .PARAMETER Uninstall
   Removes the tasks (the AI model server's too, if you installed it), the program folder and the PATH entry.
   %ProgramData%\nuc-console (config, baseline, and the AI runtime and models in its ai\ folder) is left in place.
-  The Telegram notifier's folder (%ProgramData%\nuc-console\notify, with the bot token) is deleted.
+  The Telegram notifier's folder (%ProgramData%\nuc-console\notify, with the bot token) is deleted. The tokens of the fleet peers
+  (%ProgramData%\nuc-console\peers) stay, like config.ini.
 
 .PARAMETER Display
   browser (default): at every logon the dashboard opens in a normal window of your browser. fullscreen (or kiosk): it opens
@@ -147,9 +149,11 @@ if ($Uninstall) {
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
     if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
-    Say "removed ($Data with config.ini, the baseline, the download cache and the AI runtime and models in $Data\ai is left in place; delete $Data\ai to free the disk)"
+    Say "removed ($Data with config.ini, the baseline, the tokens of the fleet peers in $Data\peers, the download cache and the AI runtime and models in $Data\ai is left in place; delete $Data\ai to free the disk)"
     exit 0
 }
+
+$peersTask = [bool](Get-ScheduledTask -TaskPath $TaskPath -TaskName 'peers' -ErrorAction SilentlyContinue)  # kept if [hosts] cannot be read below
 
 # ---- 1. data folder: config, state, logs, download cache -----------------------------------------------------------------
 foreach ($d in @($Data, "$Data\run", "$Data\lib", "$Data\logs", "$Data\ai", $Cache)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
@@ -176,6 +180,17 @@ if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\private" }
 New-Item -ItemType Directory -Force -Path "$Data\notify\inbox" | Out-Null
 & icacls.exe "$Data\notify\inbox" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' '*S-1-5-19:(W)' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\notify\inbox" }
+# the fleet poller (docs\INSTALL.md, "Fleet poller"): NETWORK SERVICE like the notifier, but its own folders, so it reads no notifier file and
+# the notifier no peer token. Tokens (peers\NAME.token): SYSTEM, Administrators and the poller only. State (peers-state\, the remembered
+# host_id of each peer): the poller, SYSTEM and Administrators write, nobody else reads. Cache (run\peers\, what it saw): the poller
+# writes, everybody reads (the web view is LOCAL SERVICE, the console and the dashboard run as users).
+New-Item -ItemType Directory -Force -Path "$Data\peers", "$Data\peers-state", "$Data\run\peers" | Out-Null
+& icacls.exe "$Data\peers" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\peers" }
+& icacls.exe "$Data\peers-state" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\peers-state" }
+& icacls.exe "$Data\run\peers" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-20:(OI)(CI)M' '*S-1-5-19:(OI)(CI)RX' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Data\run\peers" }
 
 # ---- 2. private Python ---------------------------------------------------------------------------------------------------
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -221,8 +236,8 @@ $url = "http://127.0.0.1:$port/?fit=1"
 Set-MachinePath $true
 
 # ---- 4. scheduled tasks ------------------------------------------------------------------------------------------------
-function Register-Service($name, $script, $sid, $log, $description, $extra = '') {
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "-B `"$App\$script`" --log `"$Data\logs\$log`" $extra".TrimEnd() -WorkingDirectory $App
+function Register-Service($name, $script, $sid, $log, $description, $extra = '', $flags = '-B', $sub = '') {  # $sub: a word before --log (peers.py serve)
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "$flags `"$App\$script`" $sub --log `"$Data\logs\$log`" $extra".TrimEnd() -WorkingDirectory $App
     # at startup, and every 5 minutes: if it stopped, it starts again (IgnoreNew: never two at once)
     $triggers = @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)))
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable `
@@ -248,6 +263,23 @@ if ($web) {
 # page may set it up). Outbound HTTPS to api.telegram.org only, as NETWORK SERVICE; its folder (token, chat) is the one locked above
 Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log' 'nuc-console Telegram notifier: outbound only (NETWORK SERVICE)'
 Start-ScheduledTask -TaskPath $TaskPath -TaskName 'notify'
+
+# the fleet poller: outbound only, as NETWORK SERVICE; registered only if [hosts] has a peer. peers.py --needed: 0 a peer is listed, 1 none,
+# anything else (2: unreadable config.ini, or the program did not run): the task of an earlier install is registered again, none is made.
+# -E: no PYTHON* variable from the environment; --log: pythonw has no stderr; it rereads [hosts] when config.ini changes.
+function Register-Peers {
+    Register-Service 'peers' 'peers.py' 'S-1-5-20' 'peers.log' 'nuc-console fleet poller: outbound only (NETWORK SERVICE)' -flags '-E -B' -sub 'serve'
+    Start-ScheduledTask -TaskPath $TaskPath -TaskName 'peers'
+}
+$old, $peersRc = $ErrorActionPreference, 2
+$ErrorActionPreference = 'Continue'  # a native command's stderr must not stop the script
+try { & $python -E -B (Join-Path $App 'peers.py') --needed; $peersRc = $LASTEXITCODE } catch { $peersRc = 2 } finally { $ErrorActionPreference = $old }
+if ($peersRc -eq 0) { Register-Peers }
+elseif ($peersRc -eq 1) { Say 'the fleet poller is installed but off ([hosts] is empty): after adding a peer, run install-windows.ps1 or nuc-console-update again (docs\INSTALL.md, Fleet poller)' }
+else {
+    Say "warning: could not tell whether [hosts] in $cfg lists a peer (exit code $peersRc): the fleet poller is left as it is"
+    if ($peersTask) { Register-Peers }
+}
 
 if ($mode -ne 'none') {  # at every logon: a normal browser window (--open) or a full-screen one (--kiosk)
     $arg = @{ browser = '--open'; fullscreen = '--kiosk' }[$mode]

@@ -592,10 +592,10 @@ The Telegram page does not write `config.ini` either: it asks the notifier, an u
 
 ## Fleet cache
 
-On Linux the poller is the service `nuc-console-peers` (account `nuc-console-peers`, cache `/run/nuc-console-peers` readable by everybody, state `/var/lib/nuc-console-peers`; [INSTALL.md](INSTALL.md#fleet-poller)); it exists only while `[hosts]` has a peer. A portable run starts it with the launcher.
+On Linux the poller is the service `nuc-console-peers` (account `nuc-console-peers`, cache `/run/nuc-console-peers` readable by everybody, state `/var/lib/nuc-console-peers`; [INSTALL.md](INSTALL.md#fleet-poller)); on installed macOS the LaunchDaemon `com.nuc-console.peers` (account `_nuc-console-peers`), on installed Windows the task `\nuc-console\peers` (NETWORK SERVICE); each exists only while `[hosts]` has a peer. A portable run and the desktop app start it with the launcher.
 
 The fleet client (`src/peers.py`, `nuc-console-fleet once`) writes what it saw of the `[hosts]` peers into a folder of its own: Linux `/run/nuc-console-peers`,
-macOS `/var/run/nuc-console-peers`, Windows `%ProgramData%\nuc-console\run\peers`, a portable run `<data>/peers-cache` (`NUC_CONSOLE_PEERS_CACHE` overrides it). The web view and the
+macOS `/var/lib/nuc-console-peers-cache` (`/var/run` is root's), Windows `%ProgramData%\nuc-console\run\peers`, a portable run `<data>/peers-cache` (`NUC_CONSOLE_PEERS_CACHE` overrides it). The web view and the
 console only **read** this folder; they never open a socket to a peer and never hold a peer's token. Two JSON files per peer, written atomically (a file aside, then rename), mode 0644: `<name>.json`, the summary entry and a small index of its documents (what a page reads every few seconds), and `<name>.views.json`, the documents themselves (`{"v": 1, "views": {...}}`, only for scope `views`/`full`, written before `<name>.json` and removed when there are none). A name ending `.views.json` is never a peer. `<name>.json`:
 
 ```json
