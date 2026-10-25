@@ -89,7 +89,7 @@ TELEGRAM_WEB = "web.json"  # in NOTIFY_DIR: what the web view's Telegram page ch
 MUTABLE_ALERTS = ("journal-errors", "thermal", "throttling", "container-exited", "unhealthy-container", "collector-boot",
                   "reboot-required", "disk-inodes",
                   "container-no-restart", "containers-not-back",
-                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down")
+                  "display-stuck", "oom-killed", "memory-pressure", "nic-resets", "ai-down", "peer-down", "fleet-poller-down")
 
 # [services] must_run and [tls] watch: what the root collector checks (units to ask systemctl about, certificates to read). Both lists are
 # validated here, by load() (the settings page refuses a bad value) and again by the collector, which runs this very function.
@@ -97,6 +97,22 @@ UNIT_RE = re.compile(r"[A-Za-z0-9@._:][A-Za-z0-9@._:-]{0,63}")  # a systemd unit
 WATCH_NAME_RE = re.compile(r"[A-Za-z0-9._-]{1,32}")
 WATCH_MAX = 20  # units under [services] must_run
 TLS_MAX = 10  # entries under [tls] watch (each can cost a connect and a handshake)
+# [posture]: opt-in security-posture checks (off: on a kiosk they are noise). The closed set, per OS; Linux has none yet.
+POSTURE_CHECKS = {"windows": ("secure-boot", "rdp-nla", "smb1"), "darwin": ("filevault", "sip", "gatekeeper"), "linux": ()}
+POSTURE_ALL = tuple(c for v in POSTURE_CHECKS.values() for c in v)
+POSTURE_WORDS = {"secure-boot": "Secure Boot off", "rdp-nla": "RDP without NLA", "smb1": "SMB1 enabled",
+                 "filevault": "FileVault off", "sip": "SIP off", "gatekeeper": "Gatekeeper off"}  # fixed words of the alarm text
+
+
+_CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # what ui.safe() strips (nuc_config cannot import ui): a name from the file reaches the journal
+
+
+def posture_wanted(checks, os_name):
+    """The checks to run on this OS: the ones asked (an empty list = every check this OS has) that exist here, in the closed set's order."""
+    mine = POSTURE_CHECKS.get(os_name, ())
+    return tuple(c for c in mine if not checks or c in checks)
+
+
 WATCH_BUDGET_S = 30  # the collector stops starting new checks of a section after this many seconds
 # a certificate is fetched only from this machine or a private network: nuc-console makes no other outbound connection than Telegram's.
 # (the same list as exposure.PRIVATE_NETS; tests/test_watch_checks.py keeps them equal)
@@ -286,6 +302,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["host"] = {"name": ""}  # [host] name: the label of this machine (default: the host name)
     cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
     cfg["tls"] = {"watch": [], "warn_days": 21}  # [tls] watch: ["name=host:port" | "name=/path"] as watch_entry reads them
+    cfg["posture"] = {"enabled": False, "checks": []}  # [posture]: opt-in posture alarms; checks = names of POSTURE_ALL, empty = all of this OS
     cfg["watch_warnings"] = []  # what [services] and [tls] asked that cannot be done: shown as an ATTENTION warning (watch-config)
     cfg["hosts"] = []  # [hosts]: the peers peers.py polls, see parse_hosts; never from the overlay, never from the settings page
     cfg["ui"] = {"sections": list(SECTIONS)}  # [ui] (prefs.parse_ui): the section order and only the keys the file sets
@@ -429,6 +446,21 @@ def load(path=None, warn=None, overlay=True):
             else:
                 seen.add(name)
                 cfg["tls"]["watch"].append(f"{name}={host}" if kind == "file" else f"{name}=[{host}]:{port}" if ":" in host else f"{name}={host}:{port}")
+    if cp.has_section("posture"):  # enabled = no (default), checks = names of POSTURE_ALL: an unknown name is said and skipped
+        for key in [k for k in cp.options("posture") if k not in cp.defaults() and k not in ("enabled", "checks")]:
+            say(f"nuc-console: {path}: [posture] unknown key '{_CTRL.sub('?', key[:40])}' ignored (known: enabled, checks)")
+        try:
+            cfg["posture"]["enabled"] = cp.getboolean("posture", "enabled", fallback=False)
+        except ValueError:
+            say(f"nuc-console: {path}: [posture] enabled is not a boolean: kept off")
+        for x in [x.strip().lower() for x in re.split(r"[,;\s]+", cp.get("posture", "checks", fallback="")) if x.strip()]:
+            if x in POSTURE_ALL:
+                if x not in cfg["posture"]["checks"]:
+                    cfg["posture"]["checks"].append(x)
+            else:
+                why = ("not implemented (it cannot be read without PowerShell or localised text)" if x == "bitlocker"
+                       else "unknown (known: %s)" % ", ".join(POSTURE_ALL))
+                say(f"nuc-console: {path}: [posture] checks: '{_CTRL.sub('?', x[:40])}' is {why}: skipped")
     if cp.has_section("hosts"):
         cfg["hosts"] = parse_hosts([(k, cp.get("hosts", k, raw=True)) for k in cp.options("hosts") if k not in cp.defaults()],
                                    lambda why: say(f"nuc-console: {path}: [hosts] {why}"))

@@ -129,6 +129,7 @@ Windows `nuc-console-telegram.cmd --on` from an administrator prompt: it stops a
 
 - A problem must stay on the list for **two checks in a row** (2 cycles of 30 s) before it is announced: a container that restarts and recovers, or a
   one-second blip, sends nothing. When it is gone you get a "resolved" message (unless `resolved = no`).
+- The alarms about watched hosts (`peer-down`, `peer-insecure`, `peer-identity`, `fleet-poller-down`: [CONFIGURATION.md](CONFIGURATION.md#alarms-about-the-peers)) are announced like any other problem, by title; the host names only with `detail = full`.
 - At most **20 messages per hour**: a flapping service cannot flood your phone.
 - The first time it runs (nothing sent yet) it sends **one summary** of what is open now, not one message per existing problem.
 

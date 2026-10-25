@@ -57,6 +57,7 @@ RANK = {"ok": 0, "info": 0, "warn": 1, "unknown": 2, "stale": 2, "incompatible":
 FAILED = ("unreachable", "unauthorized", "untrusted", "incompatible")  # these raise the backoff of the peer
 SCOPES = nuc_config.HOST_SCOPES
 INTERVAL, INTERVAL_MIN = 15, 5
+HEARTBEAT_S = 15  # fleet.json is rewritten at least this often (the poller's clock), even when no poll finished: consumers judge "the poller runs" by its ts
 BACKOFF_FIRST, BACKOFF_MAX = 5, 300
 WORKERS = 4
 STALE_AGE_S = 120  # a summary whose own `at` is older than this (by the peer's clock) is "stale"
@@ -651,7 +652,7 @@ def new_entry(peer, now):
         shown = ""
     return {"v": 1, "name": peer["name"], "url_display": shown, "ts": int(now), "state": "unknown", "error": "", "summary": {}, "views": {},
             "scope": peer.get("scope", "summary"), "warn": [], "insecure": False, "identity": "ok", "last_ok": None, "skew_s": None,
-            "age_s": None}
+            "age_s": None, "fails": 0}
 
 
 def poll_peer(peer, prev=None, wall=time.time, **net):
@@ -700,11 +701,16 @@ def poll_peer(peer, prev=None, wall=time.time, **net):
                         break
     except PeerError as e:
         entry["state"], entry["error"] = e.state, e.reason
+        if prev and _int(prev.get("last_ok"), 4102444800) is not None:
+            entry["last_ok"] = prev["last_ok"]  # the last good answer is remembered through every failed state (the peer-down 60 s rule reads it)
         if e.state == "unreachable" and prev and isinstance(prev.get("summary"), dict):
-            entry["summary"], entry["views"], entry["last_ok"] = prev["summary"], prev.get("views") or {}, prev.get("last_ok")
+            entry["summary"], entry["views"] = prev["summary"], prev.get("views") or {}
             entry["warn"].append("showing-old-data")
     except Exception:  # noqa: BLE001  (a bug must not take the poller down, nor leak a message)
         entry["state"], entry["error"] = "unreachable", "internal"
+    # rounds in a row that ended in a failed state: what the peer-down alarm counts (problems.peer_state); a good answer starts again at 0
+    before = _int((prev or {}).get("fails"), 10 ** 6) or 0
+    entry["fails"] = min(before + 1, 10 ** 6) if entry["state"] in FAILED else 0
     entry["insecure"] = bool(info["plain"])
     if info["plain"]:
         entry["warn"].append("insecure-transport")
@@ -893,7 +899,7 @@ def valid_entry(obj, name):
            "ts": ts, "state": obj["state"], "error": err, "scope": obj["scope"], "identity": obj["identity"], "insecure": obj["insecure"],
            "warn": [clean(w, 40) for w in warn if isinstance(w, str)], "summary": flat_summary(obj.get("summary")),
            "last_ok": _int(obj.get("last_ok"), 4102444800), "skew_s": obj["skew_s"] if isinstance(obj.get("skew_s"), int) and not isinstance(obj.get("skew_s"), bool) else None,
-           "age_s": _int(obj.get("age_s"), 10 ** 9), "views": {}, "view_index": {}}
+           "age_s": _int(obj.get("age_s"), 10 ** 9), "fails": _int(obj.get("fails"), 10 ** 6) or 0, "views": {}, "view_index": {}}
     index = obj.get("view_index")
     if isinstance(index, dict):
         for vname in VIEWS:
@@ -988,6 +994,7 @@ class Poller(object):
         self.running = {}
         self.entries = {}
         self.known = Known(self.state)
+        self.beat = None  # when fleet.json was last written (self.clock)
 
     def delay(self, name, entry):
         if entry["state"] in FAILED:
@@ -1005,6 +1012,9 @@ class Poller(object):
             except Exception:  # noqa: BLE001
                 entry = new_entry(next(p for p in self.peers if p["name"] == name), self.wall())
                 entry["state"], entry["error"] = "unreachable", "internal"
+                before = self.last(name) or {}  # a poll that raised is a failed round like any other: the count goes on
+                entry["fails"] = min((_int(before.get("fails"), 10 ** 6) or 0) + 1, 10 ** 6)
+                entry["last_ok"] = before.get("last_ok")
             if self.known.check(entry):
                 try:
                     self.known.save(self.state)
@@ -1034,7 +1044,8 @@ class Poller(object):
             name = p["name"]
             if name not in self.running and self.next[name] <= now:
                 self.running[name] = self.pool.submit(self.poll, p, self.last(name), self.wall, **self.net)
-        if changed:
+        if changed or (self.entries and (self.beat is None or not 0 <= now - self.beat < HEARTBEAT_S)):  # the heartbeat: a peer that is down for good backs off to 5 min
+            self.beat = now
             try:
                 self.write()
             except OSError as e:  # a full disk or a folder that is not ours must not stop the polling: say it once per kind
