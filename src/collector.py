@@ -47,7 +47,8 @@ BOOT_FEATURE = {"analyze": ("boot",), "blame": ("boot",), "failed": ("boot",), "
 # Linux-only sections: on macOS/Windows they are "not available on this OS" (no error, no alarm)
 LINUX_ONLY_NET = ("ufw", "docker_user", "iptables", "drops", "f2b", "users", "keys", "cron", "units", "smart")
 UNSUPPORTED_BOOT_BY_OS = {"darwin": ("analyze", "blame", "journal", "deps", "kernlog", "reboot", "updates", "clock", "services", "sshd"),
-                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd")}  # the host-hygiene sections are Linux (inodes: macOS too)
+                          "windows": ("blame", "kernlog", "reboot", "updates", "clock", "inodes", "services", "sshd"),
+                          "linux": ("posture",)}  # the host-hygiene sections are Linux (inodes: macOS too)
 UNSUPPORTED_BOOT = UNSUPPORTED_BOOT_BY_OS.get(OS_NAME, ())
 OUT = os.path.join(nuc_config.RUN_DIR, "containers.json")
 OUT_NET = os.path.join(nuc_config.RUN_DIR, "net.json")
@@ -947,13 +948,22 @@ def collect_boot():
             out.append({"name": name, "exp": exp, "why": "" if exp is not None else "unreadable"})
         return out
 
+    def posture():
+        """[posture] (opt-in): {check: ok | fail | unknown}, read by the OS's own source (collect_windows registry, collect_darwin Apple tools)."""
+        wanted = nuc_config.posture_wanted(CFG["posture"]["checks"], OS_NAME)
+        if WINDOWS:
+            import winreg
+            return cwin.posture(winreg, wanted)
+        return cmac.posture(run, wanted)
+
     d["btime"] = boot_time()
     if not LINUX:  # same sections, native sources; 'blame' (and on macOS 'analyze', 'journal', 'deps') stay unsupported
         analyze, failed, deps, enabled, journal = (from_native(k) for k in ("analyze", "failed", "deps", "enabled", "journal"))
     for key, fn in (("analyze", analyze), ("blame", blame), ("failed", failed), ("deps", deps), ("enabled", enabled),
                     ("journal", journal), ("kernlog", kernlog), ("containers", containers), ("docker_df", docker_df), ("backups", collect_backups),
                     ("reboot", collect_reboot), ("updates", collect_updates), ("clock", collect_clock), ("inodes", collect_inodes),
-                    ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ())):
+                    ("sshd", sshd), *((("services", services),) if CFG["services"]["must_run"] else ()), *((("certs", certs),) if CFG["tls"]["watch"] else ()),
+                    *((("posture", posture),) if CFG["posture"]["enabled"] else ())):
         section(key, fn)
     return d
 

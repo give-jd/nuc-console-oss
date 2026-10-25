@@ -549,3 +549,53 @@ def sensor_sources(data):
     status, zones = wmi_status(data.get("ACPI"), "zones")
     out.append(("ACPI", "absent" if status is None and not zones else status, acpi_readings(zones)))
     return out
+
+
+# ---- [posture] (opt-in): registry reads only, no PowerShell ------------------------------------------------------------------------
+
+POSTURE_KEYS = {  # check -> (key under HKLM, value)
+    "secure-boot": (r"SYSTEM\CurrentControlSet\Control\SecureBoot\State", "UEFISecureBootEnabled"),
+    "rdp-deny": (r"SYSTEM\CurrentControlSet\Control\Terminal Server", "fDenyTSConnections"),
+    "rdp-nla": (r"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp", "UserAuthentication"),
+    "smb1": (r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "SMB1"),
+}
+
+
+def reg_dword(winreg, which):
+    """A DWORD of HKLM (64-bit view) -> int; None when the key or the value does not exist. Any other failure (access, a value of another
+    type) raises: the check is then unknown, never ok."""
+    key, name = POSTURE_KEYS[which]
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+            v, kind = winreg.QueryValueEx(k, name)
+    except FileNotFoundError:
+        return None
+    if kind != winreg.REG_DWORD or isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError("not a DWORD")
+    return v
+
+
+def posture(winreg, wanted):
+    """{check: "ok" | "fail" | "unknown"} for the wanted checks. Missing values: Secure Boot (legacy BIOS) and RDP settings are unknown; a missing
+    SMB1 value is the OS default (the SMB1 server is off on Windows 10/11 and Server 2016+), so ok."""
+    out = {}
+    for check in wanted:
+        try:
+            if check == "secure-boot":
+                v = reg_dword(winreg, "secure-boot")
+                out[check] = "unknown" if v is None else "fail" if v == 0 else "ok" if v == 1 else "unknown"
+            elif check == "rdp-nla":
+                deny = reg_dword(winreg, "rdp-deny")
+                if deny is None:
+                    out[check] = "unknown"
+                elif deny != 0:  # RDP connections are denied: NLA is moot
+                    out[check] = "ok"
+                else:
+                    nla = reg_dword(winreg, "rdp-nla")
+                    out[check] = "unknown" if nla is None else "fail" if nla == 0 else "ok" if nla == 1 else "unknown"
+            elif check == "smb1":
+                v = reg_dword(winreg, "smb1")
+                out[check] = "ok" if v in (None, 0) else "fail" if v == 1 else "unknown"
+        except (OSError, ValueError):
+            out[check] = "unknown"
+    return out

@@ -436,3 +436,32 @@ def temp_tool(run, name):
     if c is None:
         raise ValueError("unreadable output: " + repr(out.strip()[:40]))
     return c
+
+
+# ---- [posture] (opt-in): Apple's own tools, fixed argv, run by the root collector like the others (all in /usr/bin or /usr/sbin) --------
+
+POSTURE_TOOLS = {"filevault": ("fdesetup", "status"), "sip": ("csrutil", "status"), "gatekeeper": ("spctl", "--status")}
+POSTURE_RE = {  # wording tolerant: the first state word after the tool's own phrase; anything else is unknown
+    "filevault": (re.compile(r"filevault\s+is\s+(on|off)\b", re.I), {"on": "ok", "off": "fail"}),
+    "sip": (re.compile(r"protection\s+status:\s*(enabled|disabled)\b(?!\s*\(custom)", re.I), {"enabled": "ok", "disabled": "fail"}),
+    "gatekeeper": (re.compile(r"assessments?\s+(enabled|disabled)\b", re.I), {"enabled": "ok", "disabled": "fail"}),
+}
+
+
+def parse_posture(check, text):
+    """One tool's output -> "ok" | "fail" | "unknown". 'enabled (Custom Configuration)' for SIP is unknown: weaker than enabled, not off."""
+    rx, states = POSTURE_RE[check]
+    m = rx.search(text or "")
+    return states[m.group(1).lower()] if m else "unknown"
+
+
+def posture(run, wanted):
+    """{check: state} for the wanted checks. A tool that is missing, times out or prints something else is unknown, never ok."""
+    out = {}
+    for check in wanted:
+        try:
+            rc, text, err = run(*POSTURE_TOOLS[check], timeout=10)
+            out[check] = parse_posture(check, text + "\n" + err) if rc is not None else "unknown"
+        except Exception:  # noqa: BLE001 - Absent, or the identity check: one check never empties the others
+            out[check] = "unknown"
+    return out

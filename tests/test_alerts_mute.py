@@ -50,7 +50,8 @@ SECURITY = {
     "feature-hidden",                                                                                                        # a section the settings page switched off
     "mute-ignored",                                                                                                          # this very setting
     "service-down", "ssh-root-login", "ssh-password-auth", "ssh-empty-passwords",                                           # a missing or weak protection
-    "cert-expiring", "cert-expired", "cert-unreadable", "watch-config",                                                     # an expiry nobody sees; the config that watches it
+    "cert-expiring", "cert-expired", "cert-unreadable", "watch-config",                                                                         # an expiry nobody sees; the config that watches it
+    "posture",                                                                                                               # opt-in: Secure Boot, FileVault, SIP...
     "updates-pending", "clock-unsynced",                                                                                     # unpatched software, a wrong clock
     "backup-stale", "backup-missing",                                                                                        # a guard the person configured: not to be silenced
     "disk-io-errors", "memory-errors",                                                                                       # hardware integrity: never hidden

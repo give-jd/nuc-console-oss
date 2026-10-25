@@ -97,6 +97,9 @@ SECTIONS = (  # (section, title, what it is for): the order of the page
     ("tls", "TLS certificates to watch",
      "Certificates whose expiry is checked: a host:port on this machine or a private network (an IP address, never a name; no outbound "
      "connection is made anywhere else), or the path of a PEM file. An administrator's setting: only config.ini changes it."),
+    ("posture", "Security posture alarms (off by default)",
+     "Opt-in: Secure Boot, RDP without NLA and SMB1 on Windows; FileVault, SIP and Gatekeeper on macOS. Off because on a kiosk they are often "
+     "intended and only noise; nothing on Linux yet. An administrator's setting: only config.ini changes it."),
     ("webapps", "Web apps you expect",
      "One per line, name = port[, port...]: shown in WEB APPS as active, or DOWN when nothing listens there. A port listed here is an "
      "intended exposure: it no longer counts as a Docker port bypassing ufw."),
@@ -247,6 +250,15 @@ KEYS = (
          % nuc_config.TLS_MAX, {"pattern": re.compile(r"[^\x00-\x1f\x7f#;]{0,%d}" % MAX_TEXT)}),
         ("warn_days", INT, "21", START, "Days before the end of a certificate from which ATTENTION warns (cert-expiring); expired is an error.",
          {"lo": 1, "hi": 365}),
+    ))
+    + _k("posture", (
+        ("enabled", BOOL, "no", START,
+         "yes: the root collector reads the posture checks of this OS and ATTENTION raises the warning posture for the ones that fail. no (the default): "
+         "nothing is read, nothing is raised."),
+        ("checks", LIST, "", START,
+         "Comma-separated, of: %s. Empty: every check this OS has (Windows: secure-boot, rdp-nla, smb1; macOS: filevault, sip, gatekeeper; Linux: none). "
+         "A check that cannot be read is unknown: never ok, never an alarm." % ", ".join(nuc_config.POSTURE_ALL),
+         {"choices": nuc_config.POSTURE_ALL, "unset": True}),
     ))
     + _k("containers", (
         ("restart_ignore", LIST, "", NOW,
