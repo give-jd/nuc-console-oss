@@ -78,7 +78,8 @@ class Down(Base):
         h = self.hosts("nas", alert=True)
         for st in ("unreachable", "unauthorized", "untrusted", "incompatible"):
             rows = self.rows(h, [down("nas", state=st)])[1]
-            self.assertEqual(rows, [(2, "host not answering: nas (%s)" % st, "peer-down")], st)
+            lead = "host not answering" if st == "unreachable" else "peer not readable"  # silent, or answering but refused (token, identity, version)
+            self.assertEqual(rows, [(2, "%s: nas (%s)" % (lead, st), "peer-down")], st)
         for st in ("ok", "warn", "err", "down", "stale", "unknown"):  # a peer that answers, even with bad news, is not down
             self.assertEqual(self.rows(h, [fleetfix.entry("nas", NOW, state=st, fails=7)])[1], [], st)
 
@@ -90,6 +91,23 @@ class Down(Base):
         h = self.hosts(*names, alert=True)
         rows = self.rows(h, [down(n) for n in names])[1]
         self.assertEqual(rows, [(2, "host not answering: a1 (unreachable), b2 (unreachable), c3 (unreachable) … +2", "peer-down")])
+        mixed = self.rows(self.hosts("a1", "b2", alert=True), [down("a1"), down("b2", state="untrusted")])[1]
+        self.assertEqual(mixed, [(2, "host not answering or not readable: a1 (unreachable), b2 (untrusted)", "peer-down")])
+
+    def test_the_sixty_seconds_apply_to_every_failed_state(self):
+        h = self.hosts("nas", alert=True)
+        for st in ("unauthorized", "untrusted", "incompatible", "unreachable"):
+            self.assertEqual(self.rows(h, [down("nas", state=st, since=30)])[1], [], st)
+
+    def test_a_last_ok_in_the_future_is_not_known_so_three_rounds_decide(self):
+        h = self.hosts("nas", alert=True)
+        e = down("nas", since=0)
+        e["last_ok"] = NOW + 3600  # the poller host's clock stepped back
+        self.assertEqual(self.ids(self.rows(h, [e])[1]), ["peer-down"])
+        e["fails"] = 2
+        self.assertEqual(self.rows(h, [e])[1], [])
+        e["fails"], e["last_ok"] = 3, NOW + 30  # within the tolerance: a young answer still holds the alarm back
+        self.assertEqual(self.rows(h, [e])[1], [])
 
     def test_a_stopped_poller_is_a_note_not_peer_down(self):
         h = self.hosts("nas", alert=True)
@@ -245,6 +263,92 @@ class Layers(Base):
         with mock.patch.dict(problems.CFG, {"hosts": []}):
             self.assertIsNone(problems.peer_state())
             self.assertFalse([r for r in problems.problem_records({"ts": NOW, "errors": {}}, {"ts": NOW, "containers": []}) if r["id"] in PIDS])
+
+
+class Heartbeat(Base):
+    """A REAL Poller on a fake clock, peers failing for good: the poller is running, and the cache says so."""
+
+    def poller(self, hosts, poll=None, **kw):
+        self.t, self.m = [float(NOW)], [0.0]
+        state = tempfile.mkdtemp(prefix="nuc-peer-alarms-state-")
+        self.addCleanup(shutil.rmtree, state, True)
+        p = peers.Poller(hosts, self.dir, poll=poll or peers.poll_peer, clock=lambda: self.m[0], wall=lambda: self.t[0], jitter=lambda: 1.0, state=state, workers=1, **kw)
+        self.addCleanup(p.pool.shutdown, False)
+        return p
+
+    def tick(self, p):
+        self.t[0] += 1
+        self.m[0] += 1
+        p.step()
+        for f in list(p.running.values()):
+            f.exception()  # the poll is fast: wait for it, the next step harvests
+
+    def test_all_peers_dead_for_a_quarter_hour_peer_down_stays_and_the_poller_never_looks_dead(self):
+        h = self.hosts("nas", alert=True)  # the token file does not exist: every round fails at once, no network
+        fleetfix.write(self.dir, [fleetfix.entry("nas", NOW, age=0)], NOW)  # it was fine at the start
+        p = self.poller(h)
+        seen = set()
+        for sec in range(1, 1000):
+            self.tick(p)
+            ps = problems.peer_state(now=self.t[0], hosts=h, folder=self.dir)
+            names = {r[2] for r in problems.peer_rows(ps)}
+            self.assertEqual(ps["poller"], "running", sec)
+            self.assertNotIn("fleet-poller-down", names, sec)
+            if sec < 60:
+                self.assertNotIn("peer-down", names, sec)  # the 60 s are counted from the last good answer, in every failed state
+            if sec > 80:
+                self.assertIn("peer-down", names, sec)
+            seen |= names
+        self.assertEqual(seen, {"peer-down"})
+
+    def test_a_stopped_poller_turns_into_the_note_after_two_minutes(self):
+        h = self.hosts("nas", alert=True)
+        fleetfix.write(self.dir, [fleetfix.entry("nas", NOW, age=0)], NOW)
+        p = self.poller(h)
+        for _ in range(200):
+            self.tick(p)
+        last = self.t[0]
+        ps = problems.peer_state(now=last + 100, hosts=h, folder=self.dir)
+        self.assertEqual((ps["poller"], self.ids(problems.peer_rows(ps))), ("running", ["peer-down"]))
+        ps = problems.peer_state(now=last + 130, hosts=h, folder=self.dir)  # no more steps: the heartbeat stops
+        self.assertEqual((ps["poller"], self.ids(problems.peer_rows(ps))), ("stale", ["fleet-poller-down"]))
+
+    def test_the_heartbeat_is_written_every_fifteen_seconds_and_not_more(self):
+        p = self.poller(self.hosts("nas", alert=True))
+        fleetfix.write(self.dir, [fleetfix.entry("nas", NOW, age=0)], NOW)
+        stamps = set()
+        for _ in range(400):
+            self.tick(p)
+            stamps.add(peers.read_cache(self.dir, now=self.t[0])["fleet"]["ts"])
+        self.assertLessEqual(max(b - a for a, b in zip(sorted(stamps), sorted(stamps)[1:])), peers.HEARTBEAT_S + 1)
+
+    def test_a_poll_that_raises_carries_the_count_on(self):
+        h = self.hosts("nas", alert=True)
+        fleetfix.write(self.dir, [down("nas", fails=4)], NOW)
+
+        def boom(*a, **k):
+            raise RuntimeError("secret detail")
+        p = self.poller(h, poll=boom)
+        (e,) = p.run_once()
+        self.assertEqual((e["state"], e["error"], e["fails"]), ("unreachable", "internal", 5))
+        self.assertEqual(e["last_ok"], int(NOW - 100))
+        self.assertEqual(peers.read_cache(self.dir, now=self.t[0])["peers"]["nas"]["fails"], 5)
+
+    def test_last_ok_survives_every_failed_state(self):
+        e = peers.poll_peer(fleetfix.peer("x", token="/nonexistent/x.token"), fleetfix.entry("x", NOW, age=500), wall=lambda: NOW)
+        self.assertEqual((e["state"], e["last_ok"]), ("unauthorized", NOW - 500))
+
+
+class Demo(Base):
+    def test_demo_screens_never_mix_in_the_real_peers(self):
+        import render
+        h = self.hosts("nas", alert=True)
+        fleetfix.write(self.dir, [down("nas")], NOW)
+        self.assertIsNotNone(problems.peer_state(now=NOW, hosts=h, folder=self.dir))
+        with mock.patch.object(render, "DEMO", True):
+            self.assertIsNone(problems.peer_state(now=NOW, hosts=h, folder=self.dir))
+            with mock.patch.dict(problems.CFG, {"hosts": h}), mock.patch.dict(os.environ, {"NUC_CONSOLE_PEERS_CACHE": self.dir}):
+                self.assertFalse([r for r in problems.problem_records({"ts": NOW, "errors": {}}, {"ts": NOW, "containers": []}) if r["id"] in PIDS])
 
 
 class Catalog(unittest.TestCase):

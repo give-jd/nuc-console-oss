@@ -12,9 +12,9 @@
 <link rel="stylesheet" href="/s/app.51c727e3.css">
 </head>
 <body>
-<header class="topbar" data-card="__top" data-rev="035260bf27">
+<header class="topbar" data-card="__top" data-rev="7b5d9e1c88">
 <a class="host" href="/?view=hosts" title="All hosts">demo-host</a>
-<span class="status err" role="status">✖ 16 PROBLEMS</span>
+<span class="status err" role="status">✖ 15 PROBLEMS</span>
 <nav class="tabs" aria-label="Screens">
 <a href="/?" data-key="1" aria-current="page">
 <kbd>1</kbd>Overview</a>
@@ -44,12 +44,12 @@
 <a class="ib" href="/?view=settings" aria-label="Settings" title="Settings">⚙︎</a>
 </div>
 </header>
-<div class="kpiblock" data-card="__kpis" data-rev="a9b1b8fa25">
+<div class="kpiblock" data-card="__kpis" data-rev="5da5ae406a">
 <div class="kpis" role="list" aria-label="Key figures">
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-attention">
 <span class="kl">Problems</span>
 <span class="kv">
-<span class="sym s-err" aria-hidden="true">✖</span>16</span>
+<span class="sym s-err" aria-hidden="true">✖</span>15</span>
 </a>
 <a class="kpi st-err" role="listitem" data-state="err" href="#c-exposure">
 <span class="kl">Internet</span>
@@ -102,7 +102,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="grid" data-refresh="2" data-frag="/?frag=1">
-<article class="card s2 st-err r142" data-card="attention" data-rev="e7fb160a46" id="c-attention" data-state="err">
+<article class="card s2 st-err r142" data-card="attention" data-rev="5bb5a2f4ed" id="c-attention" data-state="err">
 <div class="ch">
 <h3>ATTENTION</h3>
 <span class="chip st-err">✖ err</span>
@@ -144,19 +144,6 @@
 <span class="d how">fix: <code class="cmd">bind it to 127.0.0.1 (or to the interface you meant), close the port in the firewall, or turn the Funnel off; if the wider reach is intended, say so under [expose] in config.ini</code>
 </span>
 <span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem over-exposed --reason &quot;...&quot;</code>
-</span>
-</details>
-</div>
-<div class="msg prob lv-err" data-problem="peer-identity">
-<span class="sym">✖</span>
-<span class="pr">not the host remembered: echo <code class="pid" title="A peer is not the host that was remembered">peer-identity</code>
-</span>
-<span class="d why">the machine behind that address has another host_id: a replaced machine, a reused address, or something else answering</span>
-<details class="fix" data-k="fix-peer-identity">
-<summary>fix</summary>
-<span class="d how">fix: <code class="cmd">check the address and the machine; once you know why: sudo -u nuc-console-peers nuc-console-fleet forget NAME</code>
-</span>
-<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem peer-identity --reason &quot;...&quot;</code>
 </span>
 </details>
 </div>
@@ -212,8 +199,21 @@
 </span>
 </details>
 </div>
+<div class="msg prob lv-warn" data-problem="backup-stale">
+<span class="sym">!</span>
+<span class="pr">1 backup older than allowed: photos (5 d) <code class="pid" title="A backup is older than allowed">backup-stale</code>
+</span>
+<span class="d why">the newest copy is old: the job that makes it may have stopped, and a restore would lose that much</span>
+<details class="fix" data-k="fix-backup-stale">
+<summary>fix</summary>
+<span class="d how">fix: <code class="cmd">look at the job that writes it (cron, systemd timer, backup tool) and its log; the limit is the number after the path under [backups] in config.ini</code>
+</span>
+<span class="d accept">accept if known: <code class="cmd">sudo nuc-console-accept --problem backup-stale --reason &quot;...&quot;</code>
+</span>
+</details>
+</div>
 <details class="more">
-<summary>… +8 more</summary>
+<summary>… +7 more</summary>
 </details>
 <p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code>
 </p>

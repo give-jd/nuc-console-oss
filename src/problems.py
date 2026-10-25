@@ -160,6 +160,8 @@ def peer_state(now=None, hosts=None, folder=None, cache=None):
     collector calls problems_raw without it, so its history never records these."""
     try:
         import peers
+        if getattr(sys.modules.get("render"), "DEMO", False):
+            return None  # synthetic screens (--demo) never mix in the real machine's peers
         hosts = CFG.get("hosts") if hosts is None else hosts
         hosts = [h for h in hosts or () if isinstance(h, dict) and isinstance(h.get("name"), str) and nuc_config.HOST_NAME_RE.fullmatch(h["name"])]
         if not hosts:
@@ -182,6 +184,8 @@ def peer_state(now=None, hosts=None, folder=None, cache=None):
             if e.get("insecure") is True and h.get("insecure") is True:
                 out["insecure"].append(name)
             last, fails = e.get("last_ok"), e.get("fails")
+            if isinstance(last, (int, float)) and not isinstance(last, bool) and last > now + peers.SKEW_WARN_S:
+                last = None  # stamped in the future (the poller host's clock stepped back): not known, so the 3 rounds decide
             if (watch and e.get("state") in PEER_FAILED and isinstance(fails, int) and not isinstance(fails, bool) and fails >= PEER_ROUNDS
                     and (not isinstance(last, (int, float)) or isinstance(last, bool) or now - last >= PEER_DOWN_S)):
                 out["down"].append((name, e["state"]))
@@ -205,7 +209,10 @@ def peer_rows(ps):
         if ps.get("watch"):
             out.append((1, "peers are configured with alert=yes but the poller is not running: " + ("no data" if ps.get("poller") == "absent" else "old data"), "fleet-poller-down"))
     elif ps.get("down"):
-        names_text("host not answering: ", ps["down"], "peer-down", 2, lambda x: f"{x[0]} ({x[1] if x[1] in PEER_FAILED else 'unreachable'})")
+        words = {x[1] if x[1] in PEER_FAILED else "unreachable" for x in ps["down"]}
+        lead = ("host not answering: " if words == {"unreachable"} else "peer not readable: " if "unreachable" not in words
+                else "host not answering or not readable: ")  # unreachable = silent; the others answer, or cannot be read (token, identity, version)
+        names_text(lead, ps["down"], "peer-down", 2, lambda x: f"{x[0]} ({x[1] if x[1] in PEER_FAILED else 'unreachable'})")
     if ps.get("identity"):
         names_text("not the host remembered: ", ps["identity"], "peer-identity", 2)
     if ps.get("insecure"):
@@ -751,7 +758,7 @@ OS_CATALOG["windows"].update({
                 "survives restarts); check: nuc-console-ai.cmd status"),
 })
 CATALOG.update({  # other nuc-console machines ([hosts], docs/WEB.md#hosts): read from the poller's cache by the console, the web and the notifier
-    "peer-down": ("A watched host is not answering", "a dead machine cannot report itself: this one is watching it (alert=yes in [hosts]), and has had no good answer for at least a minute (3 polls)"
+    "peer-down": ("A watched host is not answering or not readable", "a dead machine cannot report itself: this one is watching it (alert=yes in [hosts]), and has had no good answer for at least a minute (3 polls in a row); not readable = it answers but the token, the identity or the version is refused"
                   " (shown on the console and the web, and sent to Telegram; not recorded in Events)",
                   "nuc-console-fleet test NAME (the reason in words; as the poller's account: sudo -u nuc-console-peers nuc-console-fleet test NAME); then the host itself: power, network, "
                   "its web view"),
