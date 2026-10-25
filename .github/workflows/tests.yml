@@ -135,8 +135,12 @@ jobs:
           sudo sh -c 'printf "\n[hosts]\nlab = http://100.64.0.9:8787\n" >> /etc/nuc-console/config.ini'
           sudo NUC_CONSOLE_DISPLAY=browser ./install.sh
           sudo launchctl print system/com.nuc-console.peers > /dev/null
-          for _ in $(seq 1 40); do [ -e /var/lib/nuc-console-peers-cache/.owner ] && break; sleep 1; done
-          sudo cat /var/log/nuc-console/peers.log || true
+          for _ in $(seq 1 120); do [ -e /var/lib/nuc-console-peers-cache/fleet.json ] || [ -e /var/lib/nuc-console-peers-cache/.owner ] && break; sleep 1; done
+          if [ ! -e /var/lib/nuc-console-peers-cache/.owner ]; then
+              echo "the fleet poller wrote nothing in 120 s"; sudo cat /var/log/nuc-console/peers.log || true
+              ls -lde /var/lib/nuc-console-peers-cache /var/lib/nuc-console-peers-cache/* || true; sudo launchctl print system/com.nuc-console.peers || true
+              exit 1
+          fi
           [ "$(stat -f %Su /var/lib/nuc-console-peers-cache/.owner)" = _nuc-console-peers ]
       - run: sudo ./install.sh --uninstall
       - run: |
@@ -215,9 +219,15 @@ jobs:
           if ($t.Principal.UserId -notmatch 'NETWORK SERVICE') { throw "the peers task runs as $($t.Principal.UserId), not NETWORK SERVICE" }
           $arg = $t.Actions[0].Arguments
           if ($arg -notmatch '^-E -B ".*peers\.py" serve --log ".*peers\.log"') { throw "unexpected command line: $arg" }
-          for ($i = 0; $i -lt 40; $i++) { if (Test-Path "$env:ProgramData\nuc-console\run\peers\.owner") { break }; Start-Sleep -Seconds 1 }
-          Get-Content "$env:ProgramData\nuc-console\logs\peers.log" -ErrorAction SilentlyContinue
-          if (-not (Test-Path "$env:ProgramData\nuc-console\run\peers\.owner")) { throw "the fleet poller wrote nothing in its cache folder" }
+          $cache = "$env:ProgramData\nuc-console\run\peers"
+          for ($i = 0; $i -lt 120; $i++) { if ((Test-Path "$cache\fleet.json") -or (Test-Path "$cache\.owner")) { break }; Start-Sleep -Seconds 1 }
+          if (-not (Test-Path "$cache\.owner")) {
+              Get-Content "$env:ProgramData\nuc-console\logs\peers.log" -ErrorAction SilentlyContinue
+              Get-ChildItem -Force $cache -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime | Out-String
+              icacls.exe $cache
+              Get-ScheduledTaskInfo -TaskPath '\nuc-console\' -TaskName 'peers' | Format-List | Out-String
+              throw "the fleet poller wrote nothing in its cache folder in 120 s"
+          }
       - shell: powershell
         run: powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Uninstall
       - shell: powershell

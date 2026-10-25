@@ -171,6 +171,12 @@ ensure_service_user() {  # $1: the account (default: the web view's and the Tele
     fi
 }
 for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify; do launchctl bootout "system/$label" 2>/dev/null || true; done
+# the fleet poller (docs/INSTALL.md, "Fleet poller"): decided now, from this release's own peers.py, so a running poller is stopped BEFORE the files
+# under it are replaced (it must never import from a half-replaced tree) and loaded again at the end. peers.py --needed: 0 a peer is listed,
+# 1 none, anything else (2: unreadable config.ini, or it did not run) unknown: then a running poller is left as it is.
+peers_rc=0
+"${PY_CHECK:-$PY}" -E -B src/peers.py --needed || peers_rc=$?
+if [ "$peers_rc" -eq 0 ] || [ "$peers_rc" -eq 1 ]; then launchctl bootout "system/$PEERS_LABEL" 2>/dev/null || true; fi
 install -d -m 0755 "$DEST" "$DEST/bin" "$ETC" "$LIB" "$LOG"
 if [ -d "$DEST/python.new" ]; then  # the archive's Python, checked in section 1, now in place (the services are stopped)
     rm -rf "$DEST/python.old"
@@ -243,29 +249,27 @@ fill launchd/com.nuc-console.notify.plist > "$LD/com.nuc-console.notify.plist"
 chown root:wheel "$LD/com.nuc-console.notify.plist" && chmod 0644 "$LD/com.nuc-console.notify.plist"
 load system "$LD/com.nuc-console.notify.plist"
 
-# the fleet poller (docs/INSTALL.md, "Fleet poller"): outbound only, its own account, so neither the web view nor the notifier can read the tokens.
-# The job is always written; it is loaded only if [hosts] has a peer. peers.py --needed: 0 a peer is listed, 1 none, 2 unknown (unreadable
-# config.ini, crash): then it is left as it is. launchctl enable/disable keeps a disabled job from starting at boot (RunAtLoad).
+# the fleet poller: outbound only, its own account, so neither the web view nor the notifier can read the tokens. The job is written and loaded only
+# if [hosts] has a peer; with none it is written and disabled. If that is unknown (rc 2) nothing is written or changed: a first install gets no job (it would
+# start at boot without a decision), an upgrade keeps the one it has. launchctl enable/disable keeps a disabled job from starting at boot (RunAtLoad).
 ensure_service_user "$PEERS_USER" "nuc-console fleet poller"
 install -d -m 0750 -o root -g "$PEERS_USER" "$ETC/peers"  # NAME.token: 0600, owned by the poller (what peers.read_secret accepts)
 install -d -m 0750 -o "$PEERS_USER" -g "$PEERS_USER" "$PEERS_LIB"
 install -d -m 0755 -o "$PEERS_USER" -g "$PEERS_USER" "$PEERS_CACHE"
 touch "$LOG/peers.log" && chown "$PEERS_USER:$PEERS_USER" "$LOG/peers.log"
 echo "$LOG/peers.log  $PEERS_USER:$PEERS_USER  644  5  1024  *  NJ" >> /etc/newsyslog.d/nuc-console.conf
-fill "launchd/$PEERS_LABEL.plist" > "$LD/$PEERS_LABEL.plist"
-chown root:wheel "$LD/$PEERS_LABEL.plist" && chmod 0644 "$LD/$PEERS_LABEL.plist"
-peers_rc=0
-"$PY" -E "$DEST/peers.py" --needed || peers_rc=$?
+if [ "$peers_rc" -eq 0 ] || [ "$peers_rc" -eq 1 ]; then
+    fill "launchd/$PEERS_LABEL.plist" > "$LD/$PEERS_LABEL.plist"
+    chown root:wheel "$LD/$PEERS_LABEL.plist" && chmod 0644 "$LD/$PEERS_LABEL.plist"
+fi
 if [ "$peers_rc" -eq 0 ]; then
     launchctl enable "system/$PEERS_LABEL" 2>/dev/null || true
-    launchctl bootout "system/$PEERS_LABEL" 2>/dev/null || true  # an upgrade: the old code must not keep running
     load system "$LD/$PEERS_LABEL.plist" || echo "warning: the fleet poller did not start: sudo launchctl print system/$PEERS_LABEL" >&2
 elif [ "$peers_rc" -eq 1 ]; then
-    launchctl bootout "system/$PEERS_LABEL" 2>/dev/null || true
     launchctl disable "system/$PEERS_LABEL" 2>/dev/null || true
     echo "nuc-console: the fleet poller is installed but off ([hosts] is empty): after adding a peer, run sudo nuc-console-update or this installer again (docs/INSTALL.md, Fleet poller)"
 else
-    echo "warning: could not tell whether [hosts] in $ETC/config.ini lists a peer (exit code $peers_rc): the fleet poller is left as it is" >&2
+    echo "warning: could not tell whether [hosts] in $ETC/config.ini lists a peer (exit code $peers_rc): the fleet poller is left as it is (not installed, if it was not)" >&2
 fi
 
 # ---- 4. first snapshot, baseline, dashboard ---------------------------------------------------------------------------

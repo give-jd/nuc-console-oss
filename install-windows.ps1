@@ -145,6 +145,7 @@ if (-not (Test-Admin)) { throw 'administrator rights required: right-click insta
 if ($Uninstall) {
     Remove-Tasks
     if (Test-Path "$Data\notify") { Remove-Item -Recurse -Force "$Data\notify" }  # the Telegram bot token is in there: first
+    if (Test-Path "$Data\run\peers") { Remove-Item -Recurse -Force "$Data\run\peers" }  # the peers' summaries, readable by users; the tokens and the state stay
     try { $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $svc.GetFolder('\').DeleteFolder('nuc-console', 0) } catch { }
     Set-MachinePath $false
     if (Test-Path $Shortcut) { Remove-Item -Force $Shortcut }
@@ -237,7 +238,8 @@ Set-MachinePath $true
 
 # ---- 4. scheduled tasks ------------------------------------------------------------------------------------------------
 function Register-Service($name, $script, $sid, $log, $description, $extra = '', $flags = '-B', $sub = '') {  # $sub: a word before --log (peers.py serve)
-    $action = New-ScheduledTaskAction -Execute $pythonw -Argument "$flags `"$App\$script`" $sub --log `"$Data\logs\$log`" $extra".TrimEnd() -WorkingDirectory $App
+    $words = @($flags, "`"$App\$script`"", $sub, '--log', "`"$Data\logs\$log`"", $extra) | Where-Object { $_ }  # the non-empty ones, one space between
+    $action = New-ScheduledTaskAction -Execute $pythonw -Argument ($words -join ' ') -WorkingDirectory $App
     # at startup, and every 5 minutes: if it stopped, it starts again (IgnoreNew: never two at once)
     $triggers = @((New-ScheduledTaskTrigger -AtStartup), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)))
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable `

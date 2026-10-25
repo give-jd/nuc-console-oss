@@ -74,44 +74,63 @@ class MacInstaller(unittest.TestCase):
         self.assertIn('fill "launchd/$PEERS_LABEL.plist" > "$LD/$PEERS_LABEL.plist"', s)
         self.assertIn('chown root:wheel "$LD/$PEERS_LABEL.plist" && chmod 0644 "$LD/$PEERS_LABEL.plist"', s)
 
-    def block(self):
+    def early(self):
         a = self.src.index("peers_rc=0")
+        return self.src[a:self.src.index('install -d -m 0755 "$DEST" "$DEST/bin"', a)]
+
+    def block(self):
+        a = self.src.index('ensure_service_user "$PEERS_USER"')
         return self.src[a:self.src.index("# ---- 4.", a)]
 
-    def test_three_outcomes(self):
-        b = self.block()
-        self.assertIn('"$PY" -E "$DEST/peers.py" --needed || peers_rc=$?', b)
-        self.assertRegex(b, r'if \[ "\$peers_rc" -eq 0 \]; then\n\s+launchctl enable [^\n]*\n\s+launchctl bootout [^\n]*\n\s+load system "\$LD/\$PEERS_LABEL\.plist" \|\| echo "warning')
-        self.assertRegex(b, r'elif \[ "\$peers_rc" -eq 1 \]; then\n\s+launchctl bootout [^\n]*\n\s+launchctl disable [^\n]*\n\s+echo "nuc-console: the fleet poller is installed but off')
-        self.assertRegex(b, r'else\n\s+echo "warning: could not tell[^\n]*left as it is" >&2\nfi')
-        self.assertEqual(b.count("launchctl disable"), 1, "only the rc 1 branch disables")
+    def test_needed_runs_with_E_B_from_the_source_tree_before_files_are_replaced(self):
+        e = self.early()
+        self.assertIn('"${PY_CHECK:-$PY}" -E -B src/peers.py --needed || peers_rc=$?', e)  # -B: no root-owned __pycache__ under /opt/nuc-console
+        self.assertNotIn("peers.py --needed", self.block())
+        self.assertLess(self.src.index("peers_rc=0"), self.src.index('rm -f "$DEST"/*.py'), "decided before the code is replaced")
+        self.assertRegex(e, r'if \[ "\$peers_rc" -eq 0 \] \|\| \[ "\$peers_rc" -eq 1 \]; then launchctl bootout "system/\$PEERS_LABEL"')
 
-    def test_the_upgrade_loop_does_not_stop_it_before_the_decision(self):
-        loop = next(ln for ln in self.src.splitlines() if ln.startswith("for label in com.nuc-console.collector com.nuc-console.web com.nuc-console.notify;"))
-        self.assertNotIn("peers", loop, "rc 2 leaves it running as it is")
+    def test_outcomes(self):
+        b = self.block()
+        self.assertRegex(b, r'if \[ "\$peers_rc" -eq 0 \]; then\n\s+launchctl enable [^\n]*\n\s+load system "\$LD/\$PEERS_LABEL\.plist" \|\| echo "warning')
+        self.assertRegex(b, r'elif \[ "\$peers_rc" -eq 1 \]; then\n\s+launchctl disable [^\n]*\n\s+echo "nuc-console: the fleet poller is installed but off')
+        self.assertRegex(b, r'else\n\s+echo "warning: could not tell[^\n]*left as it is[^\n]*" >&2\nfi')
+        self.assertEqual(b.count("launchctl disable"), 1, "only the rc 1 branch disables")
+        self.assertIn('if [ "$peers_rc" -eq 0 ] || [ "$peers_rc" -eq 1 ]; then\n    fill', b)  # rc 2 writes no job (a first install gets none) and keeps the one there is
 
     @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "bash")
     def test_the_branches_run_as_designed_with_stubs(self):
-        b = self.block()
-        want = {0: ["enable system/L", "bootout system/L", "load system /LD/L.plist"], 1: ["bootout system/L", "disable system/L"], 2: [], 139: []}
-        for rc, calls_want in want.items():
+        e, b = self.early(), self.block()
+        cases = ((0, True, ["bootout system/L", "enable system/L", "load system /LD/L.plist"], True),
+                 (1, True, ["bootout system/L", "disable system/L"], True),
+                 (2, False, [], False), (2, True, [], False), (139, False, [], False))
+        for rc, had_plist, calls_want, plist_written in cases:
             with tempfile.TemporaryDirectory() as d:
                 py = os.path.join(d, "py")
                 with open(py, "w") as f:
                     f.write("#!/bin/sh\nexit %d\n" % rc)
                 os.chmod(py, 0o755)
-                log = os.path.join(d, "calls")
-                script = ("set -euo pipefail\nPY=%s\nDEST=/x\nETC=/etc/x\nLD=/LD\nPEERS_LABEL=L\n"
-                          "launchctl() { echo \"$*\" >> %s; }\nload() { echo \"load $*\" >> %s; }\n%s\necho reached\n" % (py, log, log, b))
-                r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+                log, ld = os.path.join(d, "calls"), os.path.join(d, "LD")
+                os.mkdir(ld)
+                if had_plist:
+                    open(os.path.join(ld, "L.plist"), "w").close()
+                script = ("set -euo pipefail\nPY=%s\nPY_CHECK=\nDEST=/x\nETC=/etc/x\nLD=%s\nPEERS_LABEL=L\nPEERS_USER=u\nPEERS_LIB=%s/lib\nPEERS_CACHE=%s/c\nLOG=%s\n"
+                          "launchctl() { echo \"$*\" >> %s; }\nload() { echo \"load ${1} /LD/L.plist\" >> %s; }\nensure_service_user() { :; }\n"
+                          "install() { :; }\nchown() { :; }\nchmod() { :; }\nfill() { echo plist; }\nsrc() { :; }\n"
+                          "mkdir -p src; printf '' > src/peers.py\n%s\n%s\necho reached\n" % (py, ld, d, d, d, log, log, e.replace("src/peers.py", "src/peers.py"), b))
+                # the stub interpreter ignores its arguments: run it from a scratch folder holding a dummy src/peers.py
+                os.makedirs(os.path.join(d, "w"))
+                script = script.replace("/etc/x", "/etc/x").replace("/etc/newsyslog.d/nuc-console.conf", os.path.join(d, "newsyslog"))
+                r = subprocess.run(["bash", "-c", "cd %s/w && %s" % (d, script)], capture_output=True, text=True)
                 calls = slurp_path(log).splitlines() if os.path.exists(log) else []
                 self.assertEqual(r.returncode, 0, (rc, r.stderr))
                 self.assertIn("reached", r.stdout, "set -e must not end the installer here")
-                self.assertEqual(calls, calls_want, rc)
-                if rc in (0, 1):
-                    self.assertEqual(r.stderr, "")
+                self.assertEqual(calls, calls_want, (rc, had_plist))
+                plist = os.path.join(ld, "L.plist")
+                self.assertEqual(os.path.exists(plist) and os.path.getsize(plist) > 0, plist_written, (rc, had_plist))  # rc 2: none made, one there is left
                 if rc not in (0, 1):
                     self.assertIn("could not tell", r.stderr)
+                else:
+                    self.assertEqual(r.stderr, "")
 
     def test_uninstall_removes_the_job_and_keeps_account_state_and_tokens(self):
         down = self.src[self.src.index('"--uninstall" ]'):self.src.index("exit 0")]
@@ -160,11 +179,43 @@ class WindowsInstaller(unittest.TestCase):
         self.assertIn("Register-Service 'peers' 'peers.py' 'S-1-5-20' 'peers.log'", s)  # NETWORK SERVICE, never the web view's LOCAL SERVICE
         self.assertIn("-flags '-E -B' -sub 'serve'", s)
         self.assertIn("function Register-Service($name, $script, $sid, $log, $description, $extra = '', $flags = '-B', $sub = '')", s)
-        self.assertIn('-Argument "$flags `"$App\\$script`" $sub --log `"$Data\\logs\\$log`" $extra".TrimEnd()', s)  # -E -B "app\peers.py" serve --log "...\peers.log"
         self.assertIn("-RestartCount 999", s)  # restart on failure (shared with the other tasks), and the 5-minute repetition
         # the web and notify tasks keep their old command line
         self.assertIn("Register-Service 'notify' 'notify.py' 'S-1-5-20' 'notify.log' 'nuc-console Telegram notifier: outbound only (NETWORK SERVICE)'\n", s)
         self.assertIn("'web.log' 'nuc-console web view (LOCAL SERVICE): a read-only dashboard, and the AI page has buttons' '--local'", s)
+
+    def render(self, script, log, extra="", flags="-B", sub=""):
+        """The Argument of the task, from the PowerShell source: the list `$words` is evaluated here (non-empty words joined by one space)."""
+        m = re.search(r"\$words = @\((.*)\) \| Where-Object \{ \$_ \}", self.src)
+        self.assertIsNotNone(m)
+        self.assertIn("-Argument ($words -join ' ')", self.src)
+        env = {"$App": r"C:\Program Files\nuc-console\app", "$Data": r"C:\ProgramData\nuc-console", "$script": script, "$log": log}
+        words = []
+        for item in re.findall(r'"(?:[^"`]|`.)*"|\'[^\']*\'|\$\w+', m.group(1)):
+            if item in ("$flags", "$sub", "$extra"):
+                w = {"$flags": flags, "$sub": sub, "$extra": extra}[item]
+            elif item.startswith("'"):
+                w = item[1:-1]
+            else:
+                w = item[1:-1].replace('`"', '"')
+                for k in sorted(env, key=len, reverse=True):
+                    w = w.replace(k, env[k])
+            words.append(w)
+        return " ".join(w for w in words if w)
+
+    def test_the_command_lines_of_the_old_tasks_are_unchanged_byte_for_byte(self):
+        # taken from the previous installer's template: "-B `\"$App\\$script`\" --log `\"$Data\\logs\\$log`\" $extra".TrimEnd()
+        app, logs = r"C:\Program Files\nuc-console\app", r"C:\ProgramData\nuc-console\logs"
+        self.assertEqual(self.render("collector.py", "collector.log"), '-B "%s\\collector.py" --log "%s\\collector.log"' % (app, logs))
+        self.assertEqual(self.render("notify.py", "notify.log"), '-B "%s\\notify.py" --log "%s\\notify.log"' % (app, logs))
+        self.assertEqual(self.render("web.py", "web.log", extra="--local"), '-B "%s\\web.py" --log "%s\\web.log" --local' % (app, logs))
+        self.assertEqual(self.render("peers.py", "peers.log", flags="-E -B", sub="serve"),
+                         '-E -B "%s\\peers.py" serve --log "%s\\peers.log"' % (app, logs))
+
+    def test_uninstall_removes_the_cache_but_not_tokens_or_state(self):
+        down = self.src[self.src.index("if ($Uninstall) {"):self.src.index("# ---- 1. data folder")]
+        self.assertIn('Remove-Item -Recurse -Force "$Data\\run\\peers"', down)
+        self.assertNotRegex(down, r'Remove-Item[^\n]*\$Data\\peers')
 
     def test_three_outcomes(self):
         s = self.src
@@ -188,7 +239,6 @@ class WindowsInstaller(unittest.TestCase):
     def test_uninstall_removes_the_task_and_keeps_the_tokens(self):
         down = self.src[self.src.index("if ($Uninstall) {"):self.src.index("# ---- 1. data folder")]
         self.assertIn("Remove-Tasks", down)  # every task of \nuc-console\, the poller's included
-        self.assertNotRegex(down, r"Remove-Item[^\n]*peers", "nothing of the poller's folders is removed")
         self.assertIn("the tokens of the fleet peers in $Data\\peers", down)  # said to stay
 
     def test_the_fleet_command_and_the_update_path_exist(self):
