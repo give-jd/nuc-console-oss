@@ -388,6 +388,8 @@ It also removes the AI model service, if you installed it. `/etc/nuc-console`, `
 
 # Windows
 
+What the Windows collector checks beyond ports and services, all without starting PowerShell (antivirus and EDR products flag `-EncodedCommand`): a restart waiting for Windows Update, servicing or an installer (`reboot-required`, read from the registry), the commit charge against its limit (`memory-pressure`, [thresholds] `commit_pressure_pct`), and disk, display-driver and blue-screen events in the history. Details: [CONFIGURATION.md](CONFIGURATION.md#host-hygiene-reboot-updates-clock-inodes).
+
 Windows has no text console to take over, so the same screen is shown in a browser, from the web view that the
 installer runs on **127.0.0.1 only** (not reachable from the network; read-only, except the buttons of the AI page, see [AI.md](AI.md)). You choose how ([display] `mode`):
 

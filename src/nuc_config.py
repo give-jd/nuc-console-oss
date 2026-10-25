@@ -122,7 +122,7 @@ def load(path=None, warn=None, overlay=True):
     cfg["overlaid"] = {}  # "section.key" -> value, for each key the overlay set (the settings page marks them)
     cfg["alerts"] = {"mute": [], "ignored": []}  # [alerts] mute: the ids muted (all in MUTABLE_ALERTS) and what the file asked that cannot be
     cfg["containers"] = {"restart_ignore": []}  # [containers] restart_ignore: names or globs (lower case) that container-no-restart skips
-    cfg["thresholds"] = {"memory_pressure_pct": 10}  # [thresholds]: where an operational reading becomes a problem
+    cfg["thresholds"] = {"memory_pressure_pct": 10, "commit_pressure_pct": 90}  # [thresholds]: where an operational reading becomes a problem
     cfg["config_error"] = ""  # set when a file that exists cannot be read: the defaults are in use and render says so (config-unreadable)
     cfg["telegram"] = {"enabled": False, "username": "", "detail": "titles", "resolved": True, "web_actions": True}  # notify.py; the bot token is never here
     cfg["services"] = {"must_run": []}  # [services] must_run: systemd units that must be active (systemctl is-active), none = off
@@ -274,13 +274,14 @@ def load(path=None, warn=None, overlay=True):
             say(f"nuc-console: {path}: [containers] unknown key '{key[:40]}' ignored (known: restart_ignore)")
         cfg["containers"]["restart_ignore"] = [x for x in re.split(r"[,;\s]+", cp.get("containers", "restart_ignore", fallback="").lower()) if x][:100]
     if cp.has_section("thresholds"):
-        try:
-            pct = cp.getint("thresholds", "memory_pressure_pct", fallback=10)
-            if not 1 <= pct <= 100:
-                raise ValueError
-            cfg["thresholds"]["memory_pressure_pct"] = pct
-        except ValueError:
-            say(f"nuc-console: {path}: [thresholds] memory_pressure_pct must be an integer (1-100): kept at 10")
+        for key, default in (("memory_pressure_pct", 10), ("commit_pressure_pct", 90)):
+            try:
+                pct = cp.getint("thresholds", key, fallback=default)
+                if not 1 <= pct <= 100:
+                    raise ValueError
+                cfg["thresholds"][key] = pct
+            except ValueError:
+                say(f"nuc-console: {path}: [thresholds] {key} must be an integer (1-100): kept at {default}")
     if cp.has_section("web"):
         w = cfg["web"]
         try:
