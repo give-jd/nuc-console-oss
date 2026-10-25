@@ -38,7 +38,8 @@ for _k in ("COLUMNS", "LINES", "NO_COLOR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", 
     os.environ.pop(_k, None)
 os.environ["HOME"] = os.environ["USERPROFILE"] = os.path.join(SCRATCH, "home")
 for _k, _f in (("CONFIG", "config.ini"), ("HOST_ID", "host_id"), ("BASELINE", "baseline.json"), ("ACCEPTED", "accepted.json"), ("NET", "net.json"),
-               ("STATE", "containers.json"), ("SETTINGS", "settings.ini"), ("BOOT", "boot.json"), ("SENSORS", "sensors.json")):
+               ("STATE", "containers.json"), ("SETTINGS", "settings.ini"), ("BOOT", "boot.json"), ("SENSORS", "sensors.json"),
+               ("PEERS_CACHE", "peers-cache"), ("PEERS_STATE", "peers-state")):
     os.environ["NUC_CONSOLE_" + _k] = os.path.join(ABSENT, _f)
 os.environ["NUC_CONSOLE_NOTIFY_DIR"] = os.path.join(ABSENT, "notify")
 # the setup guide's marker: present (the guide was seen), so that no page of a test carries the "New here?" banner and its form; test_wizard.py points the
@@ -56,7 +57,7 @@ collector.SOFTWAREUPDATE_PLIST = os.path.join(ABSENT, "SoftwareUpdate.plist")  #
 # what the installed console owns: where nuc_config says it lives on this OS (the temporary folder of a portable run is not the host)
 HOST_DIRS = tuple(os.path.normcase(os.path.abspath(d)) for d in (nuc_config.ETC_DIR, nuc_config.RUN_DIR, nuc_config.LIB_DIR)
                   if not os.path.abspath(d).startswith(SCRATCH)) + (
-    ("/var/lib/nuc-console", "/var/run/nuc-console", "/run/nuc-console", "/etc/nuc-console", "/var/lib/nuc-console-notify")
+    ("/var/lib/nuc-console", "/var/run/nuc-console", "/run/nuc-console", "/etc/nuc-console", "/var/lib/nuc-console-notify", "/run/nuc-console-peers", "/var/lib/nuc-console-peers")
     if nuc_config.LINUX else ())
 
 # aisetup.default_dir() names the administrator's folder (euid 0: /var/lib/nuc-console/ai) as a literal, and find_dir()/work_dir() look in

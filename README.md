@@ -262,6 +262,12 @@ Accepted items are dimmed ("N accepted" under ATTENTION) and no longer count in 
 For web apps you expose on purpose, declare them under `[webapps]` instead: they appear in WEB APPS and stop counting as "Docker port bypassing ufw".
 To say how far a service may reach, declare it under `[expose]` (`shop-db = local`): ATTENTION raises "over-exposed" when it reaches further than that, and never hides the other alarms.
 
+## Other machines (optional)
+
+`[hosts]` in `config.ini` lists other nuc-console machines to watch (docs/CONFIGURATION.md); `nuc-console-fleet list` shows them with their last cached state, `nuc-console-fleet test NAME` polls one now
+and says in words why it is not ok, `nuc-console-fleet forget NAME` accepts a replaced machine, `nuc-console-fleet once` polls them all and writes the cache the web view and the console will read (docs/WEB.md, "Fleet cache"). The client follows no redirect, honours no proxy, caps every answer and
+never reaches link-local addresses (SECURITY.md, "The peer client"). Nothing happens without `[hosts]`.
+
 ## AI advisor (optional)
 
 Which local language model can this machine run? The **AI** screen (console key `5`, web **ai** link,

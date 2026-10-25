@@ -192,6 +192,7 @@ thermal = no
 
 ## 5. Port alarms and problems
 
+`nuc-console-fleet list | test NAME | once` (no root, installed with the other commands in `/usr/local/bin`) works with the peers of `[hosts]`: [CONFIGURATION.md](CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default).
 `nuc-console-problems` (no root) lists every current ATTENTION item with advice; `sudo nuc-console-accept --problem <id> --reason "…"` accepts a known one. Declare web apps you expose on purpose under `[webapps]` in `config.ini`.
 Want them on your phone? The installer also sets up the optional Telegram notifier (`nuc-console-notify.service`, user `nuc-console-notify`, idle until you run `sudo nuc-console-telegram --setup`): [TELEGRAM.md](TELEGRAM.md).
 
