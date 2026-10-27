@@ -3,10 +3,12 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## [Unreleased]
+## [2.8.2] - 2026-10-27
+
+A finding's fix reads as steps: what each one does, and the exact command to copy.
 
 ### Changed
-- **A Health finding's fix is split into steps, each with what it does and the exact command** (console and `/api/v1` `steps`; the web follows). The one-line `fix` stays, built from the steps. A command with a `<placeholder>` is marked `template`: the name is never put into it. The web draws the steps as an ordered list, each command in its own block with a **Copy** button (it copies with the clipboard API, or the selection where the page is not a secure context, e.g. plain http on a LAN), and the ATTENTION list's "accept if known" command has the same button.
+- **A Health finding's fix is split into steps, each with what it does and the exact command** (console, web and `/api/v1` `steps`). The one-line `fix` stays, built from the steps. A command with a `<placeholder>` is marked `template`: the name is never put into it. The web draws the steps as an ordered list, each command in its own block with a **Copy** button (it copies with the clipboard API, or the selection where the page is not a secure context, e.g. plain http on a LAN), and the ATTENTION list's "accept if known" command has the same button.
 
 ## [2.8.1] - 2026-10-25
 
