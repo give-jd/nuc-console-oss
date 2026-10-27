@@ -2,8 +2,8 @@
 
 report(conn, now, days) returns the dict described in docs/DESIGN.md ("## Health"). Pure: it only reads the (read-only)
 history connection, and every rule is a small function over SQL aggregates. Each finding carries a stable id
-"<rule>:<subject>", a level (err, warn, info), one sentence with the numbers, and a fixed `fix` text (commands per OS, with
-<name>/<unit> placeholders: a name from the database is data and is never put into a command). Names and templates come
+"<rule>:<subject>", a level (err, warn, info), one sentence with the numbers, and fixed `steps` (what it does and the exact command, per OS; `fix` is
+the same as one line) with <name>/<unit> placeholders (a name from the database is data and is never put into a command). Names and templates come
 from the database: they are cleaned (control and formatting characters removed, length capped) before they reach a text.
 
 Units in the history: RSS in bytes, CPU in seconds per hour, host cpu/mem/swap in percent (0-100), temperatures in C.
@@ -12,6 +12,7 @@ With less than 24 h of data the rules that need days (memory trend, disk forecas
 """
 import math
 import os
+import re
 import time
 import unicodedata
 
@@ -69,104 +70,223 @@ TABLES = {
 }
 
 
-# ---- the fix texts: per rule and OS, with placeholders (never a name from the database) -------------------------------------
+# ---- the fix texts: per rule and OS, as steps (what it does, the exact command), with placeholders (never a name from the database) ----
+# A step is (what, cmd): `what` one short imperative sentence with no command in it, `cmd` ONE command line as typed ("" when the step is
+# not a command: check the airflow, open Task Manager). A <name>/<unit>/<size>/<label>/<disk> in a cmd is a placeholder the user fills in:
+# the command is only shown and copied, never run here, and a subject is never put into it (a process name may hold shell characters).
+TEMPLATE_RE = re.compile(r"<[A-Za-z][A-Za-z0-9_-]*>")
+MAX_STEPS = 7                 # steps per rule and OS (the longest, disk-full on Linux, has 7: one command per cleanup)
+
+
 def _fx(linux, darwin=None, windows=None):
     return {"linux": linux, "darwin": darwin or linux, "windows": windows or linux}
 
 
+def steps_of(pairs):
+    """[(what, cmd)] as the finding's steps: [{"what", "cmd", "template"}], template = the cmd still has a <placeholder> to fill in."""
+    return [{"what": w, "cmd": c, "template": bool(TEMPLATE_RE.search(c))} for w, c in pairs]
+
+
+def flat_fix(steps):
+    """The steps as the one-line `fix` older readers (the advisor, the API) still use: 'what: cmd' parts joined by '; '."""
+    return "; ".join(s["what"] if not s["cmd"] else "%s: %s" % (s["what"], s["cmd"]) for s in steps)
+
+
+_EXPECTED = ("Expected? Then there is nothing to do.", "")
+
 FIXES = {
     "cpu-hog": _fx(
-        "top (or htop) shows it now; docker stats / systemctl status <unit>; cap it: docker update --cpus 2 <name> or "
-        "CPUQuota=200% in a systemd drop-in (systemctl edit <unit>); check its log for a loop",
-        "Activity Monitor > CPU (sort by % CPU); check its log; quit or update the app; for a daemon: sudo launchctl print system/<label>",
-        "Task Manager > Details (sort by CPU); Get-Process <name>; check its log in Event Viewer; restart or update it"),
+        (("See what uses the CPU right now (htop works too)", "top"),
+         ("For a container, see its CPU use", "docker stats"),
+         ("For a service, see its state", "systemctl status <unit>"),
+         ("Cap a container's CPU", "docker update --cpus 2 <name>"),
+         ("Or cap a service: set CPUQuota=200% in a systemd drop-in", "systemctl edit <unit>"),
+         ("Check its log for a loop", "")),
+        (("Open Activity Monitor > CPU and sort by % CPU", ""),
+         ("Check its log", ""),
+         ("Quit or update the app", ""),
+         ("For a daemon, inspect its launchd job", "sudo launchctl print system/<label>")),
+        (("Open Task Manager > Details and sort by CPU", ""),
+         ("Inspect the process", "Get-Process <name>"),
+         ("Check its log in Event Viewer", ""),
+         ("Restart or update it", ""))),
     "cpu-share": _fx(
-        "expected? then nothing to do. Else: top, docker stats, systemctl status <unit> show what it does",
-        "expected? then nothing to do. Else: Activity Monitor > CPU shows what it does",
-        "expected? then nothing to do. Else: Task Manager > Details shows what it does"),
+        (_EXPECTED,
+         ("Else, see what is running", "top"),
+         ("For a container, see its CPU use", "docker stats"),
+         ("For a service, see its state", "systemctl status <unit>")),
+        (_EXPECTED, ("Else open Activity Monitor > CPU to see what it does", "")),
+        (_EXPECTED, ("Else open Task Manager > Details to see what it does", ""))),
     "mem-leak": _fx(
-        "ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart <unit> / docker restart <name>; "
-        "cap it so it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or MemoryMax=1G in a drop-in; "
-        "then update it or report the leak",
-        "Activity Monitor > Memory (sort by Memory); relaunch the app (a daemon: sudo launchctl kickstart -k system/<label>); update it",
-        "Task Manager > Details > Memory; Resource Monitor > Memory; Restart-Service <name> as a stopgap; update it or report the leak"),
+        (("List the processes that use the most memory", "ps -eo pid,rss,comm --sort=-rss | head"),
+         ("See the containers' memory use", "docker stats --no-stream"),
+         ("Stopgap: restart the service", "systemctl restart <unit>"),
+         ("Or restart the container", "docker restart <name>"),
+         ("Cap a container so it cannot starve the rest", "docker update --memory 1g --memory-swap 1g <name>"),
+         ("Or cap a service: set MemoryMax=1G in a systemd drop-in", ""),
+         ("Then update it or report the leak", "")),
+        (("Open Activity Monitor > Memory and sort by Memory", ""),
+         ("Relaunch the app", ""),
+         ("For a daemon, restart its launchd job", "sudo launchctl kickstart -k system/<label>"),
+         ("Update it", "")),
+        (("Open Task Manager > Details and sort by Memory", ""),
+         ("Open Resource Monitor > Memory", ""),
+         ("Stopgap: restart the service", "Restart-Service <name>"),
+         ("Update it or report the leak", ""))),
     "memory-pressure": _fx(
-        "free -h; ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; give the biggest a limit "
-        "(docker update --memory <size> <name>), stop what is not needed, add RAM or swap",
-        "Activity Monitor > Memory (the pressure graph); quit the biggest apps; add RAM",
-        "Task Manager > Performance > Memory; Get-Process | Sort WS -Descending | Select -First 10; stop what is not needed; add RAM"),
+        (("See how much memory and swap are used", "free -h"),
+         ("List the processes that use the most memory", "ps -eo pid,rss,comm --sort=-rss | head"),
+         ("See the containers' memory use", "docker stats --no-stream"),
+         ("Give the biggest container a limit", "docker update --memory <size> <name>"),
+         ("Stop what is not needed, add RAM or swap", "")),
+        (("Open Activity Monitor > Memory and read the pressure graph", ""),
+         ("Quit the biggest apps", ""),
+         ("Add RAM", "")),
+        (("Open Task Manager > Performance > Memory", ""),
+         ("List the ten biggest processes", "Get-Process | Sort WS -Descending | Select -First 10"),
+         ("Stop what is not needed", ""),
+         ("Add RAM", ""))),
     "crash-loop": _fx(
-        "journalctl -u <unit> -b; coredumpctl list; docker logs --tail 100 <name>; fix the cause (config, version, a missing "
-        "dependency); systemctl reset-failed <unit> once fixed",
-        "Console > Crash Reports (~/Library/Logs/DiagnosticReports, /Library/Logs/DiagnosticReports): open the newest report of the "
-        "app; update or reinstall it",
-        "Event Viewer > Windows Logs > Application: Application Error / Application Hang name the faulting module; update or "
-        "reinstall it; sfc /scannow if it is a system component"),
+        (("Read the service's log since boot", "journalctl -u <unit> -b"),
+         ("List the recent core dumps", "coredumpctl list"),
+         ("Read the container's last log lines", "docker logs --tail 100 <name>"),
+         ("Fix the cause (config, version, a missing dependency)", ""),
+         ("Once fixed, clear the failed state", "systemctl reset-failed <unit>")),
+        (("Open Console > Crash Reports and read the newest report of the app", ""),
+         ("The reports are in ~/Library/Logs/DiagnosticReports and /Library/Logs/DiagnosticReports", ""),
+         ("Update or reinstall it", "")),
+        (("Open Event Viewer > Windows Logs > Application: Application Error / Application Hang name the faulting module", ""),
+         ("Update or reinstall it", ""),
+         ("If it is a system component, check the system files", "sfc /scannow"))),
     "oom": _fx(
-        "journalctl -k | grep -i 'killed process'; free -h; give it a limit it respects (docker update --memory 2g <name> or "
-        "MemoryMax= in a drop-in) and raise it if the app really needs more; add RAM or swap; look for a leak (mem-leak)",
-        "Console > Crash Reports: JetsamEvent-*.ips lists the memory of every process; quit the biggest apps; add RAM",
-        "Event Viewer > Windows Logs > System: Resource-Exhaustion-Detector 2004 names the biggest consumers; add RAM or raise "
-        "the page file; restart the app that grows"),
+        (("Find what the kernel killed", "journalctl -k | grep -i 'killed process'"),
+         ("See how much memory and swap are used", "free -h"),
+         ("Give a container a limit it respects", "docker update --memory 2g <name>"),
+         ("Or give a service one: set MemoryMax= in a systemd drop-in", ""),
+         ("Raise the limit if the app really needs more; add RAM or swap", ""),
+         ("Look for a leak (see the mem-leak finding)", "")),
+        (("Open Console > Crash Reports: JetsamEvent-*.ips lists the memory of every process", ""),
+         ("Quit the biggest apps", ""),
+         ("Add RAM", "")),
+        (("Open Event Viewer > Windows Logs > System: Resource-Exhaustion-Detector 2004 names the biggest consumers", ""),
+         ("Add RAM or raise the page file", ""),
+         ("Restart the app that grows", ""))),
     "restart-loop": _fx(
-        "docker ps -a; docker inspect <name> (State.ExitCode, State.OOMKilled); docker logs --tail 100 <name>; systemctl status "
-        "<unit>; fix the cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU",
-        "sudo launchctl print system/<label>; its log is named in the plist (StandardErrorPath); fix the cause; ThrottleInterval "
-        "slows a restart loop",
-        "Get-Service <name>; Event Viewer > Windows Logs > System (Service Control Manager) says why it stopped; services.msc > "
-        "Recovery: restart with a delay"),
+        (("List the containers, the stopped ones too", "docker ps -a"),
+         ("See why a container exited (State.ExitCode, State.OOMKilled)", "docker inspect <name>"),
+         ("Read the container's last log lines", "docker logs --tail 100 <name>"),
+         ("For a service, see its state", "systemctl status <unit>"),
+         ("Fix the cause", ""),
+         ("Add a restart back-off (RestartSec= in the unit): a crash loop then stops burning CPU", "")),
+        (("Inspect the launchd job", "sudo launchctl print system/<label>"),
+         ("Read its log, named in the plist (StandardErrorPath)", ""),
+         ("Fix the cause", ""),
+         ("ThrottleInterval slows a restart loop: set it in the plist", "")),
+        (("Check the service", "Get-Service <name>"),
+         ("Open Event Viewer > Windows Logs > System: Service Control Manager says why it stopped", ""),
+         ("Open services.msc > Recovery and restart with a delay", ""))),
     "service-failed": _fx(
-        "systemctl status <unit>; journalctl -u <unit> -b; systemctl reset-failed <unit> once handled",
-        "sudo launchctl print system/<label>; its log is named in the plist (StandardErrorPath)",
-        "Get-Service <name>; Event Viewer > Windows Logs > System (Service Control Manager) says why; Start-Service <name>"),
+        (("See the service's state", "systemctl status <unit>"),
+         ("Read its log since boot", "journalctl -u <unit> -b"),
+         ("Once handled, clear the failed state", "systemctl reset-failed <unit>")),
+        (("Inspect the launchd job", "sudo launchctl print system/<label>"),
+         ("Read its log, named in the plist (StandardErrorPath)", "")),
+        (("Check the service", "Get-Service <name>"),
+         ("Open Event Viewer > Windows Logs > System: Service Control Manager says why", ""),
+         ("Start it again", "Start-Service <name>"))),
     "unexpected-shutdown": _fx(
-        "journalctl -b -1 -e shows the end of the previous boot; last -x | head; check the power (UPS, cable, supply), the "
-        "temperature (sensors) and the RAM (memtest86+)",
-        "Console > Log Reports > the .panic reports in /Library/Logs/DiagnosticReports; check the power and the temperature; "
-        "Apple Diagnostics (hold D at startup)",
-        "Event Viewer > Windows Logs > System: Kernel-Power 41 and the BugCheck 1001 after it; check the power supply, the "
-        "temperature and the drivers; analyse C:\\Windows\\Minidump with WinDbg"),
+        (("Read the end of the previous boot", "journalctl -b -1 -e"),
+         ("See the reboot and shutdown history", "last -x | head"),
+         ("Check the power (UPS, cable, supply)", ""),
+         ("Check the temperature", "sensors"),
+         ("Test the RAM with memtest86+", "")),
+        (("Open Console > Log Reports: the .panic reports are in /Library/Logs/DiagnosticReports", ""),
+         ("Check the power and the temperature", ""),
+         ("Run Apple Diagnostics (hold D at startup)", "")),
+        (("Open Event Viewer > Windows Logs > System: Kernel-Power 41 and the BugCheck 1001 after it", ""),
+         ("Check the power supply, the temperature and the drivers", ""),
+         ("Analyse C:\\Windows\\Minidump with WinDbg", ""))),
     "hw-error": _fx(
-        "journalctl -k -p err | grep -iE 'mce|edac|hardware error|nvme|ata'; smartctl -a /dev/<disk>; memtest86+; replace what it names",
-        "Apple Diagnostics (hold D at startup); Console > Crash Reports",
-        "Event Viewer > Windows Logs > System: WHEA-Logger names the component (CPU, memory, PCIe, disk); update the firmware and "
-        "drivers; run the vendor diagnostics"),
+        (("Find hardware errors in the kernel log", "journalctl -k -p err | grep -iE 'mce|edac|hardware error|nvme|ata'"),
+         ("Check a disk's health", "smartctl -a /dev/<disk>"),
+         ("Test the RAM with memtest86+", ""),
+         ("Replace what it names", "")),
+        (("Run Apple Diagnostics (hold D at startup)", ""),
+         ("Open Console > Crash Reports", "")),
+        (("Open Event Viewer > Windows Logs > System: WHEA-Logger names the component (CPU, memory, PCIe, disk)", ""),
+         ("Update the firmware and drivers", ""),
+         ("Run the vendor diagnostics", ""))),
     "thermal": _fx(
-        "sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed",
-        "Activity Monitor > Energy; check the airflow and the fans; quit what runs hot; pmset -g thermlog",
-        "Task Manager > Performance; clean the dust, check the fans and the airflow; power plan: maximum processor state 90%"),
+        (("Read the temperatures", "sensors"),
+         ("Clean the dust, check the fans and the airflow, move the box off the heat", ""),
+         ("Reduce the load of the apps listed", "")),
+        (("Open Activity Monitor > Energy", ""),
+         ("Check the airflow and the fans", ""),
+         ("Quit what runs hot", ""),
+         ("Read the thermal log", "pmset -g thermlog")),
+        (("Open Task Manager > Performance", ""),
+         ("Clean the dust, check the fans and the airflow", ""),
+         ("Set the power plan's maximum processor state to 90%", ""))),
     "throttle": _fx(
-        "journalctl -k | grep -i throttl; sensors; fix the cooling first (dust, fan, paste), then the load",
-        "pmset -g thermlog; check the airflow and the fans; quit what runs hot",
-        "Task Manager > Performance > CPU (speed below base); clean the dust, check the fans; power plan: maximum processor state 90%"),
+        (("Find the throttling in the kernel log", "journalctl -k | grep -i throttl"),
+         ("Read the temperatures", "sensors"),
+         ("Fix the cooling first (dust, fan, paste), then the load", "")),
+        (("Read the thermal log", "pmset -g thermlog"),
+         ("Check the airflow and the fans", ""),
+         ("Quit what runs hot", "")),
+        (("Open Task Manager > Performance > CPU: the speed is below base", ""),
+         ("Clean the dust, check the fans", ""),
+         ("Set the power plan's maximum processor state to 90%", ""))),
     "disk-full": _fx(
-        "df -h; du -xh --max-depth=1 / 2>/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); "
-        "journalctl --vacuum-size=500M; apt clean",
-        "About This Mac > Storage; du -xhd1 / | sort -rh | head; docker system df; tmutil listlocalsnapshots /",
-        "Settings > System > Storage; cleanmgr; docker system df if Docker Desktop is used; move or delete the biggest files"),
+        (("See which filesystems are full", "df -h"),
+         ("Find the biggest directories", "du -xh --max-depth=1 / 2>/dev/null | sort -rh | head"),
+         ("See what Docker uses", "docker system df"),
+         ("Remove unused Docker images", "docker image prune"),
+         ("Remove the Docker build cache", "docker builder prune"),
+         ("Shrink the journal to 500 MB", "journalctl --vacuum-size=500M"),
+         ("Clean the package cache", "apt clean")),
+        (("Open About This Mac > Storage", ""),
+         ("Find the biggest directories", "du -xhd1 / | sort -rh | head"),
+         ("See what Docker uses", "docker system df"),
+         ("List the local Time Machine snapshots", "tmutil listlocalsnapshots /")),
+        (("Open Settings > System > Storage", ""),
+         ("Run Disk Cleanup", "cleanmgr"),
+         ("If Docker Desktop is used, see what Docker uses", "docker system df"),
+         ("Move or delete the biggest files", ""))),
     "log-noisy": _fx(
-        "journalctl -u <unit> -n 50 -p warning; docker logs --tail 50 <name>; fix what it complains about or lower its log level; "
-        "LogRateLimitIntervalSec in journald.conf as a stopgap",
-        "Console.app: filter by the process; fix what it complains about",
-        "Event Viewer > Windows Logs: filter by the source; fix its cause"),
+        (("Read the service's last warnings", "journalctl -u <unit> -n 50 -p warning"),
+         ("Read the container's last log lines", "docker logs --tail 50 <name>"),
+         ("Fix what it complains about or lower its log level", ""),
+         ("As a stopgap, set LogRateLimitIntervalSec in journald.conf", "")),
+        (("Open Console.app and filter by the process", ""),
+         ("Fix what it complains about", "")),
+        (("Open Event Viewer > Windows Logs and filter by the source", ""),
+         ("Fix its cause", ""))),
     "log-new": _fx(
-        "journalctl -p warning --since '24 hours ago' | tail -50; new messages after an update or a config change are normal, "
-        "otherwise look at the unit that writes them",
-        "Console.app: filter by the process, last 24 hours; new messages after an update are normal",
-        "Event Viewer > Windows Logs > System / Application: filter Warning and Error, last 24 hours; new messages after an update "
-        "are normal"),
+        (("Read the warnings of the last 24 hours", "journalctl -p warning --since '24 hours ago' | tail -50"),
+         ("New messages after an update or a config change are normal; otherwise look at the unit that writes them", "")),
+        (("Open Console.app, filter by the process, last 24 hours", ""),
+         ("New messages after an update are normal", "")),
+        (("Open Event Viewer > Windows Logs > System / Application: filter Warning and Error, last 24 hours", ""),
+         ("New messages after an update are normal", ""))),
     "login-fail": _fx(
-        "journalctl -u ssh -u sshd | grep -i fail | tail; fail2ban-client status sshd; sudo ufw limit 22/tcp; PasswordAuthentication "
-        "no in sshd_config; do not expose port 22 to the Internet (use a VPN or Tailscale)",
-        "System Settings > General > Sharing > Remote Login: turn it off if not needed, else allow only your users; do not "
-        "expose it to the Internet",
-        "Event Viewer > Windows Logs > Security (4625) shows the source; do not expose RDP/SSH to the Internet; use a VPN or "
-        "Tailscale; account lockout policy"),
+        (("Read the failed logins", "journalctl -u ssh -u sshd | grep -i fail | tail"),
+         ("See what fail2ban has banned", "fail2ban-client status sshd"),
+         ("Rate-limit new connections to port 22", "sudo ufw limit 22/tcp"),
+         ("Set PasswordAuthentication no in sshd_config", ""),
+         ("Do not expose port 22 to the Internet (use a VPN or Tailscale)", "")),
+        (("Turn off System Settings > General > Sharing > Remote Login if it is not needed, else allow only your users", ""),
+         ("Do not expose it to the Internet", "")),
+        (("Open Event Viewer > Windows Logs > Security: event 4625 shows the source", ""),
+         ("Do not expose RDP or SSH to the Internet; use a VPN or Tailscale", ""),
+         ("Set an account lockout policy", ""))),
     "boot-regression": _fx(
-        "systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable <unit>)",
-        "System Settings > General > Login Items: remove what is new and slow",
-        "Task Manager > Startup apps: disable what is new and slow; Event Viewer > Applications and Services Logs > Microsoft > "
-        "Windows > Diagnostics-Performance (event 100)"),
+        (("List the slowest units at boot", "systemd-analyze blame | head"),
+         ("See the chain that delays the boot", "systemd-analyze critical-chain"),
+         ("Disable what is new and slow", "systemctl disable <unit>")),
+        (("Remove what is new and slow in System Settings > General > Login Items", ""),),
+        (("Disable what is new and slow in Task Manager > Startup apps", ""),
+         ("Open Event Viewer > Applications and Services Logs > Microsoft > Windows > Diagnostics-Performance (event 100)", ""))),
 }
 
 
@@ -288,8 +408,9 @@ class _Ctx(object):
     def add(self, rule, subject, level, title, text, facts, fix_key=None):
         sub = _clean(subject) if subject is not None else ""
         fid = "%s:%s" % (rule, sub or "host")
+        steps = steps_of(FIXES[fix_key or rule][self.os])
         return {"id": fid, "level": level, "title": _clean(title, 100), "text": _clean(text, 400),
-                "fix": FIXES[fix_key or rule][self.os], "facts": _facts(facts), "subject": sub or None}
+                "fix": flat_fix(steps), "steps": steps, "facts": _facts(facts), "subject": sub or None}
 
     @property
     def coverage(self):

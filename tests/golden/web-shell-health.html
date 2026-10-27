@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view" data-refresh="2" data-frag="/?view=health&amp;frag=1">
-<div class="vb" data-card="__view" data-rev="e4a7868bd3">
+<div class="vb" data-card="__view" data-rev="097243b391">
 <div class="hv">
 <header class="st">
 <h2>HEALTH</h2>
@@ -140,7 +140,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>journalctl -k | grep -i &#x27;killed process&#x27;; free -h; give it a limit it respects (docker update --memory 2g &lt;name&gt; or MemoryMax= in a drop-in) and raise it if the app really needs more; add RAM or swap; look for a leak (mem-leak)</dd>
+<dd>Find what the kernel killed: journalctl -k | grep -i &#x27;killed process&#x27;; See how much memory and swap are used: free -h; Give a container a limit it respects: docker update --memory 2g &lt;name&gt;; Or give a service one: set MemoryMax= in a systemd drop-in; Raise the limit if the app really needs more; add RAM or swap; Look for a leak (see the mem-leak finding)</dd>
 </dl>
 </details>
 </div>
@@ -170,7 +170,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>docker ps -a; docker inspect &lt;name&gt; (State.ExitCode, State.OOMKilled); docker logs --tail 100 &lt;name&gt;; systemctl status &lt;unit&gt;; fix the cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU</dd>
+<dd>List the containers, the stopped ones too: docker ps -a; See why a container exited (State.ExitCode, State.OOMKilled): docker inspect &lt;name&gt;; Read the container&#x27;s last log lines: docker logs --tail 100 &lt;name&gt;; For a service, see its state: systemctl status &lt;unit&gt;; Fix the cause; Add a restart back-off (RestartSec= in the unit): a crash loop then stops burning CPU</dd>
 </dl>
 </details>
 </div>
@@ -206,7 +206,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>df -h; du -xh --max-depth=1 / 2&gt;/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); journalctl --vacuum-size=500M; apt clean</dd>
+<dd>See which filesystems are full: df -h; Find the biggest directories: du -xh --max-depth=1 / 2&gt;/dev/null | sort -rh | head; See what Docker uses: docker system df; Remove unused Docker images: docker image prune; Remove the Docker build cache: docker builder prune; Shrink the journal to 500 MB: journalctl --vacuum-size=500M; Clean the package cache: apt clean</dd>
 </dl>
 </details>
 </div>
@@ -239,7 +239,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart &lt;unit&gt; / docker restart &lt;name&gt;; cap it so it cannot starve the rest: docker update --memory 1g --memory-swap 1g &lt;name&gt; or MemoryMax=1G in a drop-in; then update it or report the leak</dd>
+<dd>List the processes that use the most memory: ps -eo pid,rss,comm --sort=-rss | head; See the containers&#x27; memory use: docker stats --no-stream; Stopgap: restart the service: systemctl restart &lt;unit&gt;; Or restart the container: docker restart &lt;name&gt;; Cap a container so it cannot starve the rest: docker update --memory 1g --memory-swap 1g &lt;name&gt;; Or cap a service: set MemoryMax=1G in a systemd drop-in; Then update it or report the leak</dd>
 </dl>
 </details>
 </div>
@@ -278,7 +278,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>top (or htop) shows it now; docker stats / systemctl status &lt;unit&gt;; cap it: docker update --cpus 2 &lt;name&gt; or CPUQuota=200% in a systemd drop-in (systemctl edit &lt;unit&gt;); check its log for a loop</dd>
+<dd>See what uses the CPU right now (htop works too): top; For a container, see its CPU use: docker stats; For a service, see its state: systemctl status &lt;unit&gt;; Cap a container&#x27;s CPU: docker update --cpus 2 &lt;name&gt;; Or cap a service: set CPUQuota=200% in a systemd drop-in: systemctl edit &lt;unit&gt;; Check its log for a loop</dd>
 </dl>
 </details>
 </div>
@@ -308,7 +308,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed</dd>
+<dd>Read the temperatures: sensors; Clean the dust, check the fans and the airflow, move the box off the heat; Reduce the load of the apps listed</dd>
 </dl>
 </details>
 </div>
@@ -341,7 +341,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>journalctl -u ssh -u sshd | grep -i fail | tail; fail2ban-client status sshd; sudo ufw limit 22/tcp; PasswordAuthentication no in sshd_config; do not expose port 22 to the Internet (use a VPN or Tailscale)</dd>
+<dd>Read the failed logins: journalctl -u ssh -u sshd | grep -i fail | tail; See what fail2ban has banned: fail2ban-client status sshd; Rate-limit new connections to port 22: sudo ufw limit 22/tcp; Set PasswordAuthentication no in sshd_config; Do not expose port 22 to the Internet (use a VPN or Tailscale)</dd>
 </dl>
 </details>
 </div>
@@ -371,7 +371,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>journalctl -u &lt;unit&gt; -n 50 -p warning; docker logs --tail 50 &lt;name&gt;; fix what it complains about or lower its log level; LogRateLimitIntervalSec in journald.conf as a stopgap</dd>
+<dd>Read the service&#x27;s last warnings: journalctl -u &lt;unit&gt; -n 50 -p warning; Read the container&#x27;s last log lines: docker logs --tail 50 &lt;name&gt;; Fix what it complains about or lower its log level; As a stopgap, set LogRateLimitIntervalSec in journald.conf</dd>
 </dl>
 </details>
 </div>
@@ -401,7 +401,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>journalctl -p warning --since &#x27;24 hours ago&#x27; | tail -50; new messages after an update or a config change are normal, otherwise look at the unit that writes them</dd>
+<dd>Read the warnings of the last 24 hours: journalctl -p warning --since &#x27;24 hours ago&#x27; | tail -50; New messages after an update or a config change are normal; otherwise look at the unit that writes them</dd>
 </dl>
 </details>
 </div>
@@ -431,7 +431,7 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable &lt;unit&gt;)</dd>
+<dd>List the slowest units at boot: systemd-analyze blame | head; See the chain that delays the boot: systemd-analyze critical-chain; Disable what is new and slow: systemctl disable &lt;unit&gt;</dd>
 </dl>
 </details>
 </div>

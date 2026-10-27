@@ -11,6 +11,8 @@ import math
 import random
 import time
 
+import health
+
 MiB = 2 ** 20
 GiB = 2 ** 30
 MACHINES = {
@@ -561,8 +563,11 @@ def _when(ts):
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
 
 
-def _finding(rule, subject, level, title, text, facts, fix):
-    return {"id": "%s:%s" % (rule, subject or "host"), "level": level, "title": title, "text": text, "fix": fix, "facts": facts, "subject": subject}
+def _finding(rule, subject, level, title, text, facts, fix, os_name="linux"):
+    """fix: None = health.FIXES[rule] for the demo machine's OS (what the real rule says), else the steps [(what, cmd)] this finding has."""
+    steps = health.steps_of(health.FIXES[rule][os_name] if fix is None else fix)
+    return {"id": "%s:%s" % (rule, subject or "host"), "level": level, "title": title, "text": text, "fix": health.flat_fix(steps), "steps": steps,
+            "facts": facts, "subject": subject}
 
 
 def _times(n):
@@ -604,53 +609,45 @@ def _health_linux(now, days):
         (1, f("oom", "shop-worker-1", "err", "Out of memory: shop-worker-1",
               "shop-worker-1 was hit by an out-of-memory event %s in %s (last %s)." % (_times(oom_n), span, when(2.5)),
               {"n": oom_n, "last": last(2.5)},
-              "journalctl -k | grep -i 'killed process'; free -h; give it a limit it respects (docker update --memory 2g <name> or MemoryMax= in a "
-              "drop-in) and raise it if the app really needs more; add RAM or swap; look for a leak (mem-leak)")),
+              None)),
         (1, f("restart-loop", "shop-worker-1", "warn", "Restarting: shop-worker-1",
               "shop-worker-1 restarted 9 times within 24 hours (%d in total) and exited with an error 3 times in %s (last %s)."
               % (restarts, span, when(2.4)),
               {"max_restarts_24h": 9, "restarts": restarts, "exit_errors": 3, "last": last(2.4)},
-              "docker ps -a; docker inspect <name> (State.ExitCode, State.OOMKilled); docker logs --tail 100 <name>; systemctl status <unit>; fix the "
-              "cause; a restart back-off (RestartSec= in the unit) keeps a crash loop from burning CPU")),
+              None)),
         (1, f("disk-full", "/data", "warn", "Disk filling up: /data", "/data is 83%% full, growing %.1f GB/day: full in about 12 days." % growth,
               {"used_gb": data[1], "total_gb": data[2], "growth_gb_day": growth, "fit_days": 30, "used_pct": round(data[1] * 100.0 / data[2], 1),
                "days_to_full": to_full},
-              "df -h; du -xh --max-depth=1 / 2>/dev/null | sort -rh | head; docker system df (docker image prune, docker builder prune); "
-              "journalctl --vacuum-size=500M; apt clean")),
+              None)),
         (3, f("mem-leak", "node", "warn", "Memory keeps growing: node",
               "node grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.",
               {"slope_mb_day": 180.2, "days": 5, "start_mb": 920, "now_mb": 1820, "r2": 0.93},
-              "ps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart <unit> / docker restart <name>; cap it so "
-              "it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or MemoryMax=1G in a drop-in; then update it or report the leak")),
+              None)),
         (1, f("cpu-hog", "chrome", "warn", "Keeps the CPU busy: chrome",
               "chrome used over 80%% of one core for %d hours in %s (peak 143%%, busiest at %s)." % (hog_h, span, when(27)),
               {"hours_over_80pct_core": hog_h, "hours_over_half_cores": 0, "cores": mach["cpu"]["threads"], "avg_pct": 62.3, "peak_pct": 143.0,
                "cpu_s": round(375000 * scale), "peak_hour": last(27)},
-              "top (or htop) shows it now; docker stats / systemctl status <unit>; cap it: docker update --cpus 2 <name> or CPUQuota=200% in a "
-              "systemd drop-in (systemctl edit <unit>); check its log for a loop")),
+              None)),
         (1, f("thermal", None, "warn", "Running hot",
               "%d hours at or above the temperature limit (%.0f C) in %s (about 2.0 h/day, max %.0f C); busiest then: chrome, node, shop-worker-1."
               % (hot_h, mach["temp"]["high"], span, max_c),
               {"hours_hot": hot_h, "hours_per_day": 2.0, "max_c": max_c, "apps": "chrome, node, shop-worker-1"},
-              "sensors; clean the dust, check the fans and the airflow, move the box off the heat; reduce the load of the apps listed")),
+              None)),
         (3, f("login-fail", "sshd", "warn", "Failed logins: sshd",
               "412 failed logins on 2026-09-28 against a median of 18 a day; %d in %s." % (logins, span),
               {"peak_day": 412, "peak_date": "2026-09-28", "median_day": 18, "total": logins, "days_over": 2},
-              "journalctl -u ssh -u sshd | grep -i fail | tail; fail2ban-client status sshd; sudo ufw limit 22/tcp; PasswordAuthentication no in "
-              "sshd_config; do not expose port 22 to the Internet (use a VPN or Tailscale)")),
+              None)),
         (1, f("log-noisy", "dockerd", "info", "Noisy log: dockerd",
               "dockerd logged one message %d times in %s (about 2631 a day): \"level=<v> msg=<str> error=<str>\"." % (noisy, span),
               {"n": noisy, "per_day": 2631, "source": "journal", "template": "level=<v> msg=<str> error=<str>"},
-              "journalctl -u <unit> -n 50 -p warning; docker logs --tail 50 <name>; fix what it complains about or lower its log level; "
-              "LogRateLimitIntervalSec in journald.conf as a stopgap")),
+              None)),
         (3, f("log-new", None, "info", "New log messages",
               "4 log messages appeared for the first time in the last 24 hours, most often from kernel (412 times).",
               {"new_templates": 4, "top_unit": "kernel", "top_n": 412, "top_template": "nvme nvme<n>: I/O <n> QID <n> timeout, aborting"},
-              "journalctl -p warning --since '24 hours ago' | tail -50; new messages after an update or a config change are normal, otherwise look "
-              "at the unit that writes them")),
+              None)),
         (7, f("boot-regression", None, "info", "Slower boot", "The last boot took %.0f s, %.1fx the median of the 7 boots before (%.0f s)." % (mach["boot"]["total"], ratio, mach["boot"]["median"]),
               {"last_s": mach["boot"]["total"], "median_s": mach["boot"]["median"], "ratio": round(ratio, 2), "boots": 7},
-              "systemd-analyze blame | head; systemd-analyze critical-chain; disable what is new and slow (systemctl disable <unit>)")),
+              None)),
     ]
     findings = [x for d, x in found if days >= d]
     # app, share of CPU time, average % of one core, busiest hour (hours ago), RSS average and maximum (GB), RSS trend (MB/day)
@@ -692,29 +689,28 @@ def _health_windows(now, days):
     when = lambda h: _when(last(h))  # noqa: E731
     span = "the last 24 hours" if days == 1 else "the last %d days" % days
     crashes, dcom = max(3, round(4 * scale)), round(2311 * scale)
-    f = _finding
+    f = lambda *a: _finding(*a, os_name="windows")  # noqa: E731
     findings = [
         f("unexpected-shutdown", None, "err", "Unexpected shutdown",
           "The machine shut down unexpectedly 1 time in %s (last %s)." % (span, when(14)), {"n": 1, "last": last(14)},
-          "Event Viewer > Windows Logs > System: Kernel-Power 41 and the BugCheck 1001 after it; check the power supply, the temperature and "
-          "the drivers; analyse C:\\Windows\\Minidump with WinDbg"),
+          None),
         f("crash-loop", "contoso-sync.exe", "warn", "Crashing: contoso-sync.exe",
           "contoso-sync.exe crashed %s in %s (last %s)." % (_times(crashes), span, when(3)),
           {"n": crashes, "crashes": crashes, "hangs": 0, "last": last(3)},
-          "Event Viewer > Windows Logs > Application: Application Error / Application Hang name the faulting module; update or reinstall it; "
-          "sfc /scannow if it is a system component"),
+          None),
         f("crash-loop", "Spooler", "warn", "Crashing: Spooler", "Spooler crashed 3 times in %s (last %s)." % (span, when(60)),
           {"n": 3, "crashes": 3, "hangs": 0, "last": last(60)},
-          "Get-Service <name>; Event Viewer > Windows Logs > System (Service Control Manager 7031) says why it stopped; services.msc > Recovery: "
-          "restart with a delay"),
+          (("Check the service", "Get-Service <name>"),
+           ("Open Event Viewer > Windows Logs > System: Service Control Manager 7031 says why it stopped", ""),
+           ("Open services.msc > Recovery and restart with a delay", ""))),
         f("cpu-share", "MsMpEng.exe", "info", "Biggest CPU user: MsMpEng.exe",
           "MsMpEng.exe used 27%% of all CPU time in %s (average 17%% of one core, busiest at %s)." % (span, when(31)),
           {"share_pct": 27.0, "avg_pct": 17.1, "cpu_s": round(167000 * scale), "peak_hour": last(31)},
-          "expected? then nothing to do. Else: Task Manager > Details shows what it does"),
+          None),
         f("log-noisy", "System", "info", "Noisy log: System",
           "System logged one message %d times in %s (about 330 a day): \"Microsoft-Windows-DistributedCOM 10016\"." % (dcom, span),
           {"n": dcom, "per_day": 330, "source": "System", "template": "Microsoft-Windows-DistributedCOM 10016"},
-          "Event Viewer > Windows Logs: filter by the source; fix its cause"),
+          None),
     ]
     if days == 1:  # one day: the service crash of two days ago is not in the period
         findings = [x for x in findings if x["id"] != "crash-loop:Spooler"]
@@ -749,21 +745,20 @@ def _health_darwin(now, days):
     when = lambda h: _when(last(h))  # noqa: E731
     span = "the last 24 hours" if days == 1 else "the last %d days" % days
     oom_n, crashes = max(1, round(2 * scale)), max(3, round(5 * scale))
-    f = _finding
+    f = lambda *a: _finding(*a, os_name="darwin")  # noqa: E731
     findings = [
         f("oom", "Google Chrome Helper", "err", "Out of memory: Google Chrome Helper",
           "Google Chrome Helper was hit by an out-of-memory event %s in %s (last %s)." % (_times(oom_n), span, when(15)),
           {"n": oom_n, "last": last(15)},
-          "Console > Crash Reports: JetsamEvent-*.ips lists the memory of every process; quit the biggest apps; add RAM"),
+          None),
         f("crash-loop", "photolibraryd", "warn", "Crashing: photolibraryd",
           "photolibraryd crashed %s in %s (last %s)." % (_times(crashes), span, when(7)),
           {"n": crashes, "crashes": crashes, "hangs": 0, "last": last(7)},
-          "Console > Crash Reports (~/Library/Logs/DiagnosticReports, /Library/Logs/DiagnosticReports): open the newest report of the app; "
-          "update or reinstall it"),
+          None),
         f("cpu-share", "mds_stores", "info", "Biggest CPU user: mds_stores",
           "mds_stores used 28%% of all CPU time in %s (average 9%% of one core, busiest at %s)." % (span, when(55)),
           {"share_pct": 28.0, "avg_pct": 9.3, "cpu_s": round(42000 * scale), "peak_hour": last(55)},
-          "expected? then nothing to do. Else: Activity Monitor > CPU shows what it does"),
+          None),
     ]
     names = [("mds_stores", .28, 9.3, 55, .3, .5, None), ("Google Chrome Helper", .21, 7.0, 15, 1.8, 2.9, 11.0), ("WindowServer", .09, 3.1, 9, .5, .6, None),
              ("kernel_task", .08, 2.7, 80, .1, .1, None), ("photolibraryd", .06, 2.0, 7, .4, .7, None)]

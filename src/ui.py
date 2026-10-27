@@ -758,13 +758,15 @@ class Split(_Component):
 
 
 class Pane(_Component):
-    """Everything known about one finding: level (err, warn, info), title, what (the text), facts [(name, value)] and fix. h: the console
-    cuts it to that many lines (the last says how many were left out; None: not cut)."""
-    __slots__ = ("level", "title", "what", "facts", "fix", "h")
+    """Everything known about one finding: level (err, warn, info), title, what (the text), facts [(name, value)] and fix. steps:
+    the fix as [(what it does, the exact command or "", template)], template = the command still has a <placeholder> to fill in; the console
+    draws them when there are, else `fix`. h: the console cuts it to that many lines (the last says how many were left out; None: not cut)."""
+    __slots__ = ("level", "title", "what", "facts", "fix", "h", "steps")
 
-    def __init__(self, level, title, what, facts=(), fix="", h=None):
+    def __init__(self, level, title, what, facts=(), fix="", h=None, steps=()):
         self.level, self.title, self.what, self.fix = check_level(level), _text(title), _text(what), _text(fix)
         self.facts, self.h = [(_text(k), _text(v)) for k, v in facts], None if h is None else int(h)
+        self.steps = [(_text(w), _text(c), bool(t)) for w, c, t in steps]
 
 
 class Finding(_Component):

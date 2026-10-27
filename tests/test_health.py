@@ -124,7 +124,7 @@ class Shape(unittest.TestCase):
         self.assertEqual(r["period"], {"from": NOW - 7 * 86400, "to": NOW, "days": 7})
         self.assertEqual(r["coverage"], {"hours": 168, "since": (H1 - 167) * 3600})
         for f in r["findings"]:
-            self.assertEqual(set(f), {"id", "level", "title", "text", "fix", "facts", "subject"})
+            self.assertEqual(set(f), {"id", "level", "title", "text", "fix", "steps", "facts", "subject"})
             self.assertIn(f["level"], ("err", "warn", "info"))
             self.assertRegex(f["id"], r"^[a-z-]+:.+$")
             self.assertTrue(f["title"] and f["text"] and f["fix"])

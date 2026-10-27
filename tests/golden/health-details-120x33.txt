@@ -14,18 +14,18 @@
  [1;33mMemory keeps growing: node[0m[0m[0m[0m[K
  [90mwhat   [0mnode grew about 180 MB/day over 5 days (from 0.9 GB to 1.8 GB, r2 0.93), a leak is possible.[0m[0m[0m[K
  [90mfacts  [0mslope_mb_day [1m180.2[0m  ·  days [1m5[0m  ·  start_mb [1m920[0m  ·  now_mb [1m1820[0m  ·  r2 [1m0.93[0m[0m[0m[0m[K
- [90mfix    [0mps -eo pid,rss,comm --sort=-rss | head; docker stats --no-stream; stopgap: systemctl restart <unit> / docker[0m[0m[0m[K
-        restart <name>; cap it so it cannot starve the rest: docker update --memory 1g --memory-swap 1g <name> or[0m[0m[0m[K
-        MemoryMax=1G in a drop-in; then update it or report the leak[0m[0m[0m[K
-[K
-[K
-[K
-[K
-[K
-[K
-[K
-[K
-[K
+ [90mfix    [0m1. List the processes that use the most memory[0m[0m[0m[K
+           [90m$ [0mps -eo pid,rss,comm --sort=-rss | head[0m[0m[0m[K
+        2. See the containers' memory use[0m[0m[0m[K
+           [90m$ [0mdocker stats --no-stream[0m[0m[0m[K
+        3. Stopgap: restart the service[0m[0m[0m[K
+           [90m$ [0msystemctl restart <unit>[0m[0m[0m[K
+        4. Or restart the container[0m[0m[0m[K
+           [90m$ [0mdocker restart <name>[0m[0m[0m[K
+        5. Cap a container so it cannot starve the rest[0m[0m[0m[K
+           [90m$ [0mdocker update --memory 1g --memory-swap 1g <name>[0m[0m[0m[K
+        6. Or cap a service: set MemoryMax=1G in a systemd drop-in[0m[0m[0m[K
+        7. Then update it or report the leak[0m[0m[0m[K
 [K
 [K
 [K

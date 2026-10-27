@@ -3,6 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Changed
+- **A Health finding's fix is split into steps, each with what it does and the exact command** (console and `/api/v1` `steps`; the web follows). The one-line `fix` stays, built from the steps. A command with a `<placeholder>` is marked `template`: the name is never put into it.
+
 ## [2.8.1] - 2026-10-25
 
 A patch release: the AI service no longer restarts for ever when its port is taken.
