@@ -426,7 +426,7 @@ class AttentionExtrasTests(Base):
         self.assertIn('<code class="pid" title="Database/broker open on the LAN">db-open-lan</code></span><span class="d why">data services should not be reachable from the network</span>', out)
         self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('<span class="d how">fix: <code class="cmd">publish the DB on 127.0.0.1 (scripts/rebind-all-dbs.sh) or stop it if unused</code>', out)
-        self.assertIn('accept if known: <code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code>', out)
+        self.assertIn('accept if known: <div class="cm"><code class="cmd">sudo nuc-console-accept --problem db-open-lan --reason &quot;...&quot;</code><button type="button" class="btn cp" data-copy="prev"', out)
         self.assertIn('<p class="hint d">list with why and fix: <code class="cmd">nuc-console-problems</code></p>', out)
         self.assertEqual(len(re.findall("<article", out)), 1)
         self.assertNotIn("\x1b", out)

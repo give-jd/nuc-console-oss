@@ -353,7 +353,7 @@ def html(node):
         why = f'<span class="d why">{_e(node.why)}</span>' if node.id and node.why else ""
         how = "".join(x for x in (
             f'<span class="d how">fix: <code class="cmd">{_e(node.fix)}</code></span>' if node.fix else "",
-            f'<span class="d accept">accept if known: <code class="cmd">{_e(node.accept)}</code></span>' if node.accept else ""))
+            f'<span class="d accept">accept if known: {_copier(node.accept)}</span>' if node.accept else ""))
         fix = f'<details class="fix" data-k="fix-{_e(node.id)}"><summary>fix</summary>{how}</details>' if how else ""
         return (f'<div{_cls("msg", "prob", "lv-" + node.level)} data-problem="{_e(node.id)}">'
                 f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span><span class="pr">{_e(node.text)}{chip}</span>{why}{fix}</div>')
@@ -487,10 +487,21 @@ def _props_html(p):
     return f'<aside class="props">{head}<dl>{rows}</dl></aside>'
 
 
+def _copier(cmd):  # a command in its own block with its Copy button: the same markup as appjs.py copier()
+    return (f'<div class="cm"><code class="cmd">{_e(cmd)}</code><button type="button" class="btn cp" data-copy="prev" data-done="Copied" '
+            'data-fail="Press Ctrl+C">Copy</button><span class="sr-only" role="status" aria-live="polite"></span></div>')
+
+
+def _steps_html(steps):
+    return '<ol class="steps">' + "".join(
+        f'<li><span class="w">{_e(what)}</span>{_copier(cmd) if cmd else ""}'
+        + ('<span class="tpl">complete the &lt;...&gt; first</span>' if cmd and tpl else "") + "</li>" for what, cmd, tpl in steps) + "</ol>"
+
+
 def _pane_html(p):
     facts = ('<dt>facts</dt><dd><ul class="facts">' + "".join(f'<li><span class="k">{_e(k)}</span> <b>{_e(v)}</b></li>' for k, v in p.facts)
              + "</ul></dd>") if p.facts else ""
-    return f'<dl{_cls("pane", "lv-" + p.level)}><dt>what</dt><dd>{_e(p.what)}</dd>{facts}<dt>fix</dt><dd>{_e(p.fix)}</dd></dl>'
+    return f'<dl{_cls("pane", "lv-" + p.level)}><dt>what</dt><dd>{_e(p.what)}</dd>{facts}<dt>fix</dt><dd>{_steps_html(p.steps) if p.steps else _e(p.fix)}</dd></dl>'
 
 
 _TAG = {"err": "\u2716 ERR", "warn": "! WARN", "info": "\u00b7 INFO"}

@@ -343,7 +343,8 @@ reg(ui.Title, ("label", tx, ""), ("parts", seq(one_inline, fallback=_placeholder
 reg(ui.Series, ("values", seq(number_or_none, strict=True, cap=2000), ()), ("w", integer(1, 200, 10), 10), ("tone", tone, "accent"),
     build=lambda c, cls, kw: cls(**dict(kw, tone=kw["tone"] or "accent")))
 reg(ui.Pane, ("level", enum(("err", "warn", "info"), "info"), "info"), ("title", tx, ""), ("what", tl, ""),
-    ("facts", seq(pair(tx, tl), strict=True, cap=200), ()), ("fix", tl, ""), ("h", integer(0, 1000, None), None))
+    ("facts", seq(pair(tx, tl), strict=True, cap=200), ()), ("fix", tl, ""), ("h", integer(0, 1000, None), None),
+    ("steps", seq(triple(tl, tl, boolean), strict=True, cap=20), ()))
 reg(ui.Finding, ("id", short, ""), ("level", enum(("err", "warn", "info"), "info"), "info"), ("title", tx, ""), ("text", tl, ""),
     ("detail", one_of(("Pane",)), None), ("cursor", boolean, False), ("open", boolean, False))
 reg(ui.Advice, ("head", tl, ""), ("paras", seq(seq(text(2000), strict=True, cap=200), strict=True, cap=200), ()),

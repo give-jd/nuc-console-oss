@@ -727,6 +727,15 @@ def hfact(k, v):
     return hclean(v, 80)
 
 
+def health_steps(f):
+    """The fix of a finding as [(what, cmd, template)], cleaned: only well-formed steps (strings), at most 12; [] when it has none."""
+    out = []
+    for s in (f.get("steps") if isinstance(f.get("steps"), list) else [])[:12]:
+        if isinstance(s, dict) and isinstance(s.get("what"), str) and isinstance(s.get("cmd"), str):
+            out.append((hclean(s["what"], 160), hclean(s["cmd"], 200), s.get("template") is True))
+    return out
+
+
 def health_details(f):
     """What the details of a finding say, as plain cleaned values: (level, title, text, [(fact, value)], fix). Console and web share it."""
     facts = f.get("facts") if isinstance(f.get("facts"), dict) else {}
@@ -988,7 +997,7 @@ def health_tables_lines(R, w, h=None, now=None):
 def health_pane(f, w, h):
     """The details of a finding (what it is, its facts, the fix), cut to h lines."""
     level, title, text, facts, fix = health_details(f)
-    return Pane(level, title, text, facts, fix, h)
+    return Pane(level, title, text, facts, fix, h, health_steps(f))
 
 
 # -- the heading, the findings, the whole screen ----------------------------------------------------------------------------------

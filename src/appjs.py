@@ -48,11 +48,11 @@ import hashlib
 
 # The elements and attributes the app creates (draw: htmlview.html's; the frame: the shell's). Anything else throws.
 HTML_TAGS = ("a", "article", "aside", "b", "br", "button", "code", "col", "colgroup", "dd", "details", "div", "dl", "dt", "figure", "form",
-             "h2", "h3", "header", "input", "kbd", "li", "p", "pre", "section", "span", "strong", "summary", "table", "tbody", "td", "th", "thead", "tr",
+             "h2", "h3", "header", "input", "kbd", "li", "ol", "p", "pre", "section", "span", "strong", "summary", "table", "tbody", "td", "th", "thead", "tr",
              "ul")
 SVG_TAGS = ("svg", "rect", "polyline")
-ATTRS = ("action", "aria-current", "aria-disabled", "aria-hidden", "aria-label", "aria-sort", "autocomplete", "class", "colspan", "data-card",
-         "data-depth", "data-k", "data-key", "data-kpi", "data-max-lines", "data-problem", "data-row", "data-state", "data-truncated", "disabled",
+ATTRS = ("action", "aria-current", "aria-disabled", "aria-hidden", "aria-label", "aria-live", "aria-sort", "autocomplete", "class", "colspan", "data-card",
+         "data-copy", "data-depth", "data-done", "data-fail", "data-k", "data-key", "data-kpi", "data-max-lines", "data-problem", "data-row", "data-state", "data-truncated", "disabled",
          "fill", "height", "href", "id", "maxlength", "method", "name", "open", "placeholder", "points", "preserveAspectRatio", "role", "scope",
          "title", "type", "value", "viewBox", "width", "x", "y")
 
@@ -229,11 +229,16 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
     return el("table", {class: "tbl"}, el("colgroup", {}, cols.map(c => el("col", {class: cls("c-" + c.key)}))),
       el("thead", {}, el("tr", {}, cols.map(th))), el("tbody", {}, body));
   }
+  function copier(cmd) {  // a command in its own block and its Copy button (PREFS_JS copies the code before it); the status is read out
+    return el("div", {class: "cm"}, el("code", {class: "cmd"}, tx(cmd)),
+      el("button", {type: "button", class: "btn cp", "data-copy": "prev", "data-done": "Copied", "data-fail": "Press Ctrl+C"}, "Copy"),
+      el("span", {class: "sr-only", role: "status", "aria-live": "polite"}));
+  }
   function problem(p) {
     const chip = p.id ? [" ", el("code", {class: "pid", title: tx(p.title)}, tx(p.id))] : null;
     const why = p.id && p.why ? el("span", {class: "d why"}, tx(p.why)) : null;
     const how = [p.fix ? el("span", {class: "d how"}, "fix: ", el("code", {class: "cmd"}, tx(p.fix))) : null,
-      p.accept ? el("span", {class: "d accept"}, "accept if known: ", el("code", {class: "cmd"}, tx(p.accept))) : null].filter(n => n);
+      p.accept ? el("span", {class: "d accept"}, "accept if known: ", copier(p.accept)) : null].filter(n => n);
     const fx = how.length ? el("details", {class: "fix", "data-k": "fix-" + tx(p.id)}, el("summary", {}, "fix"), how) : null;
     return el("div", {class: cls("msg", "prob", "lv-" + p.level), "data-problem": tx(p.id)}, el("span", {class: "sym"}, SYM[p.level]),
       el("span", {class: "pr"}, tx(p.text), chip), why, fx);
@@ -265,7 +270,9 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   }
   function pane(p) {
     const facts = p.facts && p.facts.length ? [el("dt", {}, "facts"), el("dd", {}, el("ul", {class: "facts"}, p.facts.map(([k, v]) => el("li", {}, el("span", {class: "k"}, tx(k)), " ", el("b", {}, tx(v))))))] : null;
-    return el("dl", {class: cls("pane", "lv-" + p.level)}, el("dt", {}, "what"), el("dd", {}, tx(p.what)), facts, el("dt", {}, "fix"), el("dd", {}, tx(p.fix)));
+    const todo = p.steps && p.steps.length ? el("ol", {class: "steps"}, p.steps.map(([what, cmd, tpl]) => el("li", {}, el("span", {class: "w"}, tx(what)),
+      cmd ? copier(cmd) : null, cmd && tpl ? el("span", {class: "tpl"}, "complete the <...> first") : null))) : tx(p.fix);
+    return el("dl", {class: cls("pane", "lv-" + p.level)}, el("dt", {}, "what"), el("dd", {}, tx(p.what)), facts, el("dt", {}, "fix"), el("dd", {}, todo));
   }
   function finding(f) {
     const key = "f-" + tx(f.id);

@@ -624,6 +624,15 @@ HEALTH_VIEW = """
 dl.pane{display:grid;grid-template-columns:4.5em minmax(0,1fr);gap:.3em .9em;margin:.1em .6em .8em 2.2em;font-size:.92em}
 dl.pane dt{color:var(--muted)}
 dl.pane dd{margin:0;min-width:0;overflow-wrap:anywhere}
+ol.steps{margin:0;padding-left:1.4em;display:grid;gap:.7em}
+ol.steps li{min-width:0}
+ol.steps .w{display:block;overflow-wrap:anywhere}
+.cm{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.4em .6em;margin-top:.25em;min-width:0}
+.cm code.cmd{flex:1 1 12em;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
+.cm .cp{min-width:44px;min-height:44px;justify-content:center;font:inherit;font-size:.9em}
+.cm .cp:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+ol.steps .tpl{display:block;margin-top:.2em;color:var(--muted);font-size:.9em}
+html[data-density="wall"] ol.steps{display:none}
 ul.facts{display:flex;flex-wrap:wrap;gap:.2em 1.4em;margin:0;padding:0;list-style:none}
 ul.facts .k{color:var(--muted)}
 .hv .advice{padding:.75em 1em;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px}

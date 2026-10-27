@@ -615,6 +615,18 @@ def _split_lines(n, w):
             for i in range(max(len(left), n.h) if n.h else max(len(left), len(right)))], hl or hr
 
 
+def _step_lines(steps, w, lw, label):
+    """A fix as numbered steps: '1. what it does', then its command on its own line, '$ ' before it; `label` stands before the first line."""
+    ind, out = lw + 1, []
+    for i, (what, cmd, _template) in enumerate(steps, 1):
+        num = "%d. " % i
+        for j, x in enumerate(textwrap.wrap(what, max(8, w - ind - len(num)), break_on_hyphens=False) or ["?"]):
+            out.append((" " + label if not out else " " * ind) + (num if j == 0 else " " * len(num)) + x)
+        for j, x in enumerate(textwrap.wrap(cmd, max(8, w - ind - len(num) - 2), break_on_hyphens=False, break_long_words=False) if cmd else []):
+            out.append(" " * (ind + len(num)) + style("$ " if j == 0 else "  ", "muted") + x)
+    return out
+
+
 def _pane_lines(p, w):
     lw = 7
     out = [section("DETAILS", w), " " + style(p.title, p.level, True)]
@@ -622,6 +634,9 @@ def _pane_lines(p, w):
         if label == "facts":
             rows = _wrap([f"{k} {c(1, v)}" for k, v in p.facts], w, lw + 1, "  \u00b7  ", None)[0] if p.facts else []
             out += [" " + style(label.ljust(lw), "muted") + r[lw + 1:] if i == 0 else r for i, r in enumerate(rows)]
+            continue
+        if label == "fix" and p.steps:
+            out += _step_lines(p.steps, w, lw, style(label.ljust(lw), "muted"))
             continue
         chunks = textwrap.wrap(body, max(8, w - lw - 1), break_on_hyphens=False) or ["?"]
         out += [(" " + style(label.ljust(lw), "muted") if i == 0 else " " * (lw + 1)) + x for i, x in enumerate(chunks)]

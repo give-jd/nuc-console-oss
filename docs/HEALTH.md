@@ -3,7 +3,7 @@
 The dashboard shows *now*. The **HEALTH** screen (console key `4`, web **health** link) shows the last day, week or month:
 which apps use the CPU and the memory, which crash, hang or get killed for lack of memory, which services and containers
 keep restarting or failing, when the machine runs hot, which disks are filling up, which log messages are flooding or new.
-Each finding comes with how to fix or check it. It works the same on Linux, macOS and Windows.
+Each finding comes with how to fix or check it, as steps: what the step does and the exact command to run (the console draws the command on its own line after `$ `). A command with a `<placeholder>` is a template to complete: a name from the history is never put into a command. It works the same on Linux, macOS and Windows.
 
 No AI is involved in the findings: they are rules over numbers, so they can be checked. An optional local model can turn
 them into plain-language advice (the ADVICE block below) and answer questions about the history; it is off by default, runs
