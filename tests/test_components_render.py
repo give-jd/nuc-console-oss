@@ -313,7 +313,7 @@ class WebOnlyFieldsTests(unittest.TestCase):
         self.assertIn('<code class="pid" title="Title &lt;b&gt;">db-open-lan</code></span><span class="d why">data services stay home</span>', out)
         self.assertIn('<details class="fix" data-k="fix-db-open-lan"><summary>fix</summary>', out)
         self.assertIn('fix: <code class="cmd">publish on 127.0.0.1</code>', out)
-        self.assertIn('accept if known: <code class="cmd">sudo x --problem db-open-lan --reason &quot;...&quot;</code>', out)
+        self.assertIn('accept if known: <div class="cm"><code class="cmd">sudo x --problem db-open-lan --reason &quot;...&quot;</code><button type="button" class="btn cp" data-copy="prev"', out)
         bare = htmlview.html(ui.Problem("warn", "no id"))
         self.assertNotIn("<code", bare)
         self.assertNotIn("fix:", bare)

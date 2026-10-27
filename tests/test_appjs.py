@@ -52,6 +52,31 @@ class Rules(unittest.TestCase):
         self.assertTrue(set(appjs.HTML_TAGS) <= set(webjs.FRAG_TAGS), "the tags a fragment of the shell may hold")
         self.assertEqual(set(appjs.ATTRS) - set(webjs.FRAG_ATTRS), {"data-truncated"})
 
+    def test_a_fix_is_drawn_as_steps_with_a_copy_button_and_no_inline_handler(self):
+        js, prefs = appjs.APP_JS, webjs.PREFS_JS
+        self.assertIn('el("ol", {class: "steps"}', js)
+        self.assertEqual(js.count('"data-copy": "prev"'), 1)  # one builder of the block: the pane's steps and the accept command use it
+        self.assertEqual(js.count("copier("), 3)  # its definition, the accept command, the steps
+        self.assertIn('type: "button"', js)
+        self.assertIn('"aria-live": "polite"', js)
+        for bad in ("onclick", "innerHTML", "style="):
+            self.assertNotIn(bad, js)
+        self.assertEqual(prefs.count('document.addEventListener("click"'), 1)  # one delegated listener copies, for every Copy button
+        self.assertIn('w === "prev" ? c.previousElementSibling', prefs)
+        for a in ("data-copy", "data-done", "data-fail", "aria-live"):
+            self.assertIn(a, appjs.ATTRS)
+        self.assertIn("ol", appjs.HTML_TAGS)
+
+    def test_the_server_pane_has_the_same_steps_markup(self):
+        import htmlview
+        import ui
+        out = htmlview._pane_html(ui.Pane("warn", "t", "w", (), "flat", None, [("Look", "free -h", False), ("Cap", "docker update <name>", True), ("Think", "", False)]))
+        self.assertEqual(out.count('<button type="button" class="btn cp" data-copy="prev"'), 2)  # a step without a command has no button
+        self.assertEqual(out.count("complete the &lt;...&gt; first"), 1)  # only the template one
+        self.assertIn('<code class="cmd">docker update &lt;name&gt;</code>', out)
+        self.assertNotIn("flat", out)
+        self.assertIn("<dd>flat</dd>", htmlview._pane_html(ui.Pane("warn", "t", "w", (), "flat")))
+
     def test_the_lifted_bans_are_still_bans_for_the_other_scripts_and_markup_is_banned_for_the_app(self):
         for name, src in dict(webjs.SCRIPTS).items():
             for bad in ("document.createElement(\"div\")", "new EventSource(\"/api/v1/stream?view=cpu\")", "history.pushState(null, \"\", \"/x\")"):

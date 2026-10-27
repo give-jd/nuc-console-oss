@@ -111,7 +111,8 @@ class Shell(unittest.TestCase):
 
     def test_every_interactive_control_is_a_link_or_a_form(self):
         for t, a, _ in self.tree.tags:
-            self.assertNotIn(t, ("button", "select", "textarea", "iframe", "form"), t)
+            if not (t == "button" and a.get("data-copy") == "prev"):  # a Copy button of a fix step: PREFS_JS copies, it submits nothing
+                self.assertNotIn(t, ("button", "select", "textarea", "iframe", "form"), t)
             self.assertFalse([k for k in a if k.startswith("on") or k == "style"], (t, a))
         for t, a, _ in self.tree.find("a"):
             self.assertTrue(a["href"].startswith(("/?", "#")) or a["href"] == "/app" or a["href"].startswith("/app?") or a["href"].startswith("/setup?"), a)  # /app: the live app

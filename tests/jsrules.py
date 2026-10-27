@@ -76,7 +76,7 @@ GLOBAL_BANS = [
     # markup from data
     ("innerHTML", r"innerHTML"), ("outerHTML", r"outerHTML"), ("insertAdjacent", r"insertAdjacent(?:HTML|Text|Element)"),
     ("document.write", r"document\s*\.\s*write"), ("createElement", r"createElement"), ("createContextualFragment", r"createContextualFragment"),
-    ("innerText", r"innerText"), ("srcdoc", r"srcdoc"), ("execCommand", r"execCommand"),
+    ("innerText", r"innerText"), ("srcdoc", r"srcdoc"),
     ("appendChild and old node calls", r"\b(?:appendChild|insertBefore|cloneNode|removeChild|replaceChild|replaceChildren|prepend)\b"),
     ("Element.remove()", r"\.remove\(\)"),
     # code from strings, modules, workers
@@ -128,6 +128,7 @@ CAPS = [
     ("sessionStorage", r"\bsessionStorage\b", 99, {"graph", "refresh"}),
     ("navigator", r"\bnavigator\b", 2, {"prefs"}),
     ("clipboard.writeText", r"\bclipboard\.writeText\(", 1, {"prefs"}),
+    ("execCommand", r"execCommand", 1, {"prefs"}),                          # the copy of the selection where the clipboard API is missing
     ("trustedTypes", r"\btrustedTypes\b", 2, {"refresh"}),
 ]
 
@@ -182,8 +183,8 @@ POLICIES = {
                                      "a[href], button, input, select, textarea, label, summary"},
         attrs_read={"data-key", "aria-disabled", "tabindex"}, events={"DOMContentLoaded", "keydown", "click"}),
     "prefs": Policy(
-        "prefs", 4864, 70, ids={"export"}, selectors={"a[data-set]", "[data-copy]"},
-        attrs_read={"data-theme", "data-density", "data-copy", "data-done", "data-fail", "data-prefs", "data-prefs-src", "href"},
+        "prefs", 5632, 85, ids={"export"}, selectors={"a[data-set]", "[data-copy]"},
+        attrs_read={"data-theme", "data-density", "data-copy", "data-done", "data-fail", "data-prefs", "data-prefs-src", "href", "role"},
         attrs_write={"data-theme", "data-density", "aria-current"}, events={"DOMContentLoaded", "click"},
         location={"reload", "assign"}, assign_calls=1, storage={"localStorage": (2, {"getItem", "setItem"})}),
     "builder": Policy(

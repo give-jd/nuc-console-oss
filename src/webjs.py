@@ -77,7 +77,8 @@ Server-rendered controls the scripts click or intercept:
                                             data-theme="dark" and/or data-density="wall" say what it switches to; aria-current marks
                                             the chosen one of its group
     [data-copy="#export"]                   a button: copies the text of #export (the [ui] snippet, an element with id "export");
-                                            data-done / data-fail are optional labels it shows for a moment
+    [data-copy="prev"]                      the same for the element just before the button (a fix step's command), and a following
+                                            role=status element announces data-done; data-done / data-fail are optional labels shown for a moment
     main.grid[data-edit] > article.card[data-card]   the editor's cards, nothing else in the grid; width classes s1..s4 (exactly one)
     [data-drag]      the drag handle in a card: it moves the card (the server's CSS gives it touch-action: none, and shows it only on a
                      card that has tabindex, that is, once BUILDER_JS runs)
@@ -395,7 +396,7 @@ _PREFS = r"""// nuc-console web view: preferences (src/webjs.py PREFS_JS). A cli
 // the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
 // go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
 // back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
-// copies the text of #export. It never touches the cookie. It sets no classes.
+// copies the text of #export (or of the element before it). It never touches the cookie. It sets no classes.
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -417,17 +418,25 @@ _PREFS = r"""// nuc-console web view: preferences (src/webjs.py PREFS_JS). A cli
       if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
     }
   }
-  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
-    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
-    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
-    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+  function copy(b, src) {  // the text of src to the clipboard, within the click; without a secure context the API is missing: copy the selection, else leave it selected
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent, st = b.nextElementSibling;
+    const live = st && st.getAttribute("role") === "status" ? st : null;
+    const say = (t, ok) => { if (t) { b.textContent = t; if (live && ok) live.textContent = t; setTimeout(() => { b.textContent = was; if (live) live.textContent = ""; }, 1800); } };
+    const pick = () => {
+      const r = document.createRange(), s = window.getSelection();
+      let ok = false;
+      r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r);
+      try { ok = document.execCommand("copy"); } catch (err) { /* it stays selected */ }
+      say(ok ? done : fail, ok);
+    };
     if (!navigator.clipboard) pick();
-    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done, true), pick);
   }
 
   document.addEventListener("click", e => {
-    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
-    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]"), w = c && c.getAttribute("data-copy");
+    const src = w === "#export" ? document.getElementById("export") : w === "prev" ? c.previousElementSibling : null;
+    if (src) { e.preventDefault(); copy(c, src); return; }
     if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
     e.preventDefault();
     load(href + "&frag=1").then(r => {

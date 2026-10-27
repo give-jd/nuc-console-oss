@@ -1,4 +1,4 @@
-<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-9GZYHRyC/l+um9jeWR6HmXZOs7IkgpqRthuNvzvX+oY=' 'sha256-EvYKgsK2e0W2nhAtYXHkenBCnq+fGZYVrlPsRrOWrVg='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
+<!-- Content-Security-Policy: default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-OxrB5iw1sKYYfRLhQM/LBmoyOWCxk4tRPuxbmnvf6RQ=' 'sha256-9GZYHRyC/l+um9jeWR6HmXZOs7IkgpqRthuNvzvX+oY=' 'sha256-tpSwEMrXg+Ay4161jeeECySJS+l/9CDSilOodq6tKW8='; connect-src 'self'; require-trusted-types-for 'script'; trusted-types nuc-frag -->
 <!doctype html>
 <html lang="en" data-theme="auto" data-density="desk" class="z100 shift-1" data-prefs-src="config">
 <head>
@@ -9,7 +9,7 @@
 <meta http-equiv="refresh" content="2">
 </noscript>
 <title>demo-host · health · nuc-console</title>
-<link rel="stylesheet" href="/s/app.51c727e3.css">
+<link rel="stylesheet" href="/s/app.0bbf3567.css">
 </head>
 <body>
 <header class="topbar" data-card="__top" data-rev="854a07df13">
@@ -97,7 +97,7 @@
 <div id="stale" class="stale-banner" role="status" hidden>
 </div>
 <main class="view" data-refresh="2" data-frag="/?view=health&amp;frag=1">
-<div class="vb" data-card="__view" data-rev="097243b391">
+<div class="vb" data-card="__view" data-rev="988546a415">
 <div class="hv">
 <header class="st">
 <h2>HEALTH</h2>
@@ -140,7 +140,47 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>Find what the kernel killed: journalctl -k | grep -i &#x27;killed process&#x27;; See how much memory and swap are used: free -h; Give a container a limit it respects: docker update --memory 2g &lt;name&gt;; Or give a service one: set MemoryMax= in a systemd drop-in; Raise the limit if the app really needs more; add RAM or swap; Look for a leak (see the mem-leak finding)</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">Find what the kernel killed</span>
+<div class="cm">
+<code class="cmd">journalctl -k | grep -i &#x27;killed process&#x27;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See how much memory and swap are used</span>
+<div class="cm">
+<code class="cmd">free -h</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Give a container a limit it respects</span>
+<div class="cm">
+<code class="cmd">docker update --memory 2g &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Or give a service one: set MemoryMax= in a systemd drop-in</span>
+</li>
+<li>
+<span class="w">Raise the limit if the app really needs more; add RAM or swap</span>
+</li>
+<li>
+<span class="w">Look for a leak (see the mem-leak finding)</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -170,7 +210,55 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>List the containers, the stopped ones too: docker ps -a; See why a container exited (State.ExitCode, State.OOMKilled): docker inspect &lt;name&gt;; Read the container&#x27;s last log lines: docker logs --tail 100 &lt;name&gt;; For a service, see its state: systemctl status &lt;unit&gt;; Fix the cause; Add a restart back-off (RestartSec= in the unit): a crash loop then stops burning CPU</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">List the containers, the stopped ones too</span>
+<div class="cm">
+<code class="cmd">docker ps -a</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See why a container exited (State.ExitCode, State.OOMKilled)</span>
+<div class="cm">
+<code class="cmd">docker inspect &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Read the container&#x27;s last log lines</span>
+<div class="cm">
+<code class="cmd">docker logs --tail 100 &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">For a service, see its state</span>
+<div class="cm">
+<code class="cmd">systemctl status &lt;unit&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Fix the cause</span>
+</li>
+<li>
+<span class="w">Add a restart back-off (RestartSec= in the unit): a crash loop then stops burning CPU</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -206,7 +294,73 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>See which filesystems are full: df -h; Find the biggest directories: du -xh --max-depth=1 / 2&gt;/dev/null | sort -rh | head; See what Docker uses: docker system df; Remove unused Docker images: docker image prune; Remove the Docker build cache: docker builder prune; Shrink the journal to 500 MB: journalctl --vacuum-size=500M; Clean the package cache: apt clean</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">See which filesystems are full</span>
+<div class="cm">
+<code class="cmd">df -h</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Find the biggest directories</span>
+<div class="cm">
+<code class="cmd">du -xh --max-depth=1 / 2&gt;/dev/null | sort -rh | head</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See what Docker uses</span>
+<div class="cm">
+<code class="cmd">docker system df</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Remove unused Docker images</span>
+<div class="cm">
+<code class="cmd">docker image prune</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Remove the Docker build cache</span>
+<div class="cm">
+<code class="cmd">docker builder prune</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Shrink the journal to 500 MB</span>
+<div class="cm">
+<code class="cmd">journalctl --vacuum-size=500M</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Clean the package cache</span>
+<div class="cm">
+<code class="cmd">apt clean</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -239,7 +393,64 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>List the processes that use the most memory: ps -eo pid,rss,comm --sort=-rss | head; See the containers&#x27; memory use: docker stats --no-stream; Stopgap: restart the service: systemctl restart &lt;unit&gt;; Or restart the container: docker restart &lt;name&gt;; Cap a container so it cannot starve the rest: docker update --memory 1g --memory-swap 1g &lt;name&gt;; Or cap a service: set MemoryMax=1G in a systemd drop-in; Then update it or report the leak</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">List the processes that use the most memory</span>
+<div class="cm">
+<code class="cmd">ps -eo pid,rss,comm --sort=-rss | head</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See the containers&#x27; memory use</span>
+<div class="cm">
+<code class="cmd">docker stats --no-stream</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Stopgap: restart the service</span>
+<div class="cm">
+<code class="cmd">systemctl restart &lt;unit&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Or restart the container</span>
+<div class="cm">
+<code class="cmd">docker restart &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Cap a container so it cannot starve the rest</span>
+<div class="cm">
+<code class="cmd">docker update --memory 1g --memory-swap 1g &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Or cap a service: set MemoryMax=1G in a systemd drop-in</span>
+</li>
+<li>
+<span class="w">Then update it or report the leak</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -278,7 +489,61 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>See what uses the CPU right now (htop works too): top; For a container, see its CPU use: docker stats; For a service, see its state: systemctl status &lt;unit&gt;; Cap a container&#x27;s CPU: docker update --cpus 2 &lt;name&gt;; Or cap a service: set CPUQuota=200% in a systemd drop-in: systemctl edit &lt;unit&gt;; Check its log for a loop</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">See what uses the CPU right now (htop works too)</span>
+<div class="cm">
+<code class="cmd">top</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">For a container, see its CPU use</span>
+<div class="cm">
+<code class="cmd">docker stats</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">For a service, see its state</span>
+<div class="cm">
+<code class="cmd">systemctl status &lt;unit&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Cap a container&#x27;s CPU</span>
+<div class="cm">
+<code class="cmd">docker update --cpus 2 &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Or cap a service: set CPUQuota=200% in a systemd drop-in</span>
+<div class="cm">
+<code class="cmd">systemctl edit &lt;unit&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Check its log for a loop</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -308,7 +573,25 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>Read the temperatures: sensors; Clean the dust, check the fans and the airflow, move the box off the heat; Reduce the load of the apps listed</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">Read the temperatures</span>
+<div class="cm">
+<code class="cmd">sensors</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Clean the dust, check the fans and the airflow, move the box off the heat</span>
+</li>
+<li>
+<span class="w">Reduce the load of the apps listed</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -341,7 +624,43 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>Read the failed logins: journalctl -u ssh -u sshd | grep -i fail | tail; See what fail2ban has banned: fail2ban-client status sshd; Rate-limit new connections to port 22: sudo ufw limit 22/tcp; Set PasswordAuthentication no in sshd_config; Do not expose port 22 to the Internet (use a VPN or Tailscale)</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">Read the failed logins</span>
+<div class="cm">
+<code class="cmd">journalctl -u ssh -u sshd | grep -i fail | tail</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See what fail2ban has banned</span>
+<div class="cm">
+<code class="cmd">fail2ban-client status sshd</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Rate-limit new connections to port 22</span>
+<div class="cm">
+<code class="cmd">sudo ufw limit 22/tcp</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Set PasswordAuthentication no in sshd_config</span>
+</li>
+<li>
+<span class="w">Do not expose port 22 to the Internet (use a VPN or Tailscale)</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -371,7 +690,36 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>Read the service&#x27;s last warnings: journalctl -u &lt;unit&gt; -n 50 -p warning; Read the container&#x27;s last log lines: docker logs --tail 50 &lt;name&gt;; Fix what it complains about or lower its log level; As a stopgap, set LogRateLimitIntervalSec in journald.conf</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">Read the service&#x27;s last warnings</span>
+<div class="cm">
+<code class="cmd">journalctl -u &lt;unit&gt; -n 50 -p warning</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Read the container&#x27;s last log lines</span>
+<div class="cm">
+<code class="cmd">docker logs --tail 50 &lt;name&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+<li>
+<span class="w">Fix what it complains about or lower its log level</span>
+</li>
+<li>
+<span class="w">As a stopgap, set LogRateLimitIntervalSec in journald.conf</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -401,7 +749,22 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>Read the warnings of the last 24 hours: journalctl -p warning --since &#x27;24 hours ago&#x27; | tail -50; New messages after an update or a config change are normal; otherwise look at the unit that writes them</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">Read the warnings of the last 24 hours</span>
+<div class="cm">
+<code class="cmd">journalctl -p warning --since &#x27;24 hours ago&#x27; | tail -50</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">New messages after an update or a config change are normal; otherwise look at the unit that writes them</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -431,7 +794,38 @@
 </ul>
 </dd>
 <dt>fix</dt>
-<dd>List the slowest units at boot: systemd-analyze blame | head; See the chain that delays the boot: systemd-analyze critical-chain; Disable what is new and slow: systemctl disable &lt;unit&gt;</dd>
+<dd>
+<ol class="steps">
+<li>
+<span class="w">List the slowest units at boot</span>
+<div class="cm">
+<code class="cmd">systemd-analyze blame | head</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">See the chain that delays the boot</span>
+<div class="cm">
+<code class="cmd">systemd-analyze critical-chain</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+</li>
+<li>
+<span class="w">Disable what is new and slow</span>
+<div class="cm">
+<code class="cmd">systemctl disable &lt;unit&gt;</code>
+<button type="button" class="btn cp" data-copy="prev" data-done="Copied" data-fail="Press Ctrl+C">Copy</button>
+<span class="sr-only" role="status" aria-live="polite">
+</span>
+</div>
+<span class="tpl">complete the &lt;...&gt; first</span>
+</li>
+</ol>
+</dd>
 </dl>
 </details>
 </div>
@@ -1315,7 +1709,7 @@
 // the background (it answers 204 and sets its HttpOnly cookie) and the theme and density the link names (data-theme, data-density)
 // go on <html> at once, without a reload; if that fails the link is followed as it is. The preferences string the server sends
 // back is kept in localStorage["nuc-ui"], and sent again, once, when the server found no cookie. A [data-copy="#export"] button
-// copies the text of #export. It never touches the cookie. It sets no classes.
+// copies the text of #export (or of the element before it). It never touches the cookie. It sets no classes.
 (function main() {
   "use strict";
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", main); return; }
@@ -1340,17 +1734,25 @@
       if (de !== null && b.hasAttribute("data-density")) mark(b, b.getAttribute("data-density") === de);
     }
   }
-  function copy(b, src) {  // the text of src to the clipboard, within the click; where that is not allowed, select it
-    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent;
-    const say = t => { if (t) { b.textContent = t; setTimeout(() => { b.textContent = was; }, 1800); } };
-    const pick = () => { const r = document.createRange(), s = window.getSelection(); r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r); say(fail); };
+  function copy(b, src) {  // the text of src to the clipboard, within the click; without a secure context the API is missing: copy the selection, else leave it selected
+    const done = b.getAttribute("data-done"), fail = b.getAttribute("data-fail"), was = b.textContent, st = b.nextElementSibling;
+    const live = st && st.getAttribute("role") === "status" ? st : null;
+    const say = (t, ok) => { if (t) { b.textContent = t; if (live && ok) live.textContent = t; setTimeout(() => { b.textContent = was; if (live) live.textContent = ""; }, 1800); } };
+    const pick = () => {
+      const r = document.createRange(), s = window.getSelection();
+      let ok = false;
+      r.selectNodeContents(src); s.removeAllRanges(); s.addRange(r);
+      try { ok = document.execCommand("copy"); } catch (err) { /* it stays selected */ }
+      say(ok ? done : fail, ok);
+    };
     if (!navigator.clipboard) pick();
-    else navigator.clipboard.writeText(src.textContent).then(() => say(done), pick);
+    else navigator.clipboard.writeText(src.textContent).then(() => say(done, true), pick);
   }
 
   document.addEventListener("click", e => {
-    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]");
-    if (c && c.getAttribute("data-copy") === "#export" && document.getElementById("export")) { e.preventDefault(); copy(c, document.getElementById("export")); return; }
+    const a = e.target.closest("a[data-set]"), href = a && a.getAttribute("href"), c = e.target.closest("[data-copy]"), w = c && c.getAttribute("data-copy");
+    const src = w === "#export" ? document.getElementById("export") : w === "prev" ? c.previousElementSibling : null;
+    if (src) { e.preventDefault(); copy(c, src); return; }
     if (!a || !plain(e) || !href || !href.startsWith("/?set=") || href.indexOf("#") >= 0) return;
     e.preventDefault();
     load(href + "&frag=1").then(r => {
