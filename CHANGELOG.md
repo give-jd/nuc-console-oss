@@ -3,6 +3,13 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [2.8.3] - 2026-10-28
+
+A patch release: the console starts even when the display driver is stuck.
+
+### Fixed
+- **Restarting the console no longer waits for a wedged display.** On a machine whose graphics driver had stopped answering (the kernel log shows `i915 ... flip_done timed out`), `nuc-console.service` stayed in "activating" for 85 seconds, 5 short of systemd's 90 s start timeout, while `ttyprep.py` waited for `setfont` on the tty: a child stuck in a driver call survives the kill, and the wait after the kill lasted as long as the driver did. `ttyprep.py` now has one deadline of 15 seconds for all its steps, gives up on a step that does not come back, skips the steps after it (a tty that did not answer once will not answer again) and does not touch the framebuffer then; the journal says which step it gave up on. The driver itself is a kernel matter: a stuck display usually needs a reboot.
+
 ## [2.8.2] - 2026-10-27
 
 A finding's fix reads as steps: what each one does, and the exact command to copy.
