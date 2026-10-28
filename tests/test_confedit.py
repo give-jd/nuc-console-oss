@@ -110,7 +110,7 @@ class Schema(unittest.TestCase):
             self.assertTrue(key.what.isascii() or "…" in key.what, key.name)
         self.assertEqual(sorted(k for k, _t, _w in confedit.FEATURE_WORDS), sorted(nuc_config.FEATURES))
         locks = {(k.section, k.name) for k in confedit.KEYS if k.applies == confedit.LOCK}
-        self.assertEqual(locks, {("ai", "web_actions"), ("telegram", "web_actions"), ("ai", "allow_remote"), ("web", "settings_actions")})
+        self.assertEqual(locks, {("ai", "web_actions"), ("telegram", "web_actions"), ("ai", "allow_remote"), ("web", "settings_actions"), ("web", "fix_actions")})
 
 
 class Folder(unittest.TestCase):

@@ -651,6 +651,14 @@ hidden =
 <p class="hintl">yes: the settings page of an installation may change the presentation keys, but only behind a token (token_file); no (the default): it only shows, and what it chose before counts for nothing (an administrator&#x27;s opt-in). <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
 </p>
 </div>
+<div class="ck cko" id="k-web-fix_actions">
+<span class="cn">
+<code>fix_actions</code>
+</span>
+<code class="cv">no</code>
+<p class="hintl">yes: five ATTENTION problems (the collector or the peer poller not running) get an Execute button that restarts or starts that one service; the installer then lets the web account do exactly that, through polkit. no (the default): the button is not drawn and the rule is removed (an administrator&#x27;s opt-in; only config.ini sets it). <span class="sm">yes or no · default no · a lock: only config.ini changes it, never this page</span>
+</p>
+</div>
 </details>
 <details class="cfgs" id="cfg-alerts">
 <summary>

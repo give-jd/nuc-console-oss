@@ -24,6 +24,7 @@ import advisor
 import appjs
 import cards
 import events
+import fixactions
 import nuc_config
 import prefs
 import render
@@ -53,7 +54,8 @@ AI_ACTIONS = ("on", "off", "use", "cancel", "delete", "delete-all", "ask", "advi
 TG_ACTIONS = ("pair", "cancel", "on", "off", "test")  # POST /telegram/<action>
 SETTINGS_ACTIONS = ("feature", "config", "reset")  # POST /settings/<action>: a portable run's config.ini (the desktop app is one): a switch, a section
 SETUP_ACTIONS = ("finish", "skip")  # POST /setup/<action>: the setup guide's marker (wizard.mark): finished or skipped; it writes no setting
-POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS}
+FIX_ACTIONS = ("run",)  # POST /fix/run: the Execute button of five ATTENTION problems (fixactions.py); one field, `id`, looked up in a table
+POST_AREAS = {"ai": AI_ACTIONS, "telegram": TG_ACTIONS, "settings": SETTINGS_ACTIONS, "setup": SETUP_ACTIONS, "fix": FIX_ACTIONS}
 DRAIN_MAX = 65536    # bytes of an unread form that a refusal swallows (and drops) before closing, so the client can read the refusal
 DRAIN_S = 0.25       # ... and for at most this long
 DRAIN_PEEK_S = 0.05  # a client that has sent nothing after the headers within this long is not waited for
@@ -683,6 +685,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
         if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
             return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
+        if area == "fix" and not fixactions.available(render.CFG):
+            return self._send(403, b"locked by config.ini ([web] fix_actions = no), or not Linux\n")
         if area == "settings" and not nuc_config.settings_mode(token=srv.token)[0]:
             return self._send(403, ("the settings page cannot write here (%s): edit config.ini, then restart\n" % nuc_config.settings_mode(token=srv.token)[1]).encode())
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)
@@ -709,7 +713,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"the form is not from this page (reload the page and try again)\n")
         try:
             where = srv.ai_action(act, form) if area == "ai" else srv.tg_action(act, form) if area == "telegram" else \
-                srv.setup_action(act, form) if area == "setup" else srv.settings_action(act, form)
+                srv.setup_action(act, form) if area == "setup" else srv.fix_action(form) if area == "fix" else srv.settings_action(act, form)
         except BadRequest as e:
             return self._send(400, ("%s\n" % e).encode())
         except OSError as e:  # the settings: config.ini could not be written (a full disk, a file made read-only meanwhile)

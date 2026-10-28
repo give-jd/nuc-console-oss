@@ -39,6 +39,7 @@ import cards
 import confedit
 import events
 import exposure
+import fixactions
 import graph
 import graphjs
 import graphlayout
@@ -58,7 +59,7 @@ import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, PeerTokens, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
 from webpages import ai_asked, ai_native, ai_nodes, events_here, events_native, events_nodes, health_native, health_nodes, telegram_html
-from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
+from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params, view_url
 
 MAX_CONN = 32        # simultaneous connections; more are dropped
 STREAMS_MAX = 8      # streams open at once (each holds a connection and a thread; the app's tabs hold one each): more get 503
@@ -139,6 +140,7 @@ STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "
 QUIET_VIEWS = ("settings", "telegram", "setup")  # shell-only pages to change things on or read: no key figures, no refresh or pause links
 PLAIN_VIEWS = ("settings", "setup")  # and the ones that never reload or poll
 FEATURE_WORDS = confedit.FEATURE_WORDS  # the settings page's [features] switches: (key, title, what it is)
+FIX_NOTE_S = 30  # how long the overview shows what the last Execute did
 CONFIG_NOTE_S = 300  # how long the settings page shows what its last save of config.ini did
 SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
 
@@ -167,6 +169,7 @@ class Server(http.server.ThreadingHTTPServer):
         self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
         self.stream_s, self.keepalive_s, self.stream_tick = STREAM_S, KEEPALIVE_S, 0  # (tick 0: the refresh interval; the tests shorten them)
         self.csrf = secrets.token_urlsafe(24)  # in every form of the AI page; a page of another site cannot read it
+        self.fix_note = None  # the last Execute: {ok, text, at} (fix_action)
         self.config_note = None  # the settings page's last save of config.ini: {at, section, ok, lines, form} (settings_action)
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
@@ -423,7 +426,7 @@ class Server(http.server.ThreadingHTTPServer):
         return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
                 "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
-                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
+                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems, run=lambda pid: fixactions.item(pid, render.CFG), note=self.fix_notice())}
 
     def api_summary(self, r):
         """What every page shows above its view: the host, the status pill, every key figure, whether a collector's data is old or missing
@@ -1272,6 +1275,31 @@ class Server(http.server.ThreadingHTTPServer):
         with self.lock:
             self.cache.clear()  # what the pages show changes with it
         return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#cfg-" + section
+
+    def fix_notice(self):
+        """What the last Execute did ({ok, text}), for FIX_NOTE_S seconds after it, else None."""
+        n = self.fix_note
+        return {"ok": n["ok"], "text": n["text"]} if n and time.time() - n["at"] < FIX_NOTE_S else None
+
+    def fix_action(self, form):
+        """POST /fix/run: the Execute button. The only value taken from the request is the problem id, and it is only compared to fixactions.TABLE
+        (an id outside it is a 400). Whether that problem is on the page NOW is read again here (not from the cache, not from the client). The
+        answer is a note for the overview, and the address to go back to, rebuilt from validated parameters (never a target from the request)."""
+        one = lambda k, n=200: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        pid = one("id", 64)
+        if pid not in fixactions.TABLE:
+            raise BadRequest("unknown id")
+        try:
+            active = {p for _s, p in self.read_frame().problem_ids() if p}
+        except Exception as e:  # noqa: BLE001 - a state that cannot be read means no problem is known to be active
+            print("nuc-console web: fix: state not read: %r" % (e,), file=sys.stderr)
+            active = set()
+        ok, text = fixactions.run(pid, active, render.CFG)
+        self.fix_note = {"ok": ok, "text": text, "at": time.time()}
+        with self.lock:
+            self.cache.clear()  # the page that comes next shows the note
+        back = view_params(parse_qs(one("back", 400)))
+        return app_url(back) if one("to", 8) == "app" else view_url(back)
 
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).

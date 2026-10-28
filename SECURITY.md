@@ -124,6 +124,10 @@ Things to be aware of (by design):
 - The `docker` group is root-equivalent; that is why only the root collector talks to Docker.
 - `scripts/enable-ufw.sh` and `scripts/rebind-all-dbs.sh` are optional helpers that change your firewall/containers. Read them and use `--dry-run` first. They are never run by `install.sh`.
 
+## The Execute button
+
+Off by default (`[web] fix_actions = no`, a lock: only `config.ini` sets it, never the settings page or its overlay). With `yes`, the installer adds a polkit rule that gives the web account (`nuc-console`) exactly two systemctl actions: `restart nuc-console-collector.service` and `start nuc-console-peers.service`, five problems' worth of buttons. No new process runs as root, and no daemon listens: the web account calls `systemctl` itself and systemd and polkit enforce the list, so a bug in our code cannot widen it (the code in `src/fixactions.py` is a second lock: a table, the live problem list, one run at a time, one run per unit per minute, a fixed argument list). A root helper daemon was rejected because it would be a new privileged listener to authenticate and keep correct; a polkit rule is data the system already enforces. What a compromised web view could do with it: restart the collector (at most once a minute, only while one of its problems is active) or start the peer poller, and nothing else; it cannot name another unit, verb or argument, and the unit's sandbox (`NoNewPrivileges`, empty capability set, `ProtectSystem=strict`) is unchanged. The request carries one value, the problem id, compared to a table. With the key off the installer removes the rule. Peer tokens can never reach the endpoint. Without a `token_file`, any local user can read the page, take its CSRF token and use the button, with the same limits.
+
 ## The peer client
 
 `src/peers.py` is the one place that fetches from the network on behalf of a configured peer (`[hosts]`, [CONFIGURATION.md](docs/CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default)); the web view and the console never open a socket to a peer

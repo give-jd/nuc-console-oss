@@ -3,6 +3,11 @@
 All notable changes to nuc-console, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Every configuration key named here is described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+## [Unreleased]
+
+### Added
+- **An Execute button for five ATTENTION problems** (`collector-net`, `collector-boot`, `stale-containers`, `stale-net`, `fleet-poller-down`), off by default: `[web] fix_actions = yes` in `config.ini` (a lock: the settings page cannot change it). The web account runs `systemctl restart nuc-console-collector` or `systemctl start nuc-console-peers` itself, and a polkit rule (`systemd/50-nuc-console-fix.rules`, installed by `install.sh` only while the key is `yes` and removed otherwise) lets it do exactly that and nothing else; no new root process. `POST /fix/run` takes one field, the problem id, behind the token and CSRF checks; the problem must be active, and the same unit is run at most once a minute. The data API's ATTENTION items gain `run` (`{"label", "id"}` or `null`) and `problems.fix_note`. Linux installations only. [WEB.md](docs/WEB.md#the-execute-button), [INSTALL.md](docs/INSTALL.md#the-execute-button-optional), [SECURITY.md](SECURITY.md#the-execute-button).
+
 ## [2.8.2] - 2026-10-27
 
 A finding's fix reads as steps: what each one does, and the exact command to copy.
