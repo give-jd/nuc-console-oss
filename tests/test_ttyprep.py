@@ -3,6 +3,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -128,6 +130,83 @@ class Console(unittest.TestCase):
             self.assertEqual(ttyprep.main(env={}, say=print), 0)
         self.assertEqual(f.calls, [])
 
+
+
+class StuckDisplay(unittest.TestCase):
+    """A wedged display driver (i915 flip_done timeouts): a tty ioctl does not return, and the child survives SIGKILL, so subprocess.run does not
+    return either. The dashboard must still start: one deadline for all the steps, and no step after one that did not answer."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for obj, name, value in ((nuc_config, "RUN_DIR", tmp.name), (ttyprep, "DEADLINE_S", 0.3), (ttyprep, "JOIN_SLACK_S", 0.2)):
+            p = mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)  # the abandoned thread ends with the test
+        self.calls = []
+
+    def hang(self, cmd, **kw):
+        self.calls.append(cmd)
+        self.release.wait(30)
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def go(self, ini, fn):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.ini")
+            with open(path, "w") as fh:
+                fh.write(ini)
+            say = []
+            with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": path}), mock.patch("shutil.which", lambda n: "/usr/bin/" + n), \
+                    mock.patch("subprocess.run", fn), mock.patch.object(nuc_config, "LINUX", True):
+                t0 = time.monotonic()
+                rc = ttyprep.main(env={"NUC_CONSOLE_VT": "3"}, say=say.append)
+                return rc, say, time.monotonic() - t0
+
+    def test_a_step_that_never_returns_ends_the_run_at_the_deadline_and_skips_the_rest(self):
+        rc, say, took = self.go("[console]\nfont = x\nblank_minutes = 5\n", self.hang)
+        self.assertEqual(rc, 0)
+        self.assertLess(took, 3.0, "the old behaviour waited as long as the driver did")
+        self.assertEqual([c[0] for c in self.calls], ["/usr/bin/setfont"], "setterm was never started")
+        self.assertTrue(any("setfont did not come back" in s and "other steps are skipped" in s for s in say), say)
+
+    def test_a_timeout_that_does_return_also_skips_the_following_steps(self):
+        calls = []
+
+        def timing_out(cmd, **kw):
+            calls.append(cmd)
+            raise subprocess.TimeoutExpired(cmd, 10)
+        rc, say, took = self.go("[console]\nfont = x\nblank_minutes = 5\n", timing_out)
+        self.assertEqual((rc, [c[0] for c in calls]), (0, ["/usr/bin/setfont"]))
+        self.assertTrue(any("setfont" in s and "timed out" in s for s in say), say)
+        self.assertTrue(any("setterm" in s and "skipped" in s for s in say), say)
+
+    def test_the_framebuffer_is_not_touched_once_the_tty_is_stuck(self):
+        ttyprep._state.update(stuck=True)
+        self.addCleanup(ttyprep._state.update, stuck=False, end=None)
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "fb0"))
+            blank = os.path.join(d, "fb0", "blank")
+            with open(blank, "w") as fh:
+                fh.write("4")
+            ttyprep.unblank_fb(lambda _l: None, base=d)
+            with open(blank) as fh:
+                self.assertEqual(fh.read(), "4")
+
+    def test_a_stuck_run_does_not_leak_into_the_next_start(self):
+        self.go("[console]\nfont = x\n", self.hang)
+        self.release.set()
+        ok = Fake()
+        calls_before = len(ok.calls)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "config.ini")
+            with open(path, "w") as fh:
+                fh.write("[console]\nfont = x\n")
+            with mock.patch.dict(os.environ, {"NUC_CONSOLE_CONFIG": path}), mock.patch("shutil.which", ok.which), \
+                    mock.patch("subprocess.run", ok.run), mock.patch.object(nuc_config, "LINUX", True):
+                self.assertEqual(ttyprep.main(env={"NUC_CONSOLE_VT": "3"}, say=lambda _l: None), 0)
+        self.assertEqual(len(ok.calls), calls_before + 1, "the font was set: nothing carried over from the stuck run")
 
 class Wiring(unittest.TestCase):
     def test_unit_runs_it_as_root_and_failure_is_not_fatal_and_installer_gives_the_vt(self):

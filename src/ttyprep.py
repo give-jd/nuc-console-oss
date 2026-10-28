@@ -5,20 +5,54 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 import nuc_config
 
 
+DEADLINE_S = 15.0  # all the steps together: the dashboard must start whatever the display does (the unit's own start timeout is 90 s)
+JOIN_SLACK_S = 1.0  # a command's own timeout is enforced by subprocess.run; this is the margin before giving up on a run that does not come back
+_state = {"end": None, "stuck": False}  # main() sets the end; stuck: a step did not answer, so the tty will not answer the next one either
+
+
 def run(cmd, say, stdin=subprocess.DEVNULL):
-    """Runs one command (stdin: setterm --blank poke acts on the terminal it is given as input); False (and a line for the journal) when it is missing or fails. Never raises."""
+    """Runs one command (stdin: setterm --blank poke acts on the terminal it is given as input); False (and a line for the journal) when it is missing or fails. Never raises,
+    and never waits for ever: a child stuck in a driver call (a tty ioctl on a wedged display) survives SIGKILL, so subprocess.run, which waits for it after
+    the kill, would not return either. The call runs in a thread that is given up on after its timeout, and every later step is skipped."""
     exe = shutil.which(cmd[0])
     if not exe:
         say(f"nuc-console: {cmd[0]} not found: skipped")
         return False
-    try:
-        r = subprocess.run([exe] + cmd[1:], stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
-    except (OSError, subprocess.SubprocessError) as e:
-        say(f"nuc-console: {cmd[0]}: {e}")
+    if _state["stuck"]:
+        say(f"nuc-console: {cmd[0]}: the tty did not answer an earlier step: skipped")
+        return False
+    limit = 10.0
+    if _state["end"] is not None:
+        limit = min(limit, _state["end"] - time.monotonic())
+        if limit <= 0:
+            _state["stuck"] = True
+            say(f"nuc-console: {cmd[0]}: out of time ({DEADLINE_S:g} s for all steps): skipped")
+            return False
+    out = []
+
+    def work():
+        try:
+            out.append(subprocess.run([exe] + cmd[1:], stdin=stdin, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=limit))
+        except (OSError, subprocess.SubprocessError) as e:
+            out.append(e)
+
+    th = threading.Thread(target=work, daemon=True)
+    th.start()
+    th.join(limit + JOIN_SLACK_S)
+    if th.is_alive():  # abandoned: it ends with the process (daemon), or when the driver lets the child go
+        _state["stuck"] = True
+        say(f"nuc-console: {cmd[0]} did not come back in {limit + JOIN_SLACK_S:g} s: the display is not answering, the other steps are skipped")
+        return False
+    r = out[0]
+    if isinstance(r, Exception):
+        _state["stuck"] = _state["stuck"] or isinstance(r, subprocess.TimeoutExpired)
+        say(f"nuc-console: {cmd[0]}: {r}")
         return False
     if r.returncode:
         say(f"nuc-console: {cmd[0]} failed: {r.stderr.decode('utf-8', 'replace').strip()[:200]}")
@@ -36,6 +70,8 @@ def unblank_fb(say, base=None):
     """--powerdown leaves the framebuffer in FB_BLANK_POWERDOWN (/sys/class/graphics/fbN/blank = 4) and a poke of the console does not always bring it
     back: every fbN that is not 0 gets 0, which is what a key press does. Root only; a missing or read-only file is skipped."""
     base = base or FB_DIR
+    if _state["stuck"]:  # a write to the framebuffer would wait for the same driver
+        return
     try:
         names = sorted(n for n in os.listdir(base) if n.startswith("fb") and n[2:].isdigit())
     except OSError:
@@ -72,6 +108,7 @@ def main(env=None, say=None):
     say = say or (lambda line: print(line, file=sys.stderr))
     if not nuc_config.LINUX:
         return 0
+    _state.update(end=time.monotonic() + DEADLINE_S, stuck=False)
     cfg = nuc_config.load(warn=say)["console"]
     vt = env.get("NUC_CONSOLE_VT", "1")
     if not (vt.isascii() and vt.isdigit() and 1 <= int(vt) <= 63):
