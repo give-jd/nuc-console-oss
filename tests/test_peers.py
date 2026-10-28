@@ -415,29 +415,29 @@ class Limits(Base):
     def test_slow_loris_on_the_headers_is_closed_at_the_deadline(self):
         e, took, _ = self.run_mode("slow-headers")
         self.assertEqual((e["state"], e["error"]), ("unreachable", "timeout"))
-        self.assertLess(took, FAST.total + 0.4)
+        self.assertLess(took, 5)  # the peer would go on for 20 s or more: the deadline cut it; a loaded runner may overshoot 0.4 s
 
     def test_slow_loris_on_the_body_is_closed_at_the_deadline_though_each_byte_comes_in_time(self):
         e, took, _ = self.run_mode("slow-body")
         self.assertEqual((e["state"], e["error"]), ("unreachable", "timeout"))
-        self.assertGreaterEqual(took, FAST.total - 0.05)
-        self.assertLess(took, FAST.total + 0.4)
+        self.assertGreaterEqual(took, FAST.total - 0.05)  # the lower bound cannot flake: a clock never runs fast
+        self.assertLess(took, 5)  # the peer would go on for 20 s or more: the deadline cut it; a loaded runner may overshoot 0.4 s
 
     def test_a_peer_that_connects_and_says_nothing(self):
         e, took, _ = self.run_mode("silent")
         self.assertEqual(e["error"], "timeout")
-        self.assertLess(took, FAST.total + 0.4)
+        self.assertLess(took, 5)  # the peer would go on for 20 s or more: the deadline cut it; a loaded runner may overshoot 0.4 s
 
     def test_content_length_of_10_gb_is_refused_without_reading(self):
         e, took, _ = self.run_mode("huge-length")
         self.assertEqual(e["error"], "too-large")
-        self.assertLess(took, 0.3)
+        self.assertLess(took, 1.2)  # the peer holds the connection for 1.5 s: reading would take that long
 
     def test_chunked_without_end_stops_at_the_cap(self):
-        lim = peers.Limits(op=0.3, total=2, summary_bytes=64 * 1024)
+        lim = peers.Limits(op=0.3, total=10, summary_bytes=64 * 1024)
         e, took, p = self.run_mode("infinite-chunked", lim=lim)
         self.assertEqual(e["error"], "too-large")
-        self.assertLess(took, 1.5)
+        self.assertLess(took, 5)  # without the cap it would run to the 10 s deadline
         self.assertLess(p.sent, 4 * 1024 * 1024)  # it was not drained
 
     def test_the_body_cap_is_summary_256k_and_views_2m_and_applies_to_an_honest_length(self):
@@ -1036,14 +1036,22 @@ class Failure(Base):
         cfg = [self.peer(g.url, name="g%d" % i) for i, g in enumerate(good)] + [self.peer(dead.url, name="dead")]
         poller = peers.Poller(cfg, self.cache, state=self.state, allow_loopback=True, limits=FAST)
         self.addCleanup(poller.pool.shutdown, False)
-        t = time.monotonic()
         entries = poller.run_once()
-        took = time.monotonic() - t
         self.assertEqual([e["state"] for e in entries], ["ok"] * 4 + ["unreachable"])
         self.assertEqual(entries[-1]["error"], "timeout")
-        self.assertLess(took, 4 * FAST.total)  # parallel: not 4 x 0.4 s one after the other (a slow runner took 0.80 s of the 0.4 s timeout)
         got = peers.read_cache(self.cache)
         self.assertEqual(got["fleet"]["worst"], "unreachable")  # the fleet is as bad as its worst
+
+    def test_the_peers_are_polled_in_parallel_not_one_after_the_other(self):
+        gate = threading.Barrier(4)  # opens only when four polls are in flight together; a sequential poller never gets there
+
+        def poll(peer, prev, wall, **net):
+            gate.wait(10)  # raises BrokenBarrierError (a failed entry) if the others never arrive
+            return dict(peers.new_entry(peer, 1), state="ok")
+        cfg = [{"name": "p%d" % i, "url": "http://100.64.0.1", "scope": "summary"} for i in range(4)]
+        poller = peers.Poller(cfg, self.cache, state=self.state, poll=poll)
+        self.addCleanup(poller.pool.shutdown, False)
+        self.assertEqual([e["state"] for e in poller.run_once()], ["ok"] * 4)
 
     def test_at_most_four_requests_at_a_time(self):
         lock, state = threading.Lock(), {"now": 0, "max": 0}
@@ -1385,9 +1393,9 @@ class Review(Base):
                 peers._resolve("x.test", 80, block, 0.05)  # times out, the thread stays
         t = time.monotonic()
         with self.assertRaises(peers.PeerError) as c:
-            peers._resolve("y.test", 80, block, 2.0)
+            peers._resolve("y.test", 80, block, 10.0)
         self.assertEqual(c.exception.reason, "resolve")  # no fifth thread: refused at once
-        self.assertLess(time.monotonic() - t, 0.5)
+        self.assertLess(time.monotonic() - t, 5)  # a fifth thread would wait the whole 10 s
         stuck.set()
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
