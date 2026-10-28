@@ -199,6 +199,18 @@ class Run(unittest.TestCase):
         self.assertIsNone(fixactions.precheck("collector-net", ON, 1061.0))
         self.assertIsNone(fixactions.precheck("stale-net", ON, 1010.0) and None)
 
+    def test_token_file_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "t")
+            self.assertFalse(fixactions.token_file_ok(p))
+            write(p, "")
+            self.assertFalse(fixactions.token_file_ok(p))
+            write(p, "x" * 20)
+            self.assertTrue(fixactions.token_file_ok(p))
+            self.assertFalse(fixactions.token_file_ok(d))
+            self.assertFalse(fixactions.token_file_ok(None))
+            self.assertFalse(fixactions.token_file_ok("\0"))
+
     def test_item_is_for_a_table_id_with_the_feature_on_only(self):
         self.assertEqual(fixactions.item("stale-net", ON), {"label": "Restart nuc-console-collector", "id": "stale-net"})
         self.assertEqual(fixactions.item("fleet-poller-down", ON)["label"], "Start nuc-console-peers")
@@ -234,6 +246,19 @@ class Polkit(unittest.TestCase):
         self.assertEqual(text.count("polkit.Result.YES"), 1)
         self.assertEqual(text.count("polkit.addRule"), 1)
 
+    def test_the_rule_is_limited_to_the_web_unit_with_no_new_privileges(self):
+        text = fixactions.polkit_rule()
+        self.assertEqual(re.findall(r'subject\.system_unit == "([^"]+)"', text), [fixactions.WEB_UNIT])
+        self.assertEqual(text.count("subject.no_new_privileges &&"), 1)
+        self.assertEqual(text.count("subject."), 3)
+        unit_file = os.path.join(ROOT, "systemd", fixactions.WEB_UNIT)
+        self.assertTrue(os.path.isfile(unit_file))
+        unit = read(unit_file)
+        self.assertIn("NoNewPrivileges=yes\n", unit)
+        self.assertIn("User=%s\n" % fixactions.WEB_USER, unit)
+        self.assertIn("nuc-console web view", unit.split("\n")[1])
+        self.assertNotEqual(fixactions.WEB_UNIT, "nuc-console.service")
+
     def test_no_wildcard_pattern_or_prefix_match_and_nothing_but_yes(self):
         code = "\n".join(l for l in fixactions.polkit_rule().splitlines() if not l.lstrip().startswith("//"))
         for bad in ("*", "RegExp", ".match", ".test(", "indexOf", "startsWith", "endsWith", "includes", "slice", "subject.isInGroup", "Result.AUTH",
@@ -264,6 +289,8 @@ class Installer(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.rules = os.path.join(self.tmp.name, "rules.d")
         self.conf = os.path.join(self.tmp.name, "config.ini")
+        self.token = os.path.join(self.tmp.name, "token")
+        write(self.token, "t" * 32)
         src = read(INSTALL)
         self.block = re.search(r"(?ms)^if \[ -d /etc/polkit-1/rules\.d \].*?^fi$", src).group(0)
 
@@ -275,6 +302,8 @@ class Installer(unittest.TestCase):
             write(rule, "old")
         if ini is not None:
             write(self.conf, ini)
+        ini = ini.replace("TOKENFILE", self.token) if ini is not None else None
+        write(self.conf, ini) if ini is not None else None
         block = self.block.replace("/etc/polkit-1/rules.d", self.rules).replace("/etc/nuc-console/config.ini", self.conf)
         script = ('install() { local a=("$@"); cp "${a[-2]}" "${a[-1]}"; }\nFIXRULE=%s\nPY=%s\nDEST=%s\ncd %s\n%s\n'
                   % (rule, sys.executable, os.path.join(ROOT, "src"), ROOT, block))
@@ -283,7 +312,7 @@ class Installer(unittest.TestCase):
         return os.path.exists(rule), r.stdout
 
     def test_installed_only_with_the_key_on_and_the_folder_there(self):
-        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = /etc/nuc-console/token\n")
+        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = TOKENFILE\n")
         self.assertTrue(on)
         self.assertIn("ON", out)
         self.assertEqual(read(os.path.join(self.rules, "50-nuc-console-fix.rules")), fixactions.polkit_rule())
@@ -299,8 +328,24 @@ class Installer(unittest.TestCase):
         on, _out = self.run_block("[web\nfix_actions = yes\n", existing=True)
         self.assertFalse(on)
 
+    def test_a_missing_empty_or_non_regular_token_file_is_off(self):
+        os.remove(self.token)
+        ini = "[web]\nfix_actions = yes\ntoken_file = TOKENFILE\n"
+        self.assertFalse(self.run_block(ini, existing=True)[0], "missing")
+        write(self.token, "")
+        self.assertFalse(self.run_block(ini, existing=True)[0], "empty")
+        os.remove(self.token)
+        os.symlink(os.devnull, self.token)  # a link to something that is not a regular file
+        self.assertFalse(self.run_block(ini, existing=True)[0], "link to a device")
+        os.remove(self.token)
+        os.mkdir(self.token)
+        self.assertFalse(self.run_block(ini, existing=True)[0], "a folder")
+        os.rmdir(self.token)
+        write(self.token, "t" * 32)
+        self.assertTrue(self.run_block(ini)[0], "a regular, non-empty file")
+
     def test_no_polkit_folder_installs_nothing_and_creates_nothing(self):
-        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = /etc/nuc-console/token\n", folder=False)
+        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = TOKENFILE\n", folder=False)
         self.assertFalse(on)
         self.assertFalse(os.path.exists(self.rules))
         self.assertIn("off", out)
@@ -477,7 +522,8 @@ class Endpoint(unittest.TestCase):
             st, _h, _b = self.post()
         self.assertEqual(st, 303)
         self.sub.assert_not_called()
-        self.assertNotIn("secret detail", self.srv.fix_notice()["text"])
+        self.assertNotIn("secret detail", self.srv.fix_notice()["text"] + log.getvalue())
+        self.assertIn("state not read (RuntimeError)", log.getvalue())
 
     def test_the_second_click_within_a_minute_is_refused(self):
         self.active = [(1, "stale-net"), (1, "collector-net")]

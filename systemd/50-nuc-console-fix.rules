@@ -3,6 +3,8 @@
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         subject.user == "nuc-console" &&
+        subject.system_unit == "nuc-console-web.service" &&
+        subject.no_new_privileges &&
         (
          (action.lookup("unit") == "nuc-console-collector.service" && action.lookup("verb") == "restart") ||
          (action.lookup("unit") == "nuc-console-peers.service" && action.lookup("verb") == "start"))) {

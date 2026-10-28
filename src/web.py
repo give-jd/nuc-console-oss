@@ -1297,7 +1297,7 @@ class Server(http.server.ThreadingHTTPServer):
             try:
                 active = {p for _s, p in self.read_frame().problem_ids() if p}
             except Exception as e:  # noqa: BLE001 - a state that cannot be read means no problem is known to be active
-                print("nuc-console web: fix: state not read: %r" % (e,), file=sys.stderr)
+                print("nuc-console web: fix: state not read (%s)" % type(e).__name__, file=sys.stderr)
                 active = set()
             ok, text = fixactions.run(pid, active, render.CFG)
         self.fix_note = {"ok": ok, "text": text, "at": time.time()}

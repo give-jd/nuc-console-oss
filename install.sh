@@ -114,7 +114,7 @@ if [ -d /etc/polkit-1/rules.d ] && env -u NUC_CONSOLE_HOME NUC_CONSOLE_CONFIG=/e
     echo "nuc-console: Execute button ON: polkit rule installed ($FIXRULE)"
 else
     rm -f "$FIXRULE"
-    echo "nuc-console: Execute button off: no polkit rule (needs [web] fix_actions = yes AND a [web] token_file in config.ini, and polkit's rules.d)"
+    echo "nuc-console: Execute button off: no polkit rule (needs [web] fix_actions = yes AND a readable, non-empty [web] token_file in config.ini, and polkit's rules.d)"
 fi
 install -d /var/lib/nuc-console
 # the AI folder (docs/AI.md): the AI page of the web view and the AI screen of the console download the local model into it, as the user nuc-console

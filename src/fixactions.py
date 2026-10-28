@@ -10,7 +10,9 @@ systemctl never reaches a page.
 python3 fixactions.py --enabled   exit 0 when config.ini has [web] fix_actions = yes (install.sh: install or remove the polkit rule)
 python3 fixactions.py --rule      print the polkit rule (the committed file is this text; a test compares them)"""
 
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -18,6 +20,7 @@ import time
 
 import nuc_config
 
+WEB_UNIT = "nuc-console-web.service"  # the unit the rule is limited to (subject.system_unit, with NoNewPrivileges=yes)
 WEB_USER = "nuc-console"  # the account of nuc-console-web.service: the only one the polkit rule names
 RATE_S = 60  # the same unit is not run again within this many seconds, whichever problem asked
 RUN_TIMEOUT_S = 20
@@ -130,7 +133,7 @@ def run(pid, active, cfg, now=None):
 
 def polkit_rule():
     """The text of systemd/50-nuc-console-fix.rules: the (unit, verb) pairs of TABLE, spelled out, for WEB_USER; no pattern, no wildcard. Any other
-    action, unit, verb or user falls through (the rule returns nothing), so the default policy applies."""
+    action, unit, verb, user, or a process outside the web unit (or one a polkit without Subject.system_unit cannot place there) falls through (the rule returns nothing), so the default policy applies."""
     pairs = sorted({(unit, verb) for verb, unit, _l in TABLE.values()})
     tests = " ||\n".join('         (action.lookup("unit") == "%s" && action.lookup("verb") == "%s")' % p for p in pairs)
     return ("// nuc-console: the web account may run the fixes of the Execute button, and nothing else (docs/INSTALL.md, SECURITY.md).\n"
@@ -138,10 +141,12 @@ def polkit_rule():
             "polkit.addRule(function(action, subject) {\n"
             '    if (action.id == "org.freedesktop.systemd1.manage-units" &&\n'
             '        subject.user == "%s" &&\n'
+            '        subject.system_unit == "%s" &&\n'
+            "        subject.no_new_privileges &&\n"
             "        (\n%s)) {\n"
             "        return polkit.Result.YES;\n"
             "    }\n"
-            "});\n" % (WEB_USER, tests))
+            "});\n" % (WEB_USER, WEB_UNIT, tests))
 
 
 def main(argv):
@@ -160,7 +165,15 @@ def main(argv):
 def available_in_file():
     """[web] fix_actions in the config.ini of this installation, read alone (no overlay), on Linux."""
     cfg = nuc_config.load(overlay=False, warn=lambda line: None)
-    return not cfg.get("config_error") and available(cfg)
+    return not cfg.get("config_error") and available(cfg) and token_file_ok(cfg["web"]["token_file"])
+
+
+def token_file_ok(path):
+    """The token file exists (a link is followed), is a regular file, is readable by this (root) process and is not empty."""
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode) and os.stat(path).st_size > 0 and os.access(path, os.R_OK)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 if __name__ == "__main__":
