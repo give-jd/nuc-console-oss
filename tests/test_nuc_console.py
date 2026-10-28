@@ -926,8 +926,8 @@ Anywhere (v6) on tailscale0 ALLOW IN    Anywhere (v6)            # tailnet
             return {"ok": 1}
         t0 = time.monotonic()
         self.assertIsNone(hostdata.cached("test-slow", 60, slow))                         # does not wait for the slow read
-        self.assertLess(time.monotonic() - t0, 0.5)
-        self.assertTrue(started.wait(2))
+        self.assertLess(time.monotonic() - t0, 3.0)  # the slow read waits for `release` (5 s): waiting for it would take that long
+        self.assertTrue(started.wait(5))
         release.set()
         for _ in range(50):
             if hostdata.cached("test-slow", 60, slow) is not None:

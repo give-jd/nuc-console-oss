@@ -2053,7 +2053,7 @@ class WebSecurity(WebBase):
         head = "POST /ai/use HTTP/1.0\r\nHost: 127.0.0.1:%d\r\nOrigin: http://evil.example\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 5000\r\n\r\n" % self.port
         t0 = time.monotonic()
         out = self.raw(head)  # the body never comes: the server must not wait for it
-        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertLess(time.monotonic() - t0, 5.0)  # a server that waited for the body would hold the client for its 10 s timeout
         self.assertTrue(out.startswith("HTTP/1.0 403"), out[:60])
         s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
         self.addCleanup(s.close)

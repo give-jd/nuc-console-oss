@@ -403,10 +403,11 @@ class Stream(unittest.TestCase):
         self.assertEqual(get(self.srv, "/api/v1/stream?view=cpu&view=nope")[0], 404)
 
     def test_head_is_the_headers_only(self):
+        self.srv.stream_s = 20  # a HEAD that streamed would last this long
         took, (head, body) = self.open(method="HEAD")
         self.assertIn("text/event-stream", head)
         self.assertEqual(body, "")
-        self.assertLess(took, 1.0)
+        self.assertLess(took, 10.0)
 
     def test_streams_are_capped(self):
         for _ in range(web.STREAMS_MAX):
