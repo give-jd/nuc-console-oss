@@ -131,12 +131,15 @@ class Server(unittest.TestCase):
         mock.patch.object(nuc_config, "LINUX", True).start()
         self.addCleanup(mock.patch.stopall)
 
-    def on(self, yes=True):
-        render.CFG["web"] = dict(render.CFG["web"], fix_actions=yes)
+    def on(self, yes=True, token=True):
+        """[web] fix_actions, with a token_file: the feature needs both (a key on without a token file draws nothing)."""
+        render.CFG["web"] = dict(render.CFG["web"], fix_actions=yes, token_file="/etc/nuc-console/web.token" if token else "")
 
     def test_exec_info_only_when_the_feature_is_on(self):
         self.on(False)
         self.assertIsNone(self.srv.exec_info({}))
+        self.on(True, token=False)
+        self.assertIsNone(self.srv.exec_info({}), "the key on without a token file: nothing is drawn")
         self.on()
         info = self.srv.exec_info({"view": "cpu"})
         self.assertEqual((info["csrf"], info["back"], info["note"]), (self.srv.csrf, "view=cpu", None))
