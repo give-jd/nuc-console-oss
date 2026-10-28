@@ -292,6 +292,8 @@ class Server(http.server.ThreadingHTTPServer):
         conf = {"refresh": r, "views": [v for v in APP_VIEWS if feats(v)], "layout": [[c, w] for c, w in prefs.visible_cards(eff, on)],
                 "order": eff["order"], "custom": prefs.custom_layout(src, eff["order"]), "kpis": list(eff["kpis"]), "kpi_card": KPI_CARD,
                 "kpi_view": KPI_VIEW, "tabs": [[digit, name, TAB_TITLES[name]] for digit, name in ui.screen_keys(feats)]}
+        if fixactions.available(render.CFG):
+            conf["exec"] = {"csrf": self.csrf}  # the page's own copy of the token (as its forms hold it); the data API's documents never carry it
         qq = parse_qs(urlsplit(app_url(dict(p, view=view))).query)
         first = {}
         for name in ([view, "summary"] if view else ["overview"]):
@@ -713,6 +715,12 @@ class Server(http.server.ThreadingHTTPServer):
                'severity, unless the order is set to severity. <b>Reset layout</b> brings the preset\'s back.</p><p id="live" class="sr-only" role="status" aria-live="polite"></p></section>')
         return View("".join(built), [], vhere, False, grid=True, legacy=False, bar=bar)
 
+    def exec_info(self, here):
+        """What the Execute button of the ATTENTION card needs (htmlview.executing), or None when [web] fix_actions is off."""
+        if not fixactions.available(render.CFG):
+            return None
+        return {"run": lambda pid: fixactions.item(pid, render.CFG), "csrf": self.csrf, "back": urlsplit(page_url(here)).query, "note": self.fix_notice()}
+
     def shell_card(self, ctx, cid, size, k, here, full, tools="", off=False):
         """(state, the article) of one card: the lines the console has always drawn for it (cards.build), colours as spans. A card that fails is
         shown unknown, with the reason in the log. tools: the editor's buttons of the card (the body is then not clickable); off: the editor lists it as hidden."""
@@ -726,7 +734,8 @@ class Server(http.server.ThreadingHTTPServer):
                 note, inner = htmlview.ansi_card(lines)
             else:  # built of components: the web draws them itself, whatever the card is
                 parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
-                note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
+                with htmlview.executing(self.exec_info(here) if cid == "attention" else None):  # the Execute button: ATTENTION only
+                    note, inner, cut = "", htmlview.exec_note() + "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
             wall = k == DETAIL_K["wall"]  # nobody can click on a wall: no link to the whole card
             more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full and not wall else ""
             rows = 0 if tools or full else htmlview.est_rows(inner + (f"<p>{more}</p>" if more else ""), size, card.note or note, wall)  # the editor's cards and a card on its own do not pack
