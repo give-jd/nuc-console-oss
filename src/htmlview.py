@@ -2,9 +2,11 @@
 
 Everything is escaped; only <span class> elements with fixed class names are produced. No JavaScript, ever.
 """
+import contextlib
 import hashlib
 import html
 import re
+import threading
 
 import ui
 
@@ -356,7 +358,7 @@ def html(node):
             f'<span class="d accept">accept if known: {_copier(node.accept)}</span>' if node.accept else ""))
         fix = f'<details class="fix" data-k="fix-{_e(node.id)}"><summary>fix</summary>{how}</details>' if how else ""
         return (f'<div{_cls("msg", "prob", "lv-" + node.level)} data-problem="{_e(node.id)}">'
-                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span><span class="pr">{_e(node.text)}{chip}</span>{why}{fix}</div>')
+                f'<span class="sym">{_e(ui.SYMBOLS[node.level])}</span><span class="pr">{_e(node.text)}{chip}</span>{why}{fix}{_exec_html(node.id)}</div>')
     if isinstance(node, ui.Accepted):
         when = f" · accepted {_e(node.when)}" if node.when else ""
         undo = f' · undo: <code class="cmd">{_e(node.undo)}</code>' if node.undo else ""
@@ -485,6 +487,41 @@ def _props_html(p):
     rows = "".join(f'<dt{_cls("in" if raw.startswith("  ") else "")}>{_e(raw.strip())}</dt><dd{_cls("lv-" + lv if lv else "", "top" if i == 0 else "")}>{_e(v)}</dd>'
                    for i, (raw, v, lv) in enumerate(p.items))
     return f'<aside class="props">{head}<dl>{rows}</dl></aside>'
+
+
+_EXEC = threading.local()  # the Execute button of the card being drawn (web.py sets it around ATTENTION only): nothing is drawn without it
+
+
+@contextlib.contextmanager
+def executing(info):
+    """info: None, or {"run": f(problem id) -> {"label", "id"} or None, "csrf", "back", "note": {"ok", "text"} or None} (web.py exec_info)."""
+    before, _EXEC.info = getattr(_EXEC, "info", None), info
+    try:
+        yield
+    finally:
+        _EXEC.info = before
+
+
+def _exec_html(pid):
+    """The two-step Execute control of a problem (the same markup as appjs.py runner()): a disclosure, then a form whose button confirms. No script."""
+    info = getattr(_EXEC, "info", None)
+    run = info["run"](pid) if info and pid else None
+    if not run:
+        return ""
+    hidden = "".join(f'<input type="hidden" name="{k}" value="{_e(v)}">' for k, v in (("id", run["id"]), ("csrf", info["csrf"]), ("back", info["back"])))
+    return (f'<details class="exec"><summary>Execute</summary><form class="f" method="post" action="/fix/run">{hidden}'
+            f'<p class="d">This runs \u201c{_e(run["label"])}\u201d on this machine, as the web account, allowed by a polkit rule.</p>'
+            f'<button class="btn" type="submit">Confirm: {_e(run["label"])}</button></form></details>')
+
+
+def exec_note():
+    """What the last Execute did, as one status line at the top of the ATTENTION list ('' when there is nothing to say)."""
+    info = getattr(_EXEC, "info", None)
+    note = info and info.get("note")
+    if not note:
+        return ""
+    level = "ok" if note.get("ok") else "err"
+    return f'<p{_cls("msg", "notice", "fixnote", "lv-" + level)} role="status" aria-live="polite"><span class="sym">{_e(ui.SYMBOLS[level])}</span> {_e(note.get("text"))}</p>'
 
 
 def _copier(cmd):  # a command in its own block with its Copy button: the same markup as appjs.py copier()
@@ -731,7 +768,7 @@ def _flow(m):
     return "<q>" + m.group(2).replace("</li>", " ").replace("<li", "<i") + "</q>"
 
 
-_WALL_HIDDEN = re.compile(r'<details class="(?:fix|dt)".*?</details>|<ul class="grid".*?</ul>|<(\w+) class="[^"]*\b(?:why|hint|sm)\b[^"]*"[^>]*>.*?</\1>', re.S)  # as the style sheet hides them
+_WALL_HIDDEN = re.compile(r'<details class="(?:fix|dt|exec)".*?</details>|<ul class="grid".*?</ul>|<(\w+) class="[^"]*\b(?:why|hint|sm)\b[^"]*"[^>]*>.*?</\1>', re.S)  # as the style sheet hides them
 _FLOWS = re.compile(r'<ul class="(wrap|grid)"[^>]*>(.*?)</ul>', re.S)
 
 

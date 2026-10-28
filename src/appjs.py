@@ -241,7 +241,23 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
       p.accept ? el("span", {class: "d accept"}, "accept if known: ", copier(p.accept)) : null].filter(n => n);
     const fx = how.length ? el("details", {class: "fix", "data-k": "fix-" + tx(p.id)}, el("summary", {}, "fix"), how) : null;
     return el("div", {class: cls("msg", "prob", "lv-" + p.level), "data-problem": tx(p.id)}, el("span", {class: "sym"}, SYM[p.level]),
-      el("span", {class: "pr"}, tx(p.text), chip), why, fx);
+      el("span", {class: "pr"}, tx(p.text), chip), why, fx, runner(p.id));
+  }
+  // The Execute button (the data API's problems.items[].run, the token from #cfg): drawn in the ATTENTION card only, never from a peer's data. A
+  // disclosure, then a form: the first click opens the confirmation, the second posts (a plain form post; the page that comes back shows the note).
+  let ex = null;
+  function runner(pid) {
+    const r = ex && pid ? ex.runs.get(pid) : null;
+    if (!r) return null;
+    const hid = (k, v) => el("input", {type: "hidden", name: k, value: tx(v)});
+    return el("details", {class: "exec"}, el("summary", {}, "Execute"), el("form", {class: "f", method: "post", action: "/fix/run"},
+      hid("id", r.id), hid("csrf", ex.csrf), hid("back", ex.back), hid("to", "app"),
+      el("p", {class: "d"}, "This runs \u201c" + tx(r.label) + "\u201d on this machine, as the web account, allowed by a polkit rule."),
+      el("button", {class: "btn", type: "submit"}, "Confirm: " + tx(r.label))));
+  }
+  function execNote(n) {
+    const lv = n.ok ? "ok" : "err";
+    return el("p", {class: cls("msg", "notice", "fixnote", "lv-" + lv), role: "status", "aria-live": "polite"}, el("span", {class: "sym"}, SYM[lv]), " " + tx(n.text));
   }
   function accepted(a) {
     return el("div", {class: "msg known lv-info", "data-problem": tx(a.id)}, el("span", {class: "sym"}, SYM.info),
@@ -432,9 +448,13 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
   }
   function chip(state) { return el("span", {class: "chip st-" + say(state)}, (SYM[state] || "?") + " " + say(state)); }
   function card(c, size) {
+    const mine = c.id === "attention" ? exAll : null;
+    ex = mine;
+    const body = (mine && mine.note ? [execNote(mine.note)] : []).concat((c.body || []).map(draw));
+    ex = null;
     return el("article", {class: "card s" + size + " st-" + say(c.state), "data-card": say(c.id), id: "c-" + say(c.id), "data-state": say(c.state)},
       el("div", {class: "ch"}, el("h3", {}, say(c.title)), c.note ? el("span", {class: "note"}, say(c.note)) : null, chip(c.state)),
-      el("div", {class: "cb"}, (c.body || []).map(draw)));
+      el("div", {class: "cb"}, body));
   }
 
   // ---- the screens --------------------------------------------------------------------------------------------------------------
@@ -467,7 +487,11 @@ _APP = r"""// nuc-console web view: the live app (src/appjs.py APP_JS). It draws
         " ", el("span", {class: "sm"}, "restart it: ", el("code", {class: "cmd"}, say(doc.restart || "")))) : null;
     return [note, tiles.length ? el("div", {class: "kpis", role: "list", "aria-label": "Key figures"}, tiles) : null];  // kpis = none: no row, no space
   }
+  let exAll = null;  // the Execute data of the overview just drawn: null unless [web] fix_actions is on and the page carries the token (#cfg)
   function overview(doc) {
+    const pb = doc.problems || {}, back = [route.view ? "view=" + route.view : "", route.params.toString(), stay.toString()].filter(x => x).join("&");
+    exAll = cfg.exec && typeof cfg.exec.csrf === "string" ? {csrf: cfg.exec.csrf, back: back, note: pb.fix_note && typeof pb.fix_note === "object" ? pb.fix_note : null,
+      runs: new Map((pb.items || []).filter(i => i && i.id && i.run && typeof i.run === "object").map(i => [i.id, i.run]))} : null;
     const by = new Map((doc.cards || []).map(c => [c.id, c]));
     let list = (cfg.layout || []).filter(([cid]) => by.has(cid)).map(([cid, w]) => [by.get(cid), w]);
     if (cfg.order === "severity" && !cfg.custom) list = list.map((x, i) => [x, i]).sort((a, b) => ((RANK[a[0][0].state] ?? 3) - (RANK[b[0][0].state] ?? 3)) || a[1] - b[1]).map(x => x[0]);

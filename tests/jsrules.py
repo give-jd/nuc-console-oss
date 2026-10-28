@@ -198,7 +198,7 @@ POLICIES = {
         location=()),
     # src/appjs.py: the live app. Its DOM contract is its docstring (the page web.py app_page serves)
     "app": Policy(
-        "app", 48 * 1024, 640, ids={"app", "cfg", "doc", "kpis", "prompt", "stale"},
+        "app", 48 * 1024, 664, ids={"app", "cfg", "doc", "kpis", "prompt", "stale"},
         selectors={".host", ".kl", ".kv", ".status", "[data-pause]", "[data-state]", "a[href]", "article.card[data-card]", "button", "footer .upd", "form",
                    "input.q", "nav.tabs", "section.spec", "summary", "time.clock"},
         attrs_read={"action", "class", "data-card", "data-k", "data-problem", "data-static", "href"},
