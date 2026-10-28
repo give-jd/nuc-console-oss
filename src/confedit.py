@@ -247,7 +247,7 @@ KEYS = (
          "only shows, and what it chose before counts for nothing (an administrator's opt-in)."),
         ("fix_actions", BOOL, "no", LOCK,
          "yes: five ATTENTION problems (the collector or the peer poller not running) get an Execute button that restarts or starts that one "
-         "service; the installer then lets the web account do exactly that, through polkit. no (the default): the button is not drawn and the "
+         "service; needs token_file; the installer then lets the web account do exactly that, through polkit. no (the default): the button is not drawn and the "
          "rule is removed (an administrator's opt-in; only config.ini sets it)."),
     ))
     + _k("alerts", (

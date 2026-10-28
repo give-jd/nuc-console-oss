@@ -38,8 +38,10 @@ _last = {}  # unit -> the time of its last attempt (guarded by _lock)
 
 
 def available(cfg):
-    """Linux, and [web] fix_actions = yes (a bool True: nothing else counts)."""
-    return bool(nuc_config.LINUX and ((cfg or {}).get("web") or {}).get("fix_actions") is True)
+    """Linux, [web] fix_actions = yes (a bool True: nothing else counts) and a [web] token_file (without a token any local user of the machine could
+    take the page's CSRF token and use the button: same rule as [web] settings_actions)."""
+    web = (cfg or {}).get("web") or {}
+    return bool(nuc_config.LINUX and web.get("fix_actions") is True and web.get("token_file"))
 
 
 def item(pid, cfg):
@@ -53,19 +55,40 @@ def _log(pid, what):
     print("nuc-console web: fix %s: %s" % (pid, what), file=sys.stderr)
 
 
-def run(pid, active, cfg, now=None):
-    """Run the fix of problem `pid` -> (ok, note). `active`: the ids of the problems on the page now (the caller recomputes them; never the client's
-    word). Every refusal comes before anything is run, in this order: feature off, not Linux, id not in TABLE, problem not active, a run in
-    progress, the unit run less than RATE_S ago. One line per attempt in the journal: the validated id, the fixed argv, the outcome."""
-    if not (((cfg or {}).get("web") or {}).get("fix_actions") is True):
-        _log("?", "refused(off)")
-        return False, "Execute is off ([web] fix_actions in config.ini)"
-    if not nuc_config.LINUX:
-        _log("?", "refused(not linux)")
-        return False, "Execute is only available on Linux"
+def _recent(unit, t):
+    return unit in _last and 0 <= t - _last[unit] < RATE_S
+
+
+def precheck(pid, cfg, now=None):
+    """Every refusal that needs no look at the machine, in their one order: feature off (or no token_file), not Linux, id not in TABLE, a run in
+    progress, the unit run less than RATE_S ago. -> the note, or None when none applies. A refusal is logged here."""
+    if not available(cfg):
+        on = ((cfg or {}).get("web") or {}).get("fix_actions") is True
+        why = "not linux" if not nuc_config.LINUX else "token" if on else "off"
+        _log("?", "refused(%s)" % why)
+        return {"not linux": "Execute is only available on Linux", "token": "Execute needs a [web] token_file in config.ini",
+                "off": "Execute is off ([web] fix_actions in config.ini)"}[why]
     if not isinstance(pid, str) or pid not in TABLE:
         _log("?", "refused(unknown id)")
-        return False, "this problem has no Execute"
+        return "this problem has no Execute"
+    verb, unit, _label = TABLE[pid]
+    cmd = "systemctl %s %s" % (verb, unit)
+    if _lock.locked():
+        _log(pid, "%s: refused(busy)" % cmd)
+        return "another fix is running: wait a moment"
+    if _recent(unit, time.monotonic() if now is None else now):
+        _log(pid, "%s: refused(rate limit)" % cmd)
+        return "%s was run less than a minute ago: wait" % unit
+    return None
+
+
+def run(pid, active, cfg, now=None):
+    """Run the fix of problem `pid` -> (ok, note). `active`: the ids of the problems on the page now (the caller recomputes them, after precheck;
+    never the client's word). Order: precheck (above), problem not active, then the lock and the rate limit again under the lock (two clicks at
+    once). One line per attempt in the journal: the validated id, the fixed argv, the outcome."""
+    note = precheck(pid, cfg, now)
+    if note:
+        return False, note
     verb, unit, _label = TABLE[pid]
     cmd = "systemctl %s %s" % (verb, unit)
     if pid not in active:
@@ -76,7 +99,7 @@ def run(pid, active, cfg, now=None):
         return False, "another fix is running: wait a moment"
     try:
         t = time.monotonic() if now is None else now
-        if unit in _last and 0 <= t - _last[unit] < RATE_S:
+        if _recent(unit, t):
             _log(pid, "%s: refused(rate limit)" % cmd)
             return False, "%s was run less than a minute ago: wait" % unit
         _last[unit] = t

@@ -107,14 +107,14 @@ install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
 install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
 # the Execute button (docs/INSTALL.md): the polkit rule that lets the web account run its five systemctl actions exists only while config.ini
-# says [web] fix_actions = yes AND polkit's rules folder is there; in every other case it is removed, so switching the key off and re-running
+# says [web] fix_actions = yes AND a [web] token_file is set AND polkit's rules folder is there; in every other case it is removed, so switching the key off and re-running
 # this installer takes the power away. config.ini is read alone (no overlay, no environment); anything uncertain counts as off. polkit watches the folder: no restart.
 if [ -d /etc/polkit-1/rules.d ] && env -u NUC_CONSOLE_HOME NUC_CONSOLE_CONFIG=/etc/nuc-console/config.ini "$PY" -E "$DEST/fixactions.py" --enabled; then
     install -m 0644 -o root -g root systemd/50-nuc-console-fix.rules "$FIXRULE"
     echo "nuc-console: Execute button ON: polkit rule installed ($FIXRULE)"
 else
     rm -f "$FIXRULE"
-    echo "nuc-console: Execute button off: no polkit rule ([web] fix_actions = no, or polkit's rules.d is missing)"
+    echo "nuc-console: Execute button off: no polkit rule (needs [web] fix_actions = yes AND a [web] token_file in config.ini, and polkit's rules.d)"
 fi
 install -d /var/lib/nuc-console
 # the AI folder (docs/AI.md): the AI page of the web view and the AI screen of the console download the local model into it, as the user nuc-console

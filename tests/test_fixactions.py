@@ -34,7 +34,8 @@ import webapi  # noqa: E402
 RULE_FILE = os.path.join(ROOT, "systemd", "50-nuc-console-fix.rules")
 INSTALL = os.path.join(ROOT, "install.sh")
 VIEWER = "v" * 24
-ON = {"web": {"fix_actions": True}}
+ON = {"web": {"fix_actions": True, "token_file": "/etc/nuc-console/token"}}
+NO_TOKEN = {"web": {"fix_actions": True, "token_file": ""}}
 OFF = {"web": {"fix_actions": False}}
 ALL = set(fixactions.TABLE)
 
@@ -181,6 +182,23 @@ class Run(unittest.TestCase):
         with mock.patch.object(fixactions.shutil, "which", return_value=None), redirect_stderr(io.StringIO()):
             self.assertEqual(fixactions.run("stale-net", ALL, ON, 1.0), (False, "failed: systemctl was not found"))
 
+    def test_key_on_without_a_token_file_refuses_everything(self):
+        for cfg in (NO_TOKEN, {"web": {"fix_actions": True}}, {"web": {"fix_actions": True, "token_file": None}}):
+            self.assertFalse(fixactions.available(cfg))
+            self.assertIsNone(fixactions.item("stale-net", cfg))
+            self.refused(self.go(cfg=cfg), "token_file", "refused(token)")
+
+    def test_precheck_is_the_cheap_order_and_run_uses_it(self):
+        self.assertIsNone(fixactions.precheck("stale-net", ON, 1000.0))
+        self.assertIn("off", fixactions.precheck("stale-net", OFF, 1000.0))
+        self.assertIn("no Execute", fixactions.precheck("ssh", ON, 1000.0))
+        with fixactions._lock:
+            self.assertIn("running", fixactions.precheck("stale-net", ON, 1000.0))
+        self.go("stale-net", now=1000.0)
+        self.assertIn("minute", fixactions.precheck("collector-net", ON, 1010.0))
+        self.assertIsNone(fixactions.precheck("collector-net", ON, 1061.0))
+        self.assertIsNone(fixactions.precheck("stale-net", ON, 1010.0) and None)
+
     def test_item_is_for_a_table_id_with_the_feature_on_only(self):
         self.assertEqual(fixactions.item("stale-net", ON), {"label": "Restart nuc-console-collector", "id": "stale-net"})
         self.assertEqual(fixactions.item("fleet-poller-down", ON)["label"], "Start nuc-console-peers")
@@ -265,23 +283,24 @@ class Installer(unittest.TestCase):
         return os.path.exists(rule), r.stdout
 
     def test_installed_only_with_the_key_on_and_the_folder_there(self):
-        on, out = self.run_block("[web]\nfix_actions = yes\n")
+        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = /etc/nuc-console/token\n")
         self.assertTrue(on)
         self.assertIn("ON", out)
         self.assertEqual(read(os.path.join(self.rules, "50-nuc-console-fix.rules")), fixactions.polkit_rule())
 
     def test_removed_when_the_key_is_off_missing_or_not_a_bool(self):
-        for ini in ("[web]\nfix_actions = no\n", "[web]\nenabled = yes\n", "[web]\nfix_actions = maybe\n", "[web]\nfix_actions = \n", "", None):
+        for ini in ("[web]\nfix_actions = yes\n", "[web]\nfix_actions = yes\ntoken_file =\n", "[web]\nfix_actions = no\ntoken_file = /t\n", "[web]\nfix_actions = no\n", "[web]\nenabled = yes\n", "[web]\nfix_actions = maybe\n", "[web]\nfix_actions = \n", "", None):
             on, out = self.run_block(ini, existing=True)
             self.assertFalse(on, ini)
             self.assertIn("off", out)
+        self.assertIn("token_file", out)
 
     def test_an_unreadable_or_broken_config_removes_it(self):
         on, _out = self.run_block("[web\nfix_actions = yes\n", existing=True)
         self.assertFalse(on)
 
     def test_no_polkit_folder_installs_nothing_and_creates_nothing(self):
-        on, out = self.run_block("[web]\nfix_actions = yes\n", folder=False)
+        on, out = self.run_block("[web]\nfix_actions = yes\ntoken_file = /etc/nuc-console/token\n", folder=False)
         self.assertFalse(on)
         self.assertFalse(os.path.exists(self.rules))
         self.assertIn("off", out)
@@ -357,7 +376,7 @@ class Endpoint(unittest.TestCase):
     def setUp(self):
         fixactions._last.clear()
         self.addCleanup(fixactions._last.clear)
-        render.CFG["web"] = dict(self.web_cfg, fix_actions=True)
+        render.CFG["web"] = dict(self.web_cfg, fix_actions=True, token_file="/etc/nuc-console/token")
         self.addCleanup(lambda: render.CFG.__setitem__("web", self.web_cfg))
         self.active = [(1, "stale-net")]
         self.sub = mock.patch.object(fixactions.subprocess, "run", return_value=Completed()).start()
@@ -468,6 +487,28 @@ class Endpoint(unittest.TestCase):
         self.assertEqual(self.sub.call_count, 1)
         self.assertIn("less than a minute", self.srv.fix_notice()["text"])
 
+    def test_key_on_without_a_token_file_is_a_403_and_nothing_runs(self):
+        render.CFG["web"] = dict(self.web_cfg, fix_actions=True, token_file="")
+        self.refused(self.post(), 403)
+        self.frame.stop()
+        self.assertTrue(all(i["run"] is None for i in self.srv.api_overview(2)["problems"]["items"]))
+
+    def test_a_refused_or_rate_limited_click_never_builds_the_frame(self):
+        rf = self.srv.read_frame
+        with redirect_stderr(io.StringIO()):
+            self.post({"id": "stale-net"})
+            rf.reset_mock()
+            self.post({"id": "stale-net"})  # rate limited
+            self.post({"id": "collector-net"})  # same unit
+            with fixactions._lock:
+                self.post({"id": "fleet-poller-down"})  # busy
+            with mock.patch.object(nuc_config, "LINUX", False):
+                self.post({"id": "fleet-poller-down"})
+        rf.assert_not_called()
+        self.post({"id": "x;y"})
+        rf.assert_not_called()
+        self.assertEqual(self.sub.call_count, 1)
+
     def test_feature_off_is_a_403_and_nothing_runs(self):
         render.CFG["web"] = dict(self.web_cfg, fix_actions=False)
         self.refused(self.post(), 403)
@@ -490,6 +531,54 @@ class Endpoint(unittest.TestCase):
         self.assertEqual(__import__("webhttp").POST_AREAS["fix"], ("run",))
 
 
+class PeerDocs(unittest.TestCase):
+    """A peer token (either scope) is never handed run or fix_note, even with the key on; the viewer is."""
+
+    def test_the_overview_for_a_peer_has_run_null_and_no_note(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "peer.tokens")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write("a summary %s\nb views %s\n" % ("s" * 40, "w" * 40))
+            cfg = dict(nuc_config.load()["web"], refresh_seconds=2, peer_tokens_file=path)
+            srv = web.Server(("127.0.0.1", 0), cfg, VIEWER, demo=True)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            saved, expose, webapps, hostname = dict(render.CFG["web"]), render.CFG["expose"], render.CFG["webapps"], socket.gethostname
+            render.CFG["web"] = dict(saved, fix_actions=True, token_file="/etc/nuc-console/token")
+            srv.fix_note = {"ok": True, "text": "x", "at": __import__("time").time()}
+            frame = srv.read_frame()  # the demo's real frame, with one problem of ours
+            frame.problems = problems.ProblemList([(1, "network data stale")])
+            frame.problems.pids, frame.problems.info = ["stale-net"], [("t", "w", "f", "a")]
+            try:
+                with mock.patch.object(nuc_config, "LINUX", True), mock.patch.object(srv, "shell_frame", return_value=frame):
+                    def get(tok):
+                        c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+                        c.request("GET", "/api/v1/overview", headers={"Authorization": "Bearer " + tok})
+                        r = c.getresponse()
+                        body = r.read().decode()
+                        c.close()
+                        return r.status, body
+                    st, body = get(VIEWER)
+                    self.assertEqual(st, 200)
+                    doc = json.loads(body)["problems"]
+                    self.assertEqual(doc["items"][0]["run"]["id"], "stale-net")
+                    self.assertEqual(doc["fix_note"]["text"], "x")
+                    st, body = get("w" * 40)  # views scope reads the overview
+                    self.assertEqual(st, 200)
+                    doc = json.loads(body)["problems"]
+                    self.assertIsNone(doc["items"][0]["run"])
+                    self.assertIsNone(doc["fix_note"])
+                    self.assertNotIn("Restart nuc-console", body)
+                    self.assertEqual(get("s" * 40)[0], 403)  # summary scope cannot read it at all
+                    self.assertEqual(json.loads(get(VIEWER)[1])["problems"]["items"][0]["run"]["id"], "stale-net", "the viewer's cached copy is its own")
+            finally:
+                render.CFG["web"] = saved
+                render.CFG["expose"], render.CFG["webapps"], socket.gethostname = expose, webapps, hostname
+                render.DEMO = False
+                srv.shutdown()
+                srv.server_close()
+
+
 class PeerScope(unittest.TestCase):
     """A peer token (any scope) is a 403 on /fix/run: it is stopped before the form is read, whatever the feature says."""
 
@@ -503,7 +592,7 @@ class PeerScope(unittest.TestCase):
             srv = web.Server(("127.0.0.1", 0), cfg, VIEWER, demo=True)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             saved, expose, webapps, hostname = dict(render.CFG["web"]), render.CFG["expose"], render.CFG["webapps"], socket.gethostname
-            render.CFG["web"] = dict(saved, fix_actions=True)
+            render.CFG["web"] = dict(saved, fix_actions=True, token_file="/etc/nuc-console/token")
             try:
                 with mock.patch.object(nuc_config, "LINUX", True), mock.patch.object(fixactions.subprocess, "run") as sub:
                     for tok in ("s" * 40, "w" * 40):

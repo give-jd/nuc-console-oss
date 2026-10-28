@@ -541,7 +541,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if name not in views:
             return self._json(404, {"error": "no such view: one of " + ", ".join(views)})
         try:
-            doc = srv.api(name, q)
+            doc = srv.api(name, q, peer=peer)
         except events.QueryError as e:  # a parameter of /api/v1/events that is not valid: said, never guessed
             return self._json(400, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 - a broken state must not take the server down
@@ -685,8 +685,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(403, b"locked by config.ini ([ai] web_actions = no)\n")
         if area == "telegram" and not render.CFG["telegram"].get("web_actions", True):
             return self._send(403, b"locked by config.ini ([telegram] web_actions = no)\n")
-        if area == "fix" and not fixactions.available(render.CFG):
-            return self._send(403, b"locked by config.ini ([web] fix_actions = no), or not Linux\n")
+        if area == "fix" and not (fixactions.available(render.CFG) and srv.token):
+            return self._send(403, b"locked by config.ini ([web] fix_actions = yes and a [web] token_file are needed), or not Linux\n")
         if area == "settings" and not nuc_config.settings_mode(token=srv.token)[0]:
             return self._send(403, ("the settings page cannot write here (%s): edit config.ini, then restart\n" % nuc_config.settings_mode(token=srv.token)[1]).encode())
         # a browser says where a form came from: only this page, on this host and port (a page of another site, or of another port, is no one's click)

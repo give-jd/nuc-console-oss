@@ -196,10 +196,11 @@ The web view can restart the collector or start the peer poller from five ATTENT
 
 ```ini
 [web]
+token_file = /etc/nuc-console/token    # required: without a token the key does nothing
 fix_actions = yes
 ```
 
-then `sudo ./install.sh` (or `sudo nuc-console-update`). The installer prints one line saying what it did: it puts `systemd/50-nuc-console-fix.rules` in `/etc/polkit-1/rules.d/` (root:root 0644) only while the key is `yes` **and** that folder exists (polkit installed), and removes it in every other case, so setting the key back to `no` and re-running the installer takes the power away. polkit watches the folder: nothing is restarted. Check:
+then `sudo ./install.sh` (or `sudo nuc-console-update`). The installer prints one line saying what it did: it puts `systemd/50-nuc-console-fix.rules` in `/etc/polkit-1/rules.d/` (root:root 0644) only while the key is `yes`, a `[web] token_file` is set **and** that folder exists (polkit installed), and removes it in every other case, so setting the key back to `no` and re-running the installer takes the power away. polkit watches the folder: nothing is restarted. Check:
 
 ```bash
 sudo -u nuc-console systemctl --no-ask-password restart nuc-console-collector   # must succeed

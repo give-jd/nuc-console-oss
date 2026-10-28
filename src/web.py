@@ -363,7 +363,7 @@ class Server(http.server.ThreadingHTTPServer):
         r = self.cfg["refresh_seconds"]
         return self.cached(("metrics",), r / 2, lambda: webmetrics.render(self.shell_frame(r), nuc_config.VERSION))
 
-    def api(self, name, q):
+    def api(self, name, q, peer=False):
         """The document of the view `name` (webapi.VIEWS) for the request's parameters (the page's: view_params checks and clamps them), as a
         webapi.Doc; None when the view's feature is off. Built at most once per half refresh interval for the same parameters, whoever asks (the
         AI's and the Telegram page's at most once a second: a job's progress moves), like a page."""
@@ -374,7 +374,7 @@ class Server(http.server.ThreadingHTTPServer):
         if name in ("cpu", "health", "map", "ai") and not feats.get(name, True):
             return None
         if name == "overview":
-            return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_overview(r), time.time()))
+            return self.cached(("api", name, peer), r / 2, lambda: webapi.document(name, self.api_overview(r, peer), time.time()))
         if name == "summary":
             return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_summary(r), time.time()))
         if name == "hosts":
@@ -407,7 +407,7 @@ class Server(http.server.ThreadingHTTPServer):
                                lambda: webapi.document(name, self.api_ai(here, sel, confirm, prompt), time.time()))
         return self.cached(("api", name, tgweb.version()), min(r / 2, 1.0), lambda: webapi.document(name, self.api_telegram(), time.time()))
 
-    def api_overview(self, r):
+    def api_overview(self, r, peer=False):
         """The overview's fields: the status pill, the key figures, every card whose feature is on (built in full: nothing hidden), the layout
         config.ini gives them (which, in which order, how wide) and the problems."""
         ctx = self.shell_frame(r)
@@ -426,7 +426,8 @@ class Server(http.server.ThreadingHTTPServer):
         return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
                 "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
-                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems, run=lambda pid: fixactions.item(pid, render.CFG), note=self.fix_notice())}
+                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems, run=None if peer else lambda pid: fixactions.item(pid, render.CFG),
+                                            note=None if peer else self.fix_notice())}  # a peer (another host) is never offered the button
 
     def api_summary(self, r):
         """What every page shows above its view: the host, the status pill, every key figure, whether a collector's data is old or missing
@@ -1289,12 +1290,16 @@ class Server(http.server.ThreadingHTTPServer):
         pid = one("id", 64)
         if pid not in fixactions.TABLE:
             raise BadRequest("unknown id")
-        try:
-            active = {p for _s, p in self.read_frame().problem_ids() if p}
-        except Exception as e:  # noqa: BLE001 - a state that cannot be read means no problem is known to be active
-            print("nuc-console web: fix: state not read: %r" % (e,), file=sys.stderr)
-            active = set()
-        ok, text = fixactions.run(pid, active, render.CFG)
+        text = fixactions.precheck(pid, render.CFG)  # the cheap refusals first: a refused or rate-limited click never builds the frame
+        if text is not None:
+            ok = False
+        else:
+            try:
+                active = {p for _s, p in self.read_frame().problem_ids() if p}
+            except Exception as e:  # noqa: BLE001 - a state that cannot be read means no problem is known to be active
+                print("nuc-console web: fix: state not read: %r" % (e,), file=sys.stderr)
+                active = set()
+            ok, text = fixactions.run(pid, active, render.CFG)
         self.fix_note = {"ok": ok, "text": text, "at": time.time()}
         with self.lock:
             self.cache.clear()  # the page that comes next shows the note
