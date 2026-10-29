@@ -91,21 +91,22 @@ def _items(xs, console=False):
             yield data(x)
 
 
-def problems(pb):
+def problems(pb, run=None, note=None):
     """The problems of a frame (a problems.ProblemList, or a plain list of (severity, text)): each with its id, state, severity and text, the cards
     it belongs to and, when the list has them, the catalog's title, why, fix and the command that accepts it; how many were accepted as known,
-    and which, and how many were muted ([alerts] mute), and which."""
+    and which, and how many were muted ([alerts] mute), and which. run(pid) -> {"label", "id"} or None (the Execute button, fixactions.item):
+    every item has a `run` field, null when there is none; note: what the last Execute did, {ok, text}, or null."""
     pids = getattr(pb, "pids", None) or [None] * len(pb)
     info = getattr(pb, "info", None) or [None] * len(pb)
     items = []
     for (sev, text), pid, more in zip(pb, pids, info):
         item = {"id": pid, "state": cards.SEV_STATE.get(sev, "warn"), "severity": sev, "text": ui.safe(text),
-                "cards": list(cards.PROBLEM_CARDS.get(pid, ())) if pid else []}
+                "cards": list(cards.PROBLEM_CARDS.get(pid, ())) if pid else [], "run": run(pid) if run and pid else None}
         if more:
             item.update(zip(("title", "why", "fix", "accept"), (ui.safe(v) if v is not None else None for v in more)))
         items.append(item)
     return {"items": items, "accepted": int(getattr(pb, "accepted", 0) or 0), "known": data(getattr(pb, "known", None) or []),
-            "muted": int(getattr(pb, "muted", 0) or 0), "muted_known": data(getattr(pb, "muted_known", None) or [])}
+            "muted": int(getattr(pb, "muted", 0) or 0), "muted_known": data(getattr(pb, "muted_known", None) or []), "fix_note": note}
 
 
 def counts(pb):

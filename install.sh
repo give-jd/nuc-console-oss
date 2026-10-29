@@ -17,6 +17,7 @@ cd "$(dirname "$0")"
 DEST=/opt/nuc-console
 UNITD=/etc/systemd/system/nuc-console.service.d
 UNITF=/etc/systemd/system/nuc-console.service
+FIXRULE=/etc/polkit-1/rules.d/50-nuc-console-fix.rules  # the Execute button's polkit rule (docs/INSTALL.md): present only while [web] fix_actions = yes
 # values already installed (kept on re-install): from the drop-in, or from the old unit that had the time zone hardcoded
 # sed quits at the first match by itself: `sed ... | head -1` under pipefail dies with SIGPIPE (rc 141) when two files match.
 # (`s/x/y/{p;q}` is NOT valid sed: braces go around the whole command, `/x/{s///;p;q}`; tests/test_install.py runs these lines)
@@ -34,6 +35,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     rm -f /usr/local/bin/nuc-console-problems /usr/local/bin/nuc-console-ask "$UNITF" /etc/systemd/system/nuc-console-collector.service /etc/systemd/system/nuc-console-web.service /etc/systemd/system/nuc-console-ai.service
     rm -f /usr/local/bin/nuc-console-telegram /usr/local/bin/nuc-console-fleet /etc/systemd/system/nuc-console-notify.service /etc/systemd/system/nuc-console-peers.service
     rm -rf /var/lib/nuc-console-notify  # the Telegram bot token is in there: it must not outlive the installation
+    rm -f "$FIXRULE"  # the web account loses the five systemctl actions with the installation
     rm -rf "$DEST"
     rm -f /usr/local/sbin/nuc-console-accept /usr/local/sbin/nuc-console-update /usr/local/sbin/nuc-console-ai /usr/local/sbin/nuc-console-config
     systemctl daemon-reload
@@ -104,6 +106,16 @@ install -d "$UNITD"
 install -d /etc/nuc-console
 [ -e /etc/nuc-console/config.ini ] || install -m 0644 config/config.ini /etc/nuc-console/config.ini  # never overwrite the admin's edits
 install -m 0644 config/config.ini /etc/nuc-console/config.ini.dist  # always refreshed: diff it with config.ini to see new options
+# the Execute button (docs/INSTALL.md): the polkit rule that lets the web account run its five systemctl actions exists only while config.ini
+# says [web] fix_actions = yes AND a [web] token_file is set AND polkit's rules folder is there; in every other case it is removed, so switching the key off and re-running
+# this installer takes the power away. config.ini is read alone (no overlay, no environment); anything uncertain counts as off. polkit watches the folder: no restart.
+if [ -d /etc/polkit-1/rules.d ] && env -u NUC_CONSOLE_HOME NUC_CONSOLE_CONFIG=/etc/nuc-console/config.ini "$PY" -E "$DEST/fixactions.py" --enabled; then
+    install -m 0644 -o root -g root systemd/50-nuc-console-fix.rules "$FIXRULE"
+    echo "nuc-console: Execute button ON: polkit rule installed ($FIXRULE)"
+else
+    rm -f "$FIXRULE"
+    echo "nuc-console: Execute button off: no polkit rule (needs [web] fix_actions = yes AND a readable, non-empty [web] token_file in config.ini, and polkit's rules.d)"
+fi
 install -d /var/lib/nuc-console
 # the AI folder (docs/AI.md): the AI page of the web view and the AI screen of the console download the local model into it, as the user nuc-console
 # (the units' ReadWritePaths). Empty until you choose a model there; what an earlier `sudo nuc-console-ai setup` put in it stays root's, and stays usable.

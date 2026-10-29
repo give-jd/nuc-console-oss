@@ -19,7 +19,7 @@ import threading
 WINDOWS, MACOS = sys.platform == "win32", sys.platform == "darwin"
 LINUX = not (WINDOWS or MACOS)
 OS_NAME = "windows" if WINDOWS else "darwin" if MACOS else "linux"  # written in the state files: the renderer reads it
-VERSION = "2.8.3"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
+VERSION = "2.9.0"  # this release: the release workflow refuses a tag that does not match it, nuc-console-update compares it
 PORTABLE = os.environ.get("NUC_CONSOLE_HOME", "")  # portable run (run.sh / run.cmd): config, state and baseline in that folder
 if PORTABLE:
     BASE_DIR = os.path.abspath(PORTABLE)
@@ -287,7 +287,7 @@ def load(path=None, warn=None, overlay=True):
     say = warn or _report(lambda line: print(line, file=sys.stderr))
     cfg = {"features": {f: True for f in FEATURES}, "mode": "overview", "rotate_seconds": 15, "refresh_seconds": 2, "columns": 0, "rows": 0, "spacing": 1, "details": True, "overview_seconds": 45, "map_in_rotation": False, "cpu_in_rotation": False, "health_in_rotation": False, "sections": list(SECTIONS), "webapps": {},
            "web": {"enabled": False, "bind": "127.0.0.1", "port": 8787, "token_file": "", "peer_tokens_file": "",
-                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "metrics": True},
+                   "refresh_seconds": 2, "allowed_hosts": [], "settings_actions": False, "fix_actions": False, "metrics": True},
            "display": {"browser": "auto", "mode": "browser", "zoom": 100},
            "ai": {"enabled": False, "endpoint": "http://127.0.0.1:11434/v1", "model": "", "allow_remote": False, "timeout_s": 120,
                   "daily": False, "gpu": "auto", "web_actions": True, "autostart": True},
@@ -489,6 +489,10 @@ def load(path=None, warn=None, overlay=True):
             w["settings_actions"] = cp.getboolean("web", "settings_actions", fallback=False)  # yes = an installation's settings page may use the overlay
         except ValueError:
             say(f"nuc-console: {path}: [web] settings_actions is not a boolean: kept no (locked)")
+        try:
+            w["fix_actions"] = cp.getboolean("web", "fix_actions", fallback=False)  # yes = the Execute button of five problems (fixactions.py); config.ini only, never the overlay
+        except ValueError:
+            say(f"nuc-console: {path}: [web] fix_actions is not a boolean: kept no (locked)")
         try:
             w["metrics"] = cp.getboolean("web", "metrics", fallback=True)  # /metrics: the API's figures as Prometheus text, under the API's checks
         except ValueError:

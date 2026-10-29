@@ -39,6 +39,7 @@ import cards
 import confedit
 import events
 import exposure
+import fixactions
 import graph
 import graphjs
 import graphlayout
@@ -58,7 +59,7 @@ import wizard
 from webhttp import API_PATH, CSP, TG_ACTIONS, BadRequest, Handler, LOCAL_TOKEN, PeerTokens, check_bind, is_loopback, local_token, page_csp, read_token
 from webmap import canvas, graph_body, graph_here, graph_select, map_here, map_native, map_nodes, map_state, mode_switch, prune, tree_url, zoom_steps
 from webpages import ai_asked, ai_native, ai_nodes, events_here, events_native, events_nodes, health_native, health_nodes, telegram_html
-from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params
+from weburl import APP_PATH, APP_VIEWS, HERE_KEYS, NUM, VIEW_KEYS, ZOOMS, app_url, choice, map_mode, page_url, view_params, view_url
 
 MAX_CONN = 32        # simultaneous connections; more are dropped
 STREAMS_MAX = 8      # streams open at once (each holds a connection and a thread; the app's tabs hold one each): more get 503
@@ -139,6 +140,7 @@ STALE_PROBLEMS = ("collector-containers", "stale-containers", "collector-net", "
 QUIET_VIEWS = ("settings", "telegram", "setup")  # shell-only pages to change things on or read: no key figures, no refresh or pause links
 PLAIN_VIEWS = ("settings", "setup")  # and the ones that never reload or poll
 FEATURE_WORDS = confedit.FEATURE_WORDS  # the settings page's [features] switches: (key, title, what it is)
+FIX_NOTE_S = 30  # how long the overview shows what the last Execute did
 CONFIG_NOTE_S = 300  # how long the settings page shows what its last save of config.ini did
 SOURCE_WORDS = {"url": "from this URL (?ui=)", "browser": "from this browser", "config.ini": "from config.ini", "preset": "from the preset", "default": "default"}
 
@@ -167,6 +169,7 @@ class Server(http.server.ThreadingHTTPServer):
         self.streams = threading.BoundedSemaphore(STREAMS_MAX)  # /api/v1/stream: each holds one of the slots above for minutes
         self.stream_s, self.keepalive_s, self.stream_tick = STREAM_S, KEEPALIVE_S, 0  # (tick 0: the refresh interval; the tests shorten them)
         self.csrf = secrets.token_urlsafe(24)  # in every form of the AI page; a page of another site cannot read it
+        self.fix_note = None  # the last Execute: {ok, text, at} (fix_action)
         self.config_note = None  # the settings page's last save of config.ini: {at, section, ok, lines, form} (settings_action)
         if ":" in addr[0]:
             self.address_family = socket.AF_INET6
@@ -289,6 +292,8 @@ class Server(http.server.ThreadingHTTPServer):
         conf = {"refresh": r, "views": [v for v in APP_VIEWS if feats(v)], "layout": [[c, w] for c, w in prefs.visible_cards(eff, on)],
                 "order": eff["order"], "custom": prefs.custom_layout(src, eff["order"]), "kpis": list(eff["kpis"]), "kpi_card": KPI_CARD,
                 "kpi_view": KPI_VIEW, "tabs": [[digit, name, TAB_TITLES[name]] for digit, name in ui.screen_keys(feats)]}
+        if fixactions.available(render.CFG):
+            conf["exec"] = {"csrf": self.csrf}  # the page's own copy of the token (as its forms hold it); the data API's documents never carry it
         qq = parse_qs(urlsplit(app_url(dict(p, view=view))).query)
         first = {}
         for name in ([view, "summary"] if view else ["overview"]):
@@ -360,7 +365,7 @@ class Server(http.server.ThreadingHTTPServer):
         r = self.cfg["refresh_seconds"]
         return self.cached(("metrics",), r / 2, lambda: webmetrics.render(self.shell_frame(r), nuc_config.VERSION))
 
-    def api(self, name, q):
+    def api(self, name, q, peer=False):
         """The document of the view `name` (webapi.VIEWS) for the request's parameters (the page's: view_params checks and clamps them), as a
         webapi.Doc; None when the view's feature is off. Built at most once per half refresh interval for the same parameters, whoever asks (the
         AI's and the Telegram page's at most once a second: a job's progress moves), like a page."""
@@ -371,7 +376,7 @@ class Server(http.server.ThreadingHTTPServer):
         if name in ("cpu", "health", "map", "ai") and not feats.get(name, True):
             return None
         if name == "overview":
-            return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_overview(r), time.time()))
+            return self.cached(("api", name, peer), r / 2, lambda: webapi.document(name, self.api_overview(r, peer), time.time()))
         if name == "summary":
             return self.cached(("api", name), r / 2, lambda: webapi.document(name, self.api_summary(r), time.time()))
         if name == "hosts":
@@ -404,7 +409,7 @@ class Server(http.server.ThreadingHTTPServer):
                                lambda: webapi.document(name, self.api_ai(here, sel, confirm, prompt), time.time()))
         return self.cached(("api", name, tgweb.version()), min(r / 2, 1.0), lambda: webapi.document(name, self.api_telegram(), time.time()))
 
-    def api_overview(self, r):
+    def api_overview(self, r, peer=False):
         """The overview's fields: the status pill, the key figures, every card whose feature is on (built in full: nothing hidden), the layout
         config.ini gives them (which, in which order, how wide) and the problems."""
         ctx = self.shell_frame(r)
@@ -423,7 +428,8 @@ class Server(http.server.ThreadingHTTPServer):
         return {"host": nuc_config.host_label(render.CFG), "status": {"state": state, "text": text}, "stale": stale, "restart": render.CMD.get("restart", ""),
                 "kpis": cards.kpis(ctx, prefs.KPI_IDS), "cards": built,
                 "badges": self.tab_badges(ctx, r, lambda f: render.CFG["features"].get(f, True)),
-                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems)}
+                "layout": [{"id": cid, "w": w} for cid, w in prefs.visible_cards(eff, on)], "problems": webapi.problems(ctx.problems, run=None if peer else lambda pid: fixactions.item(pid, render.CFG),
+                                            note=None if peer else self.fix_notice())}  # a peer (another host) is never offered the button
 
     def api_summary(self, r):
         """What every page shows above its view: the host, the status pill, every key figure, whether a collector's data is old or missing
@@ -710,6 +716,12 @@ class Server(http.server.ThreadingHTTPServer):
                'severity, unless the order is set to severity. <b>Reset layout</b> brings the preset\'s back.</p><p id="live" class="sr-only" role="status" aria-live="polite"></p></section>')
         return View("".join(built), [], vhere, False, grid=True, legacy=False, bar=bar)
 
+    def exec_info(self, here):
+        """What the Execute button of the ATTENTION card needs (htmlview.executing), or None when [web] fix_actions is off."""
+        if not fixactions.available(render.CFG):
+            return None
+        return {"run": lambda pid: fixactions.item(pid, render.CFG), "csrf": self.csrf, "back": urlsplit(page_url(here)).query, "note": self.fix_notice()}
+
     def shell_card(self, ctx, cid, size, k, here, full, tools="", off=False):
         """(state, the article) of one card: the lines the console has always drawn for it (cards.build), colours as spans. A card that fails is
         shown unknown, with the reason in the log. tools: the editor's buttons of the card (the body is then not clickable); off: the editor lists it as hidden."""
@@ -723,7 +735,8 @@ class Server(http.server.ThreadingHTTPServer):
                 note, inner = htmlview.ansi_card(lines)
             else:  # built of components: the web draws them itself, whatever the card is
                 parts = wall_trim(card.body) if k == DETAIL_K["wall"] and not full else card.body
-                note, inner, cut = "", "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
+                with htmlview.executing(self.exec_info(here) if cid == "attention" else None):  # the Execute button: ATTENTION only
+                    note, inner, cut = "", htmlview.exec_note() + "".join(htmlview.html(x) for x in parts), card.truncated or parts is not card.body
             wall = k == DETAIL_K["wall"]  # nobody can click on a wall: no link to the whole card
             more = f'<a href="{html.escape(page_url(dict(here, card=cid)))}">… the whole card</a>' if cut and not full and not wall else ""
             rows = 0 if tools or full else htmlview.est_rows(inner + (f"<p>{more}</p>" if more else ""), size, card.note or note, wall)  # the editor's cards and a card on its own do not pack
@@ -1272,6 +1285,35 @@ class Server(http.server.ThreadingHTTPServer):
         with self.lock:
             self.cache.clear()  # what the pages show changes with it
         return page_url(dict({"view": "settings"}, **{k: back[k] for k in HERE_KEYS})) + "#cfg-" + section
+
+    def fix_notice(self):
+        """What the last Execute did ({ok, text}), for FIX_NOTE_S seconds after it, else None."""
+        n = self.fix_note
+        return {"ok": n["ok"], "text": n["text"]} if n and time.time() - n["at"] < FIX_NOTE_S else None
+
+    def fix_action(self, form):
+        """POST /fix/run: the Execute button. The only value taken from the request is the problem id, and it is only compared to fixactions.TABLE
+        (an id outside it is a 400). Whether that problem is on the page NOW is read again here (not from the cache, not from the client). The
+        answer is a note for the overview, and the address to go back to, rebuilt from validated parameters (never a target from the request)."""
+        one = lambda k, n=200: ((form.get(k) or [""])[0])[:n]  # noqa: E731
+        pid = one("id", 64)
+        if pid not in fixactions.TABLE:
+            raise BadRequest("unknown id")
+        text = fixactions.precheck(pid, render.CFG)  # the cheap refusals first: a refused or rate-limited click never builds the frame
+        if text is not None:
+            ok = False
+        else:
+            try:
+                active = {p for _s, p in self.read_frame().problem_ids() if p}
+            except Exception as e:  # noqa: BLE001 - a state that cannot be read means no problem is known to be active
+                print("nuc-console web: fix: state not read (%s)" % type(e).__name__, file=sys.stderr)
+                active = set()
+            ok, text = fixactions.run(pid, active, render.CFG)
+        self.fix_note = {"ok": ok, "text": text, "at": time.time()}
+        with self.lock:
+            self.cache.clear()  # the page that comes next shows the note
+        back = view_params(parse_qs(one("back", 400)))
+        return app_url(back) if one("to", 8) == "app" else view_url(back)
 
     def ai_action(self, act, form):
         """What a post of the AI page asked, done through the engine (in the background), and the address to go to next (Post/Redirect/Get).

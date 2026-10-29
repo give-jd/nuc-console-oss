@@ -190,6 +190,25 @@ tailscale = no
 thermal = no
 ```
 
+### The Execute button (optional)
+
+The web view can restart the collector or start the peer poller from five ATTENTION problems ([WEB.md](WEB.md#the-execute-button)). It is off. To enable it, in `/etc/nuc-console/config.ini`:
+
+```ini
+[web]
+token_file = /etc/nuc-console/token    # required: without a token the key does nothing
+fix_actions = yes
+```
+
+then `sudo ./install.sh` (or `sudo nuc-console-update`). The installer prints one line saying what it did: it puts `systemd/50-nuc-console-fix.rules` in `/etc/polkit-1/rules.d/` (root:root 0644) only while the key is `yes`, a `[web] token_file` is set **and** that folder exists (polkit installed), and removes it in every other case, so setting the key back to `no` and re-running the installer takes the power away (the rule goes the next time the installer runs; until then it stays while the web code already refuses). The rule applies only to processes of `nuc-console-web.service` running as `nuc-console` with `NoNewPrivileges=yes`: `nuc-console.service` does not hold it, the processes inside the web unit do (the AI model server the AI page starts included). It needs a polkit that has `Subject.system_unit` (127 on Ubuntu 26.04); an older one never matches the rule, so the button reports "not permitted" and nothing is granted. The `token_file` must exist, be a regular file readable by root and not be empty, else the installer treats the key as off. polkit watches the folder: nothing is restarted. Check:
+
+```bash
+sudo -u nuc-console systemctl --no-ask-password restart nuc-console-collector   # must succeed
+sudo -u nuc-console systemctl --no-ask-password restart ssh                      # must say Access denied / authentication required
+```
+
+`sudo ./install.sh --uninstall` removes the rule too.
+
 ## 5. Port alarms and problems
 
 `nuc-console-fleet list | test NAME | once` (no root, installed with the other commands in `/usr/local/bin`) works with the peers of `[hosts]`: [CONFIGURATION.md](CONFIGURATION.md#hosts--other-nuc-console-machines-to-watch-none-by-default).

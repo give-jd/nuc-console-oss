@@ -502,6 +502,14 @@ details.fix[open]>summary{margin-bottom:.3em}
 .how,.accept{color:var(--muted)}
 details.fix>.d{display:block;margin-top:.25em;font-size:.88em;overflow-wrap:anywhere}
 details.fix code.cmd{display:inline-block;max-width:100%;vertical-align:top;user-select:all}
+/* Execute: a disclosure and then a form, no script; both touch targets are 44 px, the form wraps at 360 px, the note says ok/failed by its symbol and its words */
+details.exec>summary{cursor:pointer;display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 .4em;color:var(--accent);font-size:.84em;font-weight:600;border-radius:3px}
+details.exec>summary:focus-visible,details.exec .btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+details.exec form{display:block;max-width:100%}
+details.exec .d{display:block;margin:.2em 0 .4em;color:var(--muted);font-size:.88em;overflow-wrap:anywhere}
+details.exec .btn{min-height:44px;min-width:44px;max-width:100%;justify-content:center;white-space:normal;overflow-wrap:anywhere;text-align:center;font:inherit;font-size:.9em;font-weight:600;border-color:var(--accent);color:var(--accent)}
+.msg.notice.fixnote{margin-bottom:.5em}
+.msg.notice.fixnote.lv-ok{border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
 .known .why code.cmd{font-size:.95em}
 ul.wrap{gap:.3em .4em}
 ul.wrap li{min-width:0;padding:.02em .55em;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);overflow-wrap:anywhere}
@@ -536,11 +544,11 @@ ul.legend{list-style:none;margin:.45em 0 0;padding:0;display:flex;flex-wrap:wrap
 ul.legend li{white-space:nowrap}
 ul.legend .sw{display:inline-block;width:.7em;height:.7em;margin-right:.2em;border-radius:2px;vertical-align:-.05em;background:var(--bar)}
 ul.legend .n{color:var(--fg)}
-html[data-density="compact"] .prob .why,html[data-density="compact"] .prob .fix,html[data-density="compact"] .hint,
-html[data-density="wall"] .prob .why,html[data-density="wall"] .prob .fix,html[data-density="wall"] .hint,html[data-density="wall"] code.pid{display:none}
+html[data-density="compact"] .prob .why,html[data-density="compact"] .prob .fix,html[data-density="compact"] .prob .exec,html[data-density="compact"] .hint,
+html[data-density="wall"] .prob .why,html[data-density="wall"] .prob .fix,html[data-density="wall"] .prob .exec,html[data-density="wall"] .hint,html[data-density="wall"] code.pid{display:none}
 html[data-density="wall"] ul.grid{display:none}
 /* a wall has no mouse: what can only be clicked is not drawn (the "+N more" keeps its count, as plain text), and a link in a card is text */
-html[data-density="wall"] .card p.more,html[data-density="wall"] details.more p,html[data-density="wall"] details.fix{display:none}
+html[data-density="wall"] .card p.more,html[data-density="wall"] details.more p,html[data-density="wall"] details.fix,html[data-density="wall"] details.exec{display:none}
 html[data-density="wall"] details.more>summary{pointer-events:none;list-style:none}
 html[data-density="wall"] details.more>summary::-webkit-details-marker{display:none}
 html[data-density="wall"] .cb a{pointer-events:none;color:inherit;text-decoration:none}
